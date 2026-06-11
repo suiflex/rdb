@@ -1,0 +1,8 @@
+// Shared view-model struct shapes (generated as Rust structs). Kept in a leaf
+// file with no component imports so sidebar/workarea/app-window can all import
+// them without an import cycle.
+export struct GridColumn { name: string, type-name: string }
+export struct GridCell { text: string, is-null: bool }
+export struct TreeNode { label: string, depth: int, kind: string }
+export struct ConnItem { id: string, name: string, engine: string, color: color, supported: bool }
+export struct TabItem { title: string }

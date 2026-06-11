@@ -1,0 +1,106 @@
+import { Theme } from "theme.slint";
+import { GridColumn, GridCell } from "structs.slint";
+import { ScrollView, Button, TextEdit } from "std-widgets.slint";
+
+export component WorkArea inherits Rectangle {
+    in-out property <string> query-text;
+    in property <[GridColumn]> columns;
+    in property <[GridCell]> cells;        // flat row-major: row r, col c at r*col-count + c
+    in property <int> col-count;
+    in property <string> doc-json;
+    in property <bool> is-documents;
+    in property <string> result-status;    // Affected toast / errors
+    in property <int> selected-row: 0;
+    callback run();
+
+    background: Theme.bg;
+
+    VerticalLayout {
+        padding: Theme.sp4;
+        spacing: Theme.sp3;
+
+        // ----- query editor -----
+        Rectangle {
+            height: 140px;
+            border-radius: Theme.radius-panel;
+            border-width: 1px;
+            border-color: Theme.hairline;
+            background: Theme.surface;
+            TextEdit {
+                text <=> root.query-text;
+                font-size: Theme.font-mono;
+                wrap: no-wrap;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: Theme.sp2;
+            Button { text: "Run  (Cmd-Enter)"; clicked => { root.run(); } }
+            Text {
+                vertical-alignment: center;
+                text: root.result-status;
+                color: Theme.text-dim;
+                font-size: Theme.font-label;
+            }
+        }
+
+        // ----- result region -----
+        Rectangle {
+            border-radius: Theme.radius-panel;
+            border-width: 1px;
+            border-color: Theme.hairline;
+            background: Theme.surface;
+
+            // documents (JSON) view
+            if root.is-documents: ScrollView {
+                Text {
+                    text: root.doc-json;
+                    color: Theme.text;
+                    font-family: Theme.mono-family;
+                    font-size: Theme.font-mono;
+                }
+            }
+
+            // tabular / key-value grid
+            if !root.is-documents: ScrollView {
+                VerticalLayout {
+                    // header
+                    HorizontalLayout {
+                        height: Theme.row-height;
+                        for col in root.columns: Rectangle {
+                            width: 160px;
+                            background: Theme.surface;
+                            Text {
+                                vertical-alignment: center;
+                                x: Theme.sp1;
+                                text: col.name;
+                                color: Theme.text-dim;
+                                font-size: Theme.font-label;
+                            }
+                        }
+                    }
+                    Rectangle { height: 1px; background: Theme.hairline; }
+                    // rows
+                    for r in (root.col-count > 0 ? root.cells.length / root.col-count : 0): Rectangle {
+                        height: Theme.row-height;
+                        background: r == root.selected-row ? Theme.accent.with-alpha(0.14) : transparent;
+                        HorizontalLayout {
+                            for c in root.col-count: Rectangle {
+                                width: 160px;
+                                Text {
+                                    vertical-alignment: center;
+                                    x: Theme.sp1;
+                                    text: root.cells[r * root.col-count + c].text;
+                                    color: root.cells[r * root.col-count + c].is-null
+                                        ? Theme.text-dim : Theme.text;
+                                    font-family: Theme.mono-family;
+                                    font-size: Theme.font-mono;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

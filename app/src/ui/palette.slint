@@ -1,0 +1,63 @@
+import { Theme } from "theme.slint";
+import { ScrollView, LineEdit } from "std-widgets.slint";
+
+export struct PaletteItem { label: string, kind: string }
+
+export component CommandPalette inherits Rectangle {
+    in property <bool> open;
+    in property <[PaletteItem]> items;
+    callback filter(string);
+    callback choose(int);
+
+    visible: root.open;
+    background: #00000066; // dim scrim
+
+    if root.open: Rectangle {
+        width: 520px;
+        height: 360px;
+        y: 80px;
+        x: (parent.width - self.width) / 2;
+        border-radius: Theme.radius-panel;
+        background: Theme.surface;
+        border-width: 1px;
+        border-color: Theme.hairline;
+        // single elevation shadow (spec: shadow only on modals/popovers)
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #00000088;
+
+        VerticalLayout {
+            padding: Theme.sp3;
+            spacing: Theme.sp2;
+            LineEdit {
+                placeholder-text: "Jump to connection or table…";
+                edited(t) => { root.filter(t); }
+            }
+            ScrollView {
+                VerticalLayout {
+                    for it[i] in root.items: Rectangle {
+                        height: Theme.row-height;
+                        border-radius: Theme.radius-control;
+                        TouchArea { clicked => { root.choose(i); } }
+                        HorizontalLayout {
+                            padding-left: Theme.sp2;
+                            spacing: Theme.sp2;
+                            Text {
+                                vertical-alignment: center;
+                                text: it.label;
+                                color: Theme.text;
+                                font-size: Theme.font-body;
+                            }
+                            Rectangle {}
+                            Text {
+                                vertical-alignment: center;
+                                text: it.kind;
+                                color: Theme.text-dim;
+                                font-size: Theme.font-label;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

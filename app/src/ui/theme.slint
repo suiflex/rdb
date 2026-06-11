@@ -1,0 +1,37 @@
+// Design tokens — single source of truth. Light/dark = one `dark` flip.
+// Per-connection accent is a runtime property fed from Rust, not a static token.
+export global Theme {
+    // ----- mode -----
+    in-out property <bool> dark: true;
+
+    // ----- base palette (selected by `dark`) -----
+    out property <color> bg:       dark ? #1b1d1f : #fbfbfc;
+    out property <color> surface:  dark ? #232629 : #ffffff;
+    out property <color> hairline: dark ? #ffffff14 : #0000000d;
+    out property <color> text:     dark ? #e6e8ea : #1b1d1f;
+    out property <color> text-dim: dark ? #8b9095 : #6b7075;
+
+    // ----- accent (per-connection, default blue) -----
+    in-out property <color> accent: #3b82f6;
+
+    // ----- spacing scale (4px grid) -----
+    out property <length> sp1: 4px;
+    out property <length> sp2: 8px;
+    out property <length> sp3: 12px;
+    out property <length> sp4: 16px;
+    out property <length> sp6: 24px;
+
+    // ----- metrics -----
+    out property <length> row-height: 30px;
+    out property <length> radius-panel: 6px;
+    out property <length> radius-control: 4px;
+
+    // ----- typography (system fonts; embed nothing) -----
+    out property <length> font-body: 13px;
+    out property <length> font-label: 12px;
+    out property <length> font-mono: 13px;
+    out property <string> mono-family: "monospace"; // SF Mono / Consolas resolve via system
+
+    // ----- motion -----
+    out property <duration> fade: 100ms; // functional fades only, 80–120ms band
+}

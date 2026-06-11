@@ -1,0 +1,71 @@
+import { Theme } from "theme.slint";
+import { ConnItem, TreeNode } from "structs.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export component Sidebar inherits Rectangle {
+    in property <[ConnItem]> connections;
+    in property <[TreeNode]> tree;
+    in property <int> selected-conn: -1;
+    callback connect-clicked(int);
+
+    background: Theme.surface;
+
+    VerticalLayout {
+        padding: Theme.sp3;
+        spacing: Theme.sp2;
+
+        Text { text: "Connections"; color: Theme.text-dim; font-size: Theme.font-label; }
+
+        for conn[i] in root.connections: Rectangle {
+            height: Theme.row-height;
+            border-radius: Theme.radius-control;
+            background: i == root.selected-conn ? Theme.accent.with-alpha(0.18) : transparent;
+            TouchArea { clicked => { root.connect-clicked(i); } }
+            HorizontalLayout {
+                padding-left: Theme.sp1;
+                padding-right: Theme.sp1;
+                spacing: Theme.sp2;
+                // per-connection color dot
+                Rectangle {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 4px;
+                    y: (parent.height - self.height) / 2;
+                    background: conn.color;
+                }
+                Text {
+                    vertical-alignment: center;
+                    text: conn.name;
+                    color: conn.supported ? Theme.text : Theme.text-dim;
+                    font-size: Theme.font-body;
+                }
+                Rectangle {} // spacer
+                Text {
+                    vertical-alignment: center;
+                    text: conn.engine;
+                    color: Theme.text-dim;
+                    font-size: Theme.font-label;
+                }
+            }
+        }
+
+        Text { text: "Schema"; color: Theme.text-dim; font-size: Theme.font-label; }
+
+        ScrollView {
+            VerticalLayout {
+                for node[i] in root.tree: Rectangle {
+                    height: Theme.row-height;
+                    HorizontalLayout {
+                        padding-left: Theme.sp1 + node.depth * Theme.sp4;
+                        Text {
+                            vertical-alignment: center;
+                            text: node.label;
+                            color: node.kind == "field" ? Theme.text-dim : Theme.text;
+                            font-size: node.kind == "field" ? Theme.font-label : Theme.font-body;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
