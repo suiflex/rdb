@@ -111,6 +111,8 @@ export component MainWindow inherits Window {
                 tree: root.schema-tree;
                 selected-conn: root.selected-conn;
                 connect-clicked(i) => { root.connect-clicked(i); }
+                add-clicked() => { root.open-add-form(); }
+                edit-clicked(i) => { root.open-edit-form(i); }
             }
 
             // hairline divider

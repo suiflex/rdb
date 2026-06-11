@@ -7,6 +7,8 @@ export component Sidebar inherits Rectangle {
     in property <[TreeNode]> tree;
     in property <int> selected-conn: -1;
     callback connect-clicked(int);
+    callback add-clicked();
+    callback edit-clicked(int);
 
     background: Theme.surface;
 
@@ -14,7 +16,20 @@ export component Sidebar inherits Rectangle {
         padding: Theme.sp3;
         spacing: Theme.sp2;
 
-        Text { text: "Connections"; color: Theme.text-dim; font-size: Theme.font-label; }
+        HorizontalLayout {
+            Text {
+                vertical-alignment: center;
+                text: "Connections";
+                color: Theme.text-dim;
+                font-size: Theme.font-label;
+            }
+            Rectangle {}
+            Rectangle {
+                width: 20px;
+                TouchArea { clicked => { root.add-clicked(); } }
+                Text { text: "+"; horizontal-alignment: center; color: Theme.text-dim; }
+            }
+        }
 
         for conn[i] in root.connections: Rectangle {
             height: Theme.row-height;
@@ -40,6 +55,11 @@ export component Sidebar inherits Rectangle {
                     font-size: Theme.font-body;
                 }
                 Rectangle {} // spacer
+                Rectangle {
+                    width: 18px;
+                    TouchArea { clicked => { root.edit-clicked(i); } }
+                    Text { text: "✎"; horizontal-alignment: center; color: Theme.text-dim; font-size: Theme.font-label; }
+                }
                 Text {
                     vertical-alignment: center;
                     text: conn.engine;

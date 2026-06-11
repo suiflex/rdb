@@ -18,43 +18,12 @@ mod query_parse;
 mod theme;
 
 use std::cell::RefCell;
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use dbm_connstore::{ConnStore, SavedConnection};
 use slint::{Model, ModelRc, SharedString, VecModel};
 
 use dispatch::AnyDriver;
-
-/// Load saved connections from connstore. Returns an empty list on any error
-/// (no config yet, no keychain, etc.) so the app always launches.
-fn load_saved() -> Vec<SavedConnection> {
-    fn inner() -> dbm_connstore::Result<Vec<SavedConnection>> {
-        let path = ConnStore::default_path()?;
-        let dir = path
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."));
-        let backend = dbm_connstore::secret::select_backend(&dir)?;
-        let store = ConnStore::load(path, backend)?;
-        Ok(store.list().to_vec())
-    }
-    inner().unwrap_or_default()
-}
-
-/// Rebuild a `ConnConfig` (password injected from the secret backend) for a
-/// saved connection id. Returns the error as a string for UI display.
-fn conn_config_for(id: &str) -> Result<dbm_core::conn::ConnConfig, String> {
-    let path = ConnStore::default_path().map_err(|e| e.to_string())?;
-    let dir = path
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("."));
-    let backend = dbm_connstore::secret::select_backend(&dir).map_err(|e| e.to_string())?;
-    let store = ConnStore::load(path, backend).map_err(|e| e.to_string())?;
-    store.conn_config_for(id).map_err(|e| e.to_string())
-}
 
 /// Rebuild the tab model titles "Query 1..N".
 fn set_tab_titles(w: &MainWindow, count: usize) {
@@ -116,26 +85,44 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let window = MainWindow::new()?;
 
+    // One store for the app lifetime; all CRUD + password ops go through it.
+    let store: Rc<RefCell<dbm_connstore::ConnStore>> = Rc::new(RefCell::new(
+        dbm_connstore::ConnStore::open_default().unwrap_or_else(|_| {
+            let dir = std::env::temp_dir().join("dbm");
+            let _ = std::fs::create_dir_all(&dir);
+            let backend = dbm_connstore::secret::select_backend(&dir).expect("secret backend");
+            dbm_connstore::ConnStore::new(dir.join("connections.json"), backend)
+        }),
+    ));
+
     // (engine, driver) so run-query can parse text for the right paradigm.
     let current: Arc<tokio::sync::Mutex<Option<(dbm_connstore::Engine, AnyDriver)>>> =
         Arc::new(tokio::sync::Mutex::new(None));
 
-    // Load saved connections (sync; passwords loaded lazily at connect time).
-    let saved: Vec<SavedConnection> = load_saved();
-
-    // Build the ConnItem model for the sidebar.
-    let conn_items: Vec<ConnItem> = saved
-        .iter()
-        .map(|s| ConnItem {
-            id: s.id.clone().into(),
-            name: s.name.clone().into(),
-            engine: AnyDriver::label(s.engine).into(),
-            color: theme::accent_or_default(s.color.as_deref().unwrap_or("")),
-            supported: AnyDriver::is_supported(s.engine),
-        })
-        .collect();
-    let conn_model: Rc<VecModel<ConnItem>> = Rc::new(VecModel::from(conn_items));
-    window.set_connections(ModelRc::from(conn_model));
+    // Reusable sidebar rebuild: maps the store's list into the ConnItem model.
+    let rebuild_sidebar = {
+        let weak = window.as_weak();
+        let store = store.clone();
+        move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let items: Vec<ConnItem> = store
+                .borrow()
+                .list()
+                .iter()
+                .map(|s| ConnItem {
+                    id: s.id.clone().into(),
+                    name: s.name.clone().into(),
+                    engine: AnyDriver::label(s.engine).into(),
+                    color: theme::accent_or_default(s.color.as_deref().unwrap_or("")),
+                    supported: AnyDriver::is_supported(s.engine),
+                })
+                .collect();
+            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+        }
+    };
+    rebuild_sidebar();
     window.set_schema_tree(ModelRc::from(Rc::new(VecModel::<TreeNode>::default())));
 
     // Per-tab query text. MVP: switching tabs swaps the editor text.
@@ -148,24 +135,33 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let rt = rt.clone();
-        let saved = saved.clone();
+        let store = store.clone();
         let current = current.clone();
         window.on_connect_clicked(move |idx| {
             let i = idx as usize;
-            let Some(sc) = saved.get(i).cloned() else { return; };
+            let (sc, cfg) = {
+                let st = store.borrow();
+                let Some(sc) = st.list().get(i).cloned() else {
+                    return;
+                };
+                let cfg = st.conn_config_for(&sc.id);
+                (sc, cfg)
+            };
             // Reflect selection + accent immediately.
             if let Some(w) = weak.upgrade() {
                 w.set_selected_conn(idx);
                 w.global::<Theme>()
                     .set_accent(theme::accent_or_default(sc.color.as_deref().unwrap_or("")));
                 w.set_status_conn(SharedString::from(sc.name.clone()));
+                w.set_query_text(SharedString::from(crate::query_parse::editor_hint(sc.engine)));
             }
             let weak2 = weak.clone();
             let store_driver = current.clone();
+            let engine = sc.engine;
             rt.spawn(async move {
                 let result = async {
-                    let cfg = conn_config_for(&sc.id).map_err(dbm_core::error::DbmError::Connection)?;
-                    let driver = AnyDriver::connect(sc.engine, &cfg).await?;
+                    let cfg = cfg.map_err(|e| dbm_core::error::DbmError::Connection(e.to_string()))?;
+                    let driver = AnyDriver::connect(engine, &cfg).await?;
                     let schema = driver.schema().await?;
                     Ok::<_, dbm_core::error::DbmError>((driver, schema))
                 }
@@ -173,7 +169,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
                 match result {
                     Ok((driver, schema)) => {
-                        *store_driver.lock().await = Some((sc.engine, driver));
+                        *store_driver.lock().await = Some((engine, driver));
                         let nodes = model::to_tree_model(&schema);
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(w) = weak2.upgrade() {
@@ -329,16 +325,18 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- palette toggle -----
     {
         let weak = window.as_weak();
-        let saved = saved.clone();
+        let store = store.clone();
         window.on_toggle_palette(move || {
             if let Some(w) = weak.upgrade() {
                 let opening = !w.get_palette_open();
                 w.set_palette_open(opening);
                 if opening {
-                    let mut items: Vec<PaletteItem> = saved
+                    let names: Vec<String> =
+                        store.borrow().list().iter().map(|s| s.name.clone()).collect();
+                    let mut items: Vec<PaletteItem> = names
                         .iter()
-                        .map(|s| PaletteItem {
-                            label: s.name.clone().into(),
+                        .map(|n| PaletteItem {
+                            label: n.clone().into(),
                             kind: "connection".into(),
                         })
                         .collect();
@@ -357,15 +355,17 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- palette filter -----
     {
         let weak = window.as_weak();
-        let saved = saved.clone();
+        let store = store.clone();
         window.on_palette_filter(move |q| {
             if let Some(w) = weak.upgrade() {
                 let needle = q.to_lowercase();
-                let mut items: Vec<PaletteItem> = saved
+                let names: Vec<String> =
+                    store.borrow().list().iter().map(|s| s.name.clone()).collect();
+                let mut items: Vec<PaletteItem> = names
                     .iter()
-                    .filter(|s| s.name.to_lowercase().contains(&needle))
-                    .map(|s| PaletteItem {
-                        label: s.name.clone().into(),
+                    .filter(|n| n.to_lowercase().contains(&needle))
+                    .map(|n| PaletteItem {
+                        label: n.clone().into(),
                         kind: "connection".into(),
                     })
                     .collect();
@@ -403,6 +403,242 @@ fn main() -> Result<(), slint::PlatformError> {
                 let now = t.get_dark();
                 t.set_dark(!now);
             }
+        });
+    }
+
+    // ----- connection form (add / edit / delete) -----
+    fn default_port(engine_label: &str) -> &'static str {
+        match engine_label {
+            "MySQL" => "3306",
+            "Redis" => "6379",
+            "MongoDB" => "27017",
+            _ => "5432",
+        }
+    }
+    fn label_to_engine(label: &str) -> dbm_connstore::Engine {
+        match label {
+            "MySQL" => dbm_connstore::Engine::MySql,
+            "Redis" => dbm_connstore::Engine::Redis,
+            "MongoDB" => dbm_connstore::Engine::Mongo,
+            _ => dbm_connstore::Engine::Postgres,
+        }
+    }
+    let editing_id: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
+
+    // open add form
+    {
+        let weak = window.as_weak();
+        let editing_id = editing_id.clone();
+        window.on_open_add_form(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            *editing_id.borrow_mut() = String::new();
+            w.set_form_edit_mode(false);
+            w.set_f_name(SharedString::default());
+            w.set_f_engine(SharedString::from("Postgres"));
+            w.set_f_host(SharedString::from("localhost"));
+            w.set_f_port(SharedString::from("5432"));
+            w.set_f_user(SharedString::default());
+            w.set_f_database(SharedString::default());
+            w.set_f_password(SharedString::default());
+            w.set_f_sslmode(SharedString::from("Prefer"));
+            w.set_f_color(SharedString::from("#3b82f6"));
+            w.set_form_error(SharedString::default());
+            w.set_form_open(true);
+        });
+    }
+    // open edit form
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let editing_id = editing_id.clone();
+        window.on_open_edit_form(move |idx| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let st = store.borrow();
+            let Some(sc) = st.list().get(idx as usize).cloned() else {
+                return;
+            };
+            *editing_id.borrow_mut() = sc.id.clone();
+            w.set_form_edit_mode(true);
+            w.set_f_name(SharedString::from(sc.name));
+            w.set_f_engine(SharedString::from(AnyDriver::label(sc.engine)));
+            w.set_f_host(SharedString::from(sc.host));
+            w.set_f_port(SharedString::from(sc.port.to_string()));
+            w.set_f_user(SharedString::from(sc.user));
+            w.set_f_database(SharedString::from(sc.database.unwrap_or_default()));
+            w.set_f_password(SharedString::default());
+            w.set_f_sslmode(SharedString::from(match sc.sslmode {
+                dbm_core::conn::SslMode::Disable => "Disable",
+                dbm_core::conn::SslMode::Prefer => "Prefer",
+                dbm_core::conn::SslMode::Require => "Require",
+            }));
+            w.set_f_color(SharedString::from(sc.color.unwrap_or_else(|| "#3b82f6".into())));
+            w.set_form_error(SharedString::default());
+            w.set_form_open(true);
+        });
+    }
+    // engine changed -> default port if port empty/default-ish
+    {
+        let weak = window.as_weak();
+        window.on_form_engine_changed(move |label| {
+            if let Some(w) = weak.upgrade() {
+                let cur = w.get_f_port().to_string();
+                if cur.is_empty() || ["5432", "3306", "6379", "27017"].contains(&cur.as_str()) {
+                    w.set_f_port(SharedString::from(default_port(&label)));
+                }
+            }
+        });
+    }
+    // cancel
+    {
+        let weak = window.as_weak();
+        window.on_form_cancel(move || {
+            if let Some(w) = weak.upgrade() {
+                w.set_form_open(false);
+            }
+        });
+    }
+    // save (add or update)
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let editing_id = editing_id.clone();
+        let rebuild = {
+            let weak = window.as_weak();
+            let store = store.clone();
+            move || {
+                if let Some(w) = weak.upgrade() {
+                    let items: Vec<ConnItem> = store
+                        .borrow()
+                        .list()
+                        .iter()
+                        .map(|s| ConnItem {
+                            id: s.id.clone().into(),
+                            name: s.name.clone().into(),
+                            engine: AnyDriver::label(s.engine).into(),
+                            color: theme::accent_or_default(s.color.as_deref().unwrap_or("")),
+                            supported: AnyDriver::is_supported(s.engine),
+                        })
+                        .collect();
+                    w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+                }
+            }
+        };
+        window.on_form_save(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let name = w.get_f_name().to_string();
+            let host = w.get_f_host().to_string();
+            if name.trim().is_empty() || host.trim().is_empty() {
+                w.set_form_error(SharedString::from("name and host are required"));
+                return;
+            }
+            let port: u16 = w.get_f_port().to_string().parse().unwrap_or(0);
+            let engine = label_to_engine(w.get_f_engine().as_ref());
+            let sslmode = match w.get_f_sslmode().to_string().as_str() {
+                "Disable" => dbm_core::conn::SslMode::Disable,
+                "Require" => dbm_core::conn::SslMode::Require,
+                _ => dbm_core::conn::SslMode::Prefer,
+            };
+            let database = {
+                let d = w.get_f_database().to_string();
+                if d.is_empty() {
+                    None
+                } else {
+                    Some(d)
+                }
+            };
+            let color = Some(w.get_f_color().to_string());
+            let password = w.get_f_password().to_string();
+            let id = editing_id.borrow().clone();
+
+            let result: dbm_connstore::Result<()> = (|| {
+                let mut st = store.borrow_mut();
+                let conn_id = if id.is_empty() {
+                    let mut sc = dbm_connstore::SavedConnection::new(
+                        name,
+                        engine,
+                        host,
+                        port,
+                        w.get_f_user().to_string(),
+                    );
+                    sc.database = database;
+                    sc.sslmode = sslmode;
+                    sc.color = color;
+                    let cid = sc.id.clone();
+                    st.add(sc)?;
+                    cid
+                } else {
+                    let mut sc = st.get(&id).cloned().ok_or_else(|| {
+                        dbm_connstore::ConnStoreError::NotFound(id.clone())
+                    })?;
+                    sc.name = name;
+                    sc.engine = engine;
+                    sc.host = host;
+                    sc.port = port;
+                    sc.user = w.get_f_user().to_string();
+                    sc.database = database;
+                    sc.sslmode = sslmode;
+                    sc.color = color;
+                    st.update(sc)?;
+                    id.clone()
+                };
+                if !password.is_empty() {
+                    st.set_password(&conn_id, &password)?;
+                }
+                Ok(())
+            })();
+
+            match result {
+                Ok(()) => {
+                    w.set_form_open(false);
+                    rebuild();
+                }
+                Err(e) => {
+                    w.set_form_error(SharedString::from(format!("save failed: {e}")));
+                }
+            }
+        });
+    }
+    // delete
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let editing_id = editing_id.clone();
+        window.on_form_delete(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let id = editing_id.borrow().clone();
+            if id.is_empty() {
+                w.set_form_open(false);
+                return;
+            }
+            {
+                let mut st = store.borrow_mut();
+                let _ = st.delete_password(&id);
+                let _ = st.remove(&id);
+            }
+            w.set_form_open(false);
+            w.set_selected_conn(-1);
+            w.set_schema_tree(ModelRc::from(Rc::new(VecModel::<TreeNode>::default())));
+            let items: Vec<ConnItem> = store
+                .borrow()
+                .list()
+                .iter()
+                .map(|s| ConnItem {
+                    id: s.id.clone().into(),
+                    name: s.name.clone().into(),
+                    engine: AnyDriver::label(s.engine).into(),
+                    color: theme::accent_or_default(s.color.as_deref().unwrap_or("")),
+                    supported: AnyDriver::is_supported(s.engine),
+                })
+                .collect();
+            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
         });
     }
 

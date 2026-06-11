@@ -2,10 +2,6 @@
 //! The connected `Engine` decides how the text is interpreted, so a single
 //! editor drives all four paradigms.
 
-// Functions are defined for use by the UI layer in a later task; suppress
-// dead-code lint until the call sites are wired in.
-#![allow(dead_code)]
-
 use dbm_connstore::Engine;
 use dbm_core::query::{MongoKind, MongoOp, Query};
 
