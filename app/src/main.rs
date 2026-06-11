@@ -562,7 +562,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_form_error(SharedString::from("name and host are required"));
                 return;
             }
-            let port: u16 = w.get_f_port().to_string().parse().unwrap_or(0);
+            let port: u16 = match w.get_f_port().to_string().parse() {
+                Ok(p) if p != 0 => p,
+                _ => {
+                    w.set_form_error(SharedString::from("port must be a number 1-65535"));
+                    return;
+                }
+            };
             let engine = label_to_engine(w.get_f_engine().as_ref());
             let sslmode = match w.get_f_sslmode().to_string().as_str() {
                 "Disable" => dbm_core::conn::SslMode::Disable,
