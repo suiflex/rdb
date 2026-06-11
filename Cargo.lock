@@ -1439,7 +1439,10 @@ version = "0.1.0"
 dependencies = [
  "dbm-connstore",
  "dbm-core",
+ "dbm-driver-mongo",
+ "dbm-driver-mysql",
  "dbm-driver-postgres",
+ "dbm-driver-redis",
  "serde_json",
  "slint",
  "slint-build",

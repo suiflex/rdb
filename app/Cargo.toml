@@ -12,6 +12,9 @@ slint = { version = "1.8", default-features = false, features = ["compat-1-2", "
 dbm-core = { path = "../crates/core" }
 dbm-connstore = { path = "../crates/connstore" }
 dbm-driver-postgres = { path = "../crates/driver-postgres" }
+dbm-driver-mysql = { path = "../crates/driver-mysql" }
+dbm-driver-redis = { path = "../crates/driver-redis" }
+dbm-driver-mongo = { path = "../crates/driver-mongo" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
 serde_json = "1"
 
