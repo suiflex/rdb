@@ -27,6 +27,10 @@ pub struct SavedConnection {
     pub sslmode: SslMode,
     /// Reference id into the secret backend; `None` until a password is set.
     pub keyref: Option<String>,
+    /// Per-connection accent color as `#rrggbb` (the signature UI feature).
+    /// `None` => UI uses the default accent.
+    #[serde(default)]
+    pub color: Option<String>,
 }
 
 impl SavedConnection {
@@ -48,6 +52,7 @@ impl SavedConnection {
             database: None,
             sslmode: SslMode::default(),
             keyref: None,
+            color: None,
         }
     }
 
@@ -80,6 +85,7 @@ mod tests {
             database: Some("app".into()),
             sslmode: SslMode::Require,
             keyref: Some("ref-123".into()),
+            color: Some("#3b82f6".into()),
         }
     }
 
