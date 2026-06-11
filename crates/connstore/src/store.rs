@@ -1,0 +1,242 @@
+use std::path::PathBuf;
+
+use directories::ProjectDirs;
+
+use crate::error::{ConnStoreError, Result};
+use crate::model::SavedConnection;
+use crate::secret::SecretBackend;
+
+/// Owns the saved-connections JSON file and the secret backend used for
+/// passwords. Connections are held in memory and flushed to disk on each
+/// mutation (the set is small — tens of entries — so full rewrite is fine).
+pub struct ConnStore {
+    path: PathBuf,
+    conns: Vec<SavedConnection>,
+    secrets: Box<dyn SecretBackend>,
+}
+
+impl ConnStore {
+    /// Construct with an explicit path and secret backend (used by tests and by
+    /// callers that select a backend at runtime). Starts with an empty set.
+    pub fn new(path: PathBuf, secrets: Box<dyn SecretBackend>) -> Self {
+        ConnStore {
+            path,
+            conns: Vec::new(),
+            secrets,
+        }
+    }
+
+    /// Construct and load existing connections from `path` (empty set if the
+    /// file does not exist yet).
+    pub fn load(path: PathBuf, secrets: Box<dyn SecretBackend>) -> Result<Self> {
+        let conns = if path.exists() {
+            let raw = std::fs::read_to_string(&path)?;
+            serde_json::from_str(&raw)?
+        } else {
+            Vec::new()
+        };
+        Ok(ConnStore {
+            path,
+            conns,
+            secrets,
+        })
+    }
+
+    /// Default location of `connections.json`: the platform config dir for
+    /// qualifier `dev`, org `dbm`, app `dbm`.
+    pub fn default_path() -> Result<PathBuf> {
+        let dirs = ProjectDirs::from("dev", "dbm", "dbm").ok_or(ConnStoreError::NoConfigDir)?;
+        Ok(dirs.config_dir().join("connections.json"))
+    }
+
+    fn flush(&self) -> Result<()> {
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(&self.conns)?;
+        std::fs::write(&self.path, json)?;
+        Ok(())
+    }
+
+    fn index_of(&self, id: &str) -> Option<usize> {
+        self.conns.iter().position(|c| c.id == id)
+    }
+
+    pub fn list(&self) -> &[SavedConnection] {
+        &self.conns
+    }
+
+    pub fn get(&self, id: &str) -> Option<&SavedConnection> {
+        self.conns.iter().find(|c| c.id == id)
+    }
+
+    pub fn add(&mut self, conn: SavedConnection) -> Result<()> {
+        self.conns.push(conn);
+        self.flush()
+    }
+
+    pub fn update(&mut self, conn: SavedConnection) -> Result<()> {
+        match self.index_of(&conn.id) {
+            Some(i) => {
+                self.conns[i] = conn;
+                self.flush()
+            }
+            None => Err(ConnStoreError::NotFound(conn.id)),
+        }
+    }
+
+    pub fn remove(&mut self, id: &str) -> Result<()> {
+        match self.index_of(id) {
+            Some(i) => {
+                self.conns.remove(i);
+                self.flush()
+            }
+            None => Err(ConnStoreError::NotFound(id.to_string())),
+        }
+    }
+
+    /// Store `password` in the secret backend keyed by the connection id, and
+    /// record that id as the connection's `keyref`. Persists the updated record.
+    pub fn set_password(&mut self, id: &str, password: &str) -> Result<()> {
+        let i = self
+            .index_of(id)
+            .ok_or_else(|| ConnStoreError::NotFound(id.to_string()))?;
+        self.secrets.set(id, password)?;
+        self.conns[i].keyref = Some(id.to_string());
+        self.flush()
+    }
+
+    /// Fetch the password for a connection from the secret backend, if any.
+    pub fn get_password(&self, id: &str) -> Result<Option<String>> {
+        self.secrets.get(id)
+    }
+
+    /// Remove the password from the secret backend and clear the `keyref`.
+    /// Idempotent: succeeds even if no password was stored.
+    pub fn delete_password(&mut self, id: &str) -> Result<()> {
+        self.secrets.delete(id)?;
+        if let Some(i) = self.index_of(id) {
+            self.conns[i].keyref = None;
+            self.flush()?;
+        }
+        Ok(())
+    }
+
+    /// Build a `dbm-core::ConnConfig` for a saved connection with its stored
+    /// password injected. Errors if the connection id is unknown.
+    pub fn conn_config_for(&self, id: &str) -> Result<dbm_core::conn::ConnConfig> {
+        let conn = self
+            .get(id)
+            .ok_or_else(|| ConnStoreError::NotFound(id.to_string()))?;
+        let password = self.get_password(id)?;
+        Ok(conn.to_conn_config(password))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Engine, SavedConnection};
+
+    fn temp_store() -> (tempfile::TempDir, ConnStore) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        let secrets = Box::new(crate::secret::EncryptedFileBackend::new(dir.path()).unwrap());
+        let store = ConnStore::new(path, secrets);
+        (dir, store)
+    }
+
+    fn pg(name: &str) -> SavedConnection {
+        SavedConnection::new(name, Engine::Postgres, "localhost", 5432, "postgres")
+    }
+
+    #[test]
+    fn add_list_get_update_remove() {
+        let (_dir, mut store) = temp_store();
+        assert_eq!(store.list().len(), 0);
+
+        let c = pg("one");
+        let id = c.id.clone();
+        store.add(c).unwrap();
+        assert_eq!(store.list().len(), 1);
+        assert_eq!(store.get(&id).unwrap().name, "one");
+
+        let mut updated = store.get(&id).unwrap().clone();
+        updated.name = "renamed".into();
+        store.update(updated).unwrap();
+        assert_eq!(store.get(&id).unwrap().name, "renamed");
+
+        store.remove(&id).unwrap();
+        assert!(store.get(&id).is_none());
+        assert_eq!(store.list().len(), 0);
+    }
+
+    #[test]
+    fn persists_to_disk_and_reloads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        let id;
+        {
+            let secrets = Box::new(crate::secret::EncryptedFileBackend::new(dir.path()).unwrap());
+            let mut store = ConnStore::new(path.clone(), secrets);
+            let c = pg("persisted");
+            id = c.id.clone();
+            store.add(c).unwrap();
+        }
+        let secrets = Box::new(crate::secret::EncryptedFileBackend::new(dir.path()).unwrap());
+        let store = ConnStore::load(path, secrets).unwrap();
+        assert_eq!(store.get(&id).unwrap().name, "persisted");
+    }
+
+    #[test]
+    fn update_missing_id_is_not_found() {
+        let (_dir, mut store) = temp_store();
+        let err = store.update(pg("ghost")).unwrap_err();
+        assert!(matches!(err, ConnStoreError::NotFound(_)));
+    }
+
+    #[test]
+    fn saved_json_has_no_password_field() {
+        let (dir, mut store) = temp_store();
+        store.add(pg("one")).unwrap();
+        let raw = std::fs::read_to_string(dir.path().join("connections.json")).unwrap();
+        assert!(!raw.contains("password"));
+    }
+
+    #[test]
+    fn set_password_records_keyref_then_get_and_delete() {
+        let (_dir, mut store) = temp_store();
+        let c = pg("secured");
+        let id = c.id.clone();
+        store.add(c).unwrap();
+
+        assert!(store.get(&id).unwrap().keyref.is_none());
+
+        store.set_password(&id, "hunter2").unwrap();
+        assert_eq!(store.get(&id).unwrap().keyref.as_deref(), Some(id.as_str()));
+        assert_eq!(store.get_password(&id).unwrap().as_deref(), Some("hunter2"));
+
+        store.delete_password(&id).unwrap();
+        assert!(store.get_password(&id).unwrap().is_none());
+        assert!(store.get(&id).unwrap().keyref.is_none());
+    }
+
+    #[test]
+    fn set_password_on_missing_connection_is_not_found() {
+        let (_dir, mut store) = temp_store();
+        let err = store.set_password("nope", "x").unwrap_err();
+        assert!(matches!(err, ConnStoreError::NotFound(_)));
+    }
+
+    #[test]
+    fn conn_config_for_injects_stored_password() {
+        let (_dir, mut store) = temp_store();
+        let c = pg("c");
+        let id = c.id.clone();
+        store.add(c).unwrap();
+        store.set_password(&id, "pw").unwrap();
+        let cfg = store.conn_config_for(&id).unwrap();
+        assert_eq!(cfg.password.as_deref(), Some("pw"));
+        assert_eq!(cfg.port, 5432);
+    }
+}
