@@ -14,6 +14,7 @@ slint::include_modules!();
 
 mod dispatch;
 mod model;
+mod query_parse;
 mod theme;
 
 use std::cell::RefCell;
