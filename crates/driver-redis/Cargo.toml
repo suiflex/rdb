@@ -1,0 +1,14 @@
+[package]
+name = "dbm-driver-redis"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dbm-core = { path = "../core" }
+async-trait = "0.1"
+redis = { version = "0.27", features = ["tokio-comp"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[dev-dependencies]
+testcontainers = "0.27"
+testcontainers-modules = { version = "0.15", features = ["redis"] }

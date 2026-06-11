@@ -1,0 +1,139 @@
+use dbm_core::conn::ConnConfig;
+use dbm_core::result::{RedisValue, ResultSet};
+use redis::Value;
+
+/// Build a `redis://[:password@]host:port[/db]` URL from connection config.
+/// Redis auth historically has no username, so only the password is included.
+pub fn connection_url(cfg: &ConnConfig) -> String {
+    let auth = match &cfg.password {
+        Some(pw) if !pw.is_empty() => format!(":{pw}@"),
+        _ => String::new(),
+    };
+    let db = match &cfg.database {
+        Some(d) if !d.is_empty() => format!("/{d}"),
+        _ => String::new(),
+    };
+    format!("redis://{auth}{}:{}{db}", cfg.host, cfg.port)
+}
+
+/// Render a single `redis::Value` (the reply to one command) into a
+/// `KeyValue` result. `label` is the key shown for the reply (we use the
+/// command name). Scalars become one entry; bulk arrays become one `List`
+/// entry; nested/other shapes are flattened to their debug string.
+pub fn value_to_resultset(label: String, value: Value) -> ResultSet {
+    ResultSet::KeyValue(vec![(label, value_to_redis(value))])
+}
+
+fn value_to_redis(value: Value) -> RedisValue {
+    match value {
+        Value::Nil => RedisValue::Nil,
+        Value::Int(i) => RedisValue::Int(i),
+        Value::SimpleString(s) => RedisValue::Str(s),
+        Value::BulkString(bytes) => RedisValue::Str(String::from_utf8_lossy(&bytes).into_owned()),
+        Value::Array(items) => RedisValue::List(items.into_iter().map(scalar_to_string).collect()),
+        Value::Map(pairs) => RedisValue::List(
+            pairs
+                .into_iter()
+                .flat_map(|(k, v)| [scalar_to_string(k), scalar_to_string(v)])
+                .collect(),
+        ),
+        Value::Okay => RedisValue::Str("OK".to_string()),
+        other => RedisValue::Str(format!("{other:?}")),
+    }
+}
+
+/// Flatten one element of a bulk reply to a display string.
+fn scalar_to_string(value: Value) -> String {
+    match value {
+        Value::Nil => "(nil)".to_string(),
+        Value::Int(i) => i.to_string(),
+        Value::SimpleString(s) => s,
+        Value::BulkString(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+        Value::Okay => "OK".to_string(),
+        other => format!("{other:?}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dbm_core::conn::{ConnConfig, SslMode};
+    use dbm_core::result::{RedisValue, ResultSet};
+    use redis::Value;
+
+    fn cfg(pw: Option<&str>, db: Option<&str>) -> ConnConfig {
+        ConnConfig {
+            host: "localhost".into(),
+            port: 6379,
+            user: "default".into(),
+            database: db.map(|s| s.to_string()),
+            password: pw.map(|s| s.to_string()),
+            sslmode: SslMode::Disable,
+        }
+    }
+
+    #[test]
+    fn url_without_password_or_db() {
+        assert_eq!(connection_url(&cfg(None, None)), "redis://localhost:6379");
+    }
+
+    #[test]
+    fn url_with_password_and_numeric_db() {
+        assert_eq!(
+            connection_url(&cfg(Some("s3cr3t"), Some("2"))),
+            "redis://:s3cr3t@localhost:6379/2"
+        );
+    }
+
+    #[test]
+    fn simple_string_becomes_single_keyvalue_entry() {
+        let label = "PING".to_string();
+        let rs = value_to_resultset(label.clone(), Value::SimpleString("PONG".into()));
+        match rs {
+            ResultSet::KeyValue(pairs) => {
+                assert_eq!(pairs.len(), 1);
+                assert_eq!(pairs[0].0, "PING");
+                assert!(matches!(pairs[0].1, RedisValue::Str(ref s) if s == "PONG"));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn integer_becomes_int_redis_value() {
+        let rs = value_to_resultset("DBSIZE".into(), Value::Int(7));
+        match rs {
+            ResultSet::KeyValue(pairs) => {
+                assert!(matches!(pairs[0].1, RedisValue::Int(7)));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn nil_becomes_nil_redis_value() {
+        let rs = value_to_resultset("GET".into(), Value::Nil);
+        match rs {
+            ResultSet::KeyValue(pairs) => assert!(matches!(pairs[0].1, RedisValue::Nil)),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn bulk_array_becomes_single_list_entry() {
+        let arr = Value::Array(vec![
+            Value::BulkString(b"a".to_vec()),
+            Value::BulkString(b"b".to_vec()),
+        ]);
+        let rs = value_to_resultset("KEYS".into(), arr);
+        match rs {
+            ResultSet::KeyValue(pairs) => {
+                assert_eq!(pairs.len(), 1);
+                assert!(
+                    matches!(pairs[0].1, RedisValue::List(ref l) if l == &vec!["a".to_string(), "b".to_string()])
+                );
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+}
