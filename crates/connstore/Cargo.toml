@@ -1,0 +1,18 @@
+[package]
+name = "dbm-connstore"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dbm-core = { path = "../core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+keyring = "3"
+directories = "5"
+thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
+aes-gcm = "0.10"
+rand = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
