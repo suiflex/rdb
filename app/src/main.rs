@@ -116,8 +116,8 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let window = MainWindow::new()?;
 
-    // Currently connected driver, shared between connect + run handlers.
-    let current: Arc<tokio::sync::Mutex<Option<AnyDriver>>> =
+    // (engine, driver) so run-query can parse text for the right paradigm.
+    let current: Arc<tokio::sync::Mutex<Option<(dbm_connstore::Engine, AnyDriver)>>> =
         Arc::new(tokio::sync::Mutex::new(None));
 
     // Load saved connections (sync; passwords loaded lazily at connect time).
@@ -173,7 +173,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
                 match result {
                     Ok((driver, schema)) => {
-                        *store_driver.lock().await = Some(driver);
+                        *store_driver.lock().await = Some((sc.engine, driver));
                         let nodes = model::to_tree_model(&schema);
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(w) = weak2.upgrade() {
@@ -214,10 +214,14 @@ fn main() -> Result<(), slint::PlatformError> {
             let current = current.clone();
             rt.spawn(async move {
                 let guard = current.lock().await;
-                let outcome = if let Some(driver) = guard.as_ref() {
-                    driver.query(&dbm_core::query::Query::Sql(sql)).await
-                } else {
-                    Err(dbm_core::error::DbmError::Connection("not connected".into()))
+                let outcome = match guard.as_ref() {
+                    Some((engine, driver)) => {
+                        match crate::query_parse::parse_query(*engine, &sql) {
+                            Ok(q) => driver.query(&q).await,
+                            Err(msg) => Err(dbm_core::error::DbmError::Query(msg)),
+                        }
+                    }
+                    None => Err(dbm_core::error::DbmError::Connection("not connected".into())),
                 };
                 let grid = outcome.as_ref().ok().map(model::to_grid_model);
                 let err = outcome.err();
