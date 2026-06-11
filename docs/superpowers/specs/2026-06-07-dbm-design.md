@@ -126,9 +126,129 @@ Out (post-MVP, noted not built):
 - Automated UI tests.
 - Data export, query history, multi-tab beyond basics (revisit after MVP).
 
+## UI Design Language
+
+Aesthetic: **"precision instrument."** Refined-minimal, content-first — closer to
+TablePlus / Linear / Things than a marketing page. This is a tool used for hours
+daily, so predictability, density, and zero-friction beat visual drama. Design
+rules below intentionally invert typical web-landing-page advice (no decorative
+motion, no maximalist layout, system fonts preferred).
+
+### Signature feature (steal from TablePlus)
+
+Per-connection accent color. When saving a connection the user picks a color; it
+tints the sidebar selection and a thin top window border. Instant "which database
+am I in" — the main guard against running a destructive query on prod. This is the
+one memorable, identity-giving element. Build it in the MVP.
+
+### Design tokens (Slint global singleton)
+
+All colors/spacing/typography live in one `global Theme` singleton so light/dark is
+a single swap and nothing hardcodes values. Per-connection accent is a runtime
+property fed in, not a static token.
+
+| Token group | Values |
+|---|---|
+| Base (dark, default) | bg `#1b1d1f`, surface `#232629`, hairline `#ffffff14`, text `#e6e8ea`, text-dim `#8b9095` |
+| Base (light) | bg `#fbfbfc`, surface `#ffffff`, hairline `#0000000d`, text `#1b1d1f`, text-dim `#6b7075` |
+| Accent | per-connection, user-chosen (default `#3b82f6`); used for selection + top border only |
+| Spacing | 4px grid: 4 / 8 / 12 / 16 / 24 |
+| Row height | 30px (grid + tree rows) |
+| Radius | 6px panels/modals, 4px controls |
+| Elevation | one shadow only, on modals/popovers; panels use hairlines not shadows |
+| Font (chrome) | system sans — SF Pro / Segoe UI / system Linux. **Embed nothing.** |
+| Font (data cells, query editor) | system mono — SF Mono / Consolas / monospace |
+| Font sizes | 13px body, 12px dim/labels, 13px mono data |
+
+System fonts are a deliberate choice: native feel on each OS **and** zero added
+binary weight (embedding a custom family adds ~200KB–1MB and looks non-native).
+
+### Layout — fixed 3-pane
+
+```
+┌──────────────────────────────────────────────┐
+│ ▔▔▔ accent top-border (per-connection color) ▔│
+├───────────┬──────────────────────────────────┤
+│ Sidebar   │ Tab bar (queries / open tables)   │
+│           ├──────────────────────────────────┤
+│ conns •   │                                   │
+│ schema    │   Work area                       │
+│  tree     │   (query editor → result grid /   │
+│           │    tree / key-list by ResultSet)  │
+│           │                                   │
+├───────────┴──────────────────────────────────┤
+│ status bar: conn name · latency · row count   │
+└──────────────────────────────────────────────┘
+```
+
+Layout never rearranges — muscle memory is a feature. Sidebar collapsible; inspector
+panel is post-MVP.
+
+### Motion
+
+Functional only. 80–120ms ease fades on hover, row select, tab switch. Nothing
+decorative, no staggered reveals, no scroll effects. Heavy animation would hurt the
+"light + fast" goal and drain battery in a daily-use tool.
+
+### Keyboard-first (spec from day 1)
+
+| Key | Action |
+|---|---|
+| Cmd/Ctrl-K | command palette (jump connection / table / action) |
+| Cmd/Ctrl-Enter | run query |
+| Cmd/Ctrl-1..9 | switch tab |
+| Cmd/Ctrl-T | new query tab |
+| j / k | move grid row selection |
+| Cmd/Ctrl-W | close tab |
+
+## Packaging & Binary Size
+
+Target: **single binary < 15 MB, idle RAM < 60 MB.** Treat as a test, not a wish —
+check the number per release.
+
+### Size build flags (`Cargo.toml` release profile)
+
+```toml
+[profile.release]
+opt-level = "z"      # optimize for size
+lto = true           # link-time optimization
+codegen-units = 1    # better optimization, smaller output
+panic = "abort"      # drop unwind tables
+strip = true         # strip symbols
+```
+
+Expect 30–50% smaller binary vs default release. Validate the < 15 MB target after
+these are on; revisit if a driver pulls heavy deps.
+
+### Slint renderer backend (RESOLVED)
+
+Use **FemtoVG (OpenGL)** as the primary renderer. Skia renders prettiest but adds
+significant binary weight; the software renderer is lightest but looks worst and is
+CPU-bound. FemtoVG is the balance point for "light + good-looking" and is the direct
+resolution of the size-vs-beauty tradeoff. Keep the software renderer available as a
+fallback for machines without GL.
+
+### Installers & signing (required, not optional)
+
+Unsigned binaries are blocked by Gatekeeper (macOS) and SmartScreen (Windows), so
+signing is part of MVP packaging, not a nicety.
+
+| Platform | Format | Signing |
+|---|---|---|
+| macOS | `.dmg` | Developer ID sign **+ notarize** (else won't open) |
+| Windows | `.msi` (or NSIS `.exe`) | Authenticode cert (else SmartScreen warning) |
+| Linux | `.AppImage` (portable) + `.deb` | none required |
+
+### Linux runtime dependency caveat
+
+Keychain on Linux uses Secret Service, which needs a running provider
+(gnome-keyring / KWallet via D-Bus). On a minimal install it may be absent — keeps
+"light install" honest by handling it: detect at runtime, and if no Secret Service,
+fall back to an encrypted local secrets file rather than crashing.
+
 ## Open Questions
 
-- Slint vs egui final call if Slint styling proves too limiting during build
-  (fallback: egui, plainer look, same architecture).
 - Connection-pool strategy per driver (single conn vs pool) — decide per driver
   during implementation.
+- Command palette (Cmd-K) scope for MVP: connections + tables only, or also actions?
+- Light vs dark as first-run default (leaning dark for the dev audience).
