@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/connstore"]
+members = ["crates/core", "crates/connstore", "crates/driver-postgres"]
 
 # Size-optimized release profile (target: binary < 15 MB).
 [profile.release]
