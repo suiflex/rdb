@@ -28,7 +28,9 @@ use dispatch::AnyDriver;
 /// Rebuild the tab model titles "Query 1..N".
 fn set_tab_titles(w: &MainWindow, count: usize) {
     let items: Vec<TabItem> = (1..=count)
-        .map(|n| TabItem { title: format!("Query {n}").into() })
+        .map(|n| TabItem {
+            title: format!("Query {n}").into(),
+        })
         .collect();
     w.set_tabs(ModelRc::from(Rc::new(VecModel::from(items))));
 }
@@ -153,14 +155,17 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.global::<Theme>()
                     .set_accent(theme::accent_or_default(sc.color.as_deref().unwrap_or("")));
                 w.set_status_conn(SharedString::from(sc.name.clone()));
-                w.set_query_text(SharedString::from(crate::query_parse::editor_hint(sc.engine)));
+                w.set_query_text(SharedString::from(crate::query_parse::editor_hint(
+                    sc.engine,
+                )));
             }
             let weak2 = weak.clone();
             let store_driver = current.clone();
             let engine = sc.engine;
             rt.spawn(async move {
                 let result = async {
-                    let cfg = cfg.map_err(|e| dbm_core::error::DbmError::Connection(e.to_string()))?;
+                    let cfg =
+                        cfg.map_err(|e| dbm_core::error::DbmError::Connection(e.to_string()))?;
                     let driver = AnyDriver::connect(engine, &cfg).await?;
                     let schema = driver.schema().await?;
                     Ok::<_, dbm_core::error::DbmError>((driver, schema))
@@ -204,7 +209,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let rt = rt.clone();
         let current = current.clone();
         window.on_run_query(move || {
-            let Some(w) = weak.upgrade() else { return; };
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
             let sql = w.get_query_text().to_string();
             let weak2 = weak.clone();
             let current = current.clone();
@@ -217,7 +224,9 @@ fn main() -> Result<(), slint::PlatformError> {
                             Err(msg) => Err(dbm_core::error::DbmError::Query(msg)),
                         }
                     }
-                    None => Err(dbm_core::error::DbmError::Connection("not connected".into())),
+                    None => Err(dbm_core::error::DbmError::Connection(
+                        "not connected".into(),
+                    )),
                 };
                 let grid = outcome.as_ref().ok().map(model::to_grid_model);
                 let err = outcome.err();
@@ -242,7 +251,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let tab_texts = tab_texts.clone();
         window.on_new_tab(move || {
-            let Some(w) = weak.upgrade() else { return; };
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
             let active = w.get_active_tab() as usize;
             {
                 let mut t = tab_texts.borrow_mut();
@@ -263,7 +274,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let tab_texts = tab_texts.clone();
         window.on_close_tab(move || {
-            let Some(w) = weak.upgrade() else { return; };
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
             let mut t = tab_texts.borrow_mut();
             if t.len() <= 1 {
                 return;
@@ -286,7 +299,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let tab_texts = tab_texts.clone();
         window.on_select_tab(move |idx| {
-            let Some(w) = weak.upgrade() else { return; };
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
             let i = idx as usize;
             let mut t = tab_texts.borrow_mut();
             if i >= t.len() {
@@ -331,8 +346,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 let opening = !w.get_palette_open();
                 w.set_palette_open(opening);
                 if opening {
-                    let names: Vec<String> =
-                        store.borrow().list().iter().map(|s| s.name.clone()).collect();
+                    let names: Vec<String> = store
+                        .borrow()
+                        .list()
+                        .iter()
+                        .map(|s| s.name.clone())
+                        .collect();
                     let mut items: Vec<PaletteItem> = names
                         .iter()
                         .map(|n| PaletteItem {
@@ -359,8 +378,12 @@ fn main() -> Result<(), slint::PlatformError> {
         window.on_palette_filter(move |q| {
             if let Some(w) = weak.upgrade() {
                 let needle = q.to_lowercase();
-                let names: Vec<String> =
-                    store.borrow().list().iter().map(|s| s.name.clone()).collect();
+                let names: Vec<String> = store
+                    .borrow()
+                    .list()
+                    .iter()
+                    .map(|s| s.name.clone())
+                    .collect();
                 let mut items: Vec<PaletteItem> = names
                     .iter()
                     .filter(|n| n.to_lowercase().contains(&needle))
@@ -436,7 +459,7 @@ fn main() -> Result<(), slint::PlatformError> {
             *editing_id.borrow_mut() = String::new();
             w.set_form_edit_mode(false);
             w.set_f_name(SharedString::default());
-            w.set_f_engine(SharedString::from("Postgres"));
+            w.set_f_engine(SharedString::from("PostgreSQL"));
             w.set_f_host(SharedString::from("localhost"));
             w.set_f_port(SharedString::from("5432"));
             w.set_f_user(SharedString::default());
@@ -475,7 +498,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 dbm_core::conn::SslMode::Prefer => "Prefer",
                 dbm_core::conn::SslMode::Require => "Require",
             }));
-            w.set_f_color(SharedString::from(sc.color.unwrap_or_else(|| "#3b82f6".into())));
+            w.set_f_color(SharedString::from(
+                sc.color.unwrap_or_else(|| "#3b82f6".into()),
+            ));
             w.set_form_error(SharedString::default());
             w.set_form_open(true);
         });
@@ -573,9 +598,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     st.add(sc)?;
                     cid
                 } else {
-                    let mut sc = st.get(&id).cloned().ok_or_else(|| {
-                        dbm_connstore::ConnStoreError::NotFound(id.clone())
-                    })?;
+                    let mut sc = st
+                        .get(&id)
+                        .cloned()
+                        .ok_or_else(|| dbm_connstore::ConnStoreError::NotFound(id.clone()))?;
                     sc.name = name;
                     sc.engine = engine;
                     sc.host = host;

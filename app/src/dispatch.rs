@@ -103,7 +103,12 @@ mod tests {
 
     #[test]
     fn all_four_engines_supported_and_labeled() {
-        for e in [Engine::Postgres, Engine::MySql, Engine::Redis, Engine::Mongo] {
+        for e in [
+            Engine::Postgres,
+            Engine::MySql,
+            Engine::Redis,
+            Engine::Mongo,
+        ] {
             assert!(AnyDriver::is_supported(e), "{e:?} should be supported");
         }
         assert_eq!(AnyDriver::label(Engine::MySql), "MySQL");
