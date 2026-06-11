@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/core"]
+members = ["crates/core", "crates/connstore"]
 
 # Size-optimized release profile (target: binary < 15 MB).
 [profile.release]
