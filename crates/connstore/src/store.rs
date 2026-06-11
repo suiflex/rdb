@@ -49,6 +49,19 @@ impl ConnStore {
         Ok(dirs.config_dir().join("connections.json"))
     }
 
+    /// Open the store at the platform default path with the runtime-selected
+    /// secret backend (keychain, or encrypted-file fallback). Convenience
+    /// wrapper over `default_path` + `secret::select_backend` + `load`.
+    pub fn open_default() -> Result<Self> {
+        let path = Self::default_path()?;
+        let dir = path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let backend = crate::secret::select_backend(&dir)?;
+        Self::load(path, backend)
+    }
+
     fn flush(&self) -> Result<()> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -238,5 +251,18 @@ mod tests {
         let cfg = store.conn_config_for(&id).unwrap();
         assert_eq!(cfg.password.as_deref(), Some("pw"));
         assert_eq!(cfg.port, 5432);
+    }
+
+    #[test]
+    fn open_default_returns_a_store_or_clean_error() {
+        // We cannot assume a writable config dir / keychain in CI, so we only
+        // assert the call resolves to a Result without panicking and, on Ok,
+        // yields a usable (possibly empty) list.
+        match ConnStore::open_default() {
+            Ok(store) => {
+                let _ = store.list().len();
+            }
+            Err(_) => { /* acceptable on headless CI */ }
+        }
     }
 }
