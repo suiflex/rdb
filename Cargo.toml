@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["crates/core"]
+
+# Size-optimized release profile (target: binary < 15 MB).
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
