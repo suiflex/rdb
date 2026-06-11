@@ -1,0 +1,134 @@
+import { Theme } from "theme.slint";
+import { LineEdit, ComboBox, Button } from "std-widgets.slint";
+
+// 8 preset accent swatches — colors for UI rendering, hex strings for the Rust-side color field.
+export global Swatches {
+    out property <[color]> colors: [
+        #3b82f6, #ef4444, #22c55e, #f59e0b,
+        #a855f7, #ec4899, #14b8a6, #64748b,
+    ];
+    // Matching hex strings passed to Rust (same order as `colors`).
+    out property <[string]> hexes: [
+        "#3b82f6", "#ef4444", "#22c55e", "#f59e0b",
+        "#a855f7", "#ec4899", "#14b8a6", "#64748b",
+    ];
+}
+
+export component ConnForm inherits Rectangle {
+    in property <bool> open;
+    in property <bool> edit-mode;
+    in-out property <string> f-name;
+    in-out property <string> f-engine;     // "Postgres"|"MySQL"|"Redis"|"MongoDB"
+    in-out property <string> f-host;
+    in-out property <string> f-port;
+    in-out property <string> f-user;
+    in-out property <string> f-database;
+    in-out property <string> f-password;
+    in-out property <string> f-sslmode;    // "Disable"|"Prefer"|"Require"
+    in-out property <string> f-color;      // selected hex
+    in property <string> form-error;
+
+    callback engine-changed(string);
+    callback save();
+    callback delete-conn();
+    callback cancel();
+
+    visible: root.open;
+    background: #00000066;
+
+    if root.open: Rectangle {
+        width: 460px;
+        height: 540px;
+        x: (parent.width - self.width) / 2;
+        y: 60px;
+        border-radius: Theme.radius-panel;
+        background: Theme.surface;
+        border-width: 1px;
+        border-color: Theme.hairline;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #00000088;
+
+        VerticalLayout {
+            padding: Theme.sp4;
+            spacing: Theme.sp2;
+
+            Text {
+                text: root.edit-mode ? "Edit Connection" : "New Connection";
+                color: Theme.text;
+                font-size: Theme.font-body;
+            }
+
+            Text { text: "Name"; color: Theme.text-dim; font-size: Theme.font-label; }
+            LineEdit { text <=> root.f-name; }
+
+            Text { text: "Engine"; color: Theme.text-dim; font-size: Theme.font-label; }
+            ComboBox {
+                model: ["Postgres", "MySQL", "Redis", "MongoDB"];
+                current-value <=> root.f-engine;
+                selected(v) => { root.engine-changed(v); }
+            }
+
+            HorizontalLayout {
+                spacing: Theme.sp2;
+                VerticalLayout {
+                    Text { text: "Host"; color: Theme.text-dim; font-size: Theme.font-label; }
+                    LineEdit { text <=> root.f-host; }
+                }
+                VerticalLayout {
+                    width: 110px;
+                    Text { text: "Port"; color: Theme.text-dim; font-size: Theme.font-label; }
+                    LineEdit { text <=> root.f-port; }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: Theme.sp2;
+                VerticalLayout {
+                    Text { text: "User"; color: Theme.text-dim; font-size: Theme.font-label; }
+                    LineEdit { text <=> root.f-user; }
+                }
+                VerticalLayout {
+                    Text { text: "Database"; color: Theme.text-dim; font-size: Theme.font-label; }
+                    LineEdit { text <=> root.f-database; }
+                }
+            }
+
+            Text { text: "Password"; color: Theme.text-dim; font-size: Theme.font-label; }
+            LineEdit { text <=> root.f-password; input-type: password; }
+
+            Text { text: "SSL"; color: Theme.text-dim; font-size: Theme.font-label; }
+            ComboBox {
+                model: ["Disable", "Prefer", "Require"];
+                current-value <=> root.f-sslmode;
+            }
+
+            Text { text: "Color"; color: Theme.text-dim; font-size: Theme.font-label; }
+            HorizontalLayout {
+                spacing: Theme.sp2;
+                for col[i] in Swatches.colors: Rectangle {
+                    width: 22px;
+                    height: 22px;
+                    border-radius: 11px;
+                    background: col;
+                    border-width: Swatches.hexes[i] == root.f-color ? 2px : 0px;
+                    border-color: Theme.text;
+                    TouchArea { clicked => { root.f-color = Swatches.hexes[i]; } }
+                }
+            }
+
+            Text {
+                text: root.form-error;
+                color: #ef4444;
+                font-size: Theme.font-label;
+            }
+
+            HorizontalLayout {
+                spacing: Theme.sp2;
+                Button { text: "Save"; clicked => { root.save(); } }
+                Button { text: "Cancel"; clicked => { root.cancel(); } }
+                Rectangle {}
+                if root.edit-mode: Button { text: "Delete"; clicked => { root.delete-conn(); } }
+            }
+        }
+    }
+}

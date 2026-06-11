@@ -3,6 +3,7 @@ export { Theme }
 import { Sidebar } from "sidebar.slint";
 import { WorkArea } from "workarea.slint";
 import { CommandPalette, PaletteItem } from "palette.slint";
+import { ConnForm } from "conn-form.slint";
 import { GridColumn, GridCell, TreeNode, ConnItem, TabItem } from "structs.slint";
 
 export component MainWindow inherits Window {
@@ -46,6 +47,26 @@ export component MainWindow inherits Window {
     callback palette-choose(int);
     callback move-row(int);
     callback toggle-theme();
+
+    // ----- connection form -----
+    in property <bool> form-open;
+    in property <bool> form-edit-mode;
+    in-out property <string> f-name;
+    in-out property <string> f-engine;
+    in-out property <string> f-host;
+    in-out property <string> f-port;
+    in-out property <string> f-user;
+    in-out property <string> f-database;
+    in-out property <string> f-password;
+    in-out property <string> f-sslmode;
+    in-out property <string> f-color;
+    in property <string> form-error;
+    callback open-add-form();
+    callback open-edit-form(int);
+    callback form-engine-changed(string);
+    callback form-save();
+    callback form-delete();
+    callback form-cancel();
 
     // ----- keyboard shortcuts -----
     FocusScope {
@@ -189,5 +210,27 @@ export component MainWindow inherits Window {
         items: root.palette-items;
         filter(t) => { root.palette-filter(t); }
         choose(i) => { root.palette-choose(i); }
+    }
+
+    // ----- connection form overlay (drawn on top of palette layer) -----
+    ConnForm {
+        width: root.width;
+        height: root.height;
+        open: root.form-open;
+        edit-mode: root.form-edit-mode;
+        f-name <=> root.f-name;
+        f-engine <=> root.f-engine;
+        f-host <=> root.f-host;
+        f-port <=> root.f-port;
+        f-user <=> root.f-user;
+        f-database <=> root.f-database;
+        f-password <=> root.f-password;
+        f-sslmode <=> root.f-sslmode;
+        f-color <=> root.f-color;
+        form-error: root.form-error;
+        engine-changed(v) => { root.form-engine-changed(v); }
+        save() => { root.form-save(); }
+        delete-conn() => { root.form-delete(); }
+        cancel() => { root.form-cancel(); }
     }
 }
