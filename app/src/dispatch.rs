@@ -34,11 +34,6 @@ impl AnyDriver {
         }
     }
 
-    /// Whether this build can connect the engine (all four are wired).
-    pub fn is_supported(_engine: Engine) -> bool {
-        true
-    }
-
     /// Connect using the concrete driver for `engine`.
     pub async fn connect(engine: Engine, cfg: &ConnConfig) -> Result<Self> {
         Ok(match engine {
@@ -77,17 +72,6 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.query(q).await,
         }
     }
-
-    /// Consumes and closes the driver; called on disconnect/app teardown.
-    #[allow(dead_code)]
-    pub async fn close(self) -> Result<()> {
-        match self {
-            AnyDriver::Postgres(d) => d.close().await,
-            AnyDriver::Mysql(d) => d.close().await,
-            AnyDriver::Redis(d) => d.close().await,
-            AnyDriver::Mongo(d) => d.close().await,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -102,15 +86,7 @@ mod tests {
     }
 
     #[test]
-    fn all_four_engines_supported_and_labeled() {
-        for e in [
-            Engine::Postgres,
-            Engine::MySql,
-            Engine::Redis,
-            Engine::Mongo,
-        ] {
-            assert!(AnyDriver::is_supported(e), "{e:?} should be supported");
-        }
+    fn all_four_engines_labeled() {
         assert_eq!(AnyDriver::label(Engine::MySql), "MySQL");
         assert_eq!(AnyDriver::label(Engine::Mongo), "MongoDB");
     }

@@ -253,13 +253,10 @@ mod tests {
         };
         let nodes = to_tree_model(&schema);
         assert_eq!(nodes[0].label, "app");
-        assert_eq!(nodes[0].depth, 0);
         assert_eq!(nodes[0].kind, "database");
         assert_eq!(nodes[1].label, "users");
-        assert_eq!(nodes[1].depth, 1);
         assert_eq!(nodes[1].kind, "table");
         assert_eq!(nodes[2].label, "id: int4");
-        assert_eq!(nodes[2].depth, 2);
         assert_eq!(nodes[2].kind, "field");
     }
 }

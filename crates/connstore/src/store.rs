@@ -108,15 +108,12 @@ impl ConnStore {
         }
     }
 
-    /// Store `password` in the secret backend keyed by the connection id, and
-    /// record that id as the connection's `keyref`. Persists the updated record.
-    pub fn set_password(&mut self, id: &str, password: &str) -> Result<()> {
-        let i = self
-            .index_of(id)
+    /// Store `password` in the secret backend keyed by the connection id.
+    /// Errors if the connection id is unknown.
+    pub fn set_password(&self, id: &str, password: &str) -> Result<()> {
+        self.index_of(id)
             .ok_or_else(|| ConnStoreError::NotFound(id.to_string()))?;
-        self.secrets.set(id, password)?;
-        self.conns[i].keyref = Some(id.to_string());
-        self.flush()
+        self.secrets.set(id, password)
     }
 
     /// Fetch the password for a connection from the secret backend, if any.
@@ -124,15 +121,10 @@ impl ConnStore {
         self.secrets.get(id)
     }
 
-    /// Remove the password from the secret backend and clear the `keyref`.
+    /// Remove the password from the secret backend.
     /// Idempotent: succeeds even if no password was stored.
-    pub fn delete_password(&mut self, id: &str) -> Result<()> {
-        self.secrets.delete(id)?;
-        if let Some(i) = self.index_of(id) {
-            self.conns[i].keyref = None;
-            self.flush()?;
-        }
-        Ok(())
+    pub fn delete_password(&self, id: &str) -> Result<()> {
+        self.secrets.delete(id)
     }
 
     /// Build a `dbm-core::ConnConfig` for a saved connection with its stored
@@ -217,26 +209,24 @@ mod tests {
     }
 
     #[test]
-    fn set_password_records_keyref_then_get_and_delete() {
+    fn set_get_then_delete_password() {
         let (_dir, mut store) = temp_store();
         let c = pg("secured");
         let id = c.id.clone();
         store.add(c).unwrap();
 
-        assert!(store.get(&id).unwrap().keyref.is_none());
+        assert!(store.get_password(&id).unwrap().is_none());
 
         store.set_password(&id, "hunter2").unwrap();
-        assert_eq!(store.get(&id).unwrap().keyref.as_deref(), Some(id.as_str()));
         assert_eq!(store.get_password(&id).unwrap().as_deref(), Some("hunter2"));
 
         store.delete_password(&id).unwrap();
         assert!(store.get_password(&id).unwrap().is_none());
-        assert!(store.get(&id).unwrap().keyref.is_none());
     }
 
     #[test]
     fn set_password_on_missing_connection_is_not_found() {
-        let (_dir, mut store) = temp_store();
+        let (_dir, store) = temp_store();
         let err = store.set_password("nope", "x").unwrap_err();
         assert!(matches!(err, ConnStoreError::NotFound(_)));
     }

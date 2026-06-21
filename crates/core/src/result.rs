@@ -80,7 +80,10 @@ mod tests {
     #[test]
     fn tabular_result_holds_cols_and_rows() {
         let rs = ResultSet::Tabular {
-            cols: vec![Column { name: "id".into(), type_name: "int4".into() }],
+            cols: vec![Column {
+                name: "id".into(),
+                type_name: "int4".into(),
+            }],
             rows: vec![vec![Cell::Int(1)]],
         };
         match rs {

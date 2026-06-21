@@ -1494,6 +1494,7 @@ dependencies = [
  "dbm-core",
  "native-tls",
  "postgres-native-tls",
+ "serde_json",
  "testcontainers",
  "testcontainers-modules",
  "tokio",

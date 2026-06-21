@@ -12,6 +12,8 @@ desktop.ini
 .idea/
 .vscode/
 *.iml
+.claude
+superpowers
 
 # Env & secrets
 .env
