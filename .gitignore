@@ -13,7 +13,7 @@ desktop.ini
 .vscode/
 *.iml
 .claude
-superpowers
+docs/superpowers
 
 # Env & secrets
 .env
