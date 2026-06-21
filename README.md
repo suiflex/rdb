@@ -103,7 +103,25 @@ pub enum ResultSet {
 }
 ```
 
-## Prerequisites
+## Install
+
+Prebuilt installers are expected to be attached to GitHub Releases.
+
+### macOS / Linux
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install.sh | bash
+```
+
+Optional:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install.sh | STORIX_VERSION=v0.1.0 INSTALL_DIR="$HOME/.local/bin" bash
+```
+
+The script installs `storix` into `/usr/local/bin` when writable, otherwise it falls back to `~/.local/bin`.
+
+## Build from source
 
 | Tool | Version |
 |------|---------|
