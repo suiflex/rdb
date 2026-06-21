@@ -25,8 +25,6 @@ pub struct SavedConnection {
     pub database: Option<String>,
     #[serde(default)]
     pub sslmode: SslMode,
-    /// Reference id into the secret backend; `None` until a password is set.
-    pub keyref: Option<String>,
     /// Per-connection accent color as `#rrggbb` (the signature UI feature).
     /// `None` => UI uses the default accent.
     #[serde(default)]
@@ -55,7 +53,6 @@ impl SavedConnection {
             user: user.into(),
             database: None,
             sslmode: SslMode::default(),
-            keyref: None,
             color: None,
             group: None,
         }
@@ -89,14 +86,13 @@ mod tests {
             user: "postgres".into(),
             database: Some("app".into()),
             sslmode: SslMode::Require,
-            keyref: Some("ref-123".into()),
             color: Some("#3b82f6".into()),
             group: Some("Local".into()),
         }
     }
 
     #[test]
-    fn json_roundtrips_and_keeps_keyref() {
+    fn json_roundtrips() {
         let conn = sample();
         let json = serde_json::to_string(&conn).unwrap();
         let back: SavedConnection = serde_json::from_str(&json).unwrap();
@@ -104,7 +100,6 @@ mod tests {
         assert_eq!(back.engine, Engine::Postgres);
         assert_eq!(back.port, 5432);
         assert_eq!(back.sslmode, SslMode::Require);
-        assert_eq!(back.keyref.as_deref(), Some("ref-123"));
     }
 
     #[test]
