@@ -72,17 +72,6 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.query(q).await,
         }
     }
-
-    /// Consumes and closes the driver; called on disconnect/app teardown.
-    #[allow(dead_code)]
-    pub async fn close(self) -> Result<()> {
-        match self {
-            AnyDriver::Postgres(d) => d.close().await,
-            AnyDriver::Mysql(d) => d.close().await,
-            AnyDriver::Redis(d) => d.close().await,
-            AnyDriver::Mongo(d) => d.close().await,
-        }
-    }
 }
 
 #[cfg(test)]
