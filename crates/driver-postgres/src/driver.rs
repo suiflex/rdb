@@ -105,7 +105,10 @@ async fn query_impl(client: &Client, q: &Query) -> Result<ResultSet> {
             }
             out_rows.push(cells);
         }
-        Ok(ResultSet::Tabular { cols, rows: out_rows })
+        Ok(ResultSet::Tabular {
+            cols,
+            rows: out_rows,
+        })
     } else {
         let affected = client
             .execute(sql, &[])

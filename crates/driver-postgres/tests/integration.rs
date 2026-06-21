@@ -141,7 +141,11 @@ async fn schema_lists_created_table_and_fields() {
 
     assert_eq!(widget.kind, ContainerKind::Table);
 
-    let id = widget.fields.iter().find(|f| f.name == "id").expect("id field");
+    let id = widget
+        .fields
+        .iter()
+        .find(|f| f.name == "id")
+        .expect("id field");
     assert!(!id.nullable);
     let label = widget
         .fields
