@@ -107,7 +107,7 @@ pub enum ResultSet {
 
 Prebuilt installers are expected to be attached to GitHub Releases.
 
-### macOS
+### macOS / Linux
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install.sh | bash
@@ -119,22 +119,7 @@ Optional:
 curl -fsSL https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install.sh | STORIX_VERSION=v0.1.0 INSTALL_DIR="$HOME/.local/bin" bash
 ```
 
-### Windows
-
-PowerShell one-liner:
-
-```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install.ps1 | iex"
-```
-
-If you want the `curl -fsSL` flow explicitly:
-
-```powershell
-curl.exe -fsSL https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install.ps1 -o install-storix.ps1
-powershell -ExecutionPolicy Bypass -File .\install-storix.ps1
-```
-
-The Windows installer drops `storix.exe` into `%USERPROFILE%\bin` by default and adds that folder to the user PATH when needed.
+The script installs `storix` into `/usr/local/bin` when writable, otherwise it falls back to `~/.local/bin`.
 
 ## Build from source
 
