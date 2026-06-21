@@ -32,16 +32,57 @@ pub struct GridModel {
 #[derive(Debug, Default, Clone)]
 pub struct VmTreeNode {
     pub label: String,
-    pub depth: i32,
     pub kind: String,
+}
+
+/// One column definition for the Structure tab (Feature B).
+#[derive(Debug, Default, Clone)]
+pub struct VmStructField {
+    pub name: String,
+    pub type_name: String,
+    pub nullable: bool,
+}
+
+/// Column definitions for the Structure tab. MVP: the fields of the first
+/// container (table/collection) found in the schema. TODO: drive this from the
+/// table the user selects in the sidebar rather than always the first one.
+pub fn to_structure_model(schema: &Schema) -> Vec<VmStructField> {
+    schema
+        .databases
+        .iter()
+        .flat_map(|db| db.containers.iter())
+        .find(|c| !c.fields.is_empty())
+        .map(|c| {
+            c.fields
+                .iter()
+                .map(|f| VmStructField {
+                    name: f.name.clone(),
+                    type_name: f.type_name.clone(),
+                    nullable: f.nullable,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn redis_cell(v: &RedisValue) -> VmCell {
     match v {
-        RedisValue::Str(s) => VmCell { text: s.clone(), is_null: false },
-        RedisValue::Int(i) => VmCell { text: i.to_string(), is_null: false },
-        RedisValue::List(items) => VmCell { text: items.join(", "), is_null: false },
-        RedisValue::Nil => VmCell { text: "(nil)".into(), is_null: true },
+        RedisValue::Str(s) => VmCell {
+            text: s.clone(),
+            is_null: false,
+        },
+        RedisValue::Int(i) => VmCell {
+            text: i.to_string(),
+            is_null: false,
+        },
+        RedisValue::List(items) => VmCell {
+            text: items.join(", "),
+            is_null: false,
+        },
+        RedisValue::Nil => VmCell {
+            text: "(nil)".into(),
+            is_null: true,
+        },
     }
 }
 
@@ -51,7 +92,10 @@ pub fn to_grid_model(rs: &ResultSet) -> GridModel {
         ResultSet::Tabular { cols, rows } => GridModel {
             columns: cols
                 .iter()
-                .map(|c| VmColumn { name: c.name.clone(), type_name: c.type_name.clone() })
+                .map(|c| VmColumn {
+                    name: c.name.clone(),
+                    type_name: c.type_name.clone(),
+                })
                 .collect(),
             rows: rows
                 .iter()
@@ -68,18 +112,36 @@ pub fn to_grid_model(rs: &ResultSet) -> GridModel {
         },
         ResultSet::KeyValue(pairs) => GridModel {
             columns: vec![
-                VmColumn { name: "key".into(), type_name: "".into() },
-                VmColumn { name: "value".into(), type_name: "".into() },
+                VmColumn {
+                    name: "key".into(),
+                    type_name: "".into(),
+                },
+                VmColumn {
+                    name: "value".into(),
+                    type_name: "".into(),
+                },
             ],
             rows: pairs
                 .iter()
-                .map(|(k, v)| vec![VmCell { text: k.clone(), is_null: false }, redis_cell(v)])
+                .map(|(k, v)| {
+                    vec![
+                        VmCell {
+                            text: k.clone(),
+                            is_null: false,
+                        },
+                        redis_cell(v),
+                    ]
+                })
                 .collect(),
             ..Default::default()
         },
         ResultSet::Documents(docs) => {
             let json = serde_json::to_string_pretty(docs).unwrap_or_else(|_| "[]".into());
-            GridModel { json, is_documents: true, ..Default::default() }
+            GridModel {
+                json,
+                is_documents: true,
+                ..Default::default()
+            }
         }
         ResultSet::Affected(n) => GridModel {
             status: format!("{} rows affected", n),
@@ -92,18 +154,23 @@ pub fn to_grid_model(rs: &ResultSet) -> GridModel {
 pub fn to_tree_model(schema: &Schema) -> Vec<VmTreeNode> {
     let mut out = Vec::new();
     for db in &schema.databases {
-        out.push(VmTreeNode { label: db.name.clone(), depth: 0, kind: "database".into() });
+        out.push(VmTreeNode {
+            label: db.name.clone(),
+            kind: "database".into(),
+        });
         for c in &db.containers {
             let kind = match c.kind {
                 ContainerKind::Table => "table",
                 ContainerKind::Collection => "collection",
                 ContainerKind::Keyspace => "keyspace",
             };
-            out.push(VmTreeNode { label: c.name.clone(), depth: 1, kind: kind.into() });
+            out.push(VmTreeNode {
+                label: c.name.clone(),
+                kind: kind.into(),
+            });
             for f in &c.fields {
                 out.push(VmTreeNode {
                     label: format!("{}: {}", f.name, f.type_name),
-                    depth: 2,
                     kind: "field".into(),
                 });
             }
@@ -121,7 +188,10 @@ mod tests {
     #[test]
     fn tabular_maps_cols_and_rows_with_null_flag() {
         let rs = ResultSet::Tabular {
-            cols: vec![Column { name: "id".into(), type_name: "int4".into() }],
+            cols: vec![Column {
+                name: "id".into(),
+                type_name: "int4".into(),
+            }],
             rows: vec![vec![Cell::Int(7)], vec![Cell::Null]],
         };
         let grid = to_grid_model(&rs);
@@ -173,7 +243,11 @@ mod tests {
                 containers: vec![Container {
                     name: "users".into(),
                     kind: ContainerKind::Table,
-                    fields: vec![Field { name: "id".into(), type_name: "int4".into(), nullable: false }],
+                    fields: vec![Field {
+                        name: "id".into(),
+                        type_name: "int4".into(),
+                        nullable: false,
+                    }],
                 }],
             }],
         };

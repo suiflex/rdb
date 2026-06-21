@@ -1,89 +1,174 @@
 import { Theme } from "theme.slint";
-import { ConnItem, TreeNode } from "structs.slint";
-import { ScrollView } from "std-widgets.slint";
+import { TreeNode } from "structs.slint";
+import { AppIcon } from "icons.slint";
+import { ScrollView, ComboBox } from "std-widgets.slint";
 
+// Workspace sidebar (TablePlus-style). Three stacked regions:
+//   1. connection header card (click to disconnect / go back)
+//   2. scrollable object tree: collapsible "Tables/Views/Functions" categories,
+//      each holding container rows that expand to show columns
+//   3. a pinned schema selector glued to the bottom while (2) scrolls
 export component Sidebar inherits Rectangle {
-    in property <[ConnItem]> connections;
     in property <[TreeNode]> tree;
-    in property <int> selected-conn: -1;
-    callback connect-clicked(int);
-    callback add-clicked();
-    callback edit-clicked(int);
+    in property <string> conn-name;
+    in property <string> active-table;   // highlighted (currently open) table
+    in property <[string]> schema-list;
+    in-out property <string> schema-name;
+    callback disconnect();
+    callback open-table(string);
+    callback toggle-node(string);
+    callback select-schema(string);
 
     background: Theme.surface;
 
     VerticalLayout {
-        padding: Theme.sp3;
-        spacing: Theme.sp2;
+        padding: Theme.sp2;
+        spacing: Theme.sp1;
 
-        HorizontalLayout {
-            Text {
-                vertical-alignment: center;
-                text: "Connections";
-                color: Theme.text-dim;
-                font-size: Theme.font-label;
-            }
-            Rectangle {}
-            Rectangle {
-                width: 20px;
-                TouchArea { clicked => { root.add-clicked(); } }
-                Text { text: "+"; horizontal-alignment: center; color: Theme.text-dim; }
-            }
-        }
-
-        for conn[i] in root.connections: Rectangle {
-            height: Theme.row-height;
-            border-radius: Theme.radius-control;
-            background: i == root.selected-conn ? Theme.accent.with-alpha(0.18) : transparent;
-            TouchArea { clicked => { root.connect-clicked(i); } }
+        // ----- connection header card -----
+        Rectangle {
+            height: 44px;
+            border-radius: Theme.radius-panel;
+            background: back-ta.has-hover ? Theme.surface-2 : transparent;
+            back-ta := TouchArea { clicked => { root.disconnect(); } }
             HorizontalLayout {
-                padding-left: Theme.sp1;
-                padding-right: Theme.sp1;
+                padding-left: Theme.sp2;
+                padding-right: Theme.sp2;
                 spacing: Theme.sp2;
-                // per-connection color dot
+                // accent disc with a database glyph
                 Rectangle {
-                    width: 8px;
-                    height: 8px;
-                    border-radius: 4px;
+                    width: 28px;
+                    height: 28px;
                     y: (parent.height - self.height) / 2;
-                    background: conn.color;
+                    border-radius: 8px;
+                    background: Theme.accent-soft;
+                    AppIcon { name: "database"; size: Theme.icon-md; color: Theme.accent; }
                 }
-                Text {
-                    vertical-alignment: center;
-                    text: conn.name;
-                    color: conn.supported ? Theme.text : Theme.text-dim;
-                    font-size: Theme.font-body;
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 0px;
+                    Text {
+                        text: root.conn-name;
+                        color: Theme.text;
+                        font-size: Theme.font-h;
+                        font-weight: 600;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: "Connected";
+                        color: Theme.text-faint;
+                        font-size: Theme.font-caption;
+                    }
                 }
-                Rectangle {} // spacer
-                Rectangle {
-                    width: 18px;
-                    TouchArea { clicked => { root.edit-clicked(i); } }
-                    Text { text: "✎"; horizontal-alignment: center; color: Theme.text-dim; font-size: Theme.font-label; }
-                }
-                Text {
-                    vertical-alignment: center;
-                    text: conn.engine;
-                    color: Theme.text-dim;
-                    font-size: Theme.font-label;
+                Rectangle {}
+                // disconnect affordance
+                AppIcon {
+                    name: "close";
+                    size: Theme.icon-sm;
+                    color: back-ta.has-hover ? Theme.text-dim : Theme.text-faint;
                 }
             }
         }
+        Rectangle { height: 1px; background: Theme.hairline; }
 
-        Text { text: "Schema"; color: Theme.text-dim; font-size: Theme.font-label; }
-
+        // ----- scrollable object tree (fills the gap above the pinned footer) -----
         ScrollView {
+            vertical-stretch: 1;
             VerticalLayout {
+                padding-top: Theme.sp1;
+                spacing: 2px;
                 for node[i] in root.tree: Rectangle {
-                    height: Theme.row-height;
+                    property <bool> is-category: node.kind == "category";
+                    property <bool> is-container: node.kind == "table" || node.kind == "collection" || node.kind == "keyspace";
+                    property <bool> is-field: node.kind == "field";
+                    property <bool> is-active: is-container && node.label == root.active-table;
+                    height: is-category ? 28px : Theme.row-height;
+                    border-radius: Theme.radius-control;
+                    background: is-active ? Theme.accent-soft
+                        : (row-ta.has-hover && (is-container || is-category) ? Theme.surface-2 : transparent);
+                    // active-row accent bar
+                    if is-active: Rectangle {
+                        x: 0;
+                        width: 3px;
+                        height: parent.height - 8px;
+                        y: 4px;
+                        border-radius: 2px;
+                        background: Theme.accent;
+                    }
+                    row-ta := TouchArea {
+                        enabled: is-container || is-category;
+                        clicked => {
+                            if (is-category) { root.toggle-node(node.label); }
+                            else { root.open-table(node.label); }
+                        }
+                    }
                     HorizontalLayout {
-                        padding-left: Theme.sp1 + node.depth * Theme.sp4;
+                        padding-left: Theme.sp2 + node.depth * Theme.sp3;
+                        padding-right: Theme.sp1;
+                        spacing: Theme.sp1;
+                        // chevron: categories + containers expand (rotates when open)
+                        if is-category || is-container: AppIcon {
+                            name: "chevron";
+                            size: Theme.icon-sm;
+                            color: Theme.text-faint;
+                            transform-rotation: node.expanded ? 90deg : 0;
+                        }
+                        // leading type icon
+                        if is-category: AppIcon {
+                            name: node.label == "Views" ? "view"
+                                : (node.label == "Functions" ? "function" : "rows");
+                            size: Theme.icon-sm;
+                            color: Theme.text-faint;
+                        }
+                        if is-container: AppIcon {
+                            name: "table";
+                            size: Theme.icon-sm;
+                            color: is-active ? Theme.accent : Theme.text-dim;
+                        }
+                        // field marker dot
+                        if is-field: Rectangle {
+                            width: Theme.icon-sm;
+                            Rectangle {
+                                width: 4px; height: 4px; border-radius: 2px;
+                                background: Theme.text-faint;
+                            }
+                        }
                         Text {
                             vertical-alignment: center;
                             text: node.label;
-                            color: node.kind == "field" ? Theme.text-dim : Theme.text;
-                            font-size: node.kind == "field" ? Theme.font-label : Theme.font-body;
+                            color: is-category ? Theme.text-faint
+                                : (is-field ? Theme.text-dim
+                                    : (is-active ? Theme.accent : Theme.text));
+                            font-size: is-category ? Theme.font-caption
+                                : (is-field ? Theme.font-label : Theme.font-body);
+                            font-weight: is-category ? 700 : (is-active ? 600 : 400);
+                            font-family: is-field ? Theme.mono-family : "";
+                            overflow: elide;
                         }
                     }
+                }
+            }
+        }
+
+        // ----- pinned schema selector (always glued to the bottom) -----
+        Rectangle { height: 1px; background: Theme.hairline; }
+        Rectangle {
+            height: 46px;
+            HorizontalLayout {
+                padding: Theme.sp1;
+                spacing: Theme.sp2;
+                Rectangle {
+                    width: 30px;
+                    height: 30px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: Theme.radius-control;
+                    background: Theme.surface-2;
+                    AppIcon { name: "layers"; size: Theme.icon-sm; color: Theme.text-dim; }
+                }
+                ComboBox {
+                    model: root.schema-list;
+                    current-value <=> root.schema-name;
+                    selected(v) => { root.select-schema(v); }
                 }
             }
         }

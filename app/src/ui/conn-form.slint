@@ -26,9 +26,15 @@ export component ConnForm inherits Rectangle {
     in-out property <string> f-password;
     in-out property <string> f-sslmode;    // "Disable"|"Prefer"|"Require"
     in-out property <string> f-color;      // selected hex
+    in-out property <string> f-import-url;  // pasted connection URL
     in property <string> form-error;
+    in property <string> test-result;   // test-connection status line
+    in property <bool> test-ok;         // green when the test succeeded
+    in property <bool> test-busy;       // a test connect is in flight
 
     callback engine-changed(string);
+    callback import-url();
+    callback test-conn();
     callback save();
     callback delete-conn();
     callback cancel();
@@ -56,6 +62,17 @@ export component ConnForm inherits Rectangle {
                 text: root.edit-mode ? "Edit Connection" : "New Connection";
                 color: Theme.text;
                 font-size: Theme.font-body;
+            }
+
+            Text { text: "Import URL"; color: Theme.text-dim; font-size: Theme.font-label; }
+            HorizontalLayout {
+                spacing: Theme.sp2;
+                LineEdit {
+                    text <=> root.f-import-url;
+                    placeholder-text: "postgresql://user:pass@host:5432/db?sslmode=require";
+                    accepted => { root.import-url(); }
+                }
+                Button { text: "Import"; clicked => { root.import-url(); } }
             }
 
             Text { text: "Name"; color: Theme.text-dim; font-size: Theme.font-label; }
@@ -122,8 +139,19 @@ export component ConnForm inherits Rectangle {
                 font-size: Theme.font-label;
             }
 
+            Text {
+                text: root.test-busy ? "Testing connection…" : root.test-result;
+                color: root.test-ok ? #22c55e : Theme.text-dim;
+                font-size: Theme.font-label;
+            }
+
             HorizontalLayout {
                 spacing: Theme.sp2;
+                Button {
+                    text: "Test Connection";
+                    enabled: !root.test-busy;
+                    clicked => { root.test-conn(); }
+                }
                 Button { text: "Save"; clicked => { root.save(); } }
                 Button { text: "Cancel"; clicked => { root.cancel(); } }
                 Rectangle {}

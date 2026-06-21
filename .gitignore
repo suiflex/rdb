@@ -1,4 +1,25 @@
+# Build
 /target
 **/*.rs.bk
 Cargo.lock.bak
+
+# OS
 .DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# Logs & temp
+*.log
+*.tmp
+*.swp
+*.swo

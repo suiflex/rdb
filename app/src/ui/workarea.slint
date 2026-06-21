@@ -1,27 +1,99 @@
 import { Theme } from "theme.slint";
-import { GridColumn, GridCell } from "structs.slint";
-import { ScrollView, Button, TextEdit } from "std-widgets.slint";
+import { GridColumn, GridCell, StructField } from "structs.slint";
+import { AppIcon } from "icons.slint";
+import { ScrollView, Button, TextEdit, LineEdit } from "std-widgets.slint";
 
 export component WorkArea inherits Rectangle {
     in-out property <string> query-text;
     in property <[GridColumn]> columns;
     in property <[GridCell]> cells;        // flat row-major: row r, col c at r*col-count + c
     in property <int> col-count;
+    in property <[length]> col-widths;     // per-column pixel widths (drag-resizable)
     in property <string> doc-json;
     in property <bool> is-documents;
     in property <string> result-status;    // Affected toast / errors
     in property <int> selected-row: 0;
+    // ----- Data / Structure toggle (Feature B) -----
+    in-out property <bool> show-structure: false;
+    in property <[StructField]> structure-columns;
+    // ----- client-side grid filter (Feature C) -----
+    in-out property <string> grid-filter;
+    // ----- SQL editor toggle + active table title (TablePlus-style) -----
+    in-out property <bool> sql-open: false;
+    in property <string> active-table;
     callback run();
+    callback apply-filter();
+    callback toggle-sql();
+    callback resize-col(int, length);   // (column index, drag delta)
 
     background: Theme.bg;
+
+    // local splitter state (no Rust binding)
+    property <length> editor-h: 140px;
+    // a result is present when a table is open / a query has run
+    property <bool> has-content: root.col-count > 0 || root.is-documents
+        || root.result-status != "";
 
     VerticalLayout {
         padding: Theme.sp4;
         spacing: Theme.sp3;
 
-        // ----- query editor -----
-        Rectangle {
-            height: 140px;
+        // ----- top toolbar: SQL toggle + active table / status -----
+        HorizontalLayout {
+            spacing: Theme.sp2;
+            // SQL editor toggle pill
+            Rectangle {
+                width: 66px;
+                height: Theme.row-height;
+                border-radius: Theme.radius-control;
+                background: root.sql-open ? Theme.accent-soft
+                    : (sql-ta.has-hover ? Theme.surface-2 : Theme.surface);
+                border-width: 1px;
+                border-color: root.sql-open ? Theme.accent.with-alpha(0.4) : Theme.hairline;
+                sql-ta := TouchArea { clicked => { root.toggle-sql(); } }
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: Theme.sp1;
+                    AppIcon {
+                        name: "terminal";
+                        size: Theme.icon-sm;
+                        color: root.sql-open ? Theme.accent : Theme.text-dim;
+                    }
+                    Text {
+                        vertical-alignment: center;
+                        text: "SQL";
+                        color: root.sql-open ? Theme.accent : Theme.text-dim;
+                        font-size: Theme.font-label;
+                        font-weight: 600;
+                    }
+                }
+            }
+            // active table name with a table glyph
+            if root.active-table != "": AppIcon {
+                name: "table";
+                size: Theme.icon-sm;
+                color: Theme.text-dim;
+                y: (parent.height - self.height) / 2;
+            }
+            Text {
+                vertical-alignment: center;
+                text: root.active-table;
+                color: Theme.text;
+                font-size: Theme.font-h;
+                font-weight: 600;
+            }
+            Rectangle {} // spacer
+            Text {
+                vertical-alignment: center;
+                text: root.result-status;
+                color: Theme.text-dim;
+                font-size: Theme.font-label;
+            }
+        }
+
+        // ----- query editor (only when SQL mode is toggled on) -----
+        if root.sql-open: Rectangle {
+            height: root.editor-h;
             border-radius: Theme.radius-panel;
             border-width: 1px;
             border-color: Theme.hairline;
@@ -33,26 +105,193 @@ export component WorkArea inherits Rectangle {
             }
         }
 
-        HorizontalLayout {
+        if root.sql-open: HorizontalLayout {
             spacing: Theme.sp2;
-            Button { text: "Run  (Cmd-Enter)"; clicked => { root.run(); } }
-            Text {
-                vertical-alignment: center;
-                text: root.result-status;
-                color: Theme.text-dim;
-                font-size: Theme.font-label;
+            Rectangle {
+                width: 132px;
+                height: Theme.row-height;
+                border-radius: Theme.radius-control;
+                background: run-ta.has-hover ? Theme.accent.darker(0.1) : Theme.accent;
+                run-ta := TouchArea { clicked => { root.run(); } }
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: Theme.sp1;
+                    AppIcon { name: "bolt"; size: Theme.icon-sm; color: #ffffff; }
+                    Text {
+                        vertical-alignment: center;
+                        text: "Run  ⌘↵";
+                        color: #ffffff;
+                        font-size: Theme.font-label;
+                        font-weight: 600;
+                    }
+                }
+            }
+            Rectangle {} // spacer
+        }
+
+        // draggable editor-height splitter
+        if root.sql-open: Rectangle {
+            height: 4px;
+            background: split-v-area.has-hover || split-v-area.pressed ? Theme.accent : Theme.hairline;
+            split-v-area := TouchArea {
+                mouse-cursor: row-resize;
+                moved => {
+                    root.editor-h = clamp(root.editor-h + (self.mouse-y - self.pressed-y), 80px, 400px);
+                }
+            }
+        }
+
+        // ----- empty state: nothing open yet, SQL mode off -----
+        if !root.has-content && !root.sql-open: Rectangle {
+            vertical-stretch: 1;
+            VerticalLayout {
+                alignment: center;
+                spacing: Theme.sp3;
+                HorizontalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 56px;
+                        height: 56px;
+                        border-radius: 16px;
+                        background: Theme.surface;
+                        border-width: 1px;
+                        border-color: Theme.hairline;
+                        AppIcon { name: "table"; size: 26px; color: Theme.text-faint; }
+                    }
+                }
+                Text {
+                    horizontal-alignment: center;
+                    text: "Select a table to view its data";
+                    color: Theme.text-dim;
+                    font-size: Theme.font-body;
+                }
+            }
+        }
+
+        // ----- Data/Structure tabs + filter input (only with content) -----
+        if root.has-content: HorizontalLayout {
+            spacing: Theme.sp1;
+            // segmented Data | Structure control
+            Rectangle {
+                width: 168px;
+                height: Theme.row-height;
+                border-radius: Theme.radius-control;
+                background: Theme.surface;
+                border-width: 1px;
+                border-color: Theme.hairline;
+                HorizontalLayout {
+                    padding: 2px;
+                    spacing: 2px;
+                    Rectangle {
+                        border-radius: Theme.radius-control - 1px;
+                        background: !root.show-structure ? Theme.accent-soft : transparent;
+                        data-ta := TouchArea { clicked => { root.show-structure = false; } }
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: Theme.sp1;
+                            AppIcon { name: "rows"; size: Theme.icon-sm; color: !root.show-structure ? Theme.accent : Theme.text-dim; }
+                            Text {
+                                vertical-alignment: center;
+                                text: "Data";
+                                color: !root.show-structure ? Theme.accent : Theme.text-dim;
+                                font-size: Theme.font-label;
+                                font-weight: !root.show-structure ? 600 : 400;
+                            }
+                        }
+                    }
+                    Rectangle {
+                        border-radius: Theme.radius-control - 1px;
+                        background: root.show-structure ? Theme.accent-soft : transparent;
+                        struct-ta := TouchArea { clicked => { root.show-structure = true; } }
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: Theme.sp1;
+                            AppIcon { name: "columns"; size: Theme.icon-sm; color: root.show-structure ? Theme.accent : Theme.text-dim; }
+                            Text {
+                                vertical-alignment: center;
+                                text: "Structure";
+                                color: root.show-structure ? Theme.accent : Theme.text-dim;
+                                font-size: Theme.font-label;
+                                font-weight: root.show-structure ? 600 : 400;
+                            }
+                        }
+                    }
+                }
+            }
+            Rectangle { width: Theme.sp2; } // gap
+            // client-side filter (only meaningful for Data view); flexes with width
+            AppIcon {
+                name: "filter";
+                size: Theme.icon-sm;
+                color: Theme.text-faint;
+                y: (parent.height - self.height) / 2;
+            }
+            LineEdit {
+                min-width: 80px;
+                horizontal-stretch: 1;
+                placeholder-text: "Filter rows…";
+                text <=> root.grid-filter;
+                edited => { root.apply-filter(); }
             }
         }
 
         // ----- result region -----
-        Rectangle {
+        if root.has-content: Rectangle {
+            vertical-stretch: 1;
             border-radius: Theme.radius-panel;
             border-width: 1px;
             border-color: Theme.hairline;
             background: Theme.surface;
 
+            // structure (column definitions) view
+            if root.show-structure: ScrollView {
+                VerticalLayout {
+                    width: max(self.preferred-width, parent.visible-width);
+                    HorizontalLayout {
+                        height: Theme.row-height;
+                        Rectangle {
+                            min-width: 200px;
+                            horizontal-stretch: 2;
+                            background: Theme.surface;
+                            Text { x: Theme.sp1; vertical-alignment: center; text: "Column"; color: Theme.text-dim; font-size: Theme.font-label; }
+                        }
+                        Rectangle {
+                            min-width: 160px;
+                            horizontal-stretch: 1;
+                            background: Theme.surface;
+                            Text { x: Theme.sp1; vertical-alignment: center; text: "Type"; color: Theme.text-dim; font-size: Theme.font-label; }
+                        }
+                        Rectangle {
+                            min-width: 90px;
+                            background: Theme.surface;
+                            Text { x: Theme.sp1; vertical-alignment: center; text: "Nullable"; color: Theme.text-dim; font-size: Theme.font-label; }
+                        }
+                    }
+                    Rectangle { height: 1px; background: Theme.hairline; }
+                    for f in root.structure-columns: Rectangle {
+                        height: Theme.row-height;
+                        HorizontalLayout {
+                            Rectangle {
+                                min-width: 200px;
+                                horizontal-stretch: 2;
+                                Text { x: Theme.sp1; vertical-alignment: center; text: f.name; color: Theme.text; font-family: Theme.mono-family; font-size: Theme.font-mono; }
+                            }
+                            Rectangle {
+                                min-width: 160px;
+                                horizontal-stretch: 1;
+                                Text { x: Theme.sp1; vertical-alignment: center; text: f.type-name; color: Theme.text-dim; font-family: Theme.mono-family; font-size: Theme.font-mono; }
+                            }
+                            Rectangle {
+                                min-width: 90px;
+                                Text { x: Theme.sp1; vertical-alignment: center; text: f.nullable ? "YES" : "NO"; color: Theme.text-dim; font-size: Theme.font-mono; }
+                            }
+                        }
+                    }
+                }
+            }
+
             // documents (JSON) view
-            if root.is-documents: ScrollView {
+            if !root.show-structure && root.is-documents: ScrollView {
                 Text {
                     text: root.doc-json;
                     color: Theme.text;
@@ -62,22 +301,39 @@ export component WorkArea inherits Rectangle {
             }
 
             // tabular / key-value grid
-            if !root.is-documents: ScrollView {
+            if !root.show-structure && !root.is-documents: ScrollView {
                 VerticalLayout {
+                    // fill ScrollView width when few columns; grow past it (scroll) when many
+                    width: max(self.preferred-width, parent.visible-width);
                     // header
                     HorizontalLayout {
                         height: Theme.row-height;
-                        for col in root.columns: Rectangle {
-                            width: 160px;
+                        for col[c] in root.columns: Rectangle {
+                            width: root.col-widths.length > c ? root.col-widths[c] : 140px;
                             background: Theme.surface;
+                            clip: true;
                             Text {
                                 vertical-alignment: center;
                                 x: Theme.sp1;
+                                width: parent.width - 2 * Theme.sp1;
+                                overflow: elide;
                                 text: col.name;
                                 color: Theme.text-dim;
                                 font-size: Theme.font-label;
                             }
+                            // right-edge drag handle to resize this column
+                            Rectangle {
+                                width: 5px;
+                                x: parent.width - self.width;
+                                background: hdl.has-hover || hdl.pressed ? Theme.accent : transparent;
+                                hdl := TouchArea {
+                                    mouse-cursor: col-resize;
+                                    moved => { root.resize-col(c, self.mouse-x - self.pressed-x); }
+                                }
+                            }
                         }
+                        // trailing filler so the header spans the full width
+                        Rectangle { horizontal-stretch: 1; background: Theme.surface; }
                     }
                     Rectangle { height: 1px; background: Theme.hairline; }
                     // rows
@@ -86,10 +342,13 @@ export component WorkArea inherits Rectangle {
                         background: r == root.selected-row ? Theme.accent.with-alpha(0.14) : transparent;
                         HorizontalLayout {
                             for c in root.col-count: Rectangle {
-                                width: 160px;
+                                width: root.col-widths.length > c ? root.col-widths[c] : 140px;
+                                clip: true;
                                 Text {
                                     vertical-alignment: center;
                                     x: Theme.sp1;
+                                    width: parent.width - 2 * Theme.sp1;
+                                    overflow: elide;
                                     text: root.cells[r * root.col-count + c].text;
                                     color: root.cells[r * root.col-count + c].is-null
                                         ? Theme.text-dim : Theme.text;
@@ -97,6 +356,8 @@ export component WorkArea inherits Rectangle {
                                     font-size: Theme.font-mono;
                                 }
                             }
+                            // trailing filler so the row spans the full width
+                            Rectangle { horizontal-stretch: 1; }
                         }
                     }
                 }

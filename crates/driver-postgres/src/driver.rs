@@ -1,8 +1,10 @@
 use async_trait::async_trait;
+use native_tls::TlsConnector;
+use postgres_native_tls::MakeTlsConnector;
 use tokio::task::JoinHandle;
 use tokio_postgres::{Client, NoTls};
 
-use dbm_core::conn::ConnConfig;
+use dbm_core::conn::{ConnConfig, SslMode};
 use dbm_core::driver::Driver;
 use dbm_core::error::{DbmError, Result};
 use dbm_core::query::Query;
@@ -13,11 +15,11 @@ use crate::conn_string::build_conn_string;
 
 /// A `Driver` backed by tokio-postgres over a single connection.
 ///
-/// TLS limitation (MVP): connections always use `NoTls`. `SslMode::Require`
-/// is accepted and written to the conn string but NOT enforced at the
-/// transport layer — real enforcement needs `tokio-postgres-rustls` and is a
-/// documented follow-up. `Disable`/`Prefer` behave correctly against a plain
-/// server.
+/// TLS: `SslMode::Disable` uses a plaintext `NoTls` connection. `Prefer` and
+/// `Require` use a native-TLS connector that encrypts the transport but does
+/// NOT verify the server certificate or hostname — matching libpq's `require`
+/// semantics (encrypt, don't validate). Certificate-validating modes
+/// (verify-ca / verify-full) are a future addition.
 pub struct PostgresDriver {
     client: Client,
     /// Handle to the spawned connection-driver task; aborted on `close`.
@@ -28,14 +30,32 @@ pub struct PostgresDriver {
 impl Driver for PostgresDriver {
     async fn connect(cfg: &ConnConfig) -> Result<Self> {
         let conn_str = build_conn_string(cfg);
-        let (client, connection) = tokio_postgres::connect(&conn_str, NoTls)
-            .await
-            .map_err(|e| DbmError::Connection(e.to_string()))?;
-        // The connection object drives the protocol; it must be polled on its
-        // own task for the client to make progress.
-        let conn_task = tokio::spawn(async move {
-            let _ = connection.await;
-        });
+        // Disable -> plaintext. Prefer/Require -> TLS (negotiated per the
+        // sslmode token in the conn string). The connector accepts any cert so
+        // managed (DigitalOcean/Supabase/RDS) and self-signed servers both work.
+        let (client, conn_task) = if matches!(cfg.sslmode, SslMode::Disable) {
+            let (client, connection) = tokio_postgres::connect(&conn_str, NoTls)
+                .await
+                .map_err(|e| DbmError::Connection(e.to_string()))?;
+            let conn_task = tokio::spawn(async move {
+                let _ = connection.await;
+            });
+            (client, conn_task)
+        } else {
+            let tls = TlsConnector::builder()
+                .danger_accept_invalid_certs(true)
+                .danger_accept_invalid_hostnames(true)
+                .build()
+                .map_err(|e| DbmError::Connection(e.to_string()))?;
+            let connector = MakeTlsConnector::new(tls);
+            let (client, connection) = tokio_postgres::connect(&conn_str, connector)
+                .await
+                .map_err(|e| DbmError::Connection(e.to_string()))?;
+            let conn_task = tokio::spawn(async move {
+                let _ = connection.await;
+            });
+            (client, conn_task)
+        };
         Ok(PostgresDriver { client, conn_task })
     }
 

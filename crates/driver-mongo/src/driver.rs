@@ -3,7 +3,7 @@ use futures::stream::TryStreamExt;
 use mongodb::bson::{doc, Document};
 use mongodb::{Client, Collection};
 
-use dbm_core::conn::ConnConfig;
+use dbm_core::conn::{ConnConfig, SslMode};
 use dbm_core::driver::Driver;
 use dbm_core::error::{DbmError, Result};
 use dbm_core::query::{MongoKind, MongoOp, Query};
@@ -25,7 +25,13 @@ fn build_uri(cfg: &ConnConfig) -> String {
         Some(pw) if !pw.is_empty() => format!("{}:{}@", cfg.user, pw),
         _ => String::new(),
     };
-    format!("mongodb://{auth}{}:{}", cfg.host, cfg.port)
+    // TLS: Prefer/Require enable TLS with `tlsInsecure=true` (no cert/hostname
+    // validation) to match the other drivers; Disable stays plaintext.
+    let tls = match cfg.sslmode {
+        SslMode::Disable => "",
+        SslMode::Prefer | SslMode::Require => "?tls=true&tlsInsecure=true",
+    };
+    format!("mongodb://{auth}{}:{}{tls}", cfg.host, cfg.port)
 }
 
 impl MongoDriver {

@@ -31,6 +31,10 @@ pub struct SavedConnection {
     /// `None` => UI uses the default accent.
     #[serde(default)]
     pub color: Option<String>,
+    /// Optional sidebar group/folder label (TablePlus-style grouping).
+    /// `None` => connection renders under the default "Ungrouped" header.
+    #[serde(default)]
+    pub group: Option<String>,
 }
 
 impl SavedConnection {
@@ -53,6 +57,7 @@ impl SavedConnection {
             sslmode: SslMode::default(),
             keyref: None,
             color: None,
+            group: None,
         }
     }
 
@@ -86,6 +91,7 @@ mod tests {
             sslmode: SslMode::Require,
             keyref: Some("ref-123".into()),
             color: Some("#3b82f6".into()),
+            group: Some("Local".into()),
         }
     }
 

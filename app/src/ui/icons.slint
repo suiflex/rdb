@@ -1,0 +1,33 @@
+import { Theme } from "theme.slint";
+
+// Single tintable icon. `name` selects an embedded SVG; `color` recolors it via
+// Slint's `colorize` (the SVGs are black-stroke so any tint reads cleanly).
+// Keeping every glyph here means call sites stay declarative: AppIcon { name: "table"; }
+export component AppIcon inherits Image {
+    in property <string> name;
+    in property <length> size: Theme.icon-md;
+    in property <color> color: Theme.text;
+
+    width: size;
+    height: size;
+    colorize: color;
+    image-fit: contain;
+    source:
+        name == "chevron"   ? @image-url("icons/chevron.svg")  :
+        name == "table"     ? @image-url("icons/table.svg")    :
+        name == "view"      ? @image-url("icons/view.svg")     :
+        name == "function"  ? @image-url("icons/function.svg") :
+        name == "database"  ? @image-url("icons/database.svg") :
+        name == "search"    ? @image-url("icons/search.svg")   :
+        name == "plus"      ? @image-url("icons/plus.svg")     :
+        name == "close"     ? @image-url("icons/close.svg")    :
+        name == "bolt"      ? @image-url("icons/bolt.svg")     :
+        name == "filter"    ? @image-url("icons/filter.svg")   :
+        name == "columns"   ? @image-url("icons/columns.svg")  :
+        name == "rows"      ? @image-url("icons/rows.svg")     :
+        name == "terminal"  ? @image-url("icons/terminal.svg") :
+        name == "layers"    ? @image-url("icons/layers.svg")   :
+        name == "sun"       ? @image-url("icons/sun.svg")      :
+        name == "moon"      ? @image-url("icons/moon.svg")     :
+        @image-url("icons/table.svg");
+}

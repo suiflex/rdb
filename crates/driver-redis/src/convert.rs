@@ -1,9 +1,14 @@
-use dbm_core::conn::ConnConfig;
+use dbm_core::conn::{ConnConfig, SslMode};
 use dbm_core::result::{RedisValue, ResultSet};
 use redis::Value;
 
 /// Build a `redis://[:password@]host:port[/db]` URL from connection config.
 /// Redis auth historically has no username, so only the password is included.
+///
+/// TLS: `Prefer`/`Require` use the `rediss://` scheme with a `#insecure`
+/// fragment so redis-rs negotiates TLS without verifying the server cert
+/// (matching the other drivers' "encrypt, don't validate" posture). `Disable`
+/// uses plaintext `redis://`.
 pub fn connection_url(cfg: &ConnConfig) -> String {
     let auth = match &cfg.password {
         Some(pw) if !pw.is_empty() => format!(":{pw}@"),
@@ -13,7 +18,11 @@ pub fn connection_url(cfg: &ConnConfig) -> String {
         Some(d) if !d.is_empty() => format!("/{d}"),
         _ => String::new(),
     };
-    format!("redis://{auth}{}:{}{db}", cfg.host, cfg.port)
+    let (scheme, frag) = match cfg.sslmode {
+        SslMode::Disable => ("redis", ""),
+        SslMode::Prefer | SslMode::Require => ("rediss", "#insecure"),
+    };
+    format!("{scheme}://{auth}{}:{}{db}{frag}", cfg.host, cfg.port)
 }
 
 /// Render a single `redis::Value` (the reply to one command) into a

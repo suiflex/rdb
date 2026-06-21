@@ -55,7 +55,11 @@ fn parse_mongo(text: &str) -> Result<Query, String> {
                 .ok_or_else(|| "aggregate \"body\" must be a JSON array of stages".to_string())?;
             MongoKind::Aggregate(arr.clone())
         }
-        other => return Err(format!("unknown Mongo op \"{other}\" (use find/insert/aggregate)")),
+        other => {
+            return Err(format!(
+                "unknown Mongo op \"{other}\" (use find/insert/aggregate)"
+            ))
+        }
     };
     Ok(Query::Mongo(MongoOp { collection, kind }))
 }
@@ -124,7 +128,11 @@ mod tests {
     #[test]
     fn mongo_errors_on_bad_json_unknown_op_and_missing_collection() {
         assert!(parse_query(Engine::Mongo, "not json").is_err());
-        assert!(parse_query(Engine::Mongo, r#"{ "collection": "u", "op": "drop", "body": {} }"#).is_err());
+        assert!(parse_query(
+            Engine::Mongo,
+            r#"{ "collection": "u", "op": "drop", "body": {} }"#
+        )
+        .is_err());
         assert!(parse_query(Engine::Mongo, r#"{ "op": "find", "body": {} }"#).is_err());
     }
 }

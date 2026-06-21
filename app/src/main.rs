@@ -18,12 +18,149 @@ mod query_parse;
 mod theme;
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use slint::{Model, ModelRc, SharedString, VecModel};
 
 use dispatch::AnyDriver;
+
+/// Label used for connections with no explicit group.
+const UNGROUPED: &str = "Ungrouped";
+
+/// Build the grouped sidebar row model: a header row per group followed by its
+/// connection rows (unless the group is collapsed). `index` on each connection
+/// row is its position in the store list, so connect/edit callbacks stay correct
+/// regardless of grouping or ordering. `collapsed` holds the set of group labels
+/// currently folded shut.
+fn build_conn_items(
+    store: &dbm_connstore::ConnStore,
+    collapsed: &HashSet<String>,
+    filter: &str,
+) -> Vec<ConnItem> {
+    let needle = filter.trim().to_lowercase();
+    // Bucket store indices by group label, preserving first-seen group order.
+    let mut order: Vec<String> = Vec::new();
+    let mut buckets: std::collections::HashMap<String, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (i, sc) in store.list().iter().enumerate() {
+        if !needle.is_empty() && !sc.name.to_lowercase().contains(&needle) {
+            continue;
+        }
+        let g = sc
+            .group
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or(UNGROUPED)
+            .to_string();
+        if !buckets.contains_key(&g) {
+            order.push(g.clone());
+        }
+        buckets.entry(g).or_default().push(i);
+    }
+
+    let mut rows: Vec<ConnItem> = Vec::new();
+    for g in &order {
+        // Ungrouped connections list flat with no header and are never collapsed,
+        // so an empty "Ungrouped" header never shows when the user has no groups.
+        let is_ungrouped = g == UNGROUPED;
+        let expanded = is_ungrouped || !collapsed.contains(g);
+        if !is_ungrouped {
+            rows.push(ConnItem {
+                id: SharedString::default(),
+                name: g.clone().into(),
+                engine: SharedString::default(),
+                color: theme::accent_or_default(""),
+                supported: true,
+                is_header: true,
+                expanded,
+                index: -1,
+                group: g.clone().into(),
+            });
+        }
+        if !expanded {
+            continue;
+        }
+        for &i in &buckets[g] {
+            let s = &store.list()[i];
+            rows.push(ConnItem {
+                id: s.id.clone().into(),
+                name: s.name.clone().into(),
+                engine: AnyDriver::label(s.engine).into(),
+                color: theme::accent_or_default(s.color.as_deref().unwrap_or("")),
+                supported: AnyDriver::is_supported(s.engine),
+                is_header: false,
+                expanded: true,
+                index: i as i32,
+                group: g.clone().into(),
+            });
+        }
+    }
+    rows
+}
+
+/// Top-level sidebar categories (TablePlus-style). The label is also the toggle
+/// key, so `on_toggle_schema_node` can tell a category click from a table click.
+const SIDEBAR_CATEGORIES: [&str; 3] = ["Tables", "Views", "Functions"];
+
+/// Build the collapsible schema sidebar rows from the raw flat node list.
+///
+/// Layout is a two-level tree under fixed category headers:
+///   - category (depth 0)  — collapsed when its label is in `collapsed_cats`
+///   - container (depth 1)  — a table/collection/keyspace, opens its data
+///   - field (depth 2)      — a column, shown only when its container is expanded
+///
+/// The current schema model only produces table-like containers, so every
+/// container lands under "Tables"; "Views"/"Functions" render as empty
+/// collapsible headers until schema introspection grows those kinds.
+fn schema_display_rows(
+    nodes: &[model::VmTreeNode],
+    expanded_tables: &HashSet<String>,
+    collapsed_cats: &HashSet<String>,
+) -> Vec<TreeNode> {
+    let mut rows: Vec<TreeNode> = Vec::new();
+    for cat in SIDEBAR_CATEGORIES {
+        let cat_open = !collapsed_cats.contains(cat);
+        rows.push(TreeNode {
+            label: cat.into(),
+            depth: 0,
+            kind: "category".into(),
+            expanded: cat_open,
+        });
+        if !cat_open || cat != "Tables" {
+            continue;
+        }
+        // Walk the flat nodes: containers + (when expanded) their fields.
+        let mut show_fields = false;
+        for n in nodes {
+            let is_container = matches!(n.kind.as_str(), "table" | "collection" | "keyspace");
+            if n.kind == "field" {
+                if !show_fields {
+                    continue;
+                }
+                rows.push(TreeNode {
+                    label: n.label.clone().into(),
+                    depth: 2,
+                    kind: "field".into(),
+                    expanded: false,
+                });
+            } else if is_container {
+                show_fields = expanded_tables.contains(&n.label);
+                rows.push(TreeNode {
+                    label: n.label.clone().into(),
+                    depth: 1,
+                    kind: n.kind.clone().into(),
+                    expanded: show_fields,
+                });
+            } else {
+                // database row: categories replace it; reset field visibility
+                show_fields = false;
+            }
+        }
+    }
+    rows
+}
 
 /// Rebuild the tab model titles "Query 1..N".
 fn set_tab_titles(w: &MainWindow, count: usize) {
@@ -101,26 +238,34 @@ fn main() -> Result<(), slint::PlatformError> {
     let current: Arc<tokio::sync::Mutex<Option<(dbm_connstore::Engine, AnyDriver)>>> =
         Arc::new(tokio::sync::Mutex::new(None));
 
-    // Reusable sidebar rebuild: maps the store's list into the ConnItem model.
+    // Set of group labels the user has collapsed in the sidebar.
+    let collapsed: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
+    // Current connection-picker search text.
+    let conn_filter: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
+
+    // Schema sidebar state: raw flat nodes from the last connect (Send, so the
+    // connect task can fill it) + the set of expanded table labels.
+    let raw_nodes: Arc<std::sync::Mutex<Vec<model::VmTreeNode>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let expanded_tables: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
+    // Sidebar category headers the user has collapsed (Tables/Views/Functions).
+    let collapsed_categories: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
+    // Engine of the live connection, kept on the UI thread so table clicks can
+    // build an engine-appropriate "browse this table" query synchronously.
+    let cur_engine: Rc<RefCell<Option<dbm_connstore::Engine>>> = Rc::new(RefCell::new(None));
+
+    // Reusable sidebar rebuild: buckets the store's list into grouped rows.
     let rebuild_sidebar = {
         let weak = window.as_weak();
         let store = store.clone();
+        let collapsed = collapsed.clone();
+        let conn_filter = conn_filter.clone();
         move || {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let items: Vec<ConnItem> = store
-                .borrow()
-                .list()
-                .iter()
-                .map(|s| ConnItem {
-                    id: s.id.clone().into(),
-                    name: s.name.clone().into(),
-                    engine: AnyDriver::label(s.engine).into(),
-                    color: theme::accent_or_default(s.color.as_deref().unwrap_or("")),
-                    supported: AnyDriver::is_supported(s.engine),
-                })
-                .collect();
+            let items =
+                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
             w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
         }
     };
@@ -133,12 +278,124 @@ fn main() -> Result<(), slint::PlatformError> {
         title: "Query 1".into(),
     }]))));
 
+    // Last tabular result kept in memory so the client-side filter (Feature C)
+    // can re-derive the visible rows without re-querying. Arc<Mutex<>> (not Rc)
+    // so it can cross into the Send event-loop closure from the query task.
+    let last_grid: Arc<std::sync::Mutex<Option<model::GridModel>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    // ----- toggle a sidebar group's collapsed state (Feature A) -----
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let collapsed = collapsed.clone();
+        let conn_filter = conn_filter.clone();
+        window.on_toggle_group(move |g| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let g = g.to_string();
+            {
+                let mut c = collapsed.borrow_mut();
+                if !c.remove(&g) {
+                    c.insert(g);
+                }
+            }
+            let items =
+                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
+            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+        });
+    }
+
+    // ----- connection-picker search (filter the connection list) -----
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let collapsed = collapsed.clone();
+        let conn_filter = conn_filter.clone();
+        window.on_conn_filter(move |t| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            *conn_filter.borrow_mut() = t.to_string();
+            let items =
+                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
+            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+        });
+    }
+
+    // ----- disconnect: drop the driver and return to the picker -----
+    {
+        let weak = window.as_weak();
+        let current = current.clone();
+        let rt = rt.clone();
+        let cur_engine = cur_engine.clone();
+        let expanded_tables = expanded_tables.clone();
+        let collapsed_categories = collapsed_categories.clone();
+        let raw_nodes = raw_nodes.clone();
+        window.on_disconnect(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            w.set_connected(false);
+            w.set_selected_conn(-1);
+            w.set_active_table(SharedString::default());
+            w.set_status_conn(SharedString::from("no connection"));
+            w.set_status_latency(SharedString::default());
+            w.set_schema_tree(ModelRc::from(Rc::new(VecModel::<TreeNode>::default())));
+            w.set_structure_columns(ModelRc::from(Rc::new(VecModel::<StructField>::default())));
+            *cur_engine.borrow_mut() = None;
+            expanded_tables.borrow_mut().clear();
+            collapsed_categories.borrow_mut().clear();
+            raw_nodes.lock().unwrap().clear();
+            let current = current.clone();
+            rt.spawn(async move {
+                *current.lock().await = None;
+            });
+        });
+    }
+
+    // ----- apply client-side row filter to the last result (Feature C) -----
+    {
+        let weak = window.as_weak();
+        let last_grid = last_grid.clone();
+        window.on_apply_filter(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let needle = w.get_grid_filter().to_string().to_lowercase();
+            let guard = last_grid.lock().unwrap();
+            let Some(g) = guard.as_ref() else {
+                return;
+            };
+            // Filtering only applies to tabular results; documents/affected
+            // have no rows to filter.
+            if g.is_documents || g.columns.is_empty() {
+                return;
+            }
+            let mut filtered = g.clone();
+            if !needle.is_empty() {
+                filtered.rows = g
+                    .rows
+                    .iter()
+                    .filter(|row| row.iter().any(|c| c.text.to_lowercase().contains(&needle)))
+                    .cloned()
+                    .collect();
+            }
+            apply_grid(&w, filtered);
+        });
+    }
+
     // ----- connect: spawn driver work on tokio, push schema back to UI -----
     {
         let weak = window.as_weak();
         let rt = rt.clone();
         let store = store.clone();
         let current = current.clone();
+        let raw_nodes = raw_nodes.clone();
+        let expanded_tables = expanded_tables.clone();
+        let collapsed_categories = collapsed_categories.clone();
+        let cur_engine = cur_engine.clone();
         window.on_connect_clicked(move |idx| {
             let i = idx as usize;
             let (sc, cfg) = {
@@ -158,10 +415,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_query_text(SharedString::from(crate::query_parse::editor_hint(
                     sc.engine,
                 )));
+                w.set_active_table(SharedString::default());
             }
+            // Fresh connection: nothing browsed, nothing expanded.
+            *cur_engine.borrow_mut() = Some(sc.engine);
+            expanded_tables.borrow_mut().clear();
+            collapsed_categories.borrow_mut().clear();
             let weak2 = weak.clone();
             let store_driver = current.clone();
             let engine = sc.engine;
+            let raw_nodes = raw_nodes.clone();
             rt.spawn(async move {
                 let result = async {
                     let cfg =
@@ -176,25 +439,46 @@ fn main() -> Result<(), slint::PlatformError> {
                     Ok((driver, schema)) => {
                         *store_driver.lock().await = Some((engine, driver));
                         let nodes = model::to_tree_model(&schema);
+                        let fields = model::to_structure_model(&schema);
+                        // Stash raw nodes for later expand/collapse rebuilds, and
+                        // render the initial view (categories open, fields hidden).
+                        let rows = schema_display_rows(&nodes, &HashSet::new(), &HashSet::new());
+                        *raw_nodes.lock().unwrap() = nodes;
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(w) = weak2.upgrade() {
-                                let rows: Vec<TreeNode> = nodes
+                                w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
+                                // Seed the pinned schema selector. TODO: list real
+                                // schemas once introspection exposes them.
+                                w.set_schema_name(SharedString::from("public"));
+                                w.set_schema_list(ModelRc::from(Rc::new(VecModel::from(vec![
+                                    SharedString::from("public"),
+                                ]))));
+                                let sfields: Vec<StructField> = fields
                                     .into_iter()
-                                    .map(|n| TreeNode {
-                                        label: n.label.into(),
-                                        depth: n.depth,
-                                        kind: n.kind.into(),
+                                    .map(|f| StructField {
+                                        name: f.name.into(),
+                                        type_name: f.type_name.into(),
+                                        nullable: f.nullable,
                                     })
                                     .collect();
-                                w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
+                                w.set_structure_columns(ModelRc::from(Rc::new(VecModel::from(
+                                    sfields,
+                                ))));
                                 w.set_status_latency(SharedString::from("connected"));
+                                w.set_picker_error(SharedString::default());
+                                // Swap the picker for the workspace.
+                                w.set_connected(true);
                             }
                         });
                     }
                     Err(e) => {
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(w) = weak2.upgrade() {
-                                w.set_status_latency(SharedString::from(format!("error: {e}")));
+                                // Stay on the picker; surface the failure there.
+                                w.set_connected(false);
+                                w.set_picker_error(SharedString::from(format!(
+                                    "connection failed: {e}"
+                                )));
                             }
                         });
                     }
@@ -203,18 +487,34 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // ----- run query -----
+    // ----- drag-resize a grid column: add the drag delta to its width -----
     {
         let weak = window.as_weak();
-        let rt = rt.clone();
-        let current = current.clone();
-        window.on_run_query(move || {
+        window.on_resize_grid_col(move |i, delta| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let sql = w.get_query_text().to_string();
+            let mut v: Vec<f32> = w.get_grid_col_widths().iter().collect();
+            let idx = i as usize;
+            if idx < v.len() {
+                v[idx] = (v[idx] + delta).clamp(60.0, 1000.0);
+                w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(v))));
+            }
+        });
+    }
+
+    // ----- shared query runner: parse text for the live engine, run it, push
+    // the result (grid / documents / error) back to the UI. Used by both the
+    // Run button and table clicks. -----
+    let run_sql: Rc<dyn Fn(String)> = {
+        let weak = window.as_weak();
+        let rt = rt.clone();
+        let current = current.clone();
+        let last_grid = last_grid.clone();
+        Rc::new(move |sql: String| {
             let weak2 = weak.clone();
             let current = current.clone();
+            let last_grid = last_grid.clone();
             rt.spawn(async move {
                 let guard = current.lock().await;
                 let outcome = match guard.as_ref() {
@@ -233,8 +533,21 @@ fn main() -> Result<(), slint::PlatformError> {
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
                         match (grid, err) {
-                            (Some(g), _) => apply_grid(&w, g),
+                            (Some(g), _) => {
+                                // Cache for client-side filtering, then reset the
+                                // filter input so the full result shows first.
+                                let ncols = if g.is_documents { 0 } else { g.columns.len() };
+                                *last_grid.lock().unwrap() = Some(g.clone());
+                                w.set_grid_filter(SharedString::default());
+                                apply_grid(&w, g);
+                                // Fresh result: reset every column to a default width.
+                                let widths: Vec<f32> = vec![140.0; ncols];
+                                w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(
+                                    widths,
+                                ))));
+                            }
                             (None, Some(e)) => {
+                                *last_grid.lock().unwrap() = None;
                                 w.set_is_documents(false);
                                 w.set_result_status(SharedString::from(format!("error: {e}")));
                             }
@@ -243,6 +556,87 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 });
             });
+        })
+    };
+
+    // ----- run query (editor) -----
+    {
+        let weak = window.as_weak();
+        let run_sql = run_sql.clone();
+        window.on_run_query(move || {
+            if let Some(w) = weak.upgrade() {
+                run_sql(w.get_query_text().to_string());
+            }
+        });
+    }
+
+    // ----- open table: build an engine-appropriate "browse" query, show it in
+    // the editor, and run it (TablePlus-style click-to-view). -----
+    {
+        let weak = window.as_weak();
+        let cur_engine = cur_engine.clone();
+        let run_sql = run_sql.clone();
+        window.on_open_table(move |label| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let label = label.to_string();
+            let text = match *cur_engine.borrow() {
+                Some(dbm_connstore::Engine::Postgres) => {
+                    format!("SELECT * FROM \"{label}\" LIMIT 300")
+                }
+                Some(dbm_connstore::Engine::MySql) => {
+                    format!("SELECT * FROM `{label}` LIMIT 300")
+                }
+                Some(dbm_connstore::Engine::Mongo) => {
+                    format!("{{\"collection\":\"{label}\",\"op\":\"find\",\"body\":{{}}}}")
+                }
+                Some(dbm_connstore::Engine::Redis) => {
+                    w.set_result_status(SharedString::from(
+                        "click a key in the SQL panel for Redis",
+                    ));
+                    return;
+                }
+                None => return,
+            };
+            w.set_active_table(SharedString::from(label));
+            w.set_show_structure(false);
+            w.set_query_text(SharedString::from(text.clone()));
+            run_sql(text);
+        });
+    }
+
+    // ----- toggle a schema table's column rows (expand/collapse) -----
+    {
+        let weak = window.as_weak();
+        let raw_nodes = raw_nodes.clone();
+        let expanded_tables = expanded_tables.clone();
+        let collapsed_categories = collapsed_categories.clone();
+        window.on_toggle_schema_node(move |label| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let label = label.to_string();
+            // A category header toggles its collapsed set (open by default); any
+            // other label toggles a table's expanded-fields set.
+            if SIDEBAR_CATEGORIES.contains(&label.as_str()) {
+                let mut c = collapsed_categories.borrow_mut();
+                if !c.remove(&label) {
+                    c.insert(label);
+                }
+            } else {
+                let mut e = expanded_tables.borrow_mut();
+                if !e.remove(&label) {
+                    e.insert(label);
+                }
+            }
+            let nodes = raw_nodes.lock().unwrap();
+            let rows = schema_display_rows(
+                &nodes,
+                &expanded_tables.borrow(),
+                &collapsed_categories.borrow(),
+            );
+            w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
         });
     }
 
@@ -467,7 +861,11 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_password(SharedString::default());
             w.set_f_sslmode(SharedString::from("Prefer"));
             w.set_f_color(SharedString::from("#3b82f6"));
+            w.set_f_import_url(SharedString::default());
             w.set_form_error(SharedString::default());
+            w.set_test_result(SharedString::default());
+            w.set_test_ok(false);
+            w.set_test_busy(false);
             w.set_form_open(true);
         });
     }
@@ -501,7 +899,11 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_color(SharedString::from(
                 sc.color.unwrap_or_else(|| "#3b82f6".into()),
             ));
+            w.set_f_import_url(SharedString::default());
             w.set_form_error(SharedString::default());
+            w.set_test_result(SharedString::default());
+            w.set_test_ok(false);
+            w.set_test_busy(false);
             w.set_form_open(true);
         });
     }
@@ -517,6 +919,53 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         });
     }
+    // import URL -> parse and fill form fields for review.
+    {
+        let weak = window.as_weak();
+        window.on_form_import_url(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let raw = w.get_f_import_url().to_string();
+            match dbm_connstore::parse_conn_url(&raw) {
+                Ok(parsed) => {
+                    if let Some(engine) = parsed.engine {
+                        w.set_f_engine(SharedString::from(AnyDriver::label(engine)));
+                    }
+                    if let Some(host) = parsed.host {
+                        w.set_f_host(SharedString::from(host));
+                    }
+                    // Port from the URL wins; otherwise apply the engine default
+                    // (mirrors form_engine_changed) without clobbering a URL port.
+                    if let Some(port) = parsed.port {
+                        w.set_f_port(SharedString::from(port.to_string()));
+                    } else if let Some(engine) = parsed.engine {
+                        w.set_f_port(SharedString::from(default_port(AnyDriver::label(engine))));
+                    }
+                    if let Some(user) = parsed.user {
+                        w.set_f_user(SharedString::from(user));
+                    }
+                    if let Some(password) = parsed.password {
+                        w.set_f_password(SharedString::from(password));
+                    }
+                    if let Some(database) = parsed.database {
+                        w.set_f_database(SharedString::from(database));
+                    }
+                    if let Some(sslmode) = parsed.sslmode {
+                        w.set_f_sslmode(SharedString::from(match sslmode {
+                            dbm_core::conn::SslMode::Disable => "Disable",
+                            dbm_core::conn::SslMode::Prefer => "Prefer",
+                            dbm_core::conn::SslMode::Require => "Require",
+                        }));
+                    }
+                    w.set_form_error(SharedString::default());
+                }
+                Err(e) => {
+                    w.set_form_error(SharedString::from(format!("import failed: {e}")));
+                }
+            }
+        });
+    }
     // cancel
     {
         let weak = window.as_weak();
@@ -524,6 +973,94 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(w) = weak.upgrade() {
                 w.set_form_open(false);
             }
+        });
+    }
+    // test connection: build a config straight from the form fields (not the
+    // store) so unsaved edits are exercised, open a real connection, then drop
+    // it. Result reported in the form's test-result line.
+    {
+        let weak = window.as_weak();
+        let rt = rt.clone();
+        window.on_form_test_conn(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let host = w.get_f_host().to_string();
+            if host.trim().is_empty() {
+                w.set_test_ok(false);
+                w.set_test_result(SharedString::from("host is required"));
+                return;
+            }
+            let port: u16 = match w.get_f_port().to_string().parse() {
+                Ok(p) if p != 0 => p,
+                _ => {
+                    w.set_test_ok(false);
+                    w.set_test_result(SharedString::from("port must be a number 1-65535"));
+                    return;
+                }
+            };
+            let engine = label_to_engine(w.get_f_engine().as_ref());
+            let sslmode = match w.get_f_sslmode().to_string().as_str() {
+                "Disable" => dbm_core::conn::SslMode::Disable,
+                "Require" => dbm_core::conn::SslMode::Require,
+                _ => dbm_core::conn::SslMode::Prefer,
+            };
+            let database = {
+                let d = w.get_f_database().to_string();
+                if d.is_empty() {
+                    None
+                } else {
+                    Some(d)
+                }
+            };
+            let password = {
+                let p = w.get_f_password().to_string();
+                if p.is_empty() {
+                    None
+                } else {
+                    Some(p)
+                }
+            };
+            let cfg = dbm_core::conn::ConnConfig {
+                host,
+                port,
+                user: w.get_f_user().to_string(),
+                database,
+                password,
+                sslmode,
+            };
+
+            w.set_test_busy(true);
+            w.set_test_ok(false);
+            w.set_test_result(SharedString::default());
+            w.set_form_error(SharedString::default());
+
+            let weak2 = weak.clone();
+            rt.spawn(async move {
+                let result = async {
+                    let driver = AnyDriver::connect(engine, &cfg).await?;
+                    driver.ping().await?;
+                    Ok::<_, dbm_core::error::DbmError>(())
+                }
+                .await;
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak2.upgrade() {
+                        w.set_test_busy(false);
+                        match result {
+                            Ok(()) => {
+                                w.set_test_ok(true);
+                                w.set_test_result(SharedString::from("connection ok"));
+                            }
+                            Err(e) => {
+                                w.set_test_ok(false);
+                                w.set_test_result(SharedString::from(format!(
+                                    "connection failed: {e}"
+                                )));
+                            }
+                        }
+                    }
+                });
+            });
         });
     }
     // save (add or update)
@@ -534,20 +1071,15 @@ fn main() -> Result<(), slint::PlatformError> {
         let rebuild = {
             let weak = window.as_weak();
             let store = store.clone();
+            let collapsed = collapsed.clone();
+            let conn_filter = conn_filter.clone();
             move || {
                 if let Some(w) = weak.upgrade() {
-                    let items: Vec<ConnItem> = store
-                        .borrow()
-                        .list()
-                        .iter()
-                        .map(|s| ConnItem {
-                            id: s.id.clone().into(),
-                            name: s.name.clone().into(),
-                            engine: AnyDriver::label(s.engine).into(),
-                            color: theme::accent_or_default(s.color.as_deref().unwrap_or("")),
-                            supported: AnyDriver::is_supported(s.engine),
-                        })
-                        .collect();
+                    let items = build_conn_items(
+                        &store.borrow(),
+                        &collapsed.borrow(),
+                        &conn_filter.borrow(),
+                    );
                     w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
                 }
             }
@@ -641,6 +1173,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let store = store.clone();
         let editing_id = editing_id.clone();
+        let collapsed = collapsed.clone();
+        let conn_filter = conn_filter.clone();
         window.on_form_delete(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -658,18 +1192,8 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_form_open(false);
             w.set_selected_conn(-1);
             w.set_schema_tree(ModelRc::from(Rc::new(VecModel::<TreeNode>::default())));
-            let items: Vec<ConnItem> = store
-                .borrow()
-                .list()
-                .iter()
-                .map(|s| ConnItem {
-                    id: s.id.clone().into(),
-                    name: s.name.clone().into(),
-                    engine: AnyDriver::label(s.engine).into(),
-                    color: theme::accent_or_default(s.color.as_deref().unwrap_or("")),
-                    supported: AnyDriver::is_supported(s.engine),
-                })
-                .collect();
+            let items =
+                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
             w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
         });
     }

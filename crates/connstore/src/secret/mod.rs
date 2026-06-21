@@ -28,11 +28,20 @@ use std::path::Path;
 /// when the fallback is taken.
 pub fn select_backend(fallback_dir: &Path) -> crate::error::Result<Box<dyn SecretBackend>> {
     let keyring = KeyringBackend::new();
-    // Probe: a get on a sentinel id. Success (Some or None) means the keychain
-    // is reachable; an Err means no provider — take the fallback.
-    match keyring.get("__dbm_probe__") {
-        Ok(_) => Ok(Box::new(keyring)),
-        Err(_) => Ok(Box::new(EncryptedFileBackend::new(fallback_dir)?)),
+    // Full set->get->delete roundtrip probe. A bare `get` is not enough: on some
+    // environments (e.g. an unsigned macOS binary) `set` reports success but the
+    // value never persists, so `get` keeps returning None and every saved
+    // password is silently lost. Only trust the keychain if a written sentinel
+    // reads back identical; otherwise fall back to the encrypted file.
+    const PROBE_ID: &str = "__dbm_probe__";
+    const PROBE_VAL: &str = "dbm-probe-value";
+    let keyring_ok = keyring.set(PROBE_ID, PROBE_VAL).is_ok()
+        && matches!(keyring.get(PROBE_ID), Ok(Some(v)) if v == PROBE_VAL);
+    let _ = keyring.delete(PROBE_ID);
+    if keyring_ok {
+        Ok(Box::new(keyring))
+    } else {
+        Ok(Box::new(EncryptedFileBackend::new(fallback_dir)?))
     }
 }
 
@@ -49,5 +58,17 @@ mod tests {
             Box::new(EncryptedFileBackend::new(dir.path()).unwrap());
         backend.set("c1", "pw").unwrap();
         assert_eq!(backend.get("c1").unwrap().as_deref(), Some("pw"));
+    }
+
+    #[test]
+    fn select_backend_returns_a_backend_that_roundtrips() {
+        // Whatever backend is chosen (keyring or file fallback) must actually
+        // persist a password and read it back — guards against selecting a
+        // backend whose `set` silently no-ops.
+        let dir = tempfile::tempdir().unwrap();
+        let backend = select_backend(dir.path()).unwrap();
+        backend.set("rt", "secret-value").unwrap();
+        assert_eq!(backend.get("rt").unwrap().as_deref(), Some("secret-value"));
+        backend.delete("rt").unwrap();
     }
 }
