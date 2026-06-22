@@ -33,8 +33,8 @@ pub fn select_backend(fallback_dir: &Path) -> crate::error::Result<Box<dyn Secre
     // value never persists, so `get` keeps returning None and every saved
     // password is silently lost. Only trust the keychain if a written sentinel
     // reads back identical; otherwise fall back to the encrypted file.
-    const PROBE_ID: &str = "__dbm_probe__";
-    const PROBE_VAL: &str = "dbm-probe-value";
+    const PROBE_ID: &str = "__rdbs_probe__";
+    const PROBE_VAL: &str = "rdbs-probe-value";
     let keyring_ok = keyring.set(PROBE_ID, PROBE_VAL).is_ok()
         && matches!(keyring.get(PROBE_ID), Ok(Some(v)) if v == PROBE_VAL);
     let _ = keyring.delete(PROBE_ID);

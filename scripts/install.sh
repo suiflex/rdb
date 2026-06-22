@@ -2,8 +2,8 @@
 set -euo pipefail
 
 REPO="suiflex/rdb"
-BINARY="storix"
-VERSION="${STORIX_VERSION:-latest}"
+BINARY="rdbs"
+VERSION="${RDBS_VERSION:-latest}"
 
 log() {
   printf '==> %s\n' "$*"

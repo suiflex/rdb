@@ -2,7 +2,7 @@ use thiserror::Error;
 
 /// All fallible operations in dbm return this error.
 #[derive(Error, Debug)]
-pub enum DbmError {
+pub enum RdbsError {
     #[error("connection failed: {0}")]
     Connection(String),
     #[error("query failed: {0}")]
@@ -13,7 +13,7 @@ pub enum DbmError {
     Schema(String),
 }
 
-pub type Result<T> = std::result::Result<T, DbmError>;
+pub type Result<T> = std::result::Result<T, RdbsError>;
 
 #[cfg(test)]
 mod tests {
@@ -21,13 +21,13 @@ mod tests {
 
     #[test]
     fn unsupported_query_has_stable_message() {
-        let e = DbmError::UnsupportedQuery;
+        let e = RdbsError::UnsupportedQuery;
         assert_eq!(e.to_string(), "unsupported query for this driver");
     }
 
     #[test]
     fn connection_error_includes_detail() {
-        let e = DbmError::Connection("refused".into());
+        let e = RdbsError::Connection("refused".into());
         assert_eq!(e.to_string(), "connection failed: refused");
     }
 }

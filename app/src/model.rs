@@ -1,9 +1,9 @@
-//! Pure conversion from dbm-core result/schema types into flat view-model
+//! Pure conversion from rdbs-core result/schema types into flat view-model
 //! structs the UI binds to. No Slint imports here so it stays unit-testable;
 //! `main.rs` maps these into the Slint-generated structs.
 
-use dbm_core::result::{Cell, RedisValue, ResultSet};
-use dbm_core::schema::{ContainerKind, Schema};
+use rdbs_core::result::{Cell, RedisValue, ResultSet};
+use rdbs_core::schema::{ContainerKind, Schema};
 
 #[derive(Debug, Default, Clone)]
 pub struct VmCell {
@@ -182,8 +182,8 @@ pub fn to_tree_model(schema: &Schema) -> Vec<VmTreeNode> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dbm_core::result::{Cell, Column, RedisValue, ResultSet};
-    use dbm_core::schema::{Container, ContainerKind, Database, Field, Schema};
+    use rdbs_core::result::{Cell, Column, RedisValue, ResultSet};
+    use rdbs_core::schema::{Container, ContainerKind, Database, Field, Schema};
 
     #[test]
     fn tabular_maps_cols_and_rows_with_null_flag() {

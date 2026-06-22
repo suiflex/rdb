@@ -1434,86 +1434,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
-name = "dbm-connstore"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "dbm-core",
- "directories",
- "keyring",
- "rand 0.8.6",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "uuid",
-]
-
-[[package]]
-name = "dbm-core"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "dbm-driver-mongo"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "dbm-core",
- "futures",
- "mongodb",
- "serde_json",
- "testcontainers",
- "testcontainers-modules",
- "tokio",
-]
-
-[[package]]
-name = "dbm-driver-mysql"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "dbm-core",
- "mysql_async",
- "testcontainers",
- "testcontainers-modules",
- "tokio",
-]
-
-[[package]]
-name = "dbm-driver-postgres"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "dbm-core",
- "native-tls",
- "postgres-native-tls",
- "serde_json",
- "testcontainers",
- "testcontainers-modules",
- "tokio",
- "tokio-postgres",
-]
-
-[[package]]
-name = "dbm-driver-redis"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "dbm-core",
- "redis",
- "testcontainers",
- "testcontainers-modules",
- "tokio",
-]
-
-[[package]]
 name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5534,6 +5454,102 @@ dependencies = [
 ]
 
 [[package]]
+name = "rdbs"
+version = "0.1.0"
+dependencies = [
+ "rdbs-connstore",
+ "rdbs-core",
+ "rdbs-driver-mongo",
+ "rdbs-driver-mysql",
+ "rdbs-driver-postgres",
+ "rdbs-driver-redis",
+ "serde_json",
+ "slint",
+ "slint-build",
+ "tokio",
+]
+
+[[package]]
+name = "rdbs-connstore"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "directories",
+ "keyring",
+ "rand 0.8.6",
+ "rdbs-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "rdbs-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "rdbs-driver-mongo"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "mongodb",
+ "rdbs-core",
+ "serde_json",
+ "testcontainers",
+ "testcontainers-modules",
+ "tokio",
+]
+
+[[package]]
+name = "rdbs-driver-mysql"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "mysql_async",
+ "rdbs-core",
+ "testcontainers",
+ "testcontainers-modules",
+ "tokio",
+]
+
+[[package]]
+name = "rdbs-driver-postgres"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "native-tls",
+ "postgres-native-tls",
+ "rdbs-core",
+ "serde_json",
+ "testcontainers",
+ "testcontainers-modules",
+ "tokio",
+ "tokio-postgres",
+]
+
+[[package]]
+name = "rdbs-driver-redis"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "rdbs-core",
+ "redis",
+ "testcontainers",
+ "testcontainers-modules",
+ "tokio",
+]
+
+[[package]]
 name = "read-fonts"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6564,22 +6580,6 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
-
-[[package]]
-name = "storix"
-version = "0.1.0"
-dependencies = [
- "dbm-connstore",
- "dbm-core",
- "dbm-driver-mongo",
- "dbm-driver-mysql",
- "dbm-driver-postgres",
- "dbm-driver-redis",
- "serde_json",
- "slint",
- "slint-build",
- "tokio",
-]
 
 [[package]]
 name = "strict-num"

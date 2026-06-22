@@ -1,4 +1,4 @@
-//! dbm-driver-redis: Redis Driver impl via the redis crate.
+//! rdbs-driver-redis: Redis Driver impl via the redis crate.
 
 mod convert;
 

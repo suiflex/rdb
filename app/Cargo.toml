@@ -1,20 +1,20 @@
 [package]
-name = "storix"
+name = "rdbs"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "storix"
+name = "rdbs"
 path = "src/main.rs"
 
 [dependencies]
 slint = { version = "1.8", default-features = false, features = ["compat-1-2", "std", "backend-winit", "renderer-femtovg"] }
-dbm-core = { path = "../crates/core" }
-dbm-connstore = { path = "../crates/connstore" }
-dbm-driver-postgres = { path = "../crates/driver-postgres" }
-dbm-driver-mysql = { path = "../crates/driver-mysql" }
-dbm-driver-redis = { path = "../crates/driver-redis" }
-dbm-driver-mongo = { path = "../crates/driver-mongo" }
+rdbs-core = { path = "../crates/core" }
+rdbs-connstore = { path = "../crates/connstore" }
+rdbs-driver-postgres = { path = "../crates/driver-postgres" }
+rdbs-driver-mysql = { path = "../crates/driver-mysql" }
+rdbs-driver-redis = { path = "../crates/driver-redis" }
+rdbs-driver-mongo = { path = "../crates/driver-mongo" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
 serde_json = "1"
 

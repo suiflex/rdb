@@ -2,12 +2,12 @@ use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 use mysql_async::{OptsBuilder, Pool, Row, SslOpts};
 
-use dbm_core::conn::{ConnConfig, SslMode};
-use dbm_core::driver::Driver;
-use dbm_core::error::{DbmError, Result};
-use dbm_core::query::Query;
-use dbm_core::result::{Column, ResultSet};
-use dbm_core::schema::Schema;
+use rdbs_core::conn::{ConnConfig, SslMode};
+use rdbs_core::driver::Driver;
+use rdbs_core::error::{RdbsError, Result};
+use rdbs_core::query::Query;
+use rdbs_core::result::{Column, ResultSet};
+use rdbs_core::schema::Schema;
 
 use crate::convert::{column_type_name, value_to_cell};
 use crate::schema::{columns_query, fold_rows, SchemaRow};
@@ -46,7 +46,7 @@ impl Driver for MysqlDriver {
         let mut conn = pool
             .get_conn()
             .await
-            .map_err(|e| DbmError::Connection(e.to_string()))?;
+            .map_err(|e| RdbsError::Connection(e.to_string()))?;
         drop(conn.ping().await);
         Ok(MysqlDriver { pool })
     }
@@ -56,11 +56,11 @@ impl Driver for MysqlDriver {
             .pool
             .get_conn()
             .await
-            .map_err(|e| DbmError::Connection(e.to_string()))?;
+            .map_err(|e| RdbsError::Connection(e.to_string()))?;
         let _: Vec<i64> = conn
             .query("SELECT 1")
             .await
-            .map_err(|e| DbmError::Query(e.to_string()))?;
+            .map_err(|e| RdbsError::Query(e.to_string()))?;
         Ok(())
     }
 
@@ -69,7 +69,7 @@ impl Driver for MysqlDriver {
             .pool
             .get_conn()
             .await
-            .map_err(|e| DbmError::Connection(e.to_string()))?;
+            .map_err(|e| RdbsError::Connection(e.to_string()))?;
         let rows: Vec<SchemaRow> = conn
             .query_map(
                 columns_query(),
@@ -84,26 +84,26 @@ impl Driver for MysqlDriver {
                 },
             )
             .await
-            .map_err(|e| DbmError::Schema(e.to_string()))?;
+            .map_err(|e| RdbsError::Schema(e.to_string()))?;
         Ok(fold_rows(rows))
     }
 
     async fn query(&self, q: &Query) -> Result<ResultSet> {
         let sql = match q {
             Query::Sql(s) => s,
-            _ => return Err(DbmError::UnsupportedQuery),
+            _ => return Err(RdbsError::UnsupportedQuery),
         };
 
         let mut conn = self
             .pool
             .get_conn()
             .await
-            .map_err(|e| DbmError::Connection(e.to_string()))?;
+            .map_err(|e| RdbsError::Connection(e.to_string()))?;
 
         let mut result = conn
             .query_iter(sql.as_str())
             .await
-            .map_err(|e| DbmError::Query(e.to_string()))?;
+            .map_err(|e| RdbsError::Query(e.to_string()))?;
 
         // A statement with no result set (INSERT/UPDATE/DELETE/DDL) reports
         // affected rows and yields no columns.
@@ -116,7 +116,7 @@ impl Driver for MysqlDriver {
             result
                 .drop_result()
                 .await
-                .map_err(|e| DbmError::Query(e.to_string()))?;
+                .map_err(|e| RdbsError::Query(e.to_string()))?;
             return Ok(ResultSet::Affected(affected));
         }
 
@@ -135,7 +135,7 @@ impl Driver for MysqlDriver {
         let mysql_rows: Vec<Row> = result
             .collect()
             .await
-            .map_err(|e| DbmError::Query(e.to_string()))?;
+            .map_err(|e| RdbsError::Query(e.to_string()))?;
 
         let rows = mysql_rows
             .into_iter()
@@ -143,7 +143,7 @@ impl Driver for MysqlDriver {
                 (0..r.len())
                     .map(|i| match r.as_ref(i) {
                         Some(v) => value_to_cell(v),
-                        None => dbm_core::result::Cell::Null,
+                        None => rdbs_core::result::Cell::Null,
                     })
                     .collect::<Vec<_>>()
             })
@@ -156,7 +156,7 @@ impl Driver for MysqlDriver {
         self.pool
             .disconnect()
             .await
-            .map_err(|e| DbmError::Connection(e.to_string()))?;
+            .map_err(|e| RdbsError::Connection(e.to_string()))?;
         Ok(())
     }
 }

@@ -1,4 +1,4 @@
-use dbm_core::conn::{ConnConfig, SslMode};
+use rdbs_core::conn::{ConnConfig, SslMode};
 
 /// Map our `SslMode` to a libpq `sslmode` token.
 ///
@@ -35,7 +35,7 @@ pub fn build_conn_string(cfg: &ConnConfig) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dbm_core::conn::{ConnConfig, SslMode};
+    use rdbs_core::conn::{ConnConfig, SslMode};
 
     fn base() -> ConnConfig {
         ConnConfig {

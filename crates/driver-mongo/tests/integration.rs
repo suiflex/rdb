@@ -1,12 +1,12 @@
 //! Real-engine test: spins a MongoDB container, then exercises the driver.
 //! Requires Docker. Ignored by default; run with
-//! `cargo test -p dbm-driver-mongo -- --ignored`.
+//! `cargo test -p rdbs-driver-mongo -- --ignored`.
 
-use dbm_core::conn::{ConnConfig, SslMode};
-use dbm_core::driver::Driver;
-use dbm_core::query::{MongoKind, MongoOp, Query};
-use dbm_core::result::ResultSet;
-use dbm_driver_mongo::MongoDriver;
+use rdbs_core::conn::{ConnConfig, SslMode};
+use rdbs_core::driver::Driver;
+use rdbs_core::query::{MongoKind, MongoOp, Query};
+use rdbs_core::result::ResultSet;
+use rdbs_driver_mongo::MongoDriver;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::mongo::Mongo;
 

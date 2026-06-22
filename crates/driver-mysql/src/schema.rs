@@ -1,4 +1,4 @@
-use dbm_core::schema::{Container, ContainerKind, Database, Field, Schema};
+use rdbs_core::schema::{Container, ContainerKind, Database, Field, Schema};
 
 /// One row of the schema query: (database, table, column, type_name, nullable).
 pub type SchemaRow = (String, String, String, String, bool);
@@ -55,7 +55,7 @@ pub fn fold_rows(rows: Vec<SchemaRow>) -> Schema {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dbm_core::schema::ContainerKind;
+    use rdbs_core::schema::ContainerKind;
 
     #[test]
     fn columns_query_targets_information_schema() {

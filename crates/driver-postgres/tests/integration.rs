@@ -3,9 +3,9 @@
 // is present (CI, dev with Docker Desktop) they run; without Docker they fail
 // fast at container start, which is the intended signal.
 
-use dbm_core::conn::{ConnConfig, SslMode};
-use dbm_core::driver::Driver;
-use dbm_driver_postgres::PostgresDriver;
+use rdbs_core::conn::{ConnConfig, SslMode};
+use rdbs_core::driver::Driver;
+use rdbs_driver_postgres::PostgresDriver;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::ContainerAsync;
 use testcontainers_modules::postgres::Postgres;
@@ -43,8 +43,8 @@ async fn connect_ping_close() {
 
 #[tokio::test]
 async fn select_returns_tabular_rows() {
-    use dbm_core::query::Query;
-    use dbm_core::result::{Cell, ResultSet};
+    use rdbs_core::query::Query;
+    use rdbs_core::result::{Cell, ResultSet};
 
     let (_container, cfg) = start_pg().await;
     let driver = PostgresDriver::connect(&cfg).await.expect("connect");
@@ -88,8 +88,8 @@ async fn select_returns_tabular_rows() {
 
 #[tokio::test]
 async fn non_sql_queries_are_unsupported() {
-    use dbm_core::error::DbmError;
-    use dbm_core::query::{MongoKind, MongoOp, Query};
+    use rdbs_core::error::RdbsError;
+    use rdbs_core::query::{MongoKind, MongoOp, Query};
 
     let (_container, cfg) = start_pg().await;
     let driver = PostgresDriver::connect(&cfg).await.expect("connect");
@@ -97,7 +97,7 @@ async fn non_sql_queries_are_unsupported() {
     let cmd = driver
         .query(&Query::Command(vec!["GET".into(), "k".into()]))
         .await;
-    assert!(matches!(cmd, Err(DbmError::UnsupportedQuery)));
+    assert!(matches!(cmd, Err(RdbsError::UnsupportedQuery)));
 
     let mongo = driver
         .query(&Query::Mongo(MongoOp {
@@ -105,15 +105,15 @@ async fn non_sql_queries_are_unsupported() {
             kind: MongoKind::Find(serde_json::json!({})),
         }))
         .await;
-    assert!(matches!(mongo, Err(DbmError::UnsupportedQuery)));
+    assert!(matches!(mongo, Err(RdbsError::UnsupportedQuery)));
 
     driver.close().await.expect("close");
 }
 
 #[tokio::test]
 async fn schema_lists_created_table_and_fields() {
-    use dbm_core::query::Query;
-    use dbm_core::schema::ContainerKind;
+    use rdbs_core::query::Query;
+    use rdbs_core::schema::ContainerKind;
 
     let (_container, cfg) = start_pg().await;
     let driver = PostgresDriver::connect(&cfg).await.expect("connect");

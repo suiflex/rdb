@@ -1,4 +1,4 @@
-//! dbm-driver-mongo: MongoDB Driver impl via the mongodb crate.
+//! rdbs-driver-mongo: MongoDB Driver impl via the mongodb crate.
 
 mod convert;
 

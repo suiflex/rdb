@@ -1,4 +1,4 @@
-//! dbm-core: paradigm-agnostic Driver trait + unified result model.
+//! rdbs-core: paradigm-agnostic Driver trait + unified result model.
 
 pub mod conn;
 pub mod driver;

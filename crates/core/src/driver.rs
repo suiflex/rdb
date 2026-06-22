@@ -23,7 +23,7 @@ pub trait Driver: Send + Sync {
     async fn schema(&self) -> Result<Schema>;
 
     /// Run a query. Drivers handle the `Query` variant(s) they support and
-    /// return `DbmError::UnsupportedQuery` for the rest.
+    /// return `RdbsError::UnsupportedQuery` for the rest.
     async fn query(&self, q: &Query) -> Result<ResultSet>;
 
     /// Close the connection, consuming the driver.
@@ -55,7 +55,7 @@ mod tests {
         async fn query(&self, q: &Query) -> crate::error::Result<ResultSet> {
             match q {
                 Query::Sql(_) => Ok(ResultSet::Affected(0)),
-                _ => Err(crate::error::DbmError::UnsupportedQuery),
+                _ => Err(crate::error::RdbsError::UnsupportedQuery),
             }
         }
         async fn close(self) -> crate::error::Result<()> {

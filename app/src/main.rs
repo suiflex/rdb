@@ -1,4 +1,4 @@
-//! dbm-app: Slint desktop binary.
+//! rdbs-app: Slint desktop binary.
 //!
 //! Async bridge pattern (canonical):
 //!   - A `tokio` multi-thread runtime (`Arc<Runtime>`) lives for the whole
@@ -35,7 +35,7 @@ const UNGROUPED: &str = "Ungrouped";
 /// regardless of grouping or ordering. `collapsed` holds the set of group labels
 /// currently folded shut.
 fn build_conn_items(
-    store: &dbm_connstore::ConnStore,
+    store: &rdbs_connstore::ConnStore,
     collapsed: &HashSet<String>,
     filter: &str,
 ) -> Vec<ConnItem> {
@@ -223,17 +223,17 @@ fn main() -> Result<(), slint::PlatformError> {
     let window = MainWindow::new()?;
 
     // One store for the app lifetime; all CRUD + password ops go through it.
-    let store: Rc<RefCell<dbm_connstore::ConnStore>> = Rc::new(RefCell::new(
-        dbm_connstore::ConnStore::open_default().unwrap_or_else(|_| {
+    let store: Rc<RefCell<rdbs_connstore::ConnStore>> = Rc::new(RefCell::new(
+        rdbs_connstore::ConnStore::open_default().unwrap_or_else(|_| {
             let dir = std::env::temp_dir().join("dbm");
             let _ = std::fs::create_dir_all(&dir);
-            let backend = dbm_connstore::secret::select_backend(&dir).expect("secret backend");
-            dbm_connstore::ConnStore::new(dir.join("connections.json"), backend)
+            let backend = rdbs_connstore::secret::select_backend(&dir).expect("secret backend");
+            rdbs_connstore::ConnStore::new(dir.join("connections.json"), backend)
         }),
     ));
 
     // (engine, driver) so run-query can parse text for the right paradigm.
-    let current: Arc<tokio::sync::Mutex<Option<(dbm_connstore::Engine, AnyDriver)>>> =
+    let current: Arc<tokio::sync::Mutex<Option<(rdbs_connstore::Engine, AnyDriver)>>> =
         Arc::new(tokio::sync::Mutex::new(None));
 
     // Set of group labels the user has collapsed in the sidebar.
@@ -250,7 +250,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let collapsed_categories: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
     // Engine of the live connection, kept on the UI thread so table clicks can
     // build an engine-appropriate "browse this table" query synchronously.
-    let cur_engine: Rc<RefCell<Option<dbm_connstore::Engine>>> = Rc::new(RefCell::new(None));
+    let cur_engine: Rc<RefCell<Option<rdbs_connstore::Engine>>> = Rc::new(RefCell::new(None));
 
     // Reusable sidebar rebuild: buckets the store's list into grouped rows.
     let rebuild_sidebar = {
@@ -426,10 +426,10 @@ fn main() -> Result<(), slint::PlatformError> {
             rt.spawn(async move {
                 let result = async {
                     let cfg =
-                        cfg.map_err(|e| dbm_core::error::DbmError::Connection(e.to_string()))?;
+                        cfg.map_err(|e| rdbs_core::error::RdbsError::Connection(e.to_string()))?;
                     let driver = AnyDriver::connect(engine, &cfg).await?;
                     let schema = driver.schema().await?;
-                    Ok::<_, dbm_core::error::DbmError>((driver, schema))
+                    Ok::<_, rdbs_core::error::RdbsError>((driver, schema))
                 }
                 .await;
 
@@ -519,10 +519,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     Some((engine, driver)) => {
                         match crate::query_parse::parse_query(*engine, &sql) {
                             Ok(q) => driver.query(&q).await,
-                            Err(msg) => Err(dbm_core::error::DbmError::Query(msg)),
+                            Err(msg) => Err(rdbs_core::error::RdbsError::Query(msg)),
                         }
                     }
-                    None => Err(dbm_core::error::DbmError::Connection(
+                    None => Err(rdbs_core::error::RdbsError::Connection(
                         "not connected".into(),
                     )),
                 };
@@ -580,16 +580,16 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             let label = label.to_string();
             let text = match *cur_engine.borrow() {
-                Some(dbm_connstore::Engine::Postgres) => {
+                Some(rdbs_connstore::Engine::Postgres) => {
                     format!("SELECT * FROM \"{label}\" LIMIT 300")
                 }
-                Some(dbm_connstore::Engine::MySql) => {
+                Some(rdbs_connstore::Engine::MySql) => {
                     format!("SELECT * FROM `{label}` LIMIT 300")
                 }
-                Some(dbm_connstore::Engine::Mongo) => {
+                Some(rdbs_connstore::Engine::Mongo) => {
                     format!("{{\"collection\":\"{label}\",\"op\":\"find\",\"body\":{{}}}}")
                 }
-                Some(dbm_connstore::Engine::Redis) => {
+                Some(rdbs_connstore::Engine::Redis) => {
                     w.set_result_status(SharedString::from(
                         "click a key in the SQL panel for Redis",
                     ));
@@ -830,12 +830,12 @@ fn main() -> Result<(), slint::PlatformError> {
             _ => "5432",
         }
     }
-    fn label_to_engine(label: &str) -> dbm_connstore::Engine {
+    fn label_to_engine(label: &str) -> rdbs_connstore::Engine {
         match label {
-            "MySQL" => dbm_connstore::Engine::MySql,
-            "Redis" => dbm_connstore::Engine::Redis,
-            "MongoDB" => dbm_connstore::Engine::Mongo,
-            _ => dbm_connstore::Engine::Postgres,
+            "MySQL" => rdbs_connstore::Engine::MySql,
+            "Redis" => rdbs_connstore::Engine::Redis,
+            "MongoDB" => rdbs_connstore::Engine::Mongo,
+            _ => rdbs_connstore::Engine::Postgres,
         }
     }
     let editing_id: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
@@ -890,9 +890,9 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_database(SharedString::from(sc.database.unwrap_or_default()));
             w.set_f_password(SharedString::default());
             w.set_f_sslmode(SharedString::from(match sc.sslmode {
-                dbm_core::conn::SslMode::Disable => "Disable",
-                dbm_core::conn::SslMode::Prefer => "Prefer",
-                dbm_core::conn::SslMode::Require => "Require",
+                rdbs_core::conn::SslMode::Disable => "Disable",
+                rdbs_core::conn::SslMode::Prefer => "Prefer",
+                rdbs_core::conn::SslMode::Require => "Require",
             }));
             w.set_f_color(SharedString::from(
                 sc.color.unwrap_or_else(|| "#3b82f6".into()),
@@ -925,7 +925,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let raw = w.get_f_import_url().to_string();
-            match dbm_connstore::parse_conn_url(&raw) {
+            match rdbs_connstore::parse_conn_url(&raw) {
                 Ok(parsed) => {
                     if let Some(engine) = parsed.engine {
                         w.set_f_engine(SharedString::from(AnyDriver::label(engine)));
@@ -951,9 +951,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                     if let Some(sslmode) = parsed.sslmode {
                         w.set_f_sslmode(SharedString::from(match sslmode {
-                            dbm_core::conn::SslMode::Disable => "Disable",
-                            dbm_core::conn::SslMode::Prefer => "Prefer",
-                            dbm_core::conn::SslMode::Require => "Require",
+                            rdbs_core::conn::SslMode::Disable => "Disable",
+                            rdbs_core::conn::SslMode::Prefer => "Prefer",
+                            rdbs_core::conn::SslMode::Require => "Require",
                         }));
                     }
                     w.set_form_error(SharedString::default());
@@ -999,9 +999,9 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             let engine = label_to_engine(w.get_f_engine().as_ref());
             let sslmode = match w.get_f_sslmode().to_string().as_str() {
-                "Disable" => dbm_core::conn::SslMode::Disable,
-                "Require" => dbm_core::conn::SslMode::Require,
-                _ => dbm_core::conn::SslMode::Prefer,
+                "Disable" => rdbs_core::conn::SslMode::Disable,
+                "Require" => rdbs_core::conn::SslMode::Require,
+                _ => rdbs_core::conn::SslMode::Prefer,
             };
             let database = {
                 let d = w.get_f_database().to_string();
@@ -1019,7 +1019,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     Some(p)
                 }
             };
-            let cfg = dbm_core::conn::ConnConfig {
+            let cfg = rdbs_core::conn::ConnConfig {
                 host,
                 port,
                 user: w.get_f_user().to_string(),
@@ -1038,7 +1038,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let result = async {
                     let driver = AnyDriver::connect(engine, &cfg).await?;
                     driver.ping().await?;
-                    Ok::<_, dbm_core::error::DbmError>(())
+                    Ok::<_, rdbs_core::error::RdbsError>(())
                 }
                 .await;
                 let _ = slint::invoke_from_event_loop(move || {
@@ -1101,9 +1101,9 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             let engine = label_to_engine(w.get_f_engine().as_ref());
             let sslmode = match w.get_f_sslmode().to_string().as_str() {
-                "Disable" => dbm_core::conn::SslMode::Disable,
-                "Require" => dbm_core::conn::SslMode::Require,
-                _ => dbm_core::conn::SslMode::Prefer,
+                "Disable" => rdbs_core::conn::SslMode::Disable,
+                "Require" => rdbs_core::conn::SslMode::Require,
+                _ => rdbs_core::conn::SslMode::Prefer,
             };
             let database = {
                 let d = w.get_f_database().to_string();
@@ -1117,10 +1117,10 @@ fn main() -> Result<(), slint::PlatformError> {
             let password = w.get_f_password().to_string();
             let id = editing_id.borrow().clone();
 
-            let result: dbm_connstore::Result<()> = (|| {
+            let result: rdbs_connstore::Result<()> = (|| {
                 let mut st = store.borrow_mut();
                 let conn_id = if id.is_empty() {
-                    let mut sc = dbm_connstore::SavedConnection::new(
+                    let mut sc = rdbs_connstore::SavedConnection::new(
                         name,
                         engine,
                         host,
@@ -1137,7 +1137,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let mut sc = st
                         .get(&id)
                         .cloned()
-                        .ok_or_else(|| dbm_connstore::ConnStoreError::NotFound(id.clone()))?;
+                        .ok_or_else(|| rdbs_connstore::ConnStoreError::NotFound(id.clone()))?;
                     sc.name = name;
                     sc.engine = engine;
                     sc.host = host;

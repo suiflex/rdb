@@ -10,7 +10,7 @@
 //! UI can fall back to its per-engine defaults.
 
 use crate::model::Engine;
-use dbm_core::conn::SslMode;
+use rdbs_core::conn::SslMode;
 use thiserror::Error;
 
 /// Error returned when a connection URL cannot be parsed.
