@@ -75,6 +75,10 @@ export component Sidebar inherits Rectangle {
         ScrollView {
             vertical-stretch: 1;
             VerticalLayout {
+                // Lock content width to the viewport so a bolded active row can't
+                // widen the content and feed a relayout loop (the "jittering"
+                // sidebar). Rows elide instead of growing horizontally.
+                width: parent.visible-width;
                 padding-top: Theme.sp1;
                 spacing: 2px;
                 for node[i] in root.tree: Rectangle {
@@ -109,8 +113,9 @@ export component Sidebar inherits Rectangle {
                         padding-left: Theme.sp2 + node.depth * Theme.sp3;
                         padding-right: Theme.sp1;
                         spacing: Theme.sp1;
-                        // chevron: headers + containers expand (rotates when open)
-                        if is-header || is-container: AppIcon {
+                        // chevron: only headers expand/collapse (rotates when open).
+                        // Containers open data on click — no chevron, cleaner column.
+                        if is-header: AppIcon {
                             name: "chevron";
                             size: Theme.icon-sm;
                             color: Theme.text-faint;
