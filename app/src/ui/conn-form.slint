@@ -44,9 +44,12 @@ export component ConnForm inherits Rectangle {
 
     if root.open: Rectangle {
         width: 460px;
-        // No fixed height: the card sizes to its VerticalLayout so rows never
-        // overflow past the card edge (was a fixed 540px that pushed the button
-        // row outside the card).
+        // Hug the content height: a bare Rectangle fills its parent (the full
+        // overlay), which stretched every input. Binding to the layout's
+        // preferred height sizes the card to its rows — buttons stay inside and
+        // inputs keep their natural height.
+        // ponytail: wrap vbox in a ScrollView only if content ever exceeds the window.
+        height: vbox.preferred-height;
         x: (parent.width - self.width) / 2;
         y: 60px;
         border-radius: Theme.radius-panel;
@@ -56,7 +59,7 @@ export component ConnForm inherits Rectangle {
         drop-shadow-blur: 24px;
         drop-shadow-color: #00000088;
 
-        VerticalLayout {
+        vbox := VerticalLayout {
             padding: Theme.sp4;
             spacing: Theme.sp2;
 
