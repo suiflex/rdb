@@ -126,6 +126,12 @@ fn schema_display_rows(
     collapsed_cats: &HashSet<String>,
     engine: Option<rdbs_connstore::Engine>,
 ) -> Vec<TreeNode> {
+    // Mongo is database→collection: render each database as a collapsible header
+    // and nest only its own collections, so system DBs never mix with the app's.
+    if engine == Some(rdbs_connstore::Engine::Mongo) {
+        return mongo_display_rows(nodes, collapsed_cats);
+    }
+
     let categories = sidebar_categories(engine);
     let primary = categories[0];
     let mut rows: Vec<TreeNode> = Vec::new();
@@ -136,6 +142,7 @@ fn schema_display_rows(
             depth: 0,
             kind: "category".into(),
             expanded: cat_open,
+            db: SharedString::default(),
         });
         if !cat_open || cat != primary {
             continue;
@@ -153,6 +160,7 @@ fn schema_display_rows(
                     depth: 2,
                     kind: "field".into(),
                     expanded: false,
+                    db: SharedString::default(),
                 });
             } else if is_container {
                 show_fields = expanded_tables.contains(&n.label);
@@ -161,11 +169,50 @@ fn schema_display_rows(
                     depth: 1,
                     kind: n.kind.clone().into(),
                     expanded: show_fields,
+                    db: SharedString::default(),
                 });
             } else {
                 // database row: categories replace it; reset field visibility
                 show_fields = false;
             }
+        }
+    }
+    rows
+}
+
+/// Build database→collection rows for Mongo. Each database is a depth-0
+/// collapsible header (collapsed when its name is in `collapsed_cats`); its
+/// collections are depth-1 rows tagged with the owning database.
+fn mongo_display_rows(
+    nodes: &[model::VmTreeNode],
+    collapsed_cats: &HashSet<String>,
+) -> Vec<TreeNode> {
+    let mut rows: Vec<TreeNode> = Vec::new();
+    let mut current_db = String::new();
+    let mut db_open = false;
+    for n in nodes {
+        match n.kind.as_str() {
+            "database" => {
+                current_db = n.label.clone();
+                db_open = !collapsed_cats.contains(&current_db);
+                rows.push(TreeNode {
+                    label: n.label.clone().into(),
+                    depth: 0,
+                    kind: "database".into(),
+                    expanded: db_open,
+                    db: current_db.clone().into(),
+                });
+            }
+            "collection" | "table" | "keyspace" if db_open => {
+                rows.push(TreeNode {
+                    label: n.label.clone().into(),
+                    depth: 1,
+                    kind: "collection".into(),
+                    expanded: false,
+                    db: current_db.clone().into(),
+                });
+            }
+            _ => {}
         }
     }
     rows
@@ -606,11 +653,12 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let cur_engine = cur_engine.clone();
         let run_sql = run_sql.clone();
-        window.on_open_table(move |label| {
+        window.on_open_table(move |db, label| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
             let label = label.to_string();
+            let db = db.to_string();
             let text = match *cur_engine.borrow() {
                 Some(rdbs_connstore::Engine::Postgres) => {
                     format!("SELECT * FROM \"{label}\" LIMIT 300")
@@ -619,7 +667,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     format!("SELECT * FROM `{label}` LIMIT 300")
                 }
                 Some(rdbs_connstore::Engine::Mongo) => {
-                    format!("{{\"collection\":\"{label}\",\"op\":\"find\",\"body\":{{}}}}")
+                    format!(
+                        "{{\"collection\":\"{label}\",\"database\":\"{db}\",\"op\":\"find\",\"body\":{{}}}}"
+                    )
                 }
                 Some(rdbs_connstore::Engine::Redis) => {
                     w.set_result_status(SharedString::from(
@@ -649,17 +699,12 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             let engine = *cur_engine.borrow();
             let label = label.to_string();
-            // A category header toggles its collapsed set (open by default); any
-            // other label toggles a table's expanded-fields set.
-            if sidebar_categories(engine).contains(&label.as_str()) {
+            // Only headers (SQL categories and Mongo database names) invoke this;
+            // toggle the collapsed set for the clicked header (open by default).
+            {
                 let mut c = collapsed_categories.borrow_mut();
                 if !c.remove(&label) {
                     c.insert(label);
-                }
-            } else {
-                let mut e = expanded_tables.borrow_mut();
-                if !e.remove(&label) {
-                    e.insert(label);
                 }
             }
             let nodes = raw_nodes.lock().unwrap();

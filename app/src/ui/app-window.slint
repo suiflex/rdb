@@ -37,7 +37,7 @@ export component MainWindow inherits Window {
     in-out property <string> schema-name: "public";
     callback connect-clicked(int);
     callback toggle-group(string);
-    callback open-table(string);
+    callback open-table(string, string);   // (database, container)
     callback toggle-schema-node(string);
     callback select-schema(string);
 
@@ -231,8 +231,8 @@ export component MainWindow inherits Window {
                     disconnect() => {
                         root.disconnect();
                     }
-                    open-table(t) => {
-                        root.open-table(t);
+                    open-table(db, t) => {
+                        root.open-table(db, t);
                     }
                     toggle-node(t) => {
                         root.toggle-schema-node(t);
