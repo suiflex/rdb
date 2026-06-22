@@ -1,13 +1,13 @@
 # RDBS
 
-A native, lightweight, cross-platform database manager built with Rust and Slint — in the spirit of TablePlus but compiled from a single codebase for macOS, Windows, and Linux.
+A native, lightweight, cross-platform database manager built with Rust and Slint — in the spirit of TablePlus but compiled from a single codebase for macOS and Linux.
 
 ## Features
 
 - **Multi-engine** — PostgreSQL, MySQL/MariaDB, Redis, MongoDB in one app
 - **Native UI** — GPU-rendered via Slint (no webview, no Chromium, no Electron)
 - **Fast & light** — no GC, no runtime; aggressive release optimization (LTO, `opt-level=z`, `panic=abort`)
-- **Secure connections** — passwords stored in OS keychain (macOS Keychain, libsecret, Windows Credential Manager) with AES-GCM encrypted-file fallback
+- **Secure connections** — passwords stored in OS keychain (macOS Keychain, libsecret) with AES-GCM encrypted-file fallback
 - **Schema browser** — sidebar tree: databases → tables/collections/keys → columns/fields
 - **Tabbed query editor** — multiple tabs per session, one per engine
 - **Results grid** — resizable columns, client-side row filtering, copy support
@@ -168,7 +168,7 @@ The release binary lands at `target/release/rdbs`.
 
 1. Click a saved connection → connects, schema loads in sidebar.
 2. Type SQL (PostgreSQL/MySQL), a Redis command (e.g. `GET key`), or a MongoDB JSON operation in the query editor.
-3. `Cmd+Enter` (macOS) / `Ctrl+Enter` (Windows/Linux) to run.
+3. `Cmd+Enter` (macOS) / `Ctrl+Enter` (Linux) to run.
 4. Click a table/collection in the sidebar to auto-generate and run a `SELECT *` / `find` query.
 
 ### Command palette
