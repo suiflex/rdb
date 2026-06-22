@@ -1,0 +1,39 @@
+name: rdbs-driver-redis
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - crates/driver-redis/**
+      - crates/core/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/rdbs-driver-redis.yml
+  pull_request:
+    paths:
+      - crates/driver-redis/**
+      - crates/core/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/rdbs-driver-redis.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rdbs-driver-redis
+      - run: cargo fmt -p rdbs-driver-redis --check
+      - run: cargo clippy -p rdbs-driver-redis --all-targets -- -D warnings
+      - run: cargo test -p rdbs-driver-redis

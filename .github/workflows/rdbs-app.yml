@@ -1,0 +1,50 @@
+name: rdbs-app
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - app/**
+      - crates/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/rdbs-app.yml
+  pull_request:
+    paths:
+      - app/**
+      - crates/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/rdbs-app.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rdbs-app
+      # ponytail: minimal system libs for Slint winit+femtovg build on Linux;
+      # add more here if the build errors out demanding another lib.
+      - name: Install Slint system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libfontconfig1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxkbcommon-dev
+      - run: cargo fmt -p rdbs --check
+      - run: cargo clippy -p rdbs --all-targets -- -D warnings
+      - run: cargo build -p rdbs
