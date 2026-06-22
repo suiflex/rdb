@@ -22,6 +22,19 @@ make all          # fmt-check + lint + test + build (CI gate)
 cargo build --release -p rdbs   # release binary
 ```
 
+## CI
+
+One GitHub Actions workflow per component in `.github/workflows/` — `rdbs-app`
+plus one per crate (`rdbs-core`, `rdbs-connstore`, `rdbs-driver-*`). Each has a
+`paths:` filter, so editing one component only runs that component's CI (lean).
+
+- Dependents also watch `crates/core/**`, so a `core` change fans out to retest
+  core + all dependents (connstore, drivers, app). Other crates stay independent.
+- Backend jobs run `cargo {fmt,clippy,test} -p <pkg>` (scoped with `-p`, not the
+  workspace-wide `make` targets). Unit tests only — integration tests are
+  `#[ignore]` (need a live DB).
+- The app job installs Slint system libs and runs `cargo build -p rdbs`.
+
 ## Architecture
 
 - `app/` — Slint UI binary (main entry point)
