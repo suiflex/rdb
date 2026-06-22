@@ -1,7 +1,7 @@
 # Split FE/BE build entry points. BE = crates/* libs, FE = storix (app/).
 # Run `make` or `make help` for the target list.
 
-BE_PKGS = dbm-core dbm-connstore dbm-driver-postgres dbm-driver-mysql dbm-driver-redis dbm-driver-mongo
+BE_PKGS = rdbs-core rdbs-connstore rdbs-driver-postgres rdbs-driver-mysql rdbs-driver-redis rdbs-driver-mongo
 FE_PKG  = storix
 BE_FLAGS = $(addprefix -p ,$(BE_PKGS))
 

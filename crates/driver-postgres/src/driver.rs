@@ -4,12 +4,12 @@ use postgres_native_tls::MakeTlsConnector;
 use tokio::task::JoinHandle;
 use tokio_postgres::{Client, NoTls};
 
-use dbm_core::conn::{ConnConfig, SslMode};
-use dbm_core::driver::Driver;
-use dbm_core::error::{DbmError, Result};
-use dbm_core::query::Query;
-use dbm_core::result::{Column, ResultSet, Row};
-use dbm_core::schema::{Container, ContainerKind, Database, Field, Schema};
+use rdbs_core::conn::{ConnConfig, SslMode};
+use rdbs_core::driver::Driver;
+use rdbs_core::error::{RdbsError, Result};
+use rdbs_core::query::Query;
+use rdbs_core::result::{Column, ResultSet, Row};
+use rdbs_core::schema::{Container, ContainerKind, Database, Field, Schema};
 
 use crate::conn_string::build_conn_string;
 
@@ -36,7 +36,7 @@ impl Driver for PostgresDriver {
         let (client, conn_task) = if matches!(cfg.sslmode, SslMode::Disable) {
             let (client, connection) = tokio_postgres::connect(&conn_str, NoTls)
                 .await
-                .map_err(|e| DbmError::Connection(e.to_string()))?;
+                .map_err(|e| RdbsError::Connection(e.to_string()))?;
             let conn_task = tokio::spawn(async move {
                 let _ = connection.await;
             });
@@ -46,11 +46,11 @@ impl Driver for PostgresDriver {
                 .danger_accept_invalid_certs(true)
                 .danger_accept_invalid_hostnames(true)
                 .build()
-                .map_err(|e| DbmError::Connection(e.to_string()))?;
+                .map_err(|e| RdbsError::Connection(e.to_string()))?;
             let connector = MakeTlsConnector::new(tls);
             let (client, connection) = tokio_postgres::connect(&conn_str, connector)
                 .await
-                .map_err(|e| DbmError::Connection(e.to_string()))?;
+                .map_err(|e| RdbsError::Connection(e.to_string()))?;
             let conn_task = tokio::spawn(async move {
                 let _ = connection.await;
             });
@@ -63,7 +63,7 @@ impl Driver for PostgresDriver {
         self.client
             .query("SELECT 1", &[])
             .await
-            .map_err(|e| DbmError::Connection(e.to_string()))?;
+            .map_err(|e| RdbsError::Connection(e.to_string()))?;
         Ok(())
     }
 
@@ -88,14 +88,14 @@ impl Driver for PostgresDriver {
 async fn query_impl(client: &Client, q: &Query) -> Result<ResultSet> {
     let sql = match q {
         Query::Sql(s) => s,
-        Query::Command(_) | Query::Mongo(_) => return Err(DbmError::UnsupportedQuery),
+        Query::Command(_) | Query::Mongo(_) => return Err(RdbsError::UnsupportedQuery),
     };
 
     if is_row_returning(sql) {
         let rows = client
             .query(sql, &[])
             .await
-            .map_err(|e| DbmError::Query(e.to_string()))?;
+            .map_err(|e| RdbsError::Query(e.to_string()))?;
         let cols = column_meta(&rows);
         let mut out_rows: Vec<Row> = Vec::with_capacity(rows.len());
         for row in &rows {
@@ -113,7 +113,7 @@ async fn query_impl(client: &Client, q: &Query) -> Result<ResultSet> {
         let affected = client
             .execute(sql, &[])
             .await
-            .map_err(|e| DbmError::Query(e.to_string()))?;
+            .map_err(|e| RdbsError::Query(e.to_string()))?;
         Ok(ResultSet::Affected(affected))
     }
 }
@@ -151,10 +151,10 @@ async fn schema_impl(client: &Client) -> Result<Schema> {
     let db_row = client
         .query_one("SELECT current_database()", &[])
         .await
-        .map_err(|e| DbmError::Schema(e.to_string()))?;
+        .map_err(|e| RdbsError::Schema(e.to_string()))?;
     let db_name: String = db_row
         .try_get(0)
-        .map_err(|e| DbmError::Schema(e.to_string()))?;
+        .map_err(|e| RdbsError::Schema(e.to_string()))?;
 
     // User tables + columns from information_schema, public schema only.
     // Ordered so columns of the same table are contiguous for grouping.
@@ -169,7 +169,7 @@ async fn schema_impl(client: &Client) -> Result<Schema> {
             &[],
         )
         .await
-        .map_err(|e| DbmError::Schema(e.to_string()))?;
+        .map_err(|e| RdbsError::Schema(e.to_string()))?;
 
     let mut containers: Vec<Container> = Vec::new();
     for row in &rows {

@@ -57,12 +57,12 @@ mod tests {
     use crate::secret::SecretBackend;
 
     // Requires a real OS keychain / desktop session. Run locally with:
-    //   cargo test -p dbm-connstore keyring -- --ignored
+    //   cargo test -p rdbs-connstore keyring -- --ignored
     #[test]
     #[ignore]
     fn keyring_roundtrip_on_a_real_desktop_session() {
         let backend = KeyringBackend::new();
-        let id = "dbm-test-keyring-roundtrip";
+        let id = "rdbs-test-keyring-roundtrip";
         backend.set(id, "hunter2").unwrap();
         assert_eq!(backend.get(id).unwrap().as_deref(), Some("hunter2"));
         backend.delete(id).unwrap();

@@ -3,12 +3,12 @@ use redis::aio::MultiplexedConnection;
 use redis::{Client, Value};
 use tokio::sync::Mutex;
 
-use dbm_core::conn::ConnConfig;
-use dbm_core::driver::Driver;
-use dbm_core::error::{DbmError, Result};
-use dbm_core::query::Query;
-use dbm_core::result::ResultSet;
-use dbm_core::schema::{Container, ContainerKind, Database, Field, Schema};
+use rdbs_core::conn::ConnConfig;
+use rdbs_core::driver::Driver;
+use rdbs_core::error::{RdbsError, Result};
+use rdbs_core::query::Query;
+use rdbs_core::result::ResultSet;
+use rdbs_core::schema::{Container, ContainerKind, Database, Field, Schema};
 
 use crate::convert::{connection_url, value_to_resultset};
 
@@ -24,11 +24,11 @@ pub struct RedisDriver {
 impl Driver for RedisDriver {
     async fn connect(cfg: &ConnConfig) -> Result<Self> {
         let client =
-            Client::open(connection_url(cfg)).map_err(|e| DbmError::Connection(e.to_string()))?;
+            Client::open(connection_url(cfg)).map_err(|e| RdbsError::Connection(e.to_string()))?;
         let conn = client
             .get_multiplexed_async_connection()
             .await
-            .map_err(|e| DbmError::Connection(e.to_string()))?;
+            .map_err(|e| RdbsError::Connection(e.to_string()))?;
         let db = cfg.database.clone().unwrap_or_else(|| "0".to_string());
         Ok(RedisDriver {
             conn: Mutex::new(conn),
@@ -41,11 +41,11 @@ impl Driver for RedisDriver {
         let reply: String = redis::cmd("PING")
             .query_async(&mut *conn)
             .await
-            .map_err(|e| DbmError::Connection(e.to_string()))?;
+            .map_err(|e| RdbsError::Connection(e.to_string()))?;
         if reply == "PONG" {
             Ok(())
         } else {
-            Err(DbmError::Connection(format!(
+            Err(RdbsError::Connection(format!(
                 "unexpected PING reply: {reply}"
             )))
         }
@@ -56,7 +56,7 @@ impl Driver for RedisDriver {
         let size: i64 = redis::cmd("DBSIZE")
             .query_async(&mut *conn)
             .await
-            .map_err(|e| DbmError::Schema(e.to_string()))?;
+            .map_err(|e| RdbsError::Schema(e.to_string()))?;
         drop(conn);
 
         // Redis is schemaless: surface one keyspace container summarizing key count.
@@ -76,10 +76,10 @@ impl Driver for RedisDriver {
     async fn query(&self, q: &Query) -> Result<ResultSet> {
         let tokens = match q {
             Query::Command(tokens) => tokens,
-            _ => return Err(DbmError::UnsupportedQuery),
+            _ => return Err(RdbsError::UnsupportedQuery),
         };
         if tokens.is_empty() {
-            return Err(DbmError::Query("empty command".into()));
+            return Err(RdbsError::Query("empty command".into()));
         }
 
         let mut cmd = redis::cmd(&tokens[0]);
@@ -91,7 +91,7 @@ impl Driver for RedisDriver {
         let value: Value = cmd
             .query_async(&mut *conn)
             .await
-            .map_err(|e| DbmError::Query(e.to_string()))?;
+            .map_err(|e| RdbsError::Query(e.to_string()))?;
 
         Ok(value_to_resultset(tokens[0].to_uppercase(), value))
     }

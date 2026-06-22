@@ -25,7 +25,7 @@ cargo build --release -p storix   # release binary
 ## Architecture
 
 - `app/` — Slint UI binary (main entry point)
-- `crates/core/` — `Driver` trait, `Query`, `ResultSet`, `Schema`, `DbmError`
+- `crates/core/` — `Driver` trait, `Query`, `ResultSet`, `Schema`, `RdbsError`
 - `crates/connstore/` — saved connections + OS keychain / AES-GCM
 - `crates/driver-postgres/` — tokio-postgres
 - `crates/driver-mysql/` — mysql_async
@@ -34,7 +34,7 @@ cargo build --release -p storix   # release binary
 
 ## Key Rules
 
-- UI (`app/`) names a concrete driver crate only in `app/src/dispatch.rs` (the `AnyDriver` enum); the rest of the app depends on `dbm-core`.
+- UI (`app/`) names a concrete driver crate only in `app/src/dispatch.rs` (the `AnyDriver` enum); the rest of the app depends on `rdbs-core`.
 - Adding new engine = new `driver-*` crate implementing `Driver` trait + a variant in `AnyDriver`.
 - Async I/O on tokio runtime, results bridge back to Slint main thread via `invoke_from_event_loop`.
 - Release profile: `opt-level=z`, LTO, `panic=abort`, strip.

@@ -63,7 +63,7 @@ storix/
 
 ### Core design rule
 
-The UI (`app/`) depends only on `dbm-core`. It never imports a concrete driver crate. Adding a new engine = a new `driver-*` crate that implements the `Driver` trait; the UI is untouched.
+The UI (`app/`) depends only on `rdbs-core`. It never imports a concrete driver crate. Adding a new engine = a new `driver-*` crate that implements the `Driver` trait; the UI is untouched.
 
 ### Async bridge
 
@@ -188,12 +188,12 @@ Active development. MVP covers 4 engines; planned expansion to ~20 (SQLite, Clic
 | Crate | Description |
 |-------|-------------|
 | `storix` | Desktop binary (app/) |
-| `dbm-core` | `Driver` trait, `Query`, `ResultSet`, `Schema`, `DbmError` |
-| `dbm-connstore` | Saved connections — JSON on disk + OS keychain / AES-GCM file |
-| `dbm-driver-postgres` | PostgreSQL driver via `tokio-postgres` |
-| `dbm-driver-mysql` | MySQL/MariaDB driver via `mysql_async` |
-| `dbm-driver-redis` | Redis driver via `redis` crate |
-| `dbm-driver-mongo` | MongoDB driver via `mongodb` crate |
+| `rdbs-core` | `Driver` trait, `Query`, `ResultSet`, `Schema`, `RdbsError` |
+| `rdbs-connstore` | Saved connections — JSON on disk + OS keychain / AES-GCM file |
+| `rdbs-driver-postgres` | PostgreSQL driver via `tokio-postgres` |
+| `rdbs-driver-mysql` | MySQL/MariaDB driver via `mysql_async` |
+| `rdbs-driver-redis` | Redis driver via `redis` crate |
+| `rdbs-driver-mongo` | MongoDB driver via `mongodb` crate |
 
 ## License
 

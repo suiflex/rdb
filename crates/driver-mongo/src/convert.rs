@@ -1,16 +1,16 @@
 use mongodb::bson::{Bson, Document};
 
-use dbm_core::error::{DbmError, Result};
+use rdbs_core::error::{RdbsError, Result};
 
 /// Convert a JSON object into a BSON `Document`. Filters, insert payloads, and
 /// aggregation stages all arrive as JSON objects, so a non-object is a usage
 /// error and is rejected.
 pub fn json_to_document(value: &serde_json::Value) -> Result<Document> {
     let bson: Bson =
-        mongodb::bson::to_bson(value).map_err(|e| DbmError::Query(format!("invalid BSON: {e}")))?;
+        mongodb::bson::to_bson(value).map_err(|e| RdbsError::Query(format!("invalid BSON: {e}")))?;
     match bson {
         Bson::Document(d) => Ok(d),
-        other => Err(DbmError::Query(format!(
+        other => Err(RdbsError::Query(format!(
             "expected a JSON object, got {:?}",
             other.element_type()
         ))),

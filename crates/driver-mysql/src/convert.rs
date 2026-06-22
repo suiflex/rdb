@@ -1,8 +1,8 @@
-use dbm_core::result::Cell;
+use rdbs_core::result::Cell;
 use mysql_async::consts::ColumnType;
 use mysql_async::Value;
 
-/// Map a mysql_async cell value into dbm-core's `Cell`.
+/// Map a mysql_async cell value into rdbs-core's `Cell`.
 ///
 /// Bytes are treated as text when valid UTF-8 (covers CHAR/VARCHAR/TEXT and
 /// DECIMAL, which mysql returns as bytes), otherwise as raw `Bytes`
@@ -32,7 +32,7 @@ pub fn column_type_name(ct: ColumnType) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dbm_core::result::Cell;
+    use rdbs_core::result::Cell;
     use mysql_async::Value;
 
     #[test]

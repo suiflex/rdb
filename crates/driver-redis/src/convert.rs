@@ -1,5 +1,5 @@
-use dbm_core::conn::{ConnConfig, SslMode};
-use dbm_core::result::{RedisValue, ResultSet};
+use rdbs_core::conn::{ConnConfig, SslMode};
+use rdbs_core::result::{RedisValue, ResultSet};
 use redis::Value;
 
 /// Build a `redis://[:password@]host:port[/db]` URL from connection config.
@@ -66,8 +66,8 @@ fn scalar_to_string(value: Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dbm_core::conn::{ConnConfig, SslMode};
-    use dbm_core::result::{RedisValue, ResultSet};
+    use rdbs_core::conn::{ConnConfig, SslMode};
+    use rdbs_core::result::{RedisValue, ResultSet};
     use redis::Value;
 
     fn cfg(pw: Option<&str>, db: Option<&str>) -> ConnConfig {

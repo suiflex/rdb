@@ -4,17 +4,17 @@
 //! async trait methods. Construction is the ONLY place the app names a concrete
 //! driver crate.
 
-use dbm_connstore::Engine;
-use dbm_core::conn::ConnConfig;
-use dbm_core::driver::Driver;
-use dbm_core::error::Result;
-use dbm_core::query::Query;
-use dbm_core::result::ResultSet;
-use dbm_core::schema::Schema;
-use dbm_driver_mongo::MongoDriver;
-use dbm_driver_mysql::MysqlDriver;
-use dbm_driver_postgres::PostgresDriver;
-use dbm_driver_redis::RedisDriver;
+use rdbs_connstore::Engine;
+use rdbs_core::conn::ConnConfig;
+use rdbs_core::driver::Driver;
+use rdbs_core::error::Result;
+use rdbs_core::query::Query;
+use rdbs_core::result::ResultSet;
+use rdbs_core::schema::Schema;
+use rdbs_driver_mongo::MongoDriver;
+use rdbs_driver_mysql::MysqlDriver;
+use rdbs_driver_postgres::PostgresDriver;
+use rdbs_driver_redis::RedisDriver;
 
 pub enum AnyDriver {
     Postgres(PostgresDriver),
@@ -77,7 +77,7 @@ impl AnyDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dbm_connstore::Engine;
+    use rdbs_connstore::Engine;
 
     #[test]
     fn engine_maps_to_human_label() {

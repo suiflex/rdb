@@ -1,13 +1,13 @@
 //! Real-engine test: spins a Redis container, then exercises the driver.
 //! Requires Docker. Ignored by default; run with
-//! `cargo test -p dbm-driver-redis -- --ignored`.
+//! `cargo test -p rdbs-driver-redis -- --ignored`.
 
-use dbm_core::conn::{ConnConfig, SslMode};
-use dbm_core::driver::Driver;
-use dbm_core::query::Query;
-use dbm_core::result::{RedisValue, ResultSet};
-use dbm_core::schema::ContainerKind;
-use dbm_driver_redis::RedisDriver;
+use rdbs_core::conn::{ConnConfig, SslMode};
+use rdbs_core::driver::Driver;
+use rdbs_core::query::Query;
+use rdbs_core::result::{RedisValue, ResultSet};
+use rdbs_core::schema::ContainerKind;
+use rdbs_driver_redis::RedisDriver;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::redis::Redis;
 
