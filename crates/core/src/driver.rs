@@ -19,8 +19,16 @@ pub trait Driver: Send + Sync {
     /// Cheap liveness check.
     async fn ping(&self) -> Result<()>;
 
-    /// Full schema tree (databases → containers → fields).
+    /// Full schema tree (databases → containers → fields). Engines with many
+    /// databases (e.g. Mongo) may return databases with empty `containers` and
+    /// fill them lazily via [`Driver::containers`] when a database is expanded.
     async fn schema(&self) -> Result<Schema>;
+
+    /// List the containers (tables/collections) of one database, fetched on
+    /// demand. Default is empty for engines that return everything in `schema`.
+    async fn containers(&self, _database: &str) -> Result<Vec<crate::schema::Container>> {
+        Ok(Vec::new())
+    }
 
     /// Run a query. Drivers handle the `Query` variant(s) they support and
     /// return `RdbsError::UnsupportedQuery` for the rest.

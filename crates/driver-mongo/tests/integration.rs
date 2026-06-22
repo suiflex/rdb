@@ -75,13 +75,18 @@ async fn connect_insert_find_aggregate_schema_against_real_mongo() {
         other => panic!("expected Documents, got {other:?}"),
     }
 
+    // schema() is lazy: databases only, no eager collection listing.
     let schema = driver.schema().await.unwrap();
-    let has_users = schema
-        .databases
-        .iter()
-        .flat_map(|d| &d.containers)
-        .any(|c| c.name == "users");
-    assert!(has_users, "schema should contain the users collection");
+    assert!(
+        schema.databases.iter().any(|d| d.name == "appdb"),
+        "schema should list the appdb database"
+    );
+    // Collections are fetched per database on demand.
+    let containers = driver.containers("appdb").await.unwrap();
+    assert!(
+        containers.iter().any(|c| c.name == "users"),
+        "appdb should contain the users collection"
+    );
 
     assert!(driver.query(&Query::Sql("SELECT 1".into())).await.is_err());
 
