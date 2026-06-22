@@ -36,4 +36,4 @@ jobs:
           shared-key: rdbs-driver-redis
       - run: cargo fmt -p rdbs-driver-redis --check
       - run: cargo clippy -p rdbs-driver-redis --all-targets -- -D warnings
-      - run: cargo test -p rdbs-driver-redis
+      - run: cargo test -p rdbs-driver-redis --lib

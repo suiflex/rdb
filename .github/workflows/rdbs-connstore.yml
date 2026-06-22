@@ -36,4 +36,4 @@ jobs:
           shared-key: rdbs-connstore
       - run: cargo fmt -p rdbs-connstore --check
       - run: cargo clippy -p rdbs-connstore --all-targets -- -D warnings
-      - run: cargo test -p rdbs-connstore
+      - run: cargo test -p rdbs-connstore --lib

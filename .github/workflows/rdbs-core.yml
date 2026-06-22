@@ -34,4 +34,4 @@ jobs:
           shared-key: rdbs-core
       - run: cargo fmt -p rdbs-core --check
       - run: cargo clippy -p rdbs-core --all-targets -- -D warnings
-      - run: cargo test -p rdbs-core
+      - run: cargo test -p rdbs-core --lib
