@@ -102,6 +102,7 @@ async fn non_sql_queries_are_unsupported() {
     let mongo = driver
         .query(&Query::Mongo(MongoOp {
             collection: "c".into(),
+            database: None,
             kind: MongoKind::Find(serde_json::json!({})),
         }))
         .await;

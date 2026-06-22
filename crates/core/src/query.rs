@@ -17,6 +17,8 @@ pub enum Query {
 #[derive(Debug, Clone)]
 pub struct MongoOp {
     pub collection: String,
+    /// Target database; `None` falls back to the connection's default database.
+    pub database: Option<String>,
     pub kind: MongoKind,
 }
 
@@ -44,6 +46,7 @@ mod tests {
     fn mongo_find_op_constructs() {
         let op = MongoOp {
             collection: "users".into(),
+            database: None,
             kind: MongoKind::Find(serde_json::json!({ "age": { "$gt": 18 } })),
         };
         assert_eq!(op.collection, "users");

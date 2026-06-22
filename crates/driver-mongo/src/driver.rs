@@ -35,10 +35,13 @@ fn build_uri(cfg: &ConnConfig) -> String {
 }
 
 impl MongoDriver {
-    fn collection(&self, name: &str) -> Collection<Document> {
+    /// Resolve a collection in the op's database, falling back to the
+    /// connection's default database when the op names none.
+    fn collection(&self, op: &MongoOp) -> Collection<Document> {
+        let db = op.database.as_deref().unwrap_or(&self.default_db);
         self.client
-            .database(&self.default_db)
-            .collection::<Document>(name)
+            .database(db)
+            .collection::<Document>(&op.collection)
     }
 }
 
@@ -97,7 +100,7 @@ impl Driver for MongoDriver {
             Query::Mongo(op) => op,
             _ => return Err(RdbsError::UnsupportedQuery),
         };
-        let coll = self.collection(&op.collection);
+        let coll = self.collection(op);
 
         match &op.kind {
             MongoKind::Find(filter) => {

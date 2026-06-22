@@ -40,6 +40,12 @@ fn parse_mongo(text: &str) -> Result<Query, String> {
         .filter(|s| !s.is_empty())
         .ok_or_else(|| "missing \"collection\"".to_string())?
         .to_string();
+    // Optional: target a specific database; omitted falls back to the default.
+    let database = v
+        .get("database")
+        .and_then(|d| d.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
     let op = v
         .get("op")
         .and_then(|o| o.as_str())
@@ -61,7 +67,11 @@ fn parse_mongo(text: &str) -> Result<Query, String> {
             ))
         }
     };
-    Ok(Query::Mongo(MongoOp { collection, kind }))
+    Ok(Query::Mongo(MongoOp {
+        collection,
+        database,
+        kind,
+    }))
 }
 
 #[cfg(test)]
@@ -101,6 +111,20 @@ mod tests {
                 assert_eq!(op.collection, "users");
                 assert!(matches!(op.kind, MongoKind::Find(_)));
             }
+            _ => panic!("expected Mongo"),
+        }
+    }
+
+    #[test]
+    fn mongo_parses_optional_database() {
+        let with = r#"{ "collection": "c", "database": "appdb", "op": "find", "body": {} }"#;
+        match parse_query(Engine::Mongo, with).unwrap() {
+            Query::Mongo(op) => assert_eq!(op.database.as_deref(), Some("appdb")),
+            _ => panic!("expected Mongo"),
+        }
+        let without = r#"{ "collection": "c", "op": "find", "body": {} }"#;
+        match parse_query(Engine::Mongo, without).unwrap() {
+            Query::Mongo(op) => assert_eq!(op.database, None),
             _ => panic!("expected Mongo"),
         }
     }

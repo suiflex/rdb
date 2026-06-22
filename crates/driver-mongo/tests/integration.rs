@@ -33,6 +33,7 @@ async fn connect_insert_find_aggregate_schema_against_real_mongo() {
         let inserted = driver
             .query(&Query::Mongo(MongoOp {
                 collection: "users".into(),
+                database: None,
                 kind: MongoKind::Insert(serde_json::json!({ "name": name, "age": age })),
             }))
             .await
@@ -43,6 +44,7 @@ async fn connect_insert_find_aggregate_schema_against_real_mongo() {
     let found = driver
         .query(&Query::Mongo(MongoOp {
             collection: "users".into(),
+            database: None,
             kind: MongoKind::Find(serde_json::json!({ "age": { "$gte": 18 } })),
         }))
         .await
@@ -58,6 +60,7 @@ async fn connect_insert_find_aggregate_schema_against_real_mongo() {
     let agg = driver
         .query(&Query::Mongo(MongoOp {
             collection: "users".into(),
+            database: None,
             kind: MongoKind::Aggregate(vec![
                 serde_json::json!({ "$group": { "_id": null, "total": { "$sum": 1 } } }),
             ]),
