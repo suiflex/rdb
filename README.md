@@ -30,7 +30,7 @@ A native, lightweight, cross-platform database manager built with Rust and Slint
 Cargo workspace (monorepo):
 
 ```
-storix/
+rdbs/
 ├── Cargo.toml                  # workspace root
 ├── app/                        # binary: Slint UI + event handlers
 │   ├── build.rs                # slint-build codegen
@@ -116,10 +116,10 @@ curl -fsSL https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install
 Optional:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install.sh | STORIX_VERSION=v0.1.0 INSTALL_DIR="$HOME/.local/bin" bash
+curl -fsSL https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install.sh | RDBS_VERSION=v0.1.0 INSTALL_DIR="$HOME/.local/bin" bash
 ```
 
-The script installs `storix` into `/usr/local/bin` when writable, otherwise it falls back to `~/.local/bin`.
+The script installs `rdbs` into `/usr/local/bin` when writable, otherwise it falls back to `~/.local/bin`.
 
 ## Build from source
 
@@ -144,22 +144,22 @@ sudo dnf install libxkbcommon-devel fontconfig-devel mesa-libGL-devel
 
 ```bash
 # Development
-cargo build -p storix
+cargo build -p rdbs
 
 # Optimized release (~smaller binary)
-cargo build --release -p storix
+cargo build --release -p rdbs
 
 # Run directly
-cargo run -p storix
+cargo run -p rdbs
 ```
 
-The release binary lands at `target/release/storix`.
+The release binary lands at `target/release/rdbs`.
 
 ## Usage
 
 ### Add a connection
 
-1. Launch Storix — connection picker opens.
+1. Launch RDBS — connection picker opens.
 2. Click **+** → fill in host, port, credentials, database.
 3. Or paste a DSN URL into the **Import URL** field — fields auto-fill.
 4. Click **Test** to verify, then **Save**.
@@ -187,7 +187,7 @@ Active development. MVP covers 4 engines; planned expansion to ~20 (SQLite, Clic
 
 | Crate | Description |
 |-------|-------------|
-| `storix` | Desktop binary (app/) |
+| `rdbs` | Desktop binary (app/) |
 | `rdbs-core` | `Driver` trait, `Query`, `ResultSet`, `Schema`, `RdbsError` |
 | `rdbs-connstore` | Saved connections — JSON on disk + OS keychain / AES-GCM file |
 | `rdbs-driver-postgres` | PostgreSQL driver via `tokio-postgres` |

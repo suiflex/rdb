@@ -1,10 +1,10 @@
 [package]
-name = "storix"
+name = "rdbs"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "storix"
+name = "rdbs"
 path = "src/main.rs"
 
 [dependencies]
