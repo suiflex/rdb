@@ -35,6 +35,11 @@ plus one per crate (`rdbs-core`, `rdbs-connstore`, `rdbs-driver-*`). Each has a
   `#[ignore]` (need a live DB).
 - The app job installs Slint system libs and runs `cargo build -p rdbs`.
 
+Releases are handled separately by `release-please.yml` (single workspace
+release on `develop`): conventional commits drive an auto-maintained release
+PR that bumps the version and root `CHANGELOG.md`; merging it tags `vX.Y.Z`
+and cuts a GitHub Release. The `app` package (`rdbs`) is the tracked version.
+
 ## Architecture
 
 - `app/` — Slint UI binary (main entry point)
