@@ -98,9 +98,17 @@ fn build_conn_items(
     rows
 }
 
-/// Top-level sidebar categories (TablePlus-style). The label is also the toggle
-/// key, so `on_toggle_schema_node` can tell a category click from a table click.
-const SIDEBAR_CATEGORIES: [&str; 3] = ["Tables", "Views", "Functions"];
+/// Top-level sidebar categories per engine (TablePlus-style). The label is also
+/// the toggle key, so `on_toggle_schema_node` can tell a category click from a
+/// table click. The first entry is the "primary" category that holds the
+/// engine's containers. ponytail: SQL keeps the Views/Functions placeholders.
+fn sidebar_categories(engine: Option<rdbs_connstore::Engine>) -> &'static [&'static str] {
+    match engine {
+        Some(rdbs_connstore::Engine::Mongo) => &["Collections"],
+        Some(rdbs_connstore::Engine::Redis) => &["Keys"],
+        _ => &["Tables", "Views", "Functions"],
+    }
+}
 
 /// Build the collapsible schema sidebar rows from the raw flat node list.
 ///
@@ -116,9 +124,12 @@ fn schema_display_rows(
     nodes: &[model::VmTreeNode],
     expanded_tables: &HashSet<String>,
     collapsed_cats: &HashSet<String>,
+    engine: Option<rdbs_connstore::Engine>,
 ) -> Vec<TreeNode> {
+    let categories = sidebar_categories(engine);
+    let primary = categories[0];
     let mut rows: Vec<TreeNode> = Vec::new();
-    for cat in SIDEBAR_CATEGORIES {
+    for &cat in categories {
         let cat_open = !collapsed_cats.contains(cat);
         rows.push(TreeNode {
             label: cat.into(),
@@ -126,7 +137,7 @@ fn schema_display_rows(
             kind: "category".into(),
             expanded: cat_open,
         });
-        if !cat_open || cat != "Tables" {
+        if !cat_open || cat != primary {
             continue;
         }
         // Walk the flat nodes: containers + (when expanded) their fields.
@@ -172,13 +183,14 @@ fn set_tab_titles(w: &MainWindow, count: usize) {
 
 /// Push a `GridModel` into the window's grid/json/status properties.
 fn apply_grid(w: &MainWindow, g: model::GridModel) {
+    // Documents carry both a flattened grid and the raw JSON; the UI toggles
+    // between them. Fall through to the grid push below so the table view works.
     if g.is_documents {
         w.set_is_documents(true);
-        w.set_doc_json(SharedString::from(g.json));
-        w.set_result_status(SharedString::default());
-        return;
+        w.set_doc_json(SharedString::from(g.json.clone()));
+    } else {
+        w.set_is_documents(false);
     }
-    w.set_is_documents(false);
     if !g.status.is_empty() {
         // Affected: no grid, just a status toast.
         w.set_grid_col_count(0);
@@ -440,17 +452,37 @@ fn main() -> Result<(), slint::PlatformError> {
                         let fields = model::to_structure_model(&schema);
                         // Stash raw nodes for later expand/collapse rebuilds, and
                         // render the initial view (categories open, fields hidden).
-                        let rows = schema_display_rows(&nodes, &HashSet::new(), &HashSet::new());
+                        let rows = schema_display_rows(
+                            &nodes,
+                            &HashSet::new(),
+                            &HashSet::new(),
+                            Some(engine),
+                        );
+                        // Real database/schema names from introspection; fall back
+                        // to "public" only when the driver exposed none.
+                        let mut schema_names: Vec<SharedString> = schema
+                            .databases
+                            .iter()
+                            .map(|d| SharedString::from(d.name.clone()))
+                            .collect();
+                        if schema_names.is_empty() {
+                            schema_names.push(SharedString::from("public"));
+                        }
+                        let schema_current = schema_names[0].clone();
+                        // SQL editor only makes sense for the SQL engines.
+                        let sql_capable = matches!(
+                            engine,
+                            rdbs_connstore::Engine::Postgres | rdbs_connstore::Engine::MySql
+                        );
                         *raw_nodes.lock().unwrap() = nodes;
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(w) = weak2.upgrade() {
                                 w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
-                                // Seed the pinned schema selector. TODO: list real
-                                // schemas once introspection exposes them.
-                                w.set_schema_name(SharedString::from("public"));
-                                w.set_schema_list(ModelRc::from(Rc::new(VecModel::from(vec![
-                                    SharedString::from("public"),
-                                ]))));
+                                w.set_sql_capable(sql_capable);
+                                w.set_schema_name(schema_current);
+                                w.set_schema_list(ModelRc::from(Rc::new(VecModel::from(
+                                    schema_names,
+                                ))));
                                 let sfields: Vec<StructField> = fields
                                     .into_iter()
                                     .map(|f| StructField {
@@ -610,14 +642,16 @@ fn main() -> Result<(), slint::PlatformError> {
         let raw_nodes = raw_nodes.clone();
         let expanded_tables = expanded_tables.clone();
         let collapsed_categories = collapsed_categories.clone();
+        let cur_engine = cur_engine.clone();
         window.on_toggle_schema_node(move |label| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            let engine = *cur_engine.borrow();
             let label = label.to_string();
             // A category header toggles its collapsed set (open by default); any
             // other label toggles a table's expanded-fields set.
-            if SIDEBAR_CATEGORIES.contains(&label.as_str()) {
+            if sidebar_categories(engine).contains(&label.as_str()) {
                 let mut c = collapsed_categories.borrow_mut();
                 if !c.remove(&label) {
                     c.insert(label);
@@ -633,6 +667,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 &nodes,
                 &expanded_tables.borrow(),
                 &collapsed_categories.borrow(),
+                engine,
             );
             w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
         });
