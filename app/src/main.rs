@@ -98,9 +98,17 @@ fn build_conn_items(
     rows
 }
 
-/// Top-level sidebar categories (TablePlus-style). The label is also the toggle
-/// key, so `on_toggle_schema_node` can tell a category click from a table click.
-const SIDEBAR_CATEGORIES: [&str; 3] = ["Tables", "Views", "Functions"];
+/// Top-level sidebar categories per engine (TablePlus-style). The label is also
+/// the toggle key, so `on_toggle_schema_node` can tell a category click from a
+/// table click. The first entry is the "primary" category that holds the
+/// engine's containers. ponytail: SQL keeps the Views/Functions placeholders.
+fn sidebar_categories(engine: Option<rdbs_connstore::Engine>) -> &'static [&'static str] {
+    match engine {
+        Some(rdbs_connstore::Engine::Mongo) => &["Collections"],
+        Some(rdbs_connstore::Engine::Redis) => &["Keys"],
+        _ => &["Tables", "Views", "Functions"],
+    }
+}
 
 /// Build the collapsible schema sidebar rows from the raw flat node list.
 ///
@@ -116,17 +124,28 @@ fn schema_display_rows(
     nodes: &[model::VmTreeNode],
     expanded_tables: &HashSet<String>,
     collapsed_cats: &HashSet<String>,
+    engine: Option<rdbs_connstore::Engine>,
 ) -> Vec<TreeNode> {
+    // Mongo is database→collection: render each database as a collapsible header
+    // and nest only its own collections, so system DBs never mix with the app's.
+    // `expanded_tables` is the set of OPEN databases (default closed).
+    if engine == Some(rdbs_connstore::Engine::Mongo) {
+        return mongo_display_rows(nodes, expanded_tables);
+    }
+
+    let categories = sidebar_categories(engine);
+    let primary = categories[0];
     let mut rows: Vec<TreeNode> = Vec::new();
-    for cat in SIDEBAR_CATEGORIES {
+    for &cat in categories {
         let cat_open = !collapsed_cats.contains(cat);
         rows.push(TreeNode {
             label: cat.into(),
             depth: 0,
             kind: "category".into(),
             expanded: cat_open,
+            db: SharedString::default(),
         });
-        if !cat_open || cat != "Tables" {
+        if !cat_open || cat != primary {
             continue;
         }
         // Walk the flat nodes: containers + (when expanded) their fields.
@@ -142,6 +161,7 @@ fn schema_display_rows(
                     depth: 2,
                     kind: "field".into(),
                     expanded: false,
+                    db: SharedString::default(),
                 });
             } else if is_container {
                 show_fields = expanded_tables.contains(&n.label);
@@ -150,11 +170,50 @@ fn schema_display_rows(
                     depth: 1,
                     kind: n.kind.clone().into(),
                     expanded: show_fields,
+                    db: SharedString::default(),
                 });
             } else {
                 // database row: categories replace it; reset field visibility
                 show_fields = false;
             }
+        }
+    }
+    rows
+}
+
+/// Build database→collection rows for Mongo. Each database is a depth-0
+/// collapsible header (open when its name is in `expanded_dbs`, default closed);
+/// its collections are depth-1 rows tagged with the owning database.
+fn mongo_display_rows(
+    nodes: &[model::VmTreeNode],
+    expanded_dbs: &HashSet<String>,
+) -> Vec<TreeNode> {
+    let mut rows: Vec<TreeNode> = Vec::new();
+    let mut current_db = String::new();
+    let mut db_open = false;
+    for n in nodes {
+        match n.kind.as_str() {
+            "database" => {
+                current_db = n.label.clone();
+                db_open = expanded_dbs.contains(&current_db);
+                rows.push(TreeNode {
+                    label: n.label.clone().into(),
+                    depth: 0,
+                    kind: "database".into(),
+                    expanded: db_open,
+                    db: current_db.clone().into(),
+                });
+            }
+            "collection" | "table" | "keyspace" if db_open => {
+                rows.push(TreeNode {
+                    label: n.label.clone().into(),
+                    depth: 1,
+                    kind: "collection".into(),
+                    expanded: false,
+                    db: current_db.clone().into(),
+                });
+            }
+            _ => {}
         }
     }
     rows
@@ -172,13 +231,14 @@ fn set_tab_titles(w: &MainWindow, count: usize) {
 
 /// Push a `GridModel` into the window's grid/json/status properties.
 fn apply_grid(w: &MainWindow, g: model::GridModel) {
+    // Documents carry both a flattened grid and the raw JSON; the UI toggles
+    // between them. Fall through to the grid push below so the table view works.
     if g.is_documents {
         w.set_is_documents(true);
-        w.set_doc_json(SharedString::from(g.json));
-        w.set_result_status(SharedString::default());
-        return;
+        w.set_doc_json(SharedString::from(g.json.clone()));
+    } else {
+        w.set_is_documents(false);
     }
-    w.set_is_documents(false);
     if !g.status.is_empty() {
         // Affected: no grid, just a status toast.
         w.set_grid_col_count(0);
@@ -245,7 +305,14 @@ fn main() -> Result<(), slint::PlatformError> {
     // connect task can fill it) + the set of expanded table labels.
     let raw_nodes: Arc<std::sync::Mutex<Vec<model::VmTreeNode>>> =
         Arc::new(std::sync::Mutex::new(Vec::new()));
-    let expanded_tables: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
+    // Expanded sidebar nodes. For Mongo this is the set of OPEN databases
+    // (default closed → collections load lazily on expand). Arc<Mutex> so the
+    // lazy-load task can read it off the UI thread.
+    let expanded_tables: Arc<std::sync::Mutex<HashSet<String>>> =
+        Arc::new(std::sync::Mutex::new(HashSet::new()));
+    // Mongo databases whose collections have already been fetched.
+    let loaded_dbs: Arc<std::sync::Mutex<HashSet<String>>> =
+        Arc::new(std::sync::Mutex::new(HashSet::new()));
     // Sidebar category headers the user has collapsed (Tables/Views/Functions).
     let collapsed_categories: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
     // Engine of the live connection, kept on the UI thread so table clicks can
@@ -329,6 +396,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let rt = rt.clone();
         let cur_engine = cur_engine.clone();
         let expanded_tables = expanded_tables.clone();
+        let loaded_dbs = loaded_dbs.clone();
         let collapsed_categories = collapsed_categories.clone();
         let raw_nodes = raw_nodes.clone();
         window.on_disconnect(move || {
@@ -343,7 +411,8 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_schema_tree(ModelRc::from(Rc::new(VecModel::<TreeNode>::default())));
             w.set_structure_columns(ModelRc::from(Rc::new(VecModel::<StructField>::default())));
             *cur_engine.borrow_mut() = None;
-            expanded_tables.borrow_mut().clear();
+            expanded_tables.lock().unwrap().clear();
+            loaded_dbs.lock().unwrap().clear();
             collapsed_categories.borrow_mut().clear();
             raw_nodes.lock().unwrap().clear();
             let current = current.clone();
@@ -392,6 +461,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let current = current.clone();
         let raw_nodes = raw_nodes.clone();
         let expanded_tables = expanded_tables.clone();
+        let loaded_dbs = loaded_dbs.clone();
         let collapsed_categories = collapsed_categories.clone();
         let cur_engine = cur_engine.clone();
         window.on_connect_clicked(move |idx| {
@@ -417,7 +487,8 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             // Fresh connection: nothing browsed, nothing expanded.
             *cur_engine.borrow_mut() = Some(sc.engine);
-            expanded_tables.borrow_mut().clear();
+            expanded_tables.lock().unwrap().clear();
+            loaded_dbs.lock().unwrap().clear();
             collapsed_categories.borrow_mut().clear();
             let weak2 = weak.clone();
             let store_driver = current.clone();
@@ -440,17 +511,37 @@ fn main() -> Result<(), slint::PlatformError> {
                         let fields = model::to_structure_model(&schema);
                         // Stash raw nodes for later expand/collapse rebuilds, and
                         // render the initial view (categories open, fields hidden).
-                        let rows = schema_display_rows(&nodes, &HashSet::new(), &HashSet::new());
+                        let rows = schema_display_rows(
+                            &nodes,
+                            &HashSet::new(),
+                            &HashSet::new(),
+                            Some(engine),
+                        );
+                        // Real database/schema names from introspection; fall back
+                        // to "public" only when the driver exposed none.
+                        let mut schema_names: Vec<SharedString> = schema
+                            .databases
+                            .iter()
+                            .map(|d| SharedString::from(d.name.clone()))
+                            .collect();
+                        if schema_names.is_empty() {
+                            schema_names.push(SharedString::from("public"));
+                        }
+                        let schema_current = schema_names[0].clone();
+                        // SQL editor only makes sense for the SQL engines.
+                        let sql_capable = matches!(
+                            engine,
+                            rdbs_connstore::Engine::Postgres | rdbs_connstore::Engine::MySql
+                        );
                         *raw_nodes.lock().unwrap() = nodes;
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(w) = weak2.upgrade() {
                                 w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
-                                // Seed the pinned schema selector. TODO: list real
-                                // schemas once introspection exposes them.
-                                w.set_schema_name(SharedString::from("public"));
-                                w.set_schema_list(ModelRc::from(Rc::new(VecModel::from(vec![
-                                    SharedString::from("public"),
-                                ]))));
+                                w.set_sql_capable(sql_capable);
+                                w.set_schema_name(schema_current);
+                                w.set_schema_list(ModelRc::from(Rc::new(VecModel::from(
+                                    schema_names,
+                                ))));
                                 let sfields: Vec<StructField> = fields
                                     .into_iter()
                                     .map(|f| StructField {
@@ -574,11 +665,12 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let cur_engine = cur_engine.clone();
         let run_sql = run_sql.clone();
-        window.on_open_table(move |label| {
+        window.on_open_table(move |db, label| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
             let label = label.to_string();
+            let db = db.to_string();
             let text = match *cur_engine.borrow() {
                 Some(rdbs_connstore::Engine::Postgres) => {
                     format!("SELECT * FROM \"{label}\" LIMIT 300")
@@ -587,7 +679,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     format!("SELECT * FROM `{label}` LIMIT 300")
                 }
                 Some(rdbs_connstore::Engine::Mongo) => {
-                    format!("{{\"collection\":\"{label}\",\"op\":\"find\",\"body\":{{}}}}")
+                    format!(
+                        "{{\"collection\":\"{label}\",\"database\":\"{db}\",\"op\":\"find\",\"body\":{{}}}}"
+                    )
                 }
                 Some(rdbs_connstore::Engine::Redis) => {
                     w.set_result_status(SharedString::from(
@@ -604,35 +698,115 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // ----- toggle a schema table's column rows (expand/collapse) -----
+    // ----- toggle a schema header (expand/collapse) -----
     {
         let weak = window.as_weak();
         let raw_nodes = raw_nodes.clone();
         let expanded_tables = expanded_tables.clone();
+        let loaded_dbs = loaded_dbs.clone();
         let collapsed_categories = collapsed_categories.clone();
+        let cur_engine = cur_engine.clone();
+        let current = current.clone();
+        let rt = rt.clone();
         window.on_toggle_schema_node(move |label| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            let engine = *cur_engine.borrow();
             let label = label.to_string();
-            // A category header toggles its collapsed set (open by default); any
-            // other label toggles a table's expanded-fields set.
-            if SIDEBAR_CATEGORIES.contains(&label.as_str()) {
+
+            // Mongo: database headers open an opt-in set (default closed) and load
+            // their collections lazily the first time they are expanded.
+            if engine == Some(rdbs_connstore::Engine::Mongo) {
+                let now_open = {
+                    let mut e = expanded_tables.lock().unwrap();
+                    if e.remove(&label) {
+                        false
+                    } else {
+                        e.insert(label.clone());
+                        true
+                    }
+                };
+                // Fetch this database's collections once, on first open.
+                let need_fetch = now_open && {
+                    let mut l = loaded_dbs.lock().unwrap();
+                    if l.contains(&label) {
+                        false
+                    } else {
+                        l.insert(label.clone());
+                        true
+                    }
+                };
+                if need_fetch {
+                    let driver = current.clone();
+                    let raw_nodes = raw_nodes.clone();
+                    let expanded_tables = expanded_tables.clone();
+                    let weak2 = weak.clone();
+                    let db = label.clone();
+                    rt.spawn(async move {
+                        let containers = {
+                            let guard = driver.lock().await;
+                            match &*guard {
+                                Some((_, drv)) => drv.containers(&db).await.unwrap_or_default(),
+                                None => return,
+                            }
+                        };
+                        let rows = {
+                            let mut nodes = raw_nodes.lock().unwrap();
+                            if let Some(pos) = nodes
+                                .iter()
+                                .position(|n| n.kind == "database" && n.label == db)
+                            {
+                                for (k, c) in containers.into_iter().enumerate() {
+                                    nodes.insert(
+                                        pos + 1 + k,
+                                        model::VmTreeNode {
+                                            label: c.name,
+                                            kind: "collection".into(),
+                                        },
+                                    );
+                                }
+                            }
+                            schema_display_rows(
+                                &nodes,
+                                &expanded_tables.lock().unwrap(),
+                                &HashSet::new(),
+                                Some(rdbs_connstore::Engine::Mongo),
+                            )
+                        };
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = weak2.upgrade() {
+                                w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
+                            }
+                        });
+                    });
+                    return;
+                }
+                // No fetch needed (collapse, or already loaded): rebuild now.
+                let nodes = raw_nodes.lock().unwrap();
+                let rows = schema_display_rows(
+                    &nodes,
+                    &expanded_tables.lock().unwrap(),
+                    &HashSet::new(),
+                    engine,
+                );
+                w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
+                return;
+            }
+
+            // SQL/Redis: category headers collapse-toggle (open by default).
+            {
                 let mut c = collapsed_categories.borrow_mut();
                 if !c.remove(&label) {
                     c.insert(label);
-                }
-            } else {
-                let mut e = expanded_tables.borrow_mut();
-                if !e.remove(&label) {
-                    e.insert(label);
                 }
             }
             let nodes = raw_nodes.lock().unwrap();
             let rows = schema_display_rows(
                 &nodes,
-                &expanded_tables.borrow(),
+                &expanded_tables.lock().unwrap(),
                 &collapsed_categories.borrow(),
+                engine,
             );
             w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
         });
@@ -969,6 +1143,10 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         window.on_form_cancel(move || {
             if let Some(w) = weak.upgrade() {
+                // Clear any in-flight test state so the form is never stuck on
+                // "Testing connection…" when reopened.
+                w.set_test_busy(false);
+                w.set_test_result(SharedString::default());
                 w.set_form_open(false);
             }
         });
@@ -1035,12 +1213,21 @@ fn main() -> Result<(), slint::PlatformError> {
 
             let weak2 = weak.clone();
             rt.spawn(async move {
-                let result = async {
+                let attempt = async {
                     let driver = AnyDriver::connect(engine, &cfg).await?;
                     driver.ping().await?;
                     Ok::<_, rdbs_core::error::RdbsError>(())
-                }
-                .await;
+                };
+                // ponytail: timeout-bounded, no hard abort; add CancellationToken
+                // if a true cancel button is ever needed. Bounds a hung connect so
+                // "Testing connection…" always resolves.
+                let result =
+                    match tokio::time::timeout(std::time::Duration::from_secs(8), attempt).await {
+                        Ok(r) => r,
+                        Err(_) => Err(rdbs_core::error::RdbsError::Connection(
+                            "connection timed out".into(),
+                        )),
+                    };
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
                         w.set_test_busy(false);

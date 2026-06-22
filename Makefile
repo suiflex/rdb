@@ -7,7 +7,9 @@ BE_FLAGS = $(addprefix -p ,$(BE_PKGS))
 
 .DEFAULT_GOAL := help
 
-.PHONY: help be-build be-test be-check fe-build fe-run fmt fmt-check lint test test-it build all clean
+.PHONY: help be-build be-test be-check fe-build fe-run fe-build-run fe-show fmt fmt-check lint test test-it build all clean
+
+FE_BIN = target/debug/$(FE_PKG)
 
 help: ## List available targets
 	@awk 'BEGIN{FS=":.*## "} /^[a-z][a-zA-Z0-9_-]*:.*## /{printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -26,6 +28,14 @@ fe-build: ## Build the rdbs UI binary
 
 fe-run: ## Run the rdbs UI binary
 	cargo run -p $(FE_PKG)
+
+fe-build-run: ## Build the rdbs UI then launch it (GUI shows after build)
+	cargo build -p $(FE_PKG)
+	./$(FE_BIN)
+
+fe-show: ## Launch the rdbs UI; build it first only if missing
+	@test -x $(FE_BIN) || cargo build -p $(FE_PKG)
+	./$(FE_BIN)
 
 fmt: ## Format the whole workspace
 	cargo fmt --all

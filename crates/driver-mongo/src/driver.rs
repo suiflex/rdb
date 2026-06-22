@@ -35,10 +35,13 @@ fn build_uri(cfg: &ConnConfig) -> String {
 }
 
 impl MongoDriver {
-    fn collection(&self, name: &str) -> Collection<Document> {
+    /// Resolve a collection in the op's database, falling back to the
+    /// connection's default database when the op names none.
+    fn collection(&self, op: &MongoOp) -> Collection<Document> {
+        let db = op.database.as_deref().unwrap_or(&self.default_db);
         self.client
-            .database(&self.default_db)
-            .collection::<Document>(name)
+            .database(db)
+            .collection::<Document>(&op.collection)
     }
 }
 
@@ -61,35 +64,45 @@ impl Driver for MongoDriver {
         Ok(())
     }
 
+    /// Lazy: list databases only (cheap), with empty containers. Collections are
+    /// fetched per database via `containers()` when the user expands it, so a
+    /// server with many large databases doesn't stall on connect.
     async fn schema(&self) -> Result<Schema> {
         let db_names = self
             .client
             .list_database_names()
             .await
             .map_err(|e| RdbsError::Schema(e.to_string()))?;
-
-        let mut databases = Vec::new();
-        for db_name in db_names {
-            let db = self.client.database(&db_name);
-            let coll_names = db
-                .list_collection_names()
-                .await
-                .map_err(|e| RdbsError::Schema(e.to_string()))?;
-            let containers = coll_names
-                .into_iter()
-                .map(|name| Container {
-                    name,
-                    kind: ContainerKind::Collection,
-                    // Mongo is schemaless: no static field list to report.
-                    fields: Vec::new(),
-                })
-                .collect();
-            databases.push(Database {
-                name: db_name,
-                containers,
-            });
-        }
+        let databases = db_names
+            .into_iter()
+            .map(|name| Database {
+                name,
+                containers: Vec::new(),
+            })
+            .collect();
         Ok(Schema { databases })
+    }
+
+    /// Collections of one database, capped so a database with thousands of
+    /// collections stays light. ponytail: fixed cap, add paging if it matters.
+    async fn containers(&self, database: &str) -> Result<Vec<Container>> {
+        const MAX_COLLECTIONS: usize = 20;
+        let coll_names = self
+            .client
+            .database(database)
+            .list_collection_names()
+            .await
+            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+        Ok(coll_names
+            .into_iter()
+            .take(MAX_COLLECTIONS)
+            .map(|name| Container {
+                name,
+                kind: ContainerKind::Collection,
+                // Mongo is schemaless: no static field list to report.
+                fields: Vec::new(),
+            })
+            .collect())
     }
 
     async fn query(&self, q: &Query) -> Result<ResultSet> {
@@ -97,7 +110,7 @@ impl Driver for MongoDriver {
             Query::Mongo(op) => op,
             _ => return Err(RdbsError::UnsupportedQuery),
         };
-        let coll = self.collection(&op.collection);
+        let coll = self.collection(op);
 
         match &op.kind {
             MongoKind::Find(filter) => {

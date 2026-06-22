@@ -11,6 +11,9 @@ export component WorkArea inherits Rectangle {
     in property <[length]> col-widths;     // per-column pixel widths (drag-resizable)
     in property <string> doc-json;
     in property <bool> is-documents;
+    // SQL editor only for SQL engines; documents can switch grid <-> raw JSON.
+    in property <bool> sql-capable: true;
+    in-out property <bool> doc-as-json: false;
     in property <string> result-status;    // Affected toast / errors
     in property <int> selected-row: 0;
     // ----- Data / Structure toggle (Feature B) -----
@@ -41,8 +44,8 @@ export component WorkArea inherits Rectangle {
         // ----- top toolbar: SQL toggle + active table / status -----
         HorizontalLayout {
             spacing: Theme.sp2;
-            // SQL editor toggle pill
-            Rectangle {
+            // SQL editor toggle pill (SQL engines only)
+            if root.sql-capable: Rectangle {
                 width: 66px;
                 height: Theme.row-height;
                 border-radius: Theme.radius-control;
@@ -219,6 +222,46 @@ export component WorkArea inherits Rectangle {
                 }
             }
             Rectangle { width: Theme.sp2; } // gap
+            // Table | JSON toggle — documents only (Feature: Mongo preview)
+            if root.is-documents && !root.show-structure: Rectangle {
+                width: 132px;
+                height: Theme.row-height;
+                border-radius: Theme.radius-control;
+                background: Theme.surface;
+                border-width: 1px;
+                border-color: Theme.hairline;
+                HorizontalLayout {
+                    padding: 2px;
+                    spacing: 2px;
+                    Rectangle {
+                        border-radius: Theme.radius-control - 1px;
+                        background: !root.doc-as-json ? Theme.accent-soft : transparent;
+                        table-ta := TouchArea { clicked => { root.doc-as-json = false; } }
+                        Text {
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            text: "Table";
+                            color: !root.doc-as-json ? Theme.accent : Theme.text-dim;
+                            font-size: Theme.font-label;
+                            font-weight: !root.doc-as-json ? 600 : 400;
+                        }
+                    }
+                    Rectangle {
+                        border-radius: Theme.radius-control - 1px;
+                        background: root.doc-as-json ? Theme.accent-soft : transparent;
+                        json-ta := TouchArea { clicked => { root.doc-as-json = true; } }
+                        Text {
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            text: "JSON";
+                            color: root.doc-as-json ? Theme.accent : Theme.text-dim;
+                            font-size: Theme.font-label;
+                            font-weight: root.doc-as-json ? 600 : 400;
+                        }
+                    }
+                }
+            }
+            if root.is-documents: Rectangle { width: Theme.sp2; } // gap
             // client-side filter (only meaningful for Data view); flexes with width
             AppIcon {
                 name: "filter";
@@ -290,18 +333,24 @@ export component WorkArea inherits Rectangle {
                 }
             }
 
-            // documents (JSON) view
-            if !root.show-structure && root.is-documents: ScrollView {
-                Text {
-                    text: root.doc-json;
-                    color: Theme.text;
-                    font-family: Theme.mono-family;
-                    font-size: Theme.font-mono;
+            // documents raw-JSON view (toggled on); pinned top-left, full width
+            if !root.show-structure && root.is-documents && root.doc-as-json: ScrollView {
+                VerticalLayout {
+                    alignment: start;
+                    padding: Theme.sp2;
+                    Text {
+                        text: root.doc-json;
+                        color: Theme.text;
+                        horizontal-alignment: left;
+                        wrap: word-wrap;
+                        font-family: Theme.mono-family;
+                        font-size: Theme.font-mono;
+                    }
                 }
             }
 
-            // tabular / key-value grid
-            if !root.show-structure && !root.is-documents: ScrollView {
+            // tabular / key-value / flattened-document grid
+            if !root.show-structure && !(root.is-documents && root.doc-as-json): ScrollView {
                 VerticalLayout {
                     // fill ScrollView width when few columns; grow past it (scroll) when many
                     width: max(self.preferred-width, parent.visible-width);

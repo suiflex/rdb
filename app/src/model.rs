@@ -86,6 +86,60 @@ fn redis_cell(v: &RedisValue) -> VmCell {
     }
 }
 
+/// Flatten Mongo documents into a tabular grid: columns are the ordered union
+/// of top-level keys (`_id` first), cells are the matching values. A missing key
+/// is a null cell; a nested object/array is rendered as compact JSON so the row
+/// still reads as one line. The raw pretty JSON is kept separately for the
+/// JSON-view toggle. ponytail: top-level keys only, no deep column expansion.
+fn flatten_documents(docs: &[serde_json::Value]) -> (Vec<VmColumn>, Vec<Vec<VmCell>>) {
+    let mut keys: Vec<String> = Vec::new();
+    for doc in docs {
+        if let Some(obj) = doc.as_object() {
+            for k in obj.keys() {
+                if !keys.iter().any(|e| e == k) {
+                    keys.push(k.clone());
+                }
+            }
+        }
+    }
+    // _id reads first, like every Mongo client.
+    if let Some(pos) = keys.iter().position(|k| k == "_id") {
+        keys.swap(0, pos);
+    }
+
+    let columns = keys
+        .iter()
+        .map(|k| VmColumn {
+            name: k.clone(),
+            type_name: String::new(),
+        })
+        .collect();
+
+    let rows = docs
+        .iter()
+        .map(|doc| {
+            keys.iter()
+                .map(|k| match doc.get(k) {
+                    None | Some(serde_json::Value::Null) => VmCell {
+                        text: String::new(),
+                        is_null: true,
+                    },
+                    Some(serde_json::Value::String(s)) => VmCell {
+                        text: s.clone(),
+                        is_null: false,
+                    },
+                    Some(v) => VmCell {
+                        text: v.to_string(),
+                        is_null: false,
+                    },
+                })
+                .collect()
+        })
+        .collect();
+
+    (columns, rows)
+}
+
 /// Convert any ResultSet into the grid view-model.
 pub fn to_grid_model(rs: &ResultSet) -> GridModel {
     match rs {
@@ -137,7 +191,10 @@ pub fn to_grid_model(rs: &ResultSet) -> GridModel {
         },
         ResultSet::Documents(docs) => {
             let json = serde_json::to_string_pretty(docs).unwrap_or_else(|_| "[]".into());
+            let (columns, rows) = flatten_documents(docs);
             GridModel {
+                columns,
+                rows,
                 json,
                 is_documents: true,
                 ..Default::default()
@@ -233,6 +290,25 @@ mod tests {
         let grid = to_grid_model(&rs);
         assert!(grid.json.contains("\"a\""));
         assert!(grid.is_documents);
+    }
+
+    #[test]
+    fn documents_flatten_to_grid_with_id_first() {
+        let rs = ResultSet::Documents(vec![
+            serde_json::json!({"_id": "x", "name": "ada", "tags": [1, 2]}),
+            serde_json::json!({"name": "lin", "age": 30}),
+        ]);
+        let grid = to_grid_model(&rs);
+        // union of keys, _id first
+        let names: Vec<&str> = grid.columns.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names[0], "_id");
+        assert!(names.contains(&"name") && names.contains(&"tags") && names.contains(&"age"));
+        // row 0: _id plain string, nested array as compact JSON
+        assert_eq!(grid.rows[0][0].text, "x");
+        let tags_idx = names.iter().position(|n| *n == "tags").unwrap();
+        assert_eq!(grid.rows[0][tags_idx].text, "[1,2]");
+        // row 1 missing _id -> null cell
+        assert!(grid.rows[1][0].is_null);
     }
 
     #[test]

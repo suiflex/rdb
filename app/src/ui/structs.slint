@@ -3,7 +3,9 @@
 // them without an import cycle.
 export struct GridColumn { name: string, type-name: string }
 export struct GridCell { text: string, is-null: bool }
-export struct TreeNode { label: string, depth: int, kind: string, expanded: bool }
+// `db` tags the owning database for container rows (Mongo db→collection tree);
+// empty for SQL/Redis where the category path is used instead.
+export struct TreeNode { label: string, depth: int, kind: string, expanded: bool, db: string }
 // A sidebar row is either a group header (is-header=true, name holds the group
 // label, expanded holds its toggle state) or a connection. `index` is the
 // connection's index in the underlying store (-1 for headers) so connect/edit

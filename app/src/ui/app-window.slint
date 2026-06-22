@@ -37,7 +37,7 @@ export component MainWindow inherits Window {
     in-out property <string> schema-name: "public";
     callback connect-clicked(int);
     callback toggle-group(string);
-    callback open-table(string);
+    callback open-table(string, string);   // (database, container)
     callback toggle-schema-node(string);
     callback select-schema(string);
 
@@ -54,6 +54,7 @@ export component MainWindow inherits Window {
     in property <int> grid-col-count;
     in property <string> doc-json;
     in property <bool> is-documents;
+    in property <bool> sql-capable: true;
     in property <string> result-status;
     in-out property <int> selected-row: 0;
     in-out property <bool> show-structure: false;
@@ -230,8 +231,8 @@ export component MainWindow inherits Window {
                     disconnect() => {
                         root.disconnect();
                     }
-                    open-table(t) => {
-                        root.open-table(t);
+                    open-table(db, t) => {
+                        root.open-table(db, t);
                     }
                     toggle-node(t) => {
                         root.toggle-schema-node(t);
@@ -364,6 +365,7 @@ export component MainWindow inherits Window {
                         col-widths: root.grid-col-widths;
                         doc-json: root.doc-json;
                         is-documents: root.is-documents;
+                        sql-capable: root.sql-capable;
                         result-status: root.result-status;
                         selected-row: root.selected-row;
                         show-structure <=> root.show-structure;

@@ -10,7 +10,7 @@ use rdbs_core::driver::Driver;
 use rdbs_core::error::Result;
 use rdbs_core::query::Query;
 use rdbs_core::result::ResultSet;
-use rdbs_core::schema::Schema;
+use rdbs_core::schema::{Container, Schema};
 use rdbs_driver_mongo::MongoDriver;
 use rdbs_driver_mysql::MysqlDriver;
 use rdbs_driver_postgres::PostgresDriver;
@@ -61,6 +61,15 @@ impl AnyDriver {
             AnyDriver::Mysql(d) => d.schema().await,
             AnyDriver::Redis(d) => d.schema().await,
             AnyDriver::Mongo(d) => d.schema().await,
+        }
+    }
+
+    pub async fn containers(&self, database: &str) -> Result<Vec<Container>> {
+        match self {
+            AnyDriver::Postgres(d) => d.containers(database).await,
+            AnyDriver::Mysql(d) => d.containers(database).await,
+            AnyDriver::Redis(d) => d.containers(database).await,
+            AnyDriver::Mongo(d) => d.containers(database).await,
         }
     }
 

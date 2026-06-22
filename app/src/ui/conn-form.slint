@@ -44,7 +44,12 @@ export component ConnForm inherits Rectangle {
 
     if root.open: Rectangle {
         width: 460px;
-        height: 540px;
+        // Hug the content height: a bare Rectangle fills its parent (the full
+        // overlay), which stretched every input. Binding to the layout's
+        // preferred height sizes the card to its rows — buttons stay inside and
+        // inputs keep their natural height.
+        // ponytail: wrap vbox in a ScrollView only if content ever exceeds the window.
+        height: vbox.preferred-height;
         x: (parent.width - self.width) / 2;
         y: 60px;
         border-radius: Theme.radius-panel;
@@ -54,7 +59,7 @@ export component ConnForm inherits Rectangle {
         drop-shadow-blur: 24px;
         drop-shadow-color: #00000088;
 
-        VerticalLayout {
+        vbox := VerticalLayout {
             padding: Theme.sp4;
             spacing: Theme.sp2;
 
@@ -98,7 +103,8 @@ export component ConnForm inherits Rectangle {
                 }
             }
 
-            HorizontalLayout {
+            // Redis has no user/database concept — hide those for it.
+            if root.f-engine != "Redis": HorizontalLayout {
                 spacing: Theme.sp2;
                 VerticalLayout {
                     Text { text: "User"; color: Theme.text-dim; font-size: Theme.font-label; }
@@ -113,8 +119,11 @@ export component ConnForm inherits Rectangle {
             Text { text: "Password"; color: Theme.text-dim; font-size: Theme.font-label; }
             LineEdit { text <=> root.f-password; input-type: password; }
 
-            Text { text: "SSL"; color: Theme.text-dim; font-size: Theme.font-label; }
-            ComboBox {
+            // SSL mode only applies to the SQL engines.
+            if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL": Text {
+                text: "SSL"; color: Theme.text-dim; font-size: Theme.font-label;
+            }
+            if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL": ComboBox {
                 model: ["Disable", "Prefer", "Require"];
                 current-value <=> root.f-sslmode;
             }
