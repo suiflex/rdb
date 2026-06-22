@@ -4,8 +4,7 @@
   "include-component-in-tag": false,
   "packages": {
     "app": {
-      "package-name": "rdbs",
-      "changelog-path": "../CHANGELOG.md"
+      "package-name": "rdbs"
     }
   }
 }
