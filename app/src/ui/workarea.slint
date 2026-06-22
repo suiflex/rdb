@@ -333,17 +333,19 @@ export component WorkArea inherits Rectangle {
                 }
             }
 
-            // documents raw-JSON view (toggled on); full width, left-aligned
+            // documents raw-JSON view (toggled on); pinned top-left, full width
             if !root.show-structure && root.is-documents && root.doc-as-json: ScrollView {
-                Text {
-                    width: parent.visible-width - 2 * Theme.sp2;
-                    x: Theme.sp2;
-                    text: root.doc-json;
-                    color: Theme.text;
-                    horizontal-alignment: left;
-                    wrap: word-wrap;
-                    font-family: Theme.mono-family;
-                    font-size: Theme.font-mono;
+                VerticalLayout {
+                    alignment: start;
+                    padding: Theme.sp2;
+                    Text {
+                        text: root.doc-json;
+                        color: Theme.text;
+                        horizontal-alignment: left;
+                        wrap: word-wrap;
+                        font-family: Theme.mono-family;
+                        font-size: Theme.font-mono;
+                    }
                 }
             }
 
