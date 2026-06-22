@@ -25,7 +25,11 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -36,7 +40,9 @@ jobs:
           shared-key: rdbs-app
       # ponytail: minimal system libs for Slint winit+femtovg build on Linux;
       # add more here if the build errors out demanding another lib.
-      - name: Install Slint system deps
+      # macOS uses system frameworks, so no install step is needed there.
+      - name: Install Slint system deps (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
