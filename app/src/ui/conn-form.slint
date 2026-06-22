@@ -44,7 +44,9 @@ export component ConnForm inherits Rectangle {
 
     if root.open: Rectangle {
         width: 460px;
-        height: 540px;
+        // No fixed height: the card sizes to its VerticalLayout so rows never
+        // overflow past the card edge (was a fixed 540px that pushed the button
+        // row outside the card).
         x: (parent.width - self.width) / 2;
         y: 60px;
         border-radius: Theme.radius-panel;
@@ -98,7 +100,8 @@ export component ConnForm inherits Rectangle {
                 }
             }
 
-            HorizontalLayout {
+            // Redis has no user/database concept — hide those for it.
+            if root.f-engine != "Redis": HorizontalLayout {
                 spacing: Theme.sp2;
                 VerticalLayout {
                     Text { text: "User"; color: Theme.text-dim; font-size: Theme.font-label; }
@@ -113,8 +116,11 @@ export component ConnForm inherits Rectangle {
             Text { text: "Password"; color: Theme.text-dim; font-size: Theme.font-label; }
             LineEdit { text <=> root.f-password; input-type: password; }
 
-            Text { text: "SSL"; color: Theme.text-dim; font-size: Theme.font-label; }
-            ComboBox {
+            // SSL mode only applies to the SQL engines.
+            if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL": Text {
+                text: "SSL"; color: Theme.text-dim; font-size: Theme.font-label;
+            }
+            if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL": ComboBox {
                 model: ["Disable", "Prefer", "Require"];
                 current-value <=> root.f-sslmode;
             }
