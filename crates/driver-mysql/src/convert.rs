@@ -1,6 +1,6 @@
-use rdbs_core::result::Cell;
 use mysql_async::consts::ColumnType;
 use mysql_async::Value;
+use rdbs_core::result::Cell;
 
 /// Map a mysql_async cell value into rdbs-core's `Cell`.
 ///
@@ -32,8 +32,8 @@ pub fn column_type_name(ct: ColumnType) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rdbs_core::result::Cell;
     use mysql_async::Value;
+    use rdbs_core::result::Cell;
 
     #[test]
     fn null_maps_to_cell_null() {

@@ -6,8 +6,8 @@ use rdbs_core::error::{RdbsError, Result};
 /// aggregation stages all arrive as JSON objects, so a non-object is a usage
 /// error and is rejected.
 pub fn json_to_document(value: &serde_json::Value) -> Result<Document> {
-    let bson: Bson =
-        mongodb::bson::to_bson(value).map_err(|e| RdbsError::Query(format!("invalid BSON: {e}")))?;
+    let bson: Bson = mongodb::bson::to_bson(value)
+        .map_err(|e| RdbsError::Query(format!("invalid BSON: {e}")))?;
     match bson {
         Bson::Document(d) => Ok(d),
         other => Err(RdbsError::Query(format!(
