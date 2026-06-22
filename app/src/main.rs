@@ -969,6 +969,10 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         window.on_form_cancel(move || {
             if let Some(w) = weak.upgrade() {
+                // Clear any in-flight test state so the form is never stuck on
+                // "Testing connection…" when reopened.
+                w.set_test_busy(false);
+                w.set_test_result(SharedString::default());
                 w.set_form_open(false);
             }
         });
@@ -1035,12 +1039,21 @@ fn main() -> Result<(), slint::PlatformError> {
 
             let weak2 = weak.clone();
             rt.spawn(async move {
-                let result = async {
+                let attempt = async {
                     let driver = AnyDriver::connect(engine, &cfg).await?;
                     driver.ping().await?;
                     Ok::<_, rdbs_core::error::RdbsError>(())
-                }
-                .await;
+                };
+                // ponytail: timeout-bounded, no hard abort; add CancellationToken
+                // if a true cancel button is ever needed. Bounds a hung connect so
+                // "Testing connection…" always resolves.
+                let result =
+                    match tokio::time::timeout(std::time::Duration::from_secs(8), attempt).await {
+                        Ok(r) => r,
+                        Err(_) => Err(rdbs_core::error::RdbsError::Connection(
+                            "connection timed out".into(),
+                        )),
+                    };
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
                         w.set_test_busy(false);
