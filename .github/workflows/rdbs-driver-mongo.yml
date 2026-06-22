@@ -1,0 +1,39 @@
+name: rdbs-driver-mongo
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - crates/driver-mongo/**
+      - crates/core/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/rdbs-driver-mongo.yml
+  pull_request:
+    paths:
+      - crates/driver-mongo/**
+      - crates/core/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/rdbs-driver-mongo.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rdbs-driver-mongo
+      - run: cargo fmt -p rdbs-driver-mongo --check
+      - run: cargo clippy -p rdbs-driver-mongo --all-targets -- -D warnings
+      - run: cargo test -p rdbs-driver-mongo --lib

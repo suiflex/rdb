@@ -1,0 +1,39 @@
+name: rdbs-driver-mysql
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - crates/driver-mysql/**
+      - crates/core/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/rdbs-driver-mysql.yml
+  pull_request:
+    paths:
+      - crates/driver-mysql/**
+      - crates/core/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/rdbs-driver-mysql.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rdbs-driver-mysql
+      - run: cargo fmt -p rdbs-driver-mysql --check
+      - run: cargo clippy -p rdbs-driver-mysql --all-targets -- -D warnings
+      - run: cargo test -p rdbs-driver-mysql --lib

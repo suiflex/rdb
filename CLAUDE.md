@@ -22,6 +22,25 @@ make all          # fmt-check + lint + test + build (CI gate)
 cargo build --release -p rdbs   # release binary
 ```
 
+## CI
+
+One GitHub Actions workflow per component in `.github/workflows/` — `rdbs-app`
+plus one per crate (`rdbs-core`, `rdbs-connstore`, `rdbs-driver-*`). Each has a
+`paths:` filter, so editing one component only runs that component's CI (lean).
+
+- Dependents also watch `crates/core/**`, so a `core` change fans out to retest
+  core + all dependents (connstore, drivers, app). Other crates stay independent.
+- Backend jobs run `cargo {fmt,clippy} -p <pkg>` and `cargo test -p <pkg> --lib`
+  (scoped with `-p`, not the workspace-wide `make` targets). `--lib` runs unit
+  tests only; the `tests/integration.rs` targets need Docker, so they stay out
+  of CI and run locally via `make test-it`.
+- The app job installs Slint system libs and runs `cargo build -p rdbs`.
+
+Releases are handled separately by `release-please.yml` (single workspace
+release on `develop`): conventional commits drive an auto-maintained release
+PR that bumps the version and root `CHANGELOG.md`; merging it tags `vX.Y.Z`
+and cuts a GitHub Release. The `app` package (`rdbs`) is the tracked version.
+
 ## Architecture
 
 - `app/` — Slint UI binary (main entry point)

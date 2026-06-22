@@ -1,6 +1,6 @@
 //! Secret storage abstraction. Two backends:
-//! - `KeyringBackend`: OS keychain (macOS Keychain, Windows Credential Manager,
-//!   Linux Secret Service). Preferred.
+//! - `KeyringBackend`: OS keychain (macOS Keychain, Linux Secret Service).
+//!   Preferred.
 //! - `EncryptedFileBackend`: AES-GCM file, used when Secret Service is absent
 //!   (headless Linux). See its module docs for the security tradeoff.
 
