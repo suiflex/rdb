@@ -19,6 +19,9 @@ pub struct MongoOp {
     pub collection: String,
     /// Target database; `None` falls back to the connection's default database.
     pub database: Option<String>,
+    /// Max rows for a `find`; `None` is unbounded. Browsing sets a default cap so
+    /// a large collection never freezes the UI.
+    pub limit: Option<i64>,
     pub kind: MongoKind,
 }
 
@@ -47,6 +50,7 @@ mod tests {
         let op = MongoOp {
             collection: "users".into(),
             database: None,
+            limit: None,
             kind: MongoKind::Find(serde_json::json!({ "age": { "$gt": 18 } })),
         };
         assert_eq!(op.collection, "users");

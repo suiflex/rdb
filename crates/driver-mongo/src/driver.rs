@@ -122,10 +122,11 @@ impl Driver for MongoDriver {
         match &op.kind {
             MongoKind::Find(filter) => {
                 let filter_doc = json_to_document(filter)?;
-                let cursor = coll
-                    .find(filter_doc)
-                    .await
-                    .map_err(|e| RdbsError::Query(e.to_string()))?;
+                let mut find = coll.find(filter_doc);
+                if let Some(n) = op.limit {
+                    find = find.limit(n);
+                }
+                let cursor = find.await.map_err(|e| RdbsError::Query(e.to_string()))?;
                 let docs: Vec<Document> = cursor
                     .try_collect()
                     .await

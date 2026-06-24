@@ -51,6 +51,8 @@ fn parse_mongo(text: &str) -> Result<Query, String> {
         .and_then(|o| o.as_str())
         .ok_or_else(|| "missing \"op\"".to_string())?;
     let body = v.get("body").cloned().unwrap_or(serde_json::Value::Null);
+    // Optional row cap for `find`; omitted means unbounded.
+    let limit = v.get("limit").and_then(|l| l.as_i64());
 
     let kind = match op {
         "find" => MongoKind::Find(body),
@@ -70,6 +72,7 @@ fn parse_mongo(text: &str) -> Result<Query, String> {
     Ok(Query::Mongo(MongoOp {
         collection,
         database,
+        limit,
         kind,
     }))
 }
@@ -125,6 +128,20 @@ mod tests {
         let without = r#"{ "collection": "c", "op": "find", "body": {} }"#;
         match parse_query(Engine::Mongo, without).unwrap() {
             Query::Mongo(op) => assert_eq!(op.database, None),
+            _ => panic!("expected Mongo"),
+        }
+    }
+
+    #[test]
+    fn mongo_parses_optional_limit() {
+        let with = r#"{ "collection": "c", "op": "find", "body": {}, "limit": 50 }"#;
+        match parse_query(Engine::Mongo, with).unwrap() {
+            Query::Mongo(op) => assert_eq!(op.limit, Some(50)),
+            _ => panic!("expected Mongo"),
+        }
+        let without = r#"{ "collection": "c", "op": "find", "body": {} }"#;
+        match parse_query(Engine::Mongo, without).unwrap() {
+            Query::Mongo(op) => assert_eq!(op.limit, None),
             _ => panic!("expected Mongo"),
         }
     }

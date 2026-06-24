@@ -707,7 +707,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 Some(rdbs_connstore::Engine::Mongo) => {
                     format!(
-                        "{{\"collection\":\"{label}\",\"database\":\"{db}\",\"op\":\"find\",\"body\":{{}}}}"
+                        "{{\"collection\":\"{label}\",\"database\":\"{db}\",\"op\":\"find\",\"body\":{{}},\"limit\":50}}"
                     )
                 }
                 Some(rdbs_connstore::Engine::Redis) => {
