@@ -88,6 +88,8 @@ export component Sidebar inherits Rectangle {
                     property <bool> is-database: node.kind == "database";
                     property <bool> is-container: node.kind == "table" || node.kind == "collection" || node.kind == "keyspace";
                     property <bool> is-field: node.kind == "field";
+                    // placeholder row (loading / no collections): dim, non-clickable
+                    property <bool> is-hint: node.kind == "hint";
                     property <bool> is-active: is-container && node.label == root.active-table;
                     height: is-category ? 28px : Theme.row-height;
                     border-radius: Theme.radius-control;
@@ -150,12 +152,13 @@ export component Sidebar inherits Rectangle {
                             vertical-alignment: center;
                             text: node.label;
                             color: is-header ? Theme.text-faint
-                                : (is-field ? Theme.text-dim
+                                : (is-field || is-hint ? Theme.text-dim
                                     : (is-active ? Theme.accent : Theme.text));
                             font-size: is-header ? Theme.font-caption
                                 : (is-field ? Theme.font-label : Theme.font-body);
                             font-weight: is-header ? 700 : (is-active ? 600 : 400);
                             font-family: is-field ? Theme.mono-family : "";
+                            font-italic: is-hint;
                             overflow: elide;
                         }
                     }

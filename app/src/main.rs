@@ -124,13 +124,14 @@ fn schema_display_rows(
     nodes: &[model::VmTreeNode],
     expanded_tables: &HashSet<String>,
     collapsed_cats: &HashSet<String>,
+    loaded_dbs: &HashSet<String>,
     engine: Option<rdbs_connstore::Engine>,
 ) -> Vec<TreeNode> {
     // Mongo is database→collection: render each database as a collapsible header
     // and nest only its own collections, so system DBs never mix with the app's.
     // `expanded_tables` is the set of OPEN databases (default closed).
     if engine == Some(rdbs_connstore::Engine::Mongo) {
-        return mongo_display_rows(nodes, expanded_tables);
+        return mongo_display_rows(nodes, expanded_tables, loaded_dbs);
     }
 
     let categories = sidebar_categories(engine);
@@ -183,19 +184,40 @@ fn schema_display_rows(
 
 /// Build database→collection rows for Mongo. Each database is a depth-0
 /// collapsible header (open when its name is in `expanded_dbs`, default closed);
-/// its collections are depth-1 rows tagged with the owning database.
+/// its collections are depth-1 rows tagged with the owning database. An open
+/// database with no collection rows gets a non-clickable hint row so the header
+/// never looks stuck: `(loading…)` until its fetch lands in `loaded_dbs`, then
+/// `(no collections)` if it really is empty.
 fn mongo_display_rows(
     nodes: &[model::VmTreeNode],
     expanded_dbs: &HashSet<String>,
+    loaded_dbs: &HashSet<String>,
 ) -> Vec<TreeNode> {
     let mut rows: Vec<TreeNode> = Vec::new();
     let mut current_db = String::new();
     let mut db_open = false;
+    let mut coll_count = 0usize;
+    // Push the loading/empty hint for an open database that emitted no rows.
+    let hint_row = |db: &str| TreeNode {
+        label: if loaded_dbs.contains(db) {
+            "(no collections)".into()
+        } else {
+            "(loading…)".into()
+        },
+        depth: 1,
+        kind: "hint".into(),
+        expanded: false,
+        db: db.to_string().into(),
+    };
     for n in nodes {
         match n.kind.as_str() {
             "database" => {
+                if db_open && coll_count == 0 {
+                    rows.push(hint_row(&current_db));
+                }
                 current_db = n.label.clone();
                 db_open = expanded_dbs.contains(&current_db);
+                coll_count = 0;
                 rows.push(TreeNode {
                     label: n.label.clone().into(),
                     depth: 0,
@@ -205,6 +227,7 @@ fn mongo_display_rows(
                 });
             }
             "collection" | "table" | "keyspace" if db_open => {
+                coll_count += 1;
                 rows.push(TreeNode {
                     label: n.label.clone().into(),
                     depth: 1,
@@ -215,6 +238,9 @@ fn mongo_display_rows(
             }
             _ => {}
         }
+    }
+    if db_open && coll_count == 0 {
+        rows.push(hint_row(&current_db));
     }
     rows
 }
@@ -515,6 +541,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             &nodes,
                             &HashSet::new(),
                             &HashSet::new(),
+                            &HashSet::new(),
                             Some(engine),
                         );
                         // Real database/schema names from introspection; fall back
@@ -741,6 +768,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let driver = current.clone();
                     let raw_nodes = raw_nodes.clone();
                     let expanded_tables = expanded_tables.clone();
+                    let loaded_dbs = loaded_dbs.clone();
                     let weak2 = weak.clone();
                     let db = label.clone();
                     rt.spawn(async move {
@@ -771,6 +799,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 &nodes,
                                 &expanded_tables.lock().unwrap(),
                                 &HashSet::new(),
+                                &loaded_dbs.lock().unwrap(),
                                 Some(rdbs_connstore::Engine::Mongo),
                             )
                         };
@@ -788,6 +817,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     &nodes,
                     &expanded_tables.lock().unwrap(),
                     &HashSet::new(),
+                    &loaded_dbs.lock().unwrap(),
                     engine,
                 );
                 w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
@@ -806,6 +836,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 &nodes,
                 &expanded_tables.lock().unwrap(),
                 &collapsed_categories.borrow(),
+                &loaded_dbs.lock().unwrap(),
                 engine,
             );
             w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
