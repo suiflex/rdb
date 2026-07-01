@@ -17,11 +17,63 @@ pub fn json_to_document(value: &serde_json::Value) -> Result<Document> {
     }
 }
 
-/// Convert a BSON `Document` back into a `serde_json::Value`. Uses BSON's
-/// relaxed extended-JSON form so ordinary numbers/strings stay plain and only
-/// exotic types (ObjectId, dates) carry `$`-prefixed wrappers.
+/// Convert a BSON `Document` back into a `serde_json::Value`. Starts from BSON's
+/// relaxed extended-JSON form, then collapses the `$`-prefixed wrappers it emits
+/// (`$oid`, `$date`, `$numberLong`, …) into plain scalars so both the table and
+/// JSON preview read like Compass instead of leaking `{"$oid":"…"}`.
 pub fn document_to_json(doc: Document) -> serde_json::Value {
-    Bson::Document(doc).into_relaxed_extjson()
+    simplify(Bson::Document(doc).into_relaxed_extjson())
+}
+
+/// Recursively collapse single-key extended-JSON wrapper objects into the plain
+/// scalar they represent. Anything that isn't a recognized wrapper is walked
+/// through unchanged.
+fn simplify(v: serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match v {
+        Value::Array(items) => Value::Array(items.into_iter().map(simplify).collect()),
+        Value::Object(map) => {
+            // Only single-key objects can be wrappers; collapse the ones we know.
+            if map.len() == 1 {
+                let (k, inner) = map.into_iter().next().unwrap();
+                return match k.as_str() {
+                    "$oid" => inner, // already a string
+                    // Relaxed ext-JSON dates are ISO strings; pre-1970/post-9999
+                    // dates fall back to {"$date":{"$numberLong":"ms"}}.
+                    "$date" => simplify(inner),
+                    "$numberLong" | "$numberInt" => str_to_number(inner),
+                    "$numberDouble" | "$numberDecimal" => str_to_number(inner),
+                    _ => {
+                        // Not a wrapper: rebuild the one-key object, simplifying its value.
+                        let mut m = serde_json::Map::new();
+                        m.insert(k, simplify(inner));
+                        Value::Object(m)
+                    }
+                };
+            }
+            Value::Object(map.into_iter().map(|(k, val)| (k, simplify(val))).collect())
+        }
+        other => other,
+    }
+}
+
+/// Parse a numeric ext-JSON string into a JSON number; keep the string if it
+/// isn't finite/parseable (e.g. "Infinity", "NaN", Decimal128 precision).
+fn str_to_number(v: serde_json::Value) -> serde_json::Value {
+    match &v {
+        serde_json::Value::String(s) => {
+            if let Ok(i) = s.parse::<i64>() {
+                serde_json::Value::from(i)
+            } else if let Ok(f) = s.parse::<f64>() {
+                serde_json::Number::from_f64(f)
+                    .map(serde_json::Value::Number)
+                    .unwrap_or(v)
+            } else {
+                v
+            }
+        }
+        _ => v,
+    }
 }
 
 #[cfg(test)]
@@ -61,5 +113,35 @@ mod tests {
         let json = document_to_json(d);
         assert_eq!(json["name"], serde_json::json!("bob"));
         assert_eq!(json["score"], serde_json::json!(1.5));
+    }
+
+    #[test]
+    fn objectid_collapses_to_hex_string() {
+        use mongodb::bson::oid::ObjectId;
+        let oid = ObjectId::new();
+        let d = doc! { "_id": oid };
+        let json = document_to_json(d);
+        assert_eq!(json["_id"], serde_json::json!(oid.to_hex()));
+    }
+
+    #[test]
+    fn date_collapses_to_iso_string() {
+        use mongodb::bson::DateTime;
+        let dt = DateTime::from_millis(1_700_000_000_000);
+        let d = doc! { "at": dt };
+        let json = document_to_json(d);
+        // Plain ISO string, not {"$date": ...}.
+        assert!(json["at"].is_string(), "got {}", json["at"]);
+        assert!(json["at"].as_str().unwrap().starts_with("2023-"));
+    }
+
+    #[test]
+    fn nested_array_and_object_wrappers_collapse() {
+        use mongodb::bson::oid::ObjectId;
+        let oid = ObjectId::new();
+        let d = doc! { "refs": [oid], "child": { "_id": oid } };
+        let json = document_to_json(d);
+        assert_eq!(json["refs"][0], serde_json::json!(oid.to_hex()));
+        assert_eq!(json["child"]["_id"], serde_json::json!(oid.to_hex()));
     }
 }

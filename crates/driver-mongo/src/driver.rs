@@ -20,6 +20,12 @@ pub struct MongoDriver {
     default_db: String,
 }
 
+/// Mongo's internal databases. Hidden from the sidebar so the user's own
+/// databases aren't buried, matching Compass/TablePlus defaults.
+fn is_system_db(name: &str) -> bool {
+    matches!(name, "admin" | "config" | "local")
+}
+
 fn build_uri(cfg: &ConnConfig) -> String {
     let auth = match &cfg.password {
         Some(pw) if !pw.is_empty() => format!("{}:{}@", cfg.user, pw),
@@ -75,6 +81,7 @@ impl Driver for MongoDriver {
             .map_err(|e| RdbsError::Schema(e.to_string()))?;
         let databases = db_names
             .into_iter()
+            .filter(|n| !is_system_db(n))
             .map(|name| Database {
                 name,
                 containers: Vec::new(),
@@ -115,10 +122,11 @@ impl Driver for MongoDriver {
         match &op.kind {
             MongoKind::Find(filter) => {
                 let filter_doc = json_to_document(filter)?;
-                let cursor = coll
-                    .find(filter_doc)
-                    .await
-                    .map_err(|e| RdbsError::Query(e.to_string()))?;
+                let mut find = coll.find(filter_doc);
+                if let Some(n) = op.limit {
+                    find = find.limit(n);
+                }
+                let cursor = find.await.map_err(|e| RdbsError::Query(e.to_string()))?;
                 let docs: Vec<Document> = cursor
                     .try_collect()
                     .await
@@ -158,5 +166,19 @@ impl Driver for MongoDriver {
         // mongodb::Client has no explicit close; dropping it ends background tasks.
         drop(self.client);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_system_db;
+
+    #[test]
+    fn system_dbs_are_hidden() {
+        assert!(is_system_db("admin"));
+        assert!(is_system_db("config"));
+        assert!(is_system_db("local"));
+        assert!(!is_system_db("appdb"));
+        assert!(!is_system_db("local_app"));
     }
 }

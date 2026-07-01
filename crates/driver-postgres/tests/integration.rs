@@ -103,6 +103,7 @@ async fn non_sql_queries_are_unsupported() {
         .query(&Query::Mongo(MongoOp {
             collection: "c".into(),
             database: None,
+            limit: None,
             kind: MongoKind::Find(serde_json::json!({})),
         }))
         .await;
