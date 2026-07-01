@@ -51,6 +51,29 @@ fn value_to_redis(value: Value) -> RedisValue {
     }
 }
 
+/// Rows for a list/set browse: index → member. Presented as key/value where the
+/// key column is the position and the value is the member.
+pub fn pairs_from_members(members: Vec<String>) -> Vec<(String, RedisValue)> {
+    members
+        .into_iter()
+        .enumerate()
+        .map(|(i, m)| (i.to_string(), RedisValue::Str(m)))
+        .collect()
+}
+
+/// Rows for a hash (HGETALL) or sorted-set (ZRANGE WITHSCORES) browse, both of
+/// which reply as a flat `[k, v, k, v, …]` array: field/member → value/score.
+pub fn pairs_from_flat(flat: Vec<String>) -> Vec<(String, RedisValue)> {
+    flat.chunks(2)
+        .map(|c| {
+            (
+                c[0].clone(),
+                RedisValue::Str(c.get(1).cloned().unwrap_or_default()),
+            )
+        })
+        .collect()
+}
+
 /// Flatten one element of a bulk reply to a display string.
 fn scalar_to_string(value: Value) -> String {
     match value {
@@ -126,6 +149,33 @@ mod tests {
             ResultSet::KeyValue(pairs) => assert!(matches!(pairs[0].1, RedisValue::Nil)),
             _ => panic!("wrong variant"),
         }
+    }
+
+    #[test]
+    fn members_map_to_index_keyed_rows() {
+        let rows = pairs_from_members(vec!["x".into(), "y".into()]);
+        assert_eq!(rows[0].0, "0");
+        assert!(matches!(rows[0].1, RedisValue::Str(ref s) if s == "x"));
+        assert_eq!(rows[1].0, "1");
+        assert!(matches!(rows[1].1, RedisValue::Str(ref s) if s == "y"));
+    }
+
+    #[test]
+    fn flat_pairs_zip_field_and_value() {
+        let rows = pairs_from_flat(vec!["f1".into(), "v1".into(), "f2".into(), "v2".into()]);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, "f1");
+        assert!(matches!(rows[0].1, RedisValue::Str(ref s) if s == "v1"));
+        assert_eq!(rows[1].0, "f2");
+        assert!(matches!(rows[1].1, RedisValue::Str(ref s) if s == "v2"));
+    }
+
+    #[test]
+    fn flat_pairs_tolerates_odd_trailing_element() {
+        let rows = pairs_from_flat(vec!["only".into()]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, "only");
+        assert!(matches!(rows[0].1, RedisValue::Str(ref s) if s.is_empty()));
     }
 
     #[test]
