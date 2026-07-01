@@ -17,16 +17,37 @@ pub struct VmColumn {
     pub type_name: String,
 }
 
-/// Flat grid model covering all four ResultSet variants.
+/// Tabular grid: real columns + rows. Used directly for SQL results and as the
+/// "Table" rendering of Mongo documents.
 #[derive(Debug, Default, Clone)]
 pub struct GridModel {
     pub columns: Vec<VmColumn>,
     pub rows: Vec<Vec<VmCell>>,
-    /// Pretty JSON for Documents.
+}
+
+/// Mongo documents: the raw pretty JSON plus a flattened grid the UI toggles to.
+#[derive(Debug, Default, Clone)]
+pub struct DocModel {
     pub json: String,
-    pub is_documents: bool,
-    /// Status text for Affected (e.g. "3 rows affected").
-    pub status: String,
+    pub grid: GridModel,
+}
+
+/// Redis key/value rows: each row is a key (or list index / hash field) and its
+/// value cell. Kept separate from the SQL grid so Redis presentation can diverge.
+#[derive(Debug, Default, Clone)]
+pub struct KvModel {
+    pub rows: Vec<(String, VmCell)>,
+}
+
+/// Presentation-ready view of a `ResultSet`, one arm per data shape. Drives the
+/// per-kind result region in the UI instead of collapsing everything to a grid.
+#[derive(Debug, Clone)]
+pub enum ResultView {
+    Table(GridModel),
+    Documents(DocModel),
+    KeyValue(KvModel),
+    /// Status toast for writes, e.g. "3 rows affected".
+    Affected(String),
 }
 
 #[derive(Debug, Default, Clone)]
@@ -140,10 +161,11 @@ fn flatten_documents(docs: &[serde_json::Value]) -> (Vec<VmColumn>, Vec<Vec<VmCe
     (columns, rows)
 }
 
-/// Convert any ResultSet into the grid view-model.
-pub fn to_grid_model(rs: &ResultSet) -> GridModel {
+/// Convert any ResultSet into its presentation-ready view. Each variant keeps
+/// its own shape instead of collapsing to a single grid.
+pub fn to_result_view(rs: &ResultSet) -> ResultView {
     match rs {
-        ResultSet::Tabular { cols, rows } => GridModel {
+        ResultSet::Tabular { cols, rows } => ResultView::Table(GridModel {
             columns: cols
                 .iter()
                 .map(|c| VmColumn {
@@ -162,48 +184,22 @@ pub fn to_grid_model(rs: &ResultSet) -> GridModel {
                         .collect()
                 })
                 .collect(),
-            ..Default::default()
-        },
-        ResultSet::KeyValue(pairs) => GridModel {
-            columns: vec![
-                VmColumn {
-                    name: "key".into(),
-                    type_name: "".into(),
-                },
-                VmColumn {
-                    name: "value".into(),
-                    type_name: "".into(),
-                },
-            ],
+        }),
+        ResultSet::KeyValue(pairs) => ResultView::KeyValue(KvModel {
             rows: pairs
                 .iter()
-                .map(|(k, v)| {
-                    vec![
-                        VmCell {
-                            text: k.clone(),
-                            is_null: false,
-                        },
-                        redis_cell(v),
-                    ]
-                })
+                .map(|(k, v)| (k.clone(), redis_cell(v)))
                 .collect(),
-            ..Default::default()
-        },
+        }),
         ResultSet::Documents(docs) => {
             let json = serde_json::to_string_pretty(docs).unwrap_or_else(|_| "[]".into());
             let (columns, rows) = flatten_documents(docs);
-            GridModel {
-                columns,
-                rows,
+            ResultView::Documents(DocModel {
                 json,
-                is_documents: true,
-                ..Default::default()
-            }
+                grid: GridModel { columns, rows },
+            })
         }
-        ResultSet::Affected(n) => GridModel {
-            status: format!("{} rows affected", n),
-            ..Default::default()
-        },
+        ResultSet::Affected(n) => ResultView::Affected(format!("{} rows affected", n)),
     }
 }
 
@@ -242,6 +238,13 @@ mod tests {
     use rdbs_core::result::{Cell, Column, RedisValue, ResultSet};
     use rdbs_core::schema::{Container, ContainerKind, Database, Field, Schema};
 
+    fn expect_table(rs: &ResultSet) -> GridModel {
+        match to_result_view(rs) {
+            ResultView::Table(g) => g,
+            other => panic!("expected Table, got {other:?}"),
+        }
+    }
+
     #[test]
     fn tabular_maps_cols_and_rows_with_null_flag() {
         let rs = ResultSet::Tabular {
@@ -251,7 +254,7 @@ mod tests {
             }],
             rows: vec![vec![Cell::Int(7)], vec![Cell::Null]],
         };
-        let grid = to_grid_model(&rs);
+        let grid = expect_table(&rs);
         assert_eq!(grid.columns.len(), 1);
         assert_eq!(grid.columns[0].name, "id");
         assert_eq!(grid.rows.len(), 2);
@@ -263,9 +266,10 @@ mod tests {
 
     #[test]
     fn affected_maps_to_status_text() {
-        let grid = to_grid_model(&ResultSet::Affected(3));
-        assert_eq!(grid.columns.len(), 0);
-        assert_eq!(grid.status, "3 rows affected");
+        match to_result_view(&ResultSet::Affected(3)) {
+            ResultView::Affected(s) => assert_eq!(s, "3 rows affected"),
+            other => panic!("expected Affected, got {other:?}"),
+        }
     }
 
     #[test]
@@ -275,21 +279,25 @@ mod tests {
             ("k2".into(), RedisValue::Int(9)),
             ("k3".into(), RedisValue::Nil),
         ]);
-        let grid = to_grid_model(&rs);
-        assert_eq!(grid.columns.len(), 2); // key, value
-        assert_eq!(grid.rows[0][0].text, "k1");
-        assert_eq!(grid.rows[0][1].text, "v1");
-        assert_eq!(grid.rows[1][1].text, "9");
-        assert_eq!(grid.rows[2][1].text, "(nil)");
-        assert!(grid.rows[2][1].is_null);
+        let kv = match to_result_view(&rs) {
+            ResultView::KeyValue(kv) => kv,
+            other => panic!("expected KeyValue, got {other:?}"),
+        };
+        assert_eq!(kv.rows.len(), 3);
+        assert_eq!(kv.rows[0].0, "k1");
+        assert_eq!(kv.rows[0].1.text, "v1");
+        assert_eq!(kv.rows[1].1.text, "9");
+        assert_eq!(kv.rows[2].1.text, "(nil)");
+        assert!(kv.rows[2].1.is_null);
     }
 
     #[test]
     fn documents_render_as_json_text_block() {
         let rs = ResultSet::Documents(vec![serde_json::json!({"a": 1})]);
-        let grid = to_grid_model(&rs);
-        assert!(grid.json.contains("\"a\""));
-        assert!(grid.is_documents);
+        match to_result_view(&rs) {
+            ResultView::Documents(d) => assert!(d.json.contains("\"a\"")),
+            other => panic!("expected Documents, got {other:?}"),
+        }
     }
 
     #[test]
@@ -298,7 +306,10 @@ mod tests {
             serde_json::json!({"_id": "x", "name": "ada", "tags": [1, 2]}),
             serde_json::json!({"name": "lin", "age": 30}),
         ]);
-        let grid = to_grid_model(&rs);
+        let grid = match to_result_view(&rs) {
+            ResultView::Documents(d) => d.grid,
+            other => panic!("expected Documents, got {other:?}"),
+        };
         // union of keys, _id first
         let names: Vec<&str> = grid.columns.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(names[0], "_id");

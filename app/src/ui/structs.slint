@@ -3,6 +3,8 @@
 // them without an import cycle.
 export struct GridColumn { name: string, type-name: string }
 export struct GridCell { text: string, is-null: bool }
+// A Redis key/value row: the key (or list index / hash field) and its value cell.
+export struct KvRow { key: string, value: GridCell }
 // `db` tags the owning database for container rows (Mongo db→collection tree);
 // empty for SQL/Redis where the category path is used instead.
 export struct TreeNode { label: string, depth: int, kind: string, expanded: bool, db: string }

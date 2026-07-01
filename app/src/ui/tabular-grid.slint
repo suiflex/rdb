@@ -1,0 +1,74 @@
+import { Theme } from "theme.slint";
+import { GridColumn, GridCell } from "structs.slint";
+import { ScrollView } from "std-widgets.slint";
+
+// Shared row/column grid used by SQL results and the Mongo "Table" view.
+// Cells are flat row-major: row r, col c at r*col-count + c.
+export component TabularGrid inherits ScrollView {
+    in property <[GridColumn]> columns;
+    in property <[GridCell]> cells;
+    in property <int> col-count;
+    in property <[length]> col-widths;     // per-column pixel widths (drag-resizable)
+    in property <int> selected-row: 0;
+    callback resize-col(int, length);      // (column index, drag delta)
+
+    VerticalLayout {
+        // fill ScrollView width when few columns; grow past it (scroll) when many
+        width: max(self.preferred-width, parent.visible-width);
+        // header
+        HorizontalLayout {
+            height: Theme.row-height;
+            for col[c] in root.columns: Rectangle {
+                width: root.col-widths.length > c ? root.col-widths[c] : 140px;
+                background: Theme.surface;
+                clip: true;
+                Text {
+                    vertical-alignment: center;
+                    x: Theme.sp1;
+                    width: parent.width - 2 * Theme.sp1;
+                    overflow: elide;
+                    text: col.name;
+                    color: Theme.text-dim;
+                    font-size: Theme.font-label;
+                }
+                // right-edge drag handle to resize this column
+                Rectangle {
+                    width: 5px;
+                    x: parent.width - self.width;
+                    background: hdl.has-hover || hdl.pressed ? Theme.accent : transparent;
+                    hdl := TouchArea {
+                        mouse-cursor: col-resize;
+                        moved => { root.resize-col(c, self.mouse-x - self.pressed-x); }
+                    }
+                }
+            }
+            // trailing filler so the header spans the full width
+            Rectangle { horizontal-stretch: 1; background: Theme.surface; }
+        }
+        Rectangle { height: 1px; background: Theme.hairline; }
+        // rows
+        for r in (root.col-count > 0 ? root.cells.length / root.col-count : 0): Rectangle {
+            height: Theme.row-height;
+            background: r == root.selected-row ? Theme.accent.with-alpha(0.14) : transparent;
+            HorizontalLayout {
+                for c in root.col-count: Rectangle {
+                    width: root.col-widths.length > c ? root.col-widths[c] : 140px;
+                    clip: true;
+                    Text {
+                        vertical-alignment: center;
+                        x: Theme.sp1;
+                        width: parent.width - 2 * Theme.sp1;
+                        overflow: elide;
+                        text: root.cells[r * root.col-count + c].text;
+                        color: root.cells[r * root.col-count + c].is-null
+                            ? Theme.text-dim : Theme.text;
+                        font-family: Theme.mono-family;
+                        font-size: Theme.font-mono;
+                    }
+                }
+                // trailing filler so the row spans the full width
+                Rectangle { horizontal-stretch: 1; }
+            }
+        }
+    }
+}
