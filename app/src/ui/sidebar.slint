@@ -86,7 +86,7 @@ export component Sidebar inherits Rectangle {
                     property <bool> is-header: node.kind == "category" || node.kind == "database";
                     property <bool> is-category: node.kind == "category";
                     property <bool> is-database: node.kind == "database";
-                    property <bool> is-container: node.kind == "table" || node.kind == "collection" || node.kind == "keyspace";
+                    property <bool> is-container: node.kind == "table" || node.kind == "collection" || node.kind == "keyspace" || node.kind == "key";
                     property <bool> is-field: node.kind == "field";
                     // placeholder row (loading / no collections): dim, non-clickable
                     property <bool> is-hint: node.kind == "hint";

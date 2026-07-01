@@ -1,6 +1,7 @@
 import { Theme } from "theme.slint";
-import { GridColumn, GridCell, StructField } from "structs.slint";
+import { GridColumn, GridCell, KvRow, StructField } from "structs.slint";
 import { AppIcon } from "icons.slint";
+import { TabularGrid } from "tabular-grid.slint";
 import { ScrollView, Button, TextEdit, LineEdit } from "std-widgets.slint";
 
 export component WorkArea inherits Rectangle {
@@ -10,7 +11,10 @@ export component WorkArea inherits Rectangle {
     in property <int> col-count;
     in property <[length]> col-widths;     // per-column pixel widths (drag-resizable)
     in property <string> doc-json;
-    in property <bool> is-documents;
+    in property <[KvRow]> kv-rows;         // Redis key/value rows
+    // result shape: 0 Table (SQL), 1 Documents (Mongo), 2 KeyValue (Redis), 3 Affected
+    in property <int> result-kind: 0;
+    property <bool> is-documents: root.result-kind == 1;
     // SQL editor only for SQL engines; documents can switch grid <-> raw JSON.
     in property <bool> sql-capable: true;
     in-out property <bool> doc-as-json: false;
@@ -35,7 +39,7 @@ export component WorkArea inherits Rectangle {
     property <length> editor-h: 140px;
     // a result is present when a table is open / a query has run
     property <bool> has-content: root.col-count > 0 || root.is-documents
-        || root.result-status != "";
+        || root.kv-rows.length > 0 || root.result-status != "";
 
     VerticalLayout {
         padding: Theme.sp4;
@@ -334,7 +338,7 @@ export component WorkArea inherits Rectangle {
             }
 
             // documents raw-JSON view (toggled on); pinned top-left, full width
-            if !root.show-structure && root.is-documents && root.doc-as-json: ScrollView {
+            if !root.show-structure && root.result-kind == 1 && root.doc-as-json: ScrollView {
                 VerticalLayout {
                     alignment: start;
                     padding: Theme.sp2;
@@ -349,66 +353,80 @@ export component WorkArea inherits Rectangle {
                 }
             }
 
-            // tabular / key-value / flattened-document grid
-            if !root.show-structure && !(root.is-documents && root.doc-as-json): ScrollView {
+            // SQL grid (kind 0) + Mongo flattened-document "Table" view (kind 1)
+            if !root.show-structure
+                && (root.result-kind == 0 || (root.result-kind == 1 && !root.doc-as-json)): TabularGrid {
+                columns: root.columns;
+                cells: root.cells;
+                col-count: root.col-count;
+                col-widths: root.col-widths;
+                selected-row: root.selected-row;
+                resize-col(i, d) => { root.resize-col(i, d); }
+            }
+
+            // Redis key/value view (kind 2): two columns, no drag-resize
+            if !root.show-structure && root.result-kind == 2: ScrollView {
                 VerticalLayout {
-                    // fill ScrollView width when few columns; grow past it (scroll) when many
                     width: max(self.preferred-width, parent.visible-width);
-                    // header
                     HorizontalLayout {
                         height: Theme.row-height;
-                        for col[c] in root.columns: Rectangle {
-                            width: root.col-widths.length > c ? root.col-widths[c] : 140px;
+                        Rectangle {
+                            width: 240px;
                             background: Theme.surface;
-                            clip: true;
-                            Text {
-                                vertical-alignment: center;
-                                x: Theme.sp1;
-                                width: parent.width - 2 * Theme.sp1;
-                                overflow: elide;
-                                text: col.name;
-                                color: Theme.text-dim;
-                                font-size: Theme.font-label;
-                            }
-                            // right-edge drag handle to resize this column
-                            Rectangle {
-                                width: 5px;
-                                x: parent.width - self.width;
-                                background: hdl.has-hover || hdl.pressed ? Theme.accent : transparent;
-                                hdl := TouchArea {
-                                    mouse-cursor: col-resize;
-                                    moved => { root.resize-col(c, self.mouse-x - self.pressed-x); }
-                                }
-                            }
+                            Text { x: Theme.sp1; vertical-alignment: center; text: "Key"; color: Theme.text-dim; font-size: Theme.font-label; }
                         }
-                        // trailing filler so the header spans the full width
-                        Rectangle { horizontal-stretch: 1; background: Theme.surface; }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            background: Theme.surface;
+                            Text { x: Theme.sp1; vertical-alignment: center; text: "Value"; color: Theme.text-dim; font-size: Theme.font-label; }
+                        }
                     }
                     Rectangle { height: 1px; background: Theme.hairline; }
-                    // rows
-                    for r in (root.col-count > 0 ? root.cells.length / root.col-count : 0): Rectangle {
+                    for row[r] in root.kv-rows: Rectangle {
                         height: Theme.row-height;
                         background: r == root.selected-row ? Theme.accent.with-alpha(0.14) : transparent;
                         HorizontalLayout {
-                            for c in root.col-count: Rectangle {
-                                width: root.col-widths.length > c ? root.col-widths[c] : 140px;
+                            Rectangle {
+                                width: 240px;
                                 clip: true;
                                 Text {
                                     vertical-alignment: center;
                                     x: Theme.sp1;
                                     width: parent.width - 2 * Theme.sp1;
                                     overflow: elide;
-                                    text: root.cells[r * root.col-count + c].text;
-                                    color: root.cells[r * root.col-count + c].is-null
-                                        ? Theme.text-dim : Theme.text;
+                                    text: row.key;
+                                    color: Theme.text-dim;
                                     font-family: Theme.mono-family;
                                     font-size: Theme.font-mono;
                                 }
                             }
-                            // trailing filler so the row spans the full width
-                            Rectangle { horizontal-stretch: 1; }
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                clip: true;
+                                Text {
+                                    vertical-alignment: center;
+                                    x: Theme.sp1;
+                                    width: parent.width - 2 * Theme.sp1;
+                                    overflow: elide;
+                                    text: row.value.text;
+                                    color: row.value.is-null ? Theme.text-dim : Theme.text;
+                                    font-family: Theme.mono-family;
+                                    font-size: Theme.font-mono;
+                                }
+                            }
                         }
                     }
+                }
+            }
+
+            // Affected (kind 3): no grid, just the centered status
+            if !root.show-structure && root.result-kind == 3: VerticalLayout {
+                alignment: center;
+                Text {
+                    horizontal-alignment: center;
+                    text: root.result-status;
+                    color: Theme.text-dim;
+                    font-size: Theme.font-body;
                 }
             }
         }

@@ -9,6 +9,7 @@ import { AppIcon } from "icons.slint";
 import {
     GridColumn,
     GridCell,
+    KvRow,
     TreeNode,
     ConnItem,
     TabItem,
@@ -53,7 +54,9 @@ export component MainWindow inherits Window {
     in property <[GridCell]> grid-cells;
     in property <int> grid-col-count;
     in property <string> doc-json;
-    in property <bool> is-documents;
+    in property <[KvRow]> kv-rows;
+    // result shape: 0 Table, 1 Documents, 2 KeyValue, 3 Affected
+    in property <int> result-kind: 0;
     in property <bool> sql-capable: true;
     in property <string> result-status;
     in-out property <int> selected-row: 0;
@@ -364,7 +367,8 @@ export component MainWindow inherits Window {
                         col-count: root.grid-col-count;
                         col-widths: root.grid-col-widths;
                         doc-json: root.doc-json;
-                        is-documents: root.is-documents;
+                        kv-rows: root.kv-rows;
+                        result-kind: root.result-kind;
                         sql-capable: root.sql-capable;
                         result-status: root.result-status;
                         selected-row: root.selected-row;

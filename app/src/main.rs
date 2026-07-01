@@ -104,8 +104,8 @@ fn build_conn_items(
 /// engine's containers. ponytail: SQL keeps the Views/Functions placeholders.
 fn sidebar_categories(engine: Option<rdbs_connstore::Engine>) -> &'static [&'static str] {
     match engine {
+        // Mongo/Redis use the nested database→leaf path, not these categories.
         Some(rdbs_connstore::Engine::Mongo) => &["Collections"],
-        Some(rdbs_connstore::Engine::Redis) => &["Keys"],
         _ => &["Tables", "Views", "Functions"],
     }
 }
@@ -127,11 +127,17 @@ fn schema_display_rows(
     loaded_dbs: &HashSet<String>,
     engine: Option<rdbs_connstore::Engine>,
 ) -> Vec<TreeNode> {
-    // Mongo is database→collection: render each database as a collapsible header
-    // and nest only its own collections, so system DBs never mix with the app's.
+    // Mongo (database→collection) and Redis (database→key) both render as a
+    // collapsible database header nesting its own lazily-loaded leaves.
     // `expanded_tables` is the set of OPEN databases (default closed).
-    if engine == Some(rdbs_connstore::Engine::Mongo) {
-        return mongo_display_rows(nodes, expanded_tables, loaded_dbs);
+    match engine {
+        Some(rdbs_connstore::Engine::Mongo) => {
+            return nested_display_rows(nodes, expanded_tables, loaded_dbs, "collection");
+        }
+        Some(rdbs_connstore::Engine::Redis) => {
+            return nested_display_rows(nodes, expanded_tables, loaded_dbs, "key");
+        }
+        _ => {}
     }
 
     let categories = sidebar_categories(engine);
@@ -182,25 +188,27 @@ fn schema_display_rows(
     rows
 }
 
-/// Build database→collection rows for Mongo. Each database is a depth-0
-/// collapsible header (open when its name is in `expanded_dbs`, default closed);
-/// its collections are depth-1 rows tagged with the owning database. An open
-/// database with no collection rows gets a non-clickable hint row so the header
-/// never looks stuck: `(loading…)` until its fetch lands in `loaded_dbs`, then
-/// `(no collections)` if it really is empty.
-fn mongo_display_rows(
+/// Build a database→leaf tree for engines that browse per-database (Mongo
+/// collections, Redis keys). Each database is a depth-0 collapsible header (open
+/// when its name is in `expanded_dbs`, default closed); its leaves are depth-1
+/// rows tagged with the owning database and emitted with `leaf_kind`. An open
+/// database with no leaf rows gets a non-clickable hint row so the header never
+/// looks stuck: `(loading…)` until its fetch lands in `loaded_dbs`, then
+/// `(empty)` if it really is empty.
+fn nested_display_rows(
     nodes: &[model::VmTreeNode],
     expanded_dbs: &HashSet<String>,
     loaded_dbs: &HashSet<String>,
+    leaf_kind: &str,
 ) -> Vec<TreeNode> {
     let mut rows: Vec<TreeNode> = Vec::new();
     let mut current_db = String::new();
     let mut db_open = false;
-    let mut coll_count = 0usize;
+    let mut leaf_count = 0usize;
     // Push the loading/empty hint for an open database that emitted no rows.
     let hint_row = |db: &str| TreeNode {
         label: if loaded_dbs.contains(db) {
-            "(no collections)".into()
+            "(empty)".into()
         } else {
             "(loading…)".into()
         },
@@ -212,12 +220,12 @@ fn mongo_display_rows(
     for n in nodes {
         match n.kind.as_str() {
             "database" => {
-                if db_open && coll_count == 0 {
+                if db_open && leaf_count == 0 {
                     rows.push(hint_row(&current_db));
                 }
                 current_db = n.label.clone();
                 db_open = expanded_dbs.contains(&current_db);
-                coll_count = 0;
+                leaf_count = 0;
                 rows.push(TreeNode {
                     label: n.label.clone().into(),
                     depth: 0,
@@ -226,12 +234,12 @@ fn mongo_display_rows(
                     db: current_db.clone().into(),
                 });
             }
-            "collection" | "table" | "keyspace" if db_open => {
-                coll_count += 1;
+            "collection" | "table" | "keyspace" | "key" if db_open => {
+                leaf_count += 1;
                 rows.push(TreeNode {
                     label: n.label.clone().into(),
                     depth: 1,
-                    kind: "collection".into(),
+                    kind: leaf_kind.into(),
                     expanded: false,
                     db: current_db.clone().into(),
                 });
@@ -239,7 +247,7 @@ fn mongo_display_rows(
             _ => {}
         }
     }
-    if db_open && coll_count == 0 {
+    if db_open && leaf_count == 0 {
         rows.push(hint_row(&current_db));
     }
     rows
@@ -255,24 +263,8 @@ fn set_tab_titles(w: &MainWindow, count: usize) {
     w.set_tabs(ModelRc::from(Rc::new(VecModel::from(items))));
 }
 
-/// Push a `GridModel` into the window's grid/json/status properties.
-fn apply_grid(w: &MainWindow, g: model::GridModel) {
-    // Documents carry both a flattened grid and the raw JSON; the UI toggles
-    // between them. Fall through to the grid push below so the table view works.
-    if g.is_documents {
-        w.set_is_documents(true);
-        w.set_doc_json(SharedString::from(g.json.clone()));
-    } else {
-        w.set_is_documents(false);
-    }
-    if !g.status.is_empty() {
-        // Affected: no grid, just a status toast.
-        w.set_grid_col_count(0);
-        w.set_grid_columns(ModelRc::from(Rc::new(VecModel::<GridColumn>::default())));
-        w.set_grid_cells(ModelRc::from(Rc::new(VecModel::<GridCell>::default())));
-        w.set_result_status(SharedString::from(g.status));
-        return;
-    }
+/// Push a flat `GridModel` into the window's grid columns/cells properties.
+fn push_grid(w: &MainWindow, g: &model::GridModel) {
     let cols: Vec<GridColumn> = g
         .columns
         .iter()
@@ -281,7 +273,6 @@ fn apply_grid(w: &MainWindow, g: model::GridModel) {
             type_name: c.type_name.clone().into(),
         })
         .collect();
-    let col_count = cols.len() as i32;
     let mut flat: Vec<GridCell> = Vec::new();
     for row in &g.rows {
         for cell in row {
@@ -291,10 +282,86 @@ fn apply_grid(w: &MainWindow, g: model::GridModel) {
             });
         }
     }
-    w.set_grid_col_count(col_count);
+    w.set_grid_col_count(cols.len() as i32);
     w.set_grid_columns(ModelRc::from(Rc::new(VecModel::from(cols))));
     w.set_grid_cells(ModelRc::from(Rc::new(VecModel::from(flat))));
-    w.set_result_status(SharedString::from(format!("{} rows", g.rows.len())));
+}
+
+/// Clear the tabular grid properties (used by non-tabular result kinds).
+fn clear_grid(w: &MainWindow) {
+    w.set_grid_col_count(0);
+    w.set_grid_columns(ModelRc::from(Rc::new(VecModel::<GridColumn>::default())));
+    w.set_grid_cells(ModelRc::from(Rc::new(VecModel::<GridCell>::default())));
+}
+
+/// Return a copy of `g` keeping only rows where some cell matches `needle`
+/// (already lowercased). An empty needle keeps every row.
+fn filter_grid(g: &model::GridModel, needle: &str) -> model::GridModel {
+    if needle.is_empty() {
+        return g.clone();
+    }
+    model::GridModel {
+        columns: g.columns.clone(),
+        rows: g
+            .rows
+            .iter()
+            .filter(|row| row.iter().any(|c| c.text.to_lowercase().contains(needle)))
+            .cloned()
+            .collect(),
+    }
+}
+
+/// Push a `ResultView` into the window, selecting the per-kind result region
+/// via `result-kind` (0 Table, 1 Documents, 2 KeyValue, 3 Affected).
+fn apply_result(w: &MainWindow, view: model::ResultView) {
+    // Reset the KeyValue rows by default; the KeyValue arm repopulates them.
+    let clear_kv =
+        |w: &MainWindow| w.set_kv_rows(ModelRc::from(Rc::new(VecModel::<KvRow>::default())));
+    match view {
+        model::ResultView::Table(g) => {
+            w.set_result_kind(0);
+            w.set_doc_json(SharedString::default());
+            clear_kv(w);
+            push_grid(w, &g);
+            w.set_result_status(SharedString::from(format!("{} rows", g.rows.len())));
+        }
+        model::ResultView::Documents(d) => {
+            w.set_result_kind(1);
+            w.set_doc_json(SharedString::from(d.json));
+            clear_kv(w);
+            push_grid(w, &d.grid);
+            w.set_result_status(SharedString::from(format!(
+                "{} documents",
+                d.grid.rows.len()
+            )));
+        }
+        model::ResultView::KeyValue(kv) => {
+            w.set_result_kind(2);
+            w.set_doc_json(SharedString::default());
+            clear_grid(w);
+            let n = kv.rows.len();
+            let rows: Vec<KvRow> = kv
+                .rows
+                .iter()
+                .map(|(k, c)| KvRow {
+                    key: k.clone().into(),
+                    value: GridCell {
+                        text: c.text.clone().into(),
+                        is_null: c.is_null,
+                    },
+                })
+                .collect();
+            w.set_kv_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
+            w.set_result_status(SharedString::from(format!("{n} keys")));
+        }
+        model::ResultView::Affected(status) => {
+            w.set_result_kind(3);
+            w.set_doc_json(SharedString::default());
+            clear_grid(w);
+            clear_kv(w);
+            w.set_result_status(SharedString::from(status));
+        }
+    }
 }
 
 fn main() -> Result<(), slint::PlatformError> {
@@ -369,10 +436,10 @@ fn main() -> Result<(), slint::PlatformError> {
         title: "Query 1".into(),
     }]))));
 
-    // Last tabular result kept in memory so the client-side filter (Feature C)
+    // Last result view kept in memory so the client-side filter (Feature C)
     // can re-derive the visible rows without re-querying. Arc<Mutex<>> (not Rc)
     // so it can cross into the Send event-loop closure from the query task.
-    let last_grid: Arc<std::sync::Mutex<Option<model::GridModel>>> =
+    let last_view: Arc<std::sync::Mutex<Option<model::ResultView>>> =
         Arc::new(std::sync::Mutex::new(None));
 
     // ----- toggle a sidebar group's collapsed state (Feature A) -----
@@ -451,31 +518,38 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- apply client-side row filter to the last result (Feature C) -----
     {
         let weak = window.as_weak();
-        let last_grid = last_grid.clone();
+        let last_view = last_view.clone();
         window.on_apply_filter(move || {
             let Some(w) = weak.upgrade() else {
                 return;
             };
             let needle = w.get_grid_filter().to_string().to_lowercase();
-            let guard = last_grid.lock().unwrap();
-            let Some(g) = guard.as_ref() else {
+            let guard = last_view.lock().unwrap();
+            let Some(v) = guard.as_ref() else {
                 return;
             };
-            // Filtering only applies to tabular results; documents/affected
-            // have no rows to filter.
-            if g.is_documents || g.columns.is_empty() {
-                return;
-            }
-            let mut filtered = g.clone();
-            if !needle.is_empty() {
-                filtered.rows = g
-                    .rows
-                    .iter()
-                    .filter(|row| row.iter().any(|c| c.text.to_lowercase().contains(&needle)))
-                    .cloned()
-                    .collect();
-            }
-            apply_grid(&w, filtered);
+            // Filter the row-bearing views; Affected has nothing to filter.
+            let filtered = match v {
+                model::ResultView::Table(g) => model::ResultView::Table(filter_grid(g, &needle)),
+                model::ResultView::Documents(d) => model::ResultView::Documents(model::DocModel {
+                    json: d.json.clone(),
+                    grid: filter_grid(&d.grid, &needle),
+                }),
+                model::ResultView::KeyValue(kv) => model::ResultView::KeyValue(model::KvModel {
+                    rows: kv
+                        .rows
+                        .iter()
+                        .filter(|(k, c)| {
+                            needle.is_empty()
+                                || k.to_lowercase().contains(&needle)
+                                || c.text.to_lowercase().contains(&needle)
+                        })
+                        .cloned()
+                        .collect(),
+                }),
+                model::ResultView::Affected(_) => return,
+            };
+            apply_result(&w, filtered);
         });
     }
 
@@ -626,11 +700,11 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let rt = rt.clone();
         let current = current.clone();
-        let last_grid = last_grid.clone();
+        let last_view = last_view.clone();
         Rc::new(move |sql: String| {
             let weak2 = weak.clone();
             let current = current.clone();
-            let last_grid = last_grid.clone();
+            let last_view = last_view.clone();
             rt.spawn(async move {
                 let guard = current.lock().await;
                 let outcome = match guard.as_ref() {
@@ -644,18 +718,23 @@ fn main() -> Result<(), slint::PlatformError> {
                         "not connected".into(),
                     )),
                 };
-                let grid = outcome.as_ref().ok().map(model::to_grid_model);
+                let view = outcome.as_ref().ok().map(model::to_result_view);
                 let err = outcome.err();
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
-                        match (grid, err) {
-                            (Some(g), _) => {
+                        match (view, err) {
+                            (Some(v), _) => {
+                                // Only tabular-shaped views have resizable columns.
+                                let ncols = match &v {
+                                    model::ResultView::Table(g) => g.columns.len(),
+                                    model::ResultView::Documents(d) => d.grid.columns.len(),
+                                    _ => 0,
+                                };
                                 // Cache for client-side filtering, then reset the
                                 // filter input so the full result shows first.
-                                let ncols = if g.is_documents { 0 } else { g.columns.len() };
-                                *last_grid.lock().unwrap() = Some(g.clone());
+                                *last_view.lock().unwrap() = Some(v.clone());
                                 w.set_grid_filter(SharedString::default());
-                                apply_grid(&w, g);
+                                apply_result(&w, v);
                                 // Fresh result: reset every column to a default width.
                                 let widths: Vec<f32> = vec![140.0; ncols];
                                 w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(
@@ -663,9 +742,11 @@ fn main() -> Result<(), slint::PlatformError> {
                                 ))));
                             }
                             (None, Some(e)) => {
-                                *last_grid.lock().unwrap() = None;
-                                w.set_is_documents(false);
-                                w.set_result_status(SharedString::from(format!("error: {e}")));
+                                *last_view.lock().unwrap() = None;
+                                apply_result(
+                                    &w,
+                                    model::ResultView::Affected(format!("error: {e}")),
+                                );
                             }
                             _ => {}
                         }
@@ -711,10 +792,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     )
                 }
                 Some(rdbs_connstore::Engine::Redis) => {
-                    w.set_result_status(SharedString::from(
-                        "click a key in the SQL panel for Redis",
-                    ));
-                    return;
+                    // BROWSE is resolved by the Redis driver (TYPE + type-aware read).
+                    format!("BROWSE {label}")
                 }
                 None => return,
             };
@@ -742,9 +821,17 @@ fn main() -> Result<(), slint::PlatformError> {
             let engine = *cur_engine.borrow();
             let label = label.to_string();
 
-            // Mongo: database headers open an opt-in set (default closed) and load
-            // their collections lazily the first time they are expanded.
-            if engine == Some(rdbs_connstore::Engine::Mongo) {
+            // Mongo/Redis: database headers open an opt-in set (default closed)
+            // and load their leaves (collections / keys) lazily on first expand.
+            if matches!(
+                engine,
+                Some(rdbs_connstore::Engine::Mongo) | Some(rdbs_connstore::Engine::Redis)
+            ) {
+                let leaf_kind = if engine == Some(rdbs_connstore::Engine::Redis) {
+                    "key"
+                } else {
+                    "collection"
+                };
                 let now_open = {
                     let mut e = expanded_tables.lock().unwrap();
                     if e.remove(&label) {
@@ -790,7 +877,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                         pos + 1 + k,
                                         model::VmTreeNode {
                                             label: c.name,
-                                            kind: "collection".into(),
+                                            kind: leaf_kind.into(),
                                         },
                                     );
                                 }
@@ -800,7 +887,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 &expanded_tables.lock().unwrap(),
                                 &HashSet::new(),
                                 &loaded_dbs.lock().unwrap(),
-                                Some(rdbs_connstore::Engine::Mongo),
+                                engine,
                             )
                         };
                         let _ = slint::invoke_from_event_loop(move || {
@@ -824,7 +911,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             }
 
-            // SQL/Redis: category headers collapse-toggle (open by default).
+            // SQL: category headers collapse-toggle (open by default).
             {
                 let mut c = collapsed_categories.borrow_mut();
                 if !c.remove(&label) {

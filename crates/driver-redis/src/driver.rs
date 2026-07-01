@@ -7,10 +7,15 @@ use rdbs_core::conn::ConnConfig;
 use rdbs_core::driver::Driver;
 use rdbs_core::error::{RdbsError, Result};
 use rdbs_core::query::Query;
+use rdbs_core::result::RedisValue;
 use rdbs_core::result::ResultSet;
-use rdbs_core::schema::{Container, ContainerKind, Database, Field, Schema};
+use rdbs_core::schema::{Container, ContainerKind, Database, Schema};
 
-use crate::convert::{connection_url, value_to_resultset};
+use crate::convert::{connection_url, pairs_from_flat, pairs_from_members, value_to_resultset};
+
+/// Upper bound on keys surfaced when a Redis database is expanded.
+/// ponytail: single SCAN pass, wire the returned cursor for paging if needed.
+const MAX_KEYS: usize = 200;
 
 /// Redis driver over a multiplexed async connection. The connection is shared
 /// behind a Mutex because commands take `&mut` and the trait exposes `&self`.
@@ -52,25 +57,34 @@ impl Driver for RedisDriver {
     }
 
     async fn schema(&self) -> Result<Schema> {
-        let mut conn = self.conn.lock().await;
-        let size: i64 = redis::cmd("DBSIZE")
-            .query_async(&mut *conn)
-            .await
-            .map_err(|e| RdbsError::Schema(e.to_string()))?;
-        drop(conn);
-
-        // Redis is schemaless: surface one keyspace container summarizing key count.
-        let container = Container {
-            name: format!("keys ({size})"),
-            kind: ContainerKind::Keyspace,
-            fields: Vec::<Field>::new(),
-        };
+        // One expandable database header; keys load lazily via `containers()` the
+        // first time it is expanded (mirrors Mongo's database→collection tree).
         Ok(Schema {
             databases: vec![Database {
                 name: format!("db{}", self.db),
-                containers: vec![container],
+                containers: Vec::new(),
             }],
         })
+    }
+
+    async fn containers(&self, _database: &str) -> Result<Vec<Container>> {
+        let mut conn = self.conn.lock().await;
+        // SCAN over one bounded pass; COUNT is a hint, not a hard limit.
+        let (_cursor, keys): (String, Vec<String>) = redis::cmd("SCAN")
+            .arg(0)
+            .arg("COUNT")
+            .arg(MAX_KEYS as i64)
+            .query_async(&mut *conn)
+            .await
+            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+        Ok(keys
+            .into_iter()
+            .map(|k| Container {
+                name: k,
+                kind: ContainerKind::Keyspace,
+                fields: Vec::new(),
+            })
+            .collect())
     }
 
     async fn query(&self, q: &Query) -> Result<ResultSet> {
@@ -80,6 +94,15 @@ impl Driver for RedisDriver {
         };
         if tokens.is_empty() {
             return Err(RdbsError::Query("empty command".into()));
+        }
+
+        // `BROWSE <key>` is a UI-only convention (not a real Redis verb): read a
+        // key with the right command for its type and return typed rows.
+        if tokens[0].eq_ignore_ascii_case("BROWSE") {
+            let key = tokens
+                .get(1)
+                .ok_or_else(|| RdbsError::Query("BROWSE needs a key".into()))?;
+            return self.browse_key(key).await;
         }
 
         let mut cmd = redis::cmd(&tokens[0]);
@@ -100,5 +123,76 @@ impl Driver for RedisDriver {
         // MultiplexedConnection closes when dropped; nothing to await.
         drop(self.conn);
         Ok(())
+    }
+}
+
+impl RedisDriver {
+    /// Read one key using the command appropriate to its type, returning typed
+    /// key/value rows: string→value, list/set→index→member, hash→field→value,
+    /// zset→member→score.
+    async fn browse_key(&self, key: &str) -> Result<ResultSet> {
+        let qerr = |e: redis::RedisError| RdbsError::Query(e.to_string());
+        let mut conn = self.conn.lock().await;
+        let kind: String = redis::cmd("TYPE")
+            .arg(key)
+            .query_async(&mut *conn)
+            .await
+            .map_err(qerr)?;
+        let rows = match kind.as_str() {
+            "string" => {
+                let v: Option<String> = redis::cmd("GET")
+                    .arg(key)
+                    .query_async(&mut *conn)
+                    .await
+                    .map_err(qerr)?;
+                vec![(
+                    key.to_string(),
+                    v.map(RedisValue::Str).unwrap_or(RedisValue::Nil),
+                )]
+            }
+            "list" => {
+                let items: Vec<String> = redis::cmd("LRANGE")
+                    .arg(key)
+                    .arg(0)
+                    .arg(-1)
+                    .query_async(&mut *conn)
+                    .await
+                    .map_err(qerr)?;
+                pairs_from_members(items)
+            }
+            "set" => {
+                let items: Vec<String> = redis::cmd("SMEMBERS")
+                    .arg(key)
+                    .query_async(&mut *conn)
+                    .await
+                    .map_err(qerr)?;
+                pairs_from_members(items)
+            }
+            "hash" => {
+                let flat: Vec<String> = redis::cmd("HGETALL")
+                    .arg(key)
+                    .query_async(&mut *conn)
+                    .await
+                    .map_err(qerr)?;
+                pairs_from_flat(flat)
+            }
+            "zset" => {
+                let flat: Vec<String> = redis::cmd("ZRANGE")
+                    .arg(key)
+                    .arg(0)
+                    .arg(-1)
+                    .arg("WITHSCORES")
+                    .query_async(&mut *conn)
+                    .await
+                    .map_err(qerr)?;
+                pairs_from_flat(flat)
+            }
+            "none" => vec![(key.to_string(), RedisValue::Nil)],
+            other => vec![(
+                key.to_string(),
+                RedisValue::Str(format!("unsupported type: {other}")),
+            )],
+        };
+        Ok(ResultSet::KeyValue(rows))
     }
 }
