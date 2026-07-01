@@ -104,8 +104,8 @@ fn build_conn_items(
 /// engine's containers. ponytail: SQL keeps the Views/Functions placeholders.
 fn sidebar_categories(engine: Option<rdbs_connstore::Engine>) -> &'static [&'static str] {
     match engine {
+        // Mongo/Redis use the nested database→leaf path, not these categories.
         Some(rdbs_connstore::Engine::Mongo) => &["Collections"],
-        Some(rdbs_connstore::Engine::Redis) => &["Keys"],
         _ => &["Tables", "Views", "Functions"],
     }
 }
@@ -127,11 +127,17 @@ fn schema_display_rows(
     loaded_dbs: &HashSet<String>,
     engine: Option<rdbs_connstore::Engine>,
 ) -> Vec<TreeNode> {
-    // Mongo is database→collection: render each database as a collapsible header
-    // and nest only its own collections, so system DBs never mix with the app's.
+    // Mongo (database→collection) and Redis (database→key) both render as a
+    // collapsible database header nesting its own lazily-loaded leaves.
     // `expanded_tables` is the set of OPEN databases (default closed).
-    if engine == Some(rdbs_connstore::Engine::Mongo) {
-        return mongo_display_rows(nodes, expanded_tables, loaded_dbs);
+    match engine {
+        Some(rdbs_connstore::Engine::Mongo) => {
+            return nested_display_rows(nodes, expanded_tables, loaded_dbs, "collection");
+        }
+        Some(rdbs_connstore::Engine::Redis) => {
+            return nested_display_rows(nodes, expanded_tables, loaded_dbs, "key");
+        }
+        _ => {}
     }
 
     let categories = sidebar_categories(engine);
@@ -182,25 +188,27 @@ fn schema_display_rows(
     rows
 }
 
-/// Build database→collection rows for Mongo. Each database is a depth-0
-/// collapsible header (open when its name is in `expanded_dbs`, default closed);
-/// its collections are depth-1 rows tagged with the owning database. An open
-/// database with no collection rows gets a non-clickable hint row so the header
-/// never looks stuck: `(loading…)` until its fetch lands in `loaded_dbs`, then
-/// `(no collections)` if it really is empty.
-fn mongo_display_rows(
+/// Build a database→leaf tree for engines that browse per-database (Mongo
+/// collections, Redis keys). Each database is a depth-0 collapsible header (open
+/// when its name is in `expanded_dbs`, default closed); its leaves are depth-1
+/// rows tagged with the owning database and emitted with `leaf_kind`. An open
+/// database with no leaf rows gets a non-clickable hint row so the header never
+/// looks stuck: `(loading…)` until its fetch lands in `loaded_dbs`, then
+/// `(empty)` if it really is empty.
+fn nested_display_rows(
     nodes: &[model::VmTreeNode],
     expanded_dbs: &HashSet<String>,
     loaded_dbs: &HashSet<String>,
+    leaf_kind: &str,
 ) -> Vec<TreeNode> {
     let mut rows: Vec<TreeNode> = Vec::new();
     let mut current_db = String::new();
     let mut db_open = false;
-    let mut coll_count = 0usize;
+    let mut leaf_count = 0usize;
     // Push the loading/empty hint for an open database that emitted no rows.
     let hint_row = |db: &str| TreeNode {
         label: if loaded_dbs.contains(db) {
-            "(no collections)".into()
+            "(empty)".into()
         } else {
             "(loading…)".into()
         },
@@ -212,12 +220,12 @@ fn mongo_display_rows(
     for n in nodes {
         match n.kind.as_str() {
             "database" => {
-                if db_open && coll_count == 0 {
+                if db_open && leaf_count == 0 {
                     rows.push(hint_row(&current_db));
                 }
                 current_db = n.label.clone();
                 db_open = expanded_dbs.contains(&current_db);
-                coll_count = 0;
+                leaf_count = 0;
                 rows.push(TreeNode {
                     label: n.label.clone().into(),
                     depth: 0,
@@ -226,12 +234,12 @@ fn mongo_display_rows(
                     db: current_db.clone().into(),
                 });
             }
-            "collection" | "table" | "keyspace" if db_open => {
-                coll_count += 1;
+            "collection" | "table" | "keyspace" | "key" if db_open => {
+                leaf_count += 1;
                 rows.push(TreeNode {
                     label: n.label.clone().into(),
                     depth: 1,
-                    kind: "collection".into(),
+                    kind: leaf_kind.into(),
                     expanded: false,
                     db: current_db.clone().into(),
                 });
@@ -239,7 +247,7 @@ fn mongo_display_rows(
             _ => {}
         }
     }
-    if db_open && coll_count == 0 {
+    if db_open && leaf_count == 0 {
         rows.push(hint_row(&current_db));
     }
     rows
@@ -784,10 +792,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     )
                 }
                 Some(rdbs_connstore::Engine::Redis) => {
-                    w.set_result_status(SharedString::from(
-                        "click a key in the SQL panel for Redis",
-                    ));
-                    return;
+                    // BROWSE is resolved by the Redis driver (TYPE + type-aware read).
+                    format!("BROWSE {label}")
                 }
                 None => return,
             };
@@ -815,9 +821,17 @@ fn main() -> Result<(), slint::PlatformError> {
             let engine = *cur_engine.borrow();
             let label = label.to_string();
 
-            // Mongo: database headers open an opt-in set (default closed) and load
-            // their collections lazily the first time they are expanded.
-            if engine == Some(rdbs_connstore::Engine::Mongo) {
+            // Mongo/Redis: database headers open an opt-in set (default closed)
+            // and load their leaves (collections / keys) lazily on first expand.
+            if matches!(
+                engine,
+                Some(rdbs_connstore::Engine::Mongo) | Some(rdbs_connstore::Engine::Redis)
+            ) {
+                let leaf_kind = if engine == Some(rdbs_connstore::Engine::Redis) {
+                    "key"
+                } else {
+                    "collection"
+                };
                 let now_open = {
                     let mut e = expanded_tables.lock().unwrap();
                     if e.remove(&label) {
@@ -863,7 +877,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                         pos + 1 + k,
                                         model::VmTreeNode {
                                             label: c.name,
-                                            kind: "collection".into(),
+                                            kind: leaf_kind.into(),
                                         },
                                     );
                                 }
@@ -873,7 +887,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 &expanded_tables.lock().unwrap(),
                                 &HashSet::new(),
                                 &loaded_dbs.lock().unwrap(),
-                                Some(rdbs_connstore::Engine::Mongo),
+                                engine,
                             )
                         };
                         let _ = slint::invoke_from_event_loop(move || {
@@ -897,7 +911,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             }
 
-            // SQL/Redis: category headers collapse-toggle (open by default).
+            // SQL: category headers collapse-toggle (open by default).
             {
                 let mut c = collapsed_categories.borrow_mut();
                 if !c.remove(&label) {
