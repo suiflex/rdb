@@ -22,6 +22,8 @@ pub struct MongoOp {
     /// Max rows for a `find`; `None` is unbounded. Browsing sets a default cap so
     /// a large collection never freezes the UI.
     pub limit: Option<i64>,
+    /// Rows to skip before `limit` applies (pagination); `None` = 0.
+    pub skip: Option<i64>,
     pub kind: MongoKind,
 }
 
@@ -51,6 +53,7 @@ mod tests {
             collection: "users".into(),
             database: None,
             limit: None,
+            skip: None,
             kind: MongoKind::Find(serde_json::json!({ "age": { "$gt": 18 } })),
         };
         assert_eq!(op.collection, "users");

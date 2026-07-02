@@ -7,8 +7,9 @@ use rdbs_core::conn::{ConnConfig, SslMode};
 use rdbs_core::driver::Driver;
 use rdbs_core::error::{RdbsError, Result};
 use rdbs_core::query::{MongoKind, MongoOp, Query};
-use rdbs_core::result::ResultSet;
+use rdbs_core::result::{Cell, ResultSet};
 use rdbs_core::schema::{Container, ContainerKind, Database, Schema};
+use rdbs_core::write::{TableRef, WriteOp};
 
 use crate::convert::{document_to_json, json_to_document};
 
@@ -126,6 +127,9 @@ impl Driver for MongoDriver {
                 if let Some(n) = op.limit {
                     find = find.limit(n);
                 }
+                if let Some(s) = op.skip {
+                    find = find.skip(s.max(0) as u64);
+                }
                 let cursor = find.await.map_err(|e| RdbsError::Query(e.to_string()))?;
                 let docs: Vec<Document> = cursor
                     .try_collect()
@@ -162,6 +166,68 @@ impl Driver for MongoDriver {
         }
     }
 
+    /// Documents are always identified by `_id`.
+    async fn primary_key(&self, _table: &TableRef) -> Result<Vec<String>> {
+        Ok(vec!["_id".to_string()])
+    }
+
+    async fn count(&self, table: &TableRef) -> Result<u64> {
+        let db = table.database.as_deref().unwrap_or(&self.default_db);
+        self.client
+            .database(db)
+            .collection::<Document>(&table.name)
+            .count_documents(doc! {})
+            .await
+            .map_err(|e| RdbsError::Query(e.to_string()))
+    }
+
+    /// Sequential (no multi-doc transaction — standalone servers lack them);
+    /// stops at the first failure and reports how many ops applied.
+    async fn commit(&self, ops: &[WriteOp]) -> Result<u64> {
+        let mut applied = 0u64;
+        for op in ops {
+            let table = op.table();
+            let db = table.database.as_deref().unwrap_or(&self.default_db);
+            let coll = self
+                .client
+                .database(db)
+                .collection::<Document>(&table.name);
+            let res = match op {
+                WriteOp::Update { pk, changes, .. } => {
+                    let id = pk_id(pk)?;
+                    let mut sets = Document::new();
+                    for (field, val) in changes {
+                        sets.insert(field.clone(), cell_to_bson(val));
+                    }
+                    coll.update_one(doc! { "_id": id }, doc! { "$set": sets })
+                        .await
+                        .map(|_| ())
+                }
+                WriteOp::Insert { values, .. } => {
+                    let mut d = Document::new();
+                    for (field, val) in values {
+                        d.insert(field.clone(), cell_to_bson(val));
+                    }
+                    coll.insert_one(d).await.map(|_| ())
+                }
+                WriteOp::Delete { pk, .. } => {
+                    let id = pk_id(pk)?;
+                    coll.delete_one(doc! { "_id": id }).await.map(|_| ())
+                }
+            };
+            match res {
+                Ok(()) => applied += 1,
+                Err(e) => {
+                    return Err(RdbsError::Query(format!(
+                        "{e} (applied {applied} of {} ops)",
+                        ops.len()
+                    )))
+                }
+            }
+        }
+        Ok(applied)
+    }
+
     async fn close(self) -> Result<()> {
         // mongodb::Client has no explicit close; dropping it ends background tasks.
         drop(self.client);
@@ -169,9 +235,63 @@ impl Driver for MongoDriver {
     }
 }
 
+/// The `_id` value from the op identity pairs. Hex ObjectId strings become
+/// real ObjectIds (the flattened grid shows them as hex); anything else is
+/// matched as its literal BSON value.
+fn pk_id(pk: &[(String, Cell)]) -> Result<mongodb::bson::Bson> {
+    let (_, cell) = pk
+        .iter()
+        .find(|(k, _)| k == "_id")
+        .or_else(|| pk.first())
+        .ok_or_else(|| RdbsError::Query("write op without a row identity".into()))?;
+    if let Cell::Text(s) = cell {
+        if let Ok(oid) = mongodb::bson::oid::ObjectId::parse_str(s) {
+            return Ok(mongodb::bson::Bson::ObjectId(oid));
+        }
+    }
+    Ok(cell_to_bson(cell))
+}
+
+fn cell_to_bson(c: &Cell) -> mongodb::bson::Bson {
+    use mongodb::bson::Bson;
+    match c {
+        Cell::Null => Bson::Null,
+        Cell::Int(i) => Bson::Int64(*i),
+        Cell::Float(f) => Bson::Double(*f),
+        Cell::Bool(b) => Bson::Boolean(*b),
+        Cell::Text(s) => Bson::String(s.clone()),
+        Cell::Bytes(b) => Bson::Binary(mongodb::bson::Binary {
+            subtype: mongodb::bson::spec::BinarySubtype::Generic,
+            bytes: b.clone(),
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::is_system_db;
+    use super::*;
+
+    #[test]
+    fn hex_id_becomes_objectid_other_text_stays_string() {
+        let oid = "657f1f77bcf86cd799439011";
+        let b = pk_id(&[("_id".into(), Cell::Text(oid.into()))]).unwrap();
+        assert!(matches!(b, mongodb::bson::Bson::ObjectId(_)));
+        let b = pk_id(&[("_id".into(), Cell::Text("user-42".into()))]).unwrap();
+        assert_eq!(b, mongodb::bson::Bson::String("user-42".into()));
+    }
+
+    #[test]
+    fn pk_id_requires_an_identity() {
+        assert!(pk_id(&[]).is_err());
+    }
+
+    #[test]
+    fn cells_map_to_bson() {
+        use mongodb::bson::Bson;
+        assert_eq!(cell_to_bson(&Cell::Null), Bson::Null);
+        assert_eq!(cell_to_bson(&Cell::Int(3)), Bson::Int64(3));
+        assert_eq!(cell_to_bson(&Cell::Bool(true)), Bson::Boolean(true));
+    }
 
     #[test]
     fn system_dbs_are_hidden() {
