@@ -5,8 +5,6 @@ export struct GridColumn { name: string, type-name: string }
 // `state` mirrors the app-side edit buffer: 0 normal, 1 edited (pending
 // update), 2 delete-marked, 3 inserted (pending insert).
 export struct GridCell { text: string, is-null: bool, state: int }
-// A Redis key/value row: the key (or list index / hash field) and its value cell.
-export struct KvRow { key: string, value: GridCell }
 // `db` tags the owning database for container rows (Mongo db→collection tree);
 // empty for SQL/Redis where the category path is used instead.
 // `count` is the number of (filter-matching) containers under a header row;

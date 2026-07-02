@@ -245,8 +245,8 @@ fn nested_display_rows(
     let mut rows: Vec<TreeNode> = Vec::new();
     for (db, leaves) in &groups {
         // While filtering, loaded databases are forced open so matches show.
-        let db_open =
-            expanded_dbs.contains(db) || (filtering && loaded_dbs.contains(db) && !leaves.is_empty());
+        let db_open = expanded_dbs.contains(db)
+            || (filtering && loaded_dbs.contains(db) && !leaves.is_empty());
         rows.push(TreeNode {
             label: db.clone().into(),
             depth: 0,
@@ -392,6 +392,51 @@ fn push_grid(w: &MainWindow, g: &model::GridModel) {
     w.set_grid_cells(ModelRc::from(Rc::new(VecModel::from(flat))));
 }
 
+/// Push `g` with the buffer's pending edits overlaid: changed cells show the
+/// new text (state 1), delete-marked rows state 2, insert rows appended as
+/// state-3 rows at the bottom.
+fn paint_grid_with_edits(w: &MainWindow, g: &model::GridModel, buf: &model::EditBuffer) {
+    let ncols = g.columns.len();
+    let mut flat: Vec<GridCell> = Vec::with_capacity((g.rows.len() + buf.inserts.len()) * ncols);
+    for (r, row) in g.rows.iter().enumerate() {
+        let deleted = buf.deletes.contains(&r);
+        for (c, cell) in row.iter().enumerate() {
+            let (text, is_null, state) = match buf.changes.get(&(r, c)) {
+                Some(t) => (
+                    t.clone(),
+                    t.eq_ignore_ascii_case("null"),
+                    if deleted { 2 } else { 1 },
+                ),
+                None => (cell.text.clone(), cell.is_null, i32::from(deleted) * 2),
+            };
+            flat.push(GridCell {
+                text: text.into(),
+                is_null,
+                state,
+            });
+        }
+    }
+    for ins in &buf.inserts {
+        for c in 0..ncols {
+            flat.push(GridCell {
+                text: ins.get(c).cloned().unwrap_or_default().into(),
+                is_null: false,
+                state: 3,
+            });
+        }
+    }
+    w.set_grid_cells(ModelRc::from(Rc::new(VecModel::from(flat))));
+}
+
+/// The grid a view displays, if it has one (for edit-buffer bookkeeping).
+fn view_grid(v: &model::ResultView) -> Option<model::GridModel> {
+    match v {
+        model::ResultView::Table(g) => Some(g.clone()),
+        model::ResultView::Documents(d) => Some(d.grid.clone()),
+        _ => None,
+    }
+}
+
 /// Clear the tabular grid properties (used by non-tabular result kinds).
 fn clear_grid(w: &MainWindow) {
     w.set_grid_col_count(0);
@@ -417,54 +462,28 @@ fn filter_grid(g: &model::GridModel, needle: &str) -> model::GridModel {
 }
 
 /// Push a `ResultView` into the window, selecting the per-kind result region
-/// via `result-kind` (0 Table, 1 Documents, 2 KeyValue, 3 Affected).
+/// via `result-kind` (0 Table, 1 Documents, 3 Affected).
 fn apply_result(w: &MainWindow, view: model::ResultView) {
-    // Reset the KeyValue rows by default; the KeyValue arm repopulates them.
-    let clear_kv =
-        |w: &MainWindow| w.set_kv_rows(ModelRc::from(Rc::new(VecModel::<KvRow>::default())));
     match view {
         model::ResultView::Table(g) => {
             w.set_result_kind(0);
             w.set_doc_json(SharedString::default());
-            clear_kv(w);
             push_grid(w, &g);
             w.set_result_status(SharedString::from(format!("{} rows", g.rows.len())));
         }
         model::ResultView::Documents(d) => {
             w.set_result_kind(1);
             w.set_doc_json(SharedString::from(d.json));
-            clear_kv(w);
             push_grid(w, &d.grid);
             w.set_result_status(SharedString::from(format!(
                 "{} documents",
                 d.grid.rows.len()
             )));
         }
-        model::ResultView::KeyValue(kv) => {
-            w.set_result_kind(2);
-            w.set_doc_json(SharedString::default());
-            clear_grid(w);
-            let n = kv.rows.len();
-            let rows: Vec<KvRow> = kv
-                .rows
-                .iter()
-                .map(|(k, c)| KvRow {
-                    key: k.clone().into(),
-                    value: GridCell {
-                        text: c.text.clone().into(),
-                        is_null: c.is_null,
-                        state: 0,
-                    },
-                })
-                .collect();
-            w.set_kv_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
-            w.set_result_status(SharedString::from(format!("{n} keys")));
-        }
         model::ResultView::Affected(status) => {
             w.set_result_kind(3);
             w.set_doc_json(SharedString::default());
             clear_grid(w);
-            clear_kv(w);
             w.set_result_status(SharedString::from(status));
         }
     }
@@ -518,11 +537,17 @@ fn main() -> Result<(), slint::PlatformError> {
     let sidebar_filter: Arc<std::sync::Mutex<String>> =
         Arc::new(std::sync::Mutex::new(String::new()));
     // Browse-mode pagination state (open container + page window + pk).
-    let browse: Arc<std::sync::Mutex<BrowseState>> =
-        Arc::new(std::sync::Mutex::new(BrowseState {
-            limit: 300,
-            ..Default::default()
-        }));
+    let browse: Arc<std::sync::Mutex<BrowseState>> = Arc::new(std::sync::Mutex::new(BrowseState {
+        limit: 300,
+        ..Default::default()
+    }));
+    // Buffered, uncommitted grid edits (⌘S commits, Esc/Discard drops).
+    let edit_buf: Arc<std::sync::Mutex<model::EditBuffer>> =
+        Arc::new(std::sync::Mutex::new(model::EditBuffer::default()));
+    // The grid currently on screen (post client-side filter): edit-buffer row
+    // indices refer to THIS grid, and its cells carry the pre-edit pk values.
+    let displayed_grid: Arc<std::sync::Mutex<Option<model::GridModel>>> =
+        Arc::new(std::sync::Mutex::new(None));
     // Engine of the live connection, kept on the UI thread so table clicks can
     // build an engine-appropriate "browse this table" query synchronously.
     let cur_engine: Rc<RefCell<Option<rdbs_connstore::Engine>>> = Rc::new(RefCell::new(None));
@@ -634,6 +659,8 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let last_view = last_view.clone();
+        let edit_buf = edit_buf.clone();
+        let displayed_grid = displayed_grid.clone();
         window.on_apply_filter(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -643,6 +670,15 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(v) = guard.as_ref() else {
                 return;
             };
+            // Filtering renumbers the visible rows, so pending edits keyed by
+            // row index would land on the wrong rows — drop them.
+            {
+                let mut b = edit_buf.lock().unwrap();
+                b.clear();
+            }
+            w.set_pending_count(0);
+            w.set_editing_row(-1);
+            w.set_editing_col(-1);
             // Filter the row-bearing views; Affected has nothing to filter.
             let filtered = match v {
                 model::ResultView::Table(g) => model::ResultView::Table(filter_grid(g, &needle)),
@@ -650,20 +686,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     json: d.json.clone(),
                     grid: filter_grid(&d.grid, &needle),
                 }),
-                model::ResultView::KeyValue(kv) => model::ResultView::KeyValue(model::KvModel {
-                    rows: kv
-                        .rows
-                        .iter()
-                        .filter(|(k, c)| {
-                            needle.is_empty()
-                                || k.to_lowercase().contains(&needle)
-                                || c.text.to_lowercase().contains(&needle)
-                        })
-                        .cloned()
-                        .collect(),
-                }),
                 model::ResultView::Affected(_) => return,
             };
+            *displayed_grid.lock().unwrap() = view_grid(&filtered);
             apply_result(&w, filtered);
         });
     }
@@ -818,11 +843,15 @@ fn main() -> Result<(), slint::PlatformError> {
         let current = current.clone();
         let last_view = last_view.clone();
         let browse = browse.clone();
+        let edit_buf = edit_buf.clone();
+        let displayed_grid = displayed_grid.clone();
         Rc::new(move |sql: String| {
             let weak2 = weak.clone();
             let current = current.clone();
             let last_view = last_view.clone();
             let browse = browse.clone();
+            let edit_buf = edit_buf.clone();
+            let displayed_grid = displayed_grid.clone();
             rt.spawn(async move {
                 let guard = current.lock().await;
                 let outcome = match guard.as_ref() {
@@ -853,11 +882,25 @@ fn main() -> Result<(), slint::PlatformError> {
                                 let shown = match &v {
                                     model::ResultView::Table(g) => g.rows.len(),
                                     model::ResultView::Documents(d) => d.grid.rows.len(),
-                                    model::ResultView::KeyValue(kv) => kv.rows.len(),
                                     model::ResultView::Affected(_) => 0,
                                 } as u64;
                                 *last_view.lock().unwrap() = Some(v.clone());
                                 w.set_grid_filter(SharedString::default());
+                                // Fresh result: pending edits refer to rows that
+                                // no longer exist — drop them and re-anchor the
+                                // buffer to the (possibly new) browse target.
+                                *displayed_grid.lock().unwrap() = view_grid(&v);
+                                {
+                                    let st = browse.lock().unwrap();
+                                    let mut b = edit_buf.lock().unwrap();
+                                    b.clear();
+                                    b.table = st.table.clone();
+                                    b.pk_cols = st.pk_cols.clone();
+                                }
+                                w.set_pending_count(0);
+                                w.set_editing_row(-1);
+                                w.set_editing_col(-1);
+                                w.set_status_error(false);
                                 apply_result(&w, v);
                                 // Fresh result: reset every column to a default width.
                                 let widths: Vec<f32> = vec![140.0; ncols];
@@ -935,6 +978,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let current = current.clone();
         let rt = rt.clone();
         let run_browse = run_browse.clone();
+        let edit_buf = edit_buf.clone();
         window.on_open_table(move |db, label| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -968,6 +1012,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let weak2 = weak.clone();
             let current = current.clone();
             let browse = browse.clone();
+            let edit_buf = edit_buf.clone();
             rt.spawn(async move {
                 let guard = current.lock().await;
                 let Some((_, driver)) = guard.as_ref() else {
@@ -985,6 +1030,13 @@ fn main() -> Result<(), slint::PlatformError> {
                     st.pk_cols = pk.clone();
                     (st.page, st.limit)
                 };
+                {
+                    // The page result usually lands before this reply and
+                    // re-anchors the buffer with empty pk_cols — top it up.
+                    let mut b = edit_buf.lock().unwrap();
+                    b.table = Some(table.clone());
+                    b.pk_cols = pk.clone();
+                }
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
                         w.set_total_rows(total.map(|t| t as i32).unwrap_or(-1));
@@ -1328,6 +1380,236 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_selected_row(r);
                 w.set_selected_col(c);
             }
+        });
+    }
+
+    // Repaint the grid with the buffer's pending edits overlaid, and refresh
+    // the footer badge. UI-thread helper shared by every edit handler.
+    let repaint_edits: Rc<dyn Fn(&MainWindow)> = {
+        let edit_buf = edit_buf.clone();
+        let displayed_grid = displayed_grid.clone();
+        Rc::new(move |w: &MainWindow| {
+            let buf = edit_buf.lock().unwrap();
+            if let Some(g) = displayed_grid.lock().unwrap().as_ref() {
+                paint_grid_with_edits(w, g, &buf);
+            }
+            w.set_pending_count(buf.pending_count() as i32);
+        })
+    };
+
+    // ----- inline editing: open editor on double-click -----
+    {
+        let weak = window.as_weak();
+        window.on_edit_cell(move |r, c| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            // Editable only in a tabular browse view with a known identity.
+            if w.get_grid_read_only() || w.get_show_structure() || w.get_result_kind() == 3 {
+                return;
+            }
+            w.set_editing_row(r);
+            w.set_editing_col(c);
+        });
+    }
+
+    // ----- inline editing: Enter confirms the cell into the buffer -----
+    {
+        let weak = window.as_weak();
+        let edit_buf = edit_buf.clone();
+        let displayed_grid = displayed_grid.clone();
+        let repaint_edits = repaint_edits.clone();
+        window.on_cell_edited(move |r, c, text| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            w.set_editing_row(-1);
+            w.set_editing_col(-1);
+            let base = displayed_grid
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|g| g.rows.len())
+                .unwrap_or(0);
+            {
+                let mut buf = edit_buf.lock().unwrap();
+                let (r, c) = (r as usize, c as usize);
+                if r >= base {
+                    // rows below the fetched page are pending inserts
+                    let i = r - base;
+                    if let Some(row) = buf.inserts.get_mut(i) {
+                        if c < row.len() {
+                            row[c] = text.to_string();
+                        }
+                    }
+                } else {
+                    buf.changes.insert((r, c), text.to_string());
+                }
+            }
+            repaint_edits(&w);
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        window.on_edit_cancelled(move || {
+            if let Some(w) = weak.upgrade() {
+                w.set_editing_row(-1);
+                w.set_editing_col(-1);
+            }
+        });
+    }
+
+    // ----- footer: + appends a pending insert row and starts editing it -----
+    {
+        let weak = window.as_weak();
+        let edit_buf = edit_buf.clone();
+        let displayed_grid = displayed_grid.clone();
+        let repaint_edits = repaint_edits.clone();
+        window.on_add_row(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if w.get_grid_read_only() {
+                return;
+            }
+            let dg = displayed_grid.lock().unwrap();
+            let Some(g) = dg.as_ref() else {
+                return;
+            };
+            let (base, ncols) = (g.rows.len(), g.columns.len());
+            drop(dg);
+            let row_idx = {
+                let mut buf = edit_buf.lock().unwrap();
+                buf.inserts.push(vec![String::new(); ncols]);
+                base + buf.inserts.len() - 1
+            };
+            repaint_edits(&w);
+            w.set_selected_row(row_idx as i32);
+            w.set_editing_row(row_idx as i32);
+            w.set_editing_col(0);
+        });
+    }
+
+    // ----- footer: − toggles delete on the selected row -----
+    {
+        let weak = window.as_weak();
+        let edit_buf = edit_buf.clone();
+        let displayed_grid = displayed_grid.clone();
+        let repaint_edits = repaint_edits.clone();
+        window.on_mark_delete(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if w.get_grid_read_only() {
+                return;
+            }
+            let r = w.get_selected_row();
+            if r < 0 {
+                return;
+            }
+            let r = r as usize;
+            let base = displayed_grid
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|g| g.rows.len())
+                .unwrap_or(0);
+            {
+                let mut buf = edit_buf.lock().unwrap();
+                if r >= base {
+                    // deleting a pending insert just removes it
+                    let i = r - base;
+                    if i < buf.inserts.len() {
+                        buf.inserts.remove(i);
+                    }
+                } else if !buf.deletes.remove(&r) {
+                    buf.deletes.insert(r);
+                }
+            }
+            repaint_edits(&w);
+        });
+    }
+
+    // ----- discard: drop the buffer, restore the fetched page -----
+    {
+        let weak = window.as_weak();
+        let edit_buf = edit_buf.clone();
+        let repaint_edits = repaint_edits.clone();
+        window.on_discard_edits(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            edit_buf.lock().unwrap().clear();
+            w.set_editing_row(-1);
+            w.set_editing_col(-1);
+            w.set_status_error(false);
+            repaint_edits(&w);
+        });
+    }
+
+    // ----- ⌘S: turn the buffer into WriteOps and commit them -----
+    {
+        let weak = window.as_weak();
+        let edit_buf = edit_buf.clone();
+        let displayed_grid = displayed_grid.clone();
+        let current = current.clone();
+        let rt = rt.clone();
+        window.on_commit_edits(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let ops = {
+                let buf = edit_buf.lock().unwrap();
+                if buf.is_empty() {
+                    return;
+                }
+                let dg = displayed_grid.lock().unwrap();
+                let Some(g) = dg.as_ref() else {
+                    return;
+                };
+                buf.to_ops(g)
+            };
+            let ops = match ops {
+                Ok(ops) if !ops.is_empty() => ops,
+                Ok(_) => return,
+                Err(msg) => {
+                    w.set_status_error(true);
+                    w.set_result_status(SharedString::from(format!("error: {msg}")));
+                    return;
+                }
+            };
+            let weak2 = weak.clone();
+            let current = current.clone();
+            rt.spawn(async move {
+                let outcome = {
+                    let guard = current.lock().await;
+                    match guard.as_ref() {
+                        Some((_, driver)) => driver.commit(&ops).await,
+                        None => Err(rdbs_core::error::RdbsError::Connection(
+                            "not connected".into(),
+                        )),
+                    }
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(w) = weak2.upgrade() else {
+                        return;
+                    };
+                    match outcome {
+                        Ok(n) => {
+                            w.set_status_error(false);
+                            w.set_result_status(SharedString::from(format!("{n} rows written")));
+                            // Refetch page + count; the fresh result clears the buffer.
+                            w.invoke_refresh_page();
+                        }
+                        Err(e) => {
+                            // Keep the buffer so nothing typed is lost.
+                            w.set_status_error(true);
+                            w.set_result_status(SharedString::from(format!("error: {e}")));
+                        }
+                    }
+                });
+            });
         });
     }
 
@@ -1870,10 +2152,7 @@ mod tests {
     #[test]
     fn page_bounds_first_page_full() {
         // 300 shown of 1000 total: 1–300, no prev, next available
-        assert_eq!(
-            page_bounds(0, 300, Some(1000), 300),
-            (1, 300, false, true)
-        );
+        assert_eq!(page_bounds(0, 300, Some(1000), 300), (1, 300, false, true));
     }
 
     #[test]

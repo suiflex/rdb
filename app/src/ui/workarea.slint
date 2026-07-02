@@ -1,5 +1,5 @@
 import { Theme } from "theme.slint";
-import { GridColumn, GridCell, KvRow, StructField } from "structs.slint";
+import { GridColumn, GridCell, StructField } from "structs.slint";
 import { AppIcon } from "icons.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { ScrollView, Button, TextEdit, LineEdit } from "std-widgets.slint";
@@ -11,7 +11,6 @@ export component WorkArea inherits Rectangle {
     in property <int> col-count;
     in property <[length]> col-widths;     // per-column pixel widths (drag-resizable)
     in property <string> doc-json;
-    in property <[KvRow]> kv-rows;         // Redis key/value rows
     // result shape: 0 Table (SQL), 1 Documents (Mongo), 2 KeyValue (Redis), 3 Affected
     in property <int> result-kind: 0;
     property <bool> is-documents: root.result-kind == 1;
@@ -19,6 +18,7 @@ export component WorkArea inherits Rectangle {
     in property <bool> sql-capable: true;
     in-out property <bool> doc-as-json: false;
     in property <string> result-status;    // Affected toast / errors
+    in property <bool> status-error;       // paint the status line red
     in property <int> selected-row: 0;
     in property <int> selected-col: -1;
     in property <int> editing-row: -1;
@@ -63,7 +63,7 @@ export component WorkArea inherits Rectangle {
     property <length> editor-h: 140px;
     // a result is present when a table is open / a query has run
     property <bool> has-content: root.col-count > 0 || root.is-documents
-        || root.kv-rows.length > 0 || root.result-status != "";
+        || root.result-status != "";
 
     VerticalLayout {
         padding: Theme.sp4;
@@ -117,7 +117,7 @@ export component WorkArea inherits Rectangle {
             Text {
                 vertical-alignment: center;
                 text: root.result-status;
-                color: Theme.text-dim;
+                color: root.status-error ? Theme.edit-delete : Theme.text-dim;
                 font-size: Theme.font-label;
             }
         }
@@ -393,61 +393,6 @@ export component WorkArea inherits Rectangle {
                 edit-cell(r, c) => { root.edit-cell(r, c); }
                 cell-edited(r, c, t) => { root.cell-edited(r, c, t); }
                 edit-cancelled() => { root.edit-cancelled(); }
-            }
-
-            // Redis key/value view (kind 2): two columns, no drag-resize
-            if !root.show-structure && root.result-kind == 2: ScrollView {
-                VerticalLayout {
-                    width: max(self.preferred-width, parent.visible-width);
-                    HorizontalLayout {
-                        height: Theme.row-height;
-                        Rectangle {
-                            width: 240px;
-                            background: Theme.surface;
-                            Text { x: Theme.sp1; vertical-alignment: center; text: "Key"; color: Theme.text-dim; font-size: Theme.font-label; }
-                        }
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            background: Theme.surface;
-                            Text { x: Theme.sp1; vertical-alignment: center; text: "Value"; color: Theme.text-dim; font-size: Theme.font-label; }
-                        }
-                    }
-                    Rectangle { height: 1px; background: Theme.hairline; }
-                    for row[r] in root.kv-rows: Rectangle {
-                        height: Theme.row-height;
-                        background: r == root.selected-row ? Theme.accent.with-alpha(0.14) : transparent;
-                        HorizontalLayout {
-                            Rectangle {
-                                width: 240px;
-                                clip: true;
-                                Text {
-                                    vertical-alignment: center;
-                                    x: Theme.sp1;
-                                    width: parent.width - 2 * Theme.sp1;
-                                    overflow: elide;
-                                    text: row.key;
-                                    color: Theme.text-dim;
-                                    font-family: Theme.mono-family;
-                                    font-size: Theme.font-mono;
-                                }
-                            }
-                            Rectangle {
-                                horizontal-stretch: 1;
-                                clip: true;
-                                Text {
-                                    vertical-alignment: center;
-                                    x: Theme.sp1;
-                                    width: parent.width - 2 * Theme.sp1;
-                                    overflow: elide;
-                                    text: row.value.text;
-                                    color: row.value.is-null ? Theme.text-dim : Theme.text;
-                                    font-family: Theme.mono-family;
-                                    font-size: Theme.font-mono;
-                                }
-                            }
-                        }
-                    }
-                }
             }
 
             // Affected (kind 3): no grid, just the centered status

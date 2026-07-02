@@ -32,20 +32,13 @@ pub struct DocModel {
     pub grid: GridModel,
 }
 
-/// Redis key/value rows: each row is a key (or list index / hash field) and its
-/// value cell. Kept separate from the SQL grid so Redis presentation can diverge.
-#[derive(Debug, Default, Clone)]
-pub struct KvModel {
-    pub rows: Vec<(String, VmCell)>,
-}
-
-/// Presentation-ready view of a `ResultSet`, one arm per data shape. Drives the
-/// per-kind result region in the UI instead of collapsing everything to a grid.
+/// Presentation-ready view of a `ResultSet`, one arm per data shape. Redis
+/// key/value results flatten into `Table` so every row-bearing view shares the
+/// grid's selection/filter/edit machinery.
 #[derive(Debug, Clone)]
 pub enum ResultView {
     Table(GridModel),
     Documents(DocModel),
-    KeyValue(KvModel),
     /// Status toast for writes, e.g. "3 rows affected".
     Affected(String),
 }
@@ -185,10 +178,31 @@ pub fn to_result_view(rs: &ResultSet) -> ResultView {
                 })
                 .collect(),
         }),
-        ResultSet::KeyValue(pairs) => ResultView::KeyValue(KvModel {
+        // Key/value results render through the same tabular grid as SQL so
+        // they inherit selection, filtering, and inline editing. Column 0 is
+        // the row identity (key / field / index / member), column 1 the value.
+        ResultSet::KeyValue(pairs) => ResultView::Table(GridModel {
+            columns: vec![
+                VmColumn {
+                    name: "key".into(),
+                    type_name: "text".into(),
+                },
+                VmColumn {
+                    name: "value".into(),
+                    type_name: "text".into(),
+                },
+            ],
             rows: pairs
                 .iter()
-                .map(|(k, v)| (k.clone(), redis_cell(v)))
+                .map(|(k, v)| {
+                    vec![
+                        VmCell {
+                            text: k.clone(),
+                            is_null: false,
+                        },
+                        redis_cell(v),
+                    ]
+                })
                 .collect(),
         }),
         ResultSet::Documents(docs) => {
@@ -273,22 +287,23 @@ mod tests {
     }
 
     #[test]
-    fn keyvalue_maps_redis_pairs() {
+    fn keyvalue_maps_to_two_column_grid() {
         let rs = ResultSet::KeyValue(vec![
             ("k1".into(), RedisValue::Str("v1".into())),
             ("k2".into(), RedisValue::Int(9)),
             ("k3".into(), RedisValue::Nil),
         ]);
-        let kv = match to_result_view(&rs) {
-            ResultView::KeyValue(kv) => kv,
-            other => panic!("expected KeyValue, got {other:?}"),
+        let g = match to_result_view(&rs) {
+            ResultView::Table(g) => g,
+            other => panic!("expected Table, got {other:?}"),
         };
-        assert_eq!(kv.rows.len(), 3);
-        assert_eq!(kv.rows[0].0, "k1");
-        assert_eq!(kv.rows[0].1.text, "v1");
-        assert_eq!(kv.rows[1].1.text, "9");
-        assert_eq!(kv.rows[2].1.text, "(nil)");
-        assert!(kv.rows[2].1.is_null);
+        assert_eq!(g.columns.len(), 2);
+        assert_eq!(g.columns[0].name, "key");
+        assert_eq!(g.rows.len(), 3);
+        assert_eq!(g.rows[0][0].text, "k1");
+        assert_eq!(g.rows[0][1].text, "v1");
+        assert_eq!(g.rows[1][1].text, "9");
+        assert!(g.rows[2][1].is_null);
     }
 
     #[test]
@@ -414,7 +429,11 @@ impl EditBuffer {
                 .position(|c| &c.name == name)
                 .or({
                     // single-identity grids (Redis): identity lives in column 0
-                    if self.pk_cols.len() == 1 { Some(0) } else { None }
+                    if self.pk_cols.len() == 1 {
+                        Some(0)
+                    } else {
+                        None
+                    }
                 })
                 .ok_or_else(|| format!("primary key column \"{name}\" not in result"))?;
             let cell = grid
@@ -544,17 +563,35 @@ mod edit_tests {
     fn grid() -> GridModel {
         GridModel {
             columns: vec![
-                VmColumn { name: "id".into(), type_name: "int4".into() },
-                VmColumn { name: "name".into(), type_name: "text".into() },
+                VmColumn {
+                    name: "id".into(),
+                    type_name: "int4".into(),
+                },
+                VmColumn {
+                    name: "name".into(),
+                    type_name: "text".into(),
+                },
             ],
             rows: vec![
                 vec![
-                    VmCell { text: "1".into(), is_null: false },
-                    VmCell { text: "alice".into(), is_null: false },
+                    VmCell {
+                        text: "1".into(),
+                        is_null: false,
+                    },
+                    VmCell {
+                        text: "alice".into(),
+                        is_null: false,
+                    },
                 ],
                 vec![
-                    VmCell { text: "2".into(), is_null: false },
-                    VmCell { text: "bob".into(), is_null: false },
+                    VmCell {
+                        text: "2".into(),
+                        is_null: false,
+                    },
+                    VmCell {
+                        text: "bob".into(),
+                        is_null: false,
+                    },
                 ],
             ],
         }
@@ -632,12 +669,24 @@ mod edit_tests {
     fn redis_style_key_column_renames_to_pk_identity() {
         let g = GridModel {
             columns: vec![
-                VmColumn { name: "key".into(), type_name: "text".into() },
-                VmColumn { name: "value".into(), type_name: "text".into() },
+                VmColumn {
+                    name: "key".into(),
+                    type_name: "text".into(),
+                },
+                VmColumn {
+                    name: "value".into(),
+                    type_name: "text".into(),
+                },
             ],
             rows: vec![vec![
-                VmCell { text: "color".into(), is_null: false },
-                VmCell { text: "red".into(), is_null: false },
+                VmCell {
+                    text: "color".into(),
+                    is_null: false,
+                },
+                VmCell {
+                    text: "red".into(),
+                    is_null: false,
+                },
             ]],
         };
         let mut b = EditBuffer {
@@ -661,14 +710,32 @@ mod edit_tests {
     fn composite_pk_reads_both_columns() {
         let g = GridModel {
             columns: vec![
-                VmColumn { name: "a".into(), type_name: "int4".into() },
-                VmColumn { name: "b".into(), type_name: "text".into() },
-                VmColumn { name: "v".into(), type_name: "text".into() },
+                VmColumn {
+                    name: "a".into(),
+                    type_name: "int4".into(),
+                },
+                VmColumn {
+                    name: "b".into(),
+                    type_name: "text".into(),
+                },
+                VmColumn {
+                    name: "v".into(),
+                    type_name: "text".into(),
+                },
             ],
             rows: vec![vec![
-                VmCell { text: "1".into(), is_null: false },
-                VmCell { text: "x".into(), is_null: false },
-                VmCell { text: "old".into(), is_null: false },
+                VmCell {
+                    text: "1".into(),
+                    is_null: false,
+                },
+                VmCell {
+                    text: "x".into(),
+                    is_null: false,
+                },
+                VmCell {
+                    text: "old".into(),
+                    is_null: false,
+                },
             ]],
         };
         let mut b = EditBuffer {

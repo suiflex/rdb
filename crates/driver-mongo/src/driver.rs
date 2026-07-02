@@ -188,10 +188,7 @@ impl Driver for MongoDriver {
         for op in ops {
             let table = op.table();
             let db = table.database.as_deref().unwrap_or(&self.default_db);
-            let coll = self
-                .client
-                .database(db)
-                .collection::<Document>(&table.name);
+            let coll = self.client.database(db).collection::<Document>(&table.name);
             let res = match op {
                 WriteOp::Update { pk, changes, .. } => {
                     let id = pk_id(pk)?;

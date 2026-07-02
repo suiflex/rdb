@@ -9,7 +9,6 @@ import { AppIcon } from "icons.slint";
 import {
     GridColumn,
     GridCell,
-    KvRow,
     TreeNode,
     ConnItem,
     TabItem,
@@ -55,7 +54,6 @@ export component MainWindow inherits Window {
     in property <[GridCell]> grid-cells;
     in property <int> grid-col-count;
     in property <string> doc-json;
-    in property <[KvRow]> kv-rows;
     // result shape: 0 Table, 1 Documents, 2 KeyValue, 3 Affected
     in property <int> result-kind: 0;
     in property <bool> sql-capable: true;
@@ -84,6 +82,7 @@ export component MainWindow inherits Window {
     in property <bool> can-next;
     in property <int> pending-count;
     in property <bool> grid-read-only: true;
+    in property <bool> status-error;
     in-out property <string> limit-text: "300";
     callback prev-page();
     callback next-page();
@@ -147,6 +146,10 @@ export component MainWindow inherits Window {
                 }
                 if (e.text == Key.Return) {
                     root.run-query();
+                    return accept;
+                }
+                if (e.text == "s") {
+                    root.commit-edits();
                     return accept;
                 }
                 if (e.text == "t") {
@@ -397,10 +400,10 @@ export component MainWindow inherits Window {
                         col-count: root.grid-col-count;
                         col-widths: root.grid-col-widths;
                         doc-json: root.doc-json;
-                        kv-rows: root.kv-rows;
                         result-kind: root.result-kind;
                         sql-capable: root.sql-capable;
                         result-status: root.result-status;
+                        status-error: root.status-error;
                         selected-row: root.selected-row;
                         selected-col: root.selected-col;
                         editing-row: root.editing-row;

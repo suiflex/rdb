@@ -205,9 +205,7 @@ impl Driver for MysqlDriver {
         let mut affected = 0u64;
         for op in ops {
             let (sql, params) = match op {
-                WriteOp::Update { table, pk, changes } => {
-                    write_sql::update_sql(table, pk, changes)
-                }
+                WriteOp::Update { table, pk, changes } => write_sql::update_sql(table, pk, changes),
                 WriteOp::Insert { table, values } => write_sql::insert_sql(table, values),
                 WriteOp::Delete { table, pk } => write_sql::delete_sql(table, pk),
             };

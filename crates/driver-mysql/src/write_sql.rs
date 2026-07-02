@@ -60,7 +60,12 @@ pub fn update_sql(
         .collect();
     let wher = where_clause(pk, &mut params);
     (
-        format!("UPDATE {} SET {} WHERE {}", table_name(t), sets.join(", "), wher),
+        format!(
+            "UPDATE {} SET {} WHERE {}",
+            table_name(t),
+            sets.join(", "),
+            wher
+        ),
         params,
     )
 }

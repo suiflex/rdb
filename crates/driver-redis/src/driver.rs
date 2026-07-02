@@ -237,9 +237,7 @@ impl RedisDriver {
                             .map_err(qerr)?;
                         build_cmd("SADD", &[key, &value])
                     }
-                    other => {
-                        return Err(RdbsError::Query(format!("cannot edit type {other}")))
-                    }
+                    other => return Err(RdbsError::Query(format!("cannot edit type {other}"))),
                 };
                 cmd.query_async::<()>(&mut *conn).await.map_err(qerr)
             }
@@ -290,9 +288,7 @@ impl RedisDriver {
                         build_cmd("ZREM", &[key, &member])
                     }
                     other => {
-                        return Err(RdbsError::Query(format!(
-                            "cannot delete from type {other}"
-                        )))
+                        return Err(RdbsError::Query(format!("cannot delete from type {other}")))
                     }
                 };
                 cmd.query_async::<()>(&mut *conn).await.map_err(qerr)
