@@ -31,6 +31,15 @@ export component WorkArea inherits Rectangle {
     // ----- SQL editor toggle + active table title (TablePlus-style) -----
     in-out property <bool> sql-open: false;
     in property <string> active-table;
+    // ----- pagination + edit footer (browse mode only) -----
+    in property <int> page-start;       // 1-based first row shown
+    in property <int> page-end;         // last row shown
+    in property <int> total-rows: -1;   // -1 = unknown (count pending)
+    in property <bool> can-prev;
+    in property <bool> can-next;
+    in property <int> pending-count;    // buffered edits awaiting ⌘S
+    in property <bool> read-only;       // no primary key → editing disabled
+    in-out property <string> limit-text: "300";
     callback run();
     callback apply-filter();
     callback toggle-sql();
@@ -39,6 +48,14 @@ export component WorkArea inherits Rectangle {
     callback edit-cell(int, int);       // double-click → inline editor
     callback cell-edited(int, int, string);
     callback edit-cancelled();
+    callback prev-page();
+    callback next-page();
+    callback refresh-page();
+    callback set-limit(string);
+    callback add-row();
+    callback mark-delete();
+    callback commit-edits();
+    callback discard-edits();
 
     background: Theme.bg;
 
@@ -441,6 +458,138 @@ export component WorkArea inherits Rectangle {
                     text: root.result-status;
                     color: Theme.text-dim;
                     font-size: Theme.font-body;
+                }
+            }
+        }
+
+        // ----- pagination + edit footer (TablePlus-style, browse mode only) -----
+        if root.has-content && root.active-table != "": Rectangle {
+            height: 32px;
+            HorizontalLayout {
+                spacing: Theme.sp1;
+                // + insert row
+                Rectangle {
+                    width: 26px;
+                    border-radius: Theme.radius-control;
+                    background: add-row-ta.has-hover && !root.read-only ? Theme.surface-2 : transparent;
+                    add-row-ta := TouchArea { enabled: !root.read-only; clicked => { root.add-row(); } }
+                    Text {
+                        horizontal-alignment: center; vertical-alignment: center;
+                        text: "+"; font-size: 15px;
+                        color: root.read-only ? Theme.text-faint : Theme.text-dim;
+                    }
+                }
+                // − mark selected row deleted
+                Rectangle {
+                    width: 26px;
+                    border-radius: Theme.radius-control;
+                    background: del-row-ta.has-hover && !root.read-only ? Theme.surface-2 : transparent;
+                    del-row-ta := TouchArea { enabled: !root.read-only; clicked => { root.mark-delete(); } }
+                    Text {
+                        horizontal-alignment: center; vertical-alignment: center;
+                        text: "−"; font-size: 15px;
+                        color: root.read-only ? Theme.text-faint : Theme.text-dim;
+                    }
+                }
+                // ⟳ refresh page
+                Rectangle {
+                    width: 26px;
+                    border-radius: Theme.radius-control;
+                    background: refresh-ta.has-hover ? Theme.surface-2 : transparent;
+                    refresh-ta := TouchArea { clicked => { root.refresh-page(); } }
+                    Text {
+                        horizontal-alignment: center; vertical-alignment: center;
+                        text: "⟳"; font-size: 13px; color: Theme.text-dim;
+                    }
+                }
+                if root.read-only: Text {
+                    vertical-alignment: center;
+                    text: "read-only (no primary key)";
+                    color: Theme.text-faint;
+                    font-size: Theme.font-caption;
+                }
+                Rectangle {} // spacer
+                // ‹ page window ›
+                Rectangle {
+                    width: 24px;
+                    border-radius: Theme.radius-control;
+                    background: prev-ta.has-hover && root.can-prev ? Theme.surface-2 : transparent;
+                    prev-ta := TouchArea { enabled: root.can-prev; clicked => { root.prev-page(); } }
+                    Text {
+                        horizontal-alignment: center; vertical-alignment: center;
+                        text: "‹"; font-size: 14px;
+                        color: root.can-prev ? Theme.text-dim : Theme.text-faint;
+                    }
+                }
+                Text {
+                    vertical-alignment: center;
+                    text: root.total-rows < 0
+                        ? "\{root.page-start}–\{root.page-end}"
+                        : "\{root.page-start}–\{root.page-end} of \{root.total-rows}";
+                    color: Theme.text-dim;
+                    font-size: Theme.font-label;
+                }
+                Rectangle {
+                    width: 24px;
+                    border-radius: Theme.radius-control;
+                    background: next-ta.has-hover && root.can-next ? Theme.surface-2 : transparent;
+                    next-ta := TouchArea { enabled: root.can-next; clicked => { root.next-page(); } }
+                    Text {
+                        horizontal-alignment: center; vertical-alignment: center;
+                        text: "›"; font-size: 14px;
+                        color: root.can-next ? Theme.text-dim : Theme.text-faint;
+                    }
+                }
+                Rectangle { width: Theme.sp2; }
+                Text {
+                    vertical-alignment: center;
+                    text: "limit";
+                    color: Theme.text-faint;
+                    font-size: Theme.font-caption;
+                }
+                LineEdit {
+                    width: 56px;
+                    text <=> root.limit-text;
+                    font-size: Theme.font-label;
+                    accepted(t) => { root.set-limit(t); }
+                }
+                Rectangle { width: Theme.sp2; }
+                // pending edits badge + commit/discard (hidden when clean)
+                if root.pending-count > 0: Rectangle {
+                    width: 8px; height: 8px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 4px;
+                    background: Theme.edit-pending;
+                }
+                if root.pending-count > 0: Text {
+                    vertical-alignment: center;
+                    text: "\{root.pending-count} pending";
+                    color: Theme.text-dim;
+                    font-size: Theme.font-label;
+                }
+                if root.pending-count > 0: Rectangle {
+                    width: 92px;
+                    border-radius: Theme.radius-control;
+                    background: commit-ta.has-hover ? Theme.accent.darker(0.1) : Theme.accent;
+                    commit-ta := TouchArea { clicked => { root.commit-edits(); } }
+                    Text {
+                        horizontal-alignment: center; vertical-alignment: center;
+                        text: "Commit ⌘S"; color: #ffffff;
+                        font-size: Theme.font-label; font-weight: 600;
+                    }
+                }
+                if root.pending-count > 0: Rectangle {
+                    width: 64px;
+                    border-radius: Theme.radius-control;
+                    border-width: 1px;
+                    border-color: Theme.hairline-strong;
+                    background: discard-ta.has-hover ? Theme.surface-2 : transparent;
+                    discard-ta := TouchArea { clicked => { root.discard-edits(); } }
+                    Text {
+                        horizontal-alignment: center; vertical-alignment: center;
+                        text: "Discard"; color: Theme.text-dim;
+                        font-size: Theme.font-label;
+                    }
                 }
             }
         }

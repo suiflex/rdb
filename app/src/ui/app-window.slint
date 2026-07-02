@@ -76,6 +76,24 @@ export component MainWindow inherits Window {
     callback apply-filter();
     callback resize-grid-col(int, length);
 
+    // ----- pagination + edit footer -----
+    in property <int> page-start;
+    in property <int> page-end;
+    in property <int> total-rows: -1;
+    in property <bool> can-prev;
+    in property <bool> can-next;
+    in property <int> pending-count;
+    in property <bool> grid-read-only: true;
+    in-out property <string> limit-text: "300";
+    callback prev-page();
+    callback next-page();
+    callback refresh-page();
+    callback set-limit(string);
+    callback add-row();
+    callback mark-delete();
+    callback commit-edits();
+    callback discard-edits();
+
     // ----- tabs + palette -----
     in property <[TabItem]> tabs;
     in-out property <int> active-tab: 0;
@@ -391,6 +409,14 @@ export component MainWindow inherits Window {
                         structure-columns: root.structure-columns;
                         grid-filter <=> root.grid-filter;
                         active-table: root.active-table;
+                        page-start: root.page-start;
+                        page-end: root.page-end;
+                        total-rows: root.total-rows;
+                        can-prev: root.can-prev;
+                        can-next: root.can-next;
+                        pending-count: root.pending-count;
+                        read-only: root.grid-read-only;
+                        limit-text <=> root.limit-text;
                         run => {
                             root.run-query();
                         }
@@ -414,6 +440,30 @@ export component MainWindow inherits Window {
                         }
                         edit-cancelled() => {
                             root.edit-cancelled();
+                        }
+                        prev-page() => {
+                            root.prev-page();
+                        }
+                        next-page() => {
+                            root.next-page();
+                        }
+                        refresh-page() => {
+                            root.refresh-page();
+                        }
+                        set-limit(t) => {
+                            root.set-limit(t);
+                        }
+                        add-row() => {
+                            root.add-row();
+                        }
+                        mark-delete() => {
+                            root.mark-delete();
+                        }
+                        commit-edits() => {
+                            root.commit-edits();
+                        }
+                        discard-edits() => {
+                            root.discard-edits();
                         }
                     }
                 }
