@@ -23,6 +23,7 @@ pub fn fold_rows(rows: Vec<SchemaRow>) -> Schema {
             Some(d) => d,
             None => {
                 databases.push(Database {
+                    functions: Vec::new(),
                     name: db_name.clone(),
                     containers: Vec::new(),
                 });

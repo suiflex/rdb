@@ -1,0 +1,322 @@
+// Shared Tabula components. All colors/metrics come from Tokens.
+import { Tokens } from "tokens.slint";
+
+// Engine badge: rounded square with 2-letter code, engine color fill.
+export component DbBadge inherits Rectangle {
+    in property <string> engine; // "postgres" | "mysql" | "redis" | "sqlite" | "mongo"
+    in property <length> size: 24px;
+    width: self.size;
+    height: self.size;
+    border-radius: self.size * 0.28;
+    background: engine == "postgres" ? Tokens.db-pg
+        : engine == "mysql" ? Tokens.db-my
+        : engine == "redis" ? Tokens.db-re
+        : engine == "sqlite" ? Tokens.db-sl
+        : engine == "mongo" ? Tokens.db-mo
+        : Tokens.text-faint;
+    Text {
+        text: engine == "postgres" ? "Pg"
+            : engine == "mysql" ? "My"
+            : engine == "redis" ? "Re"
+            : engine == "sqlite" ? "Sl"
+            : engine == "mongo" ? "Mo"
+            : "?";
+        color: white;
+        font-size: root.size * 0.42;
+        font-weight: 700;
+    }
+}
+
+// Green outline chip: LOCAL / status labels.
+export component OutlineChip inherits Rectangle {
+    in property <string> text;
+    in property <color> tint: Tokens.ok;
+    height: 18px;
+    width: label.preferred-width + 2 * Tokens.sp2;
+    border-radius: self.height / 2;
+    border-width: 1px;
+    border-color: tint.with-alpha(0.55);
+    background: transparent;
+    label := Text {
+        text: root.text;
+        color: tint;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.8px;
+    }
+}
+
+export component PrimaryButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    callback clicked;
+    height: Tokens.button-h;
+    width: label.preferred-width + 2 * Tokens.sp4;
+    border-radius: Tokens.radius;
+    background: !enabled ? Tokens.accent.with-alpha(0.4)
+        : ta.has-hover ? Tokens.accent-hover : Tokens.accent;
+    animate background { duration: Tokens.fade; }
+    label := Text {
+        text: root.text;
+        color: white;
+        font-size: Tokens.font-sm;
+        font-weight: Tokens.weight-emphasis;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component SecondaryButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    callback clicked;
+    height: Tokens.button-h;
+    width: label.preferred-width + 2 * Tokens.sp4;
+    border-radius: Tokens.radius;
+    border-width: 1px;
+    border-color: Tokens.border-strong;
+    background: !enabled ? Tokens.chrome
+        : ta.has-hover ? Tokens.chrome : Tokens.card;
+    animate background { duration: Tokens.fade; }
+    label := Text {
+        text: root.text;
+        color: enabled ? Tokens.text : Tokens.text-faint;
+        font-size: Tokens.font-sm;
+        font-weight: 500;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Plain text button (footer actions: Import, Backup, Copy, Export CSV…).
+export component TextButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> active: false;
+    callback clicked;
+    height: Tokens.button-h;
+    width: label.preferred-width + 2 * Tokens.sp2;
+    border-radius: Tokens.radius;
+    background: ta.has-hover ? Tokens.border : transparent;
+    animate background { duration: Tokens.fade; }
+    label := Text {
+        text: root.text;
+        color: active ? Tokens.accent : Tokens.text-dim;
+        font-size: Tokens.font-sm;
+        font-weight: 500;
+    }
+    ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+// Small bordered key cap (⌘K, ⌘P, ⌘↵).
+export component KeyCap inherits Rectangle {
+    in property <string> text;
+    height: 18px;
+    width: label.preferred-width + 10px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Tokens.border;
+    background: Tokens.card;
+    label := Text {
+        text: root.text;
+        color: Tokens.text-faint;
+        font-size: 10px;
+    }
+}
+
+// Titlebar search / command pill.
+export component SearchCommandPill inherits Rectangle {
+    in property <string> placeholder: "Search or run a command...";
+    callback activated;
+    height: 28px;
+    border-radius: Tokens.radius;
+    border-width: 1px;
+    border-color: ta.has-hover ? Tokens.border-strong : Tokens.border;
+    background: Tokens.card;
+    HorizontalLayout {
+        padding-left: Tokens.sp3;
+        padding-right: 5px;
+        spacing: Tokens.sp2;
+        Text {
+            text: "⌕";
+            color: Tokens.text-faint;
+            font-size: Tokens.font-md;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.placeholder;
+            color: Tokens.text-faint;
+            font-size: Tokens.font-sm;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+        VerticalLayout {
+            alignment: center;
+            KeyCap { text: "⌘K"; }
+        }
+    }
+    ta := TouchArea { clicked => { root.activated(); } }
+}
+
+// Breadcrumb chip: white hairline card, optional status dot / trailing caret.
+export component BreadcrumbChip inherits Rectangle {
+    in property <string> text;
+    in property <bool> show-dot: false;
+    in property <color> dot-color: Tokens.ok;
+    in property <bool> caret: false;
+    in property <bool> mono: false;
+    callback clicked;
+    height: 28px;
+    width: content.preferred-width + 2 * Tokens.sp3;
+    border-radius: Tokens.radius;
+    border-width: 1px;
+    border-color: Tokens.border;
+    background: ta.has-hover ? Tokens.canvas : Tokens.card;
+    animate background { duration: Tokens.fade; }
+    content := HorizontalLayout {
+        alignment: center;
+        spacing: 6px;
+        if root.show-dot: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 7px;
+                height: 7px;
+                border-radius: 3.5px;
+                background: root.dot-color;
+            }
+        }
+        Text {
+            text: root.text;
+            color: Tokens.text;
+            font-size: Tokens.font-sm;
+            font-weight: 500;
+            font-family: root.mono ? Tokens.mono : "";
+            vertical-alignment: center;
+        }
+        if root.caret: Text {
+            text: "▾";
+            color: Tokens.text-faint;
+            font-size: 9px;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+// Underline segment control (Data/Structure/Indexes · Data/Message/Chart).
+export component UnderlineSegment inherits Rectangle {
+    in property <string> text;
+    in property <bool> active: false;
+    callback clicked;
+    height: 100%;
+    width: label.preferred-width;
+    label := Text {
+        text: root.text;
+        color: active ? Tokens.accent : (ta.has-hover ? Tokens.text : Tokens.text-dim);
+        font-size: Tokens.font-sm;
+        font-weight: active ? Tokens.weight-emphasis : 500;
+        vertical-alignment: center;
+    }
+    Rectangle {
+        y: parent.height - self.height;
+        height: 2px;
+        width: parent.width;
+        background: active ? Tokens.accent : transparent;
+    }
+    ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+// Grey tag chip (mono text: profin, fintech).
+export component TagChip inherits Rectangle {
+    in property <string> text;
+    height: 24px;
+    width: label.preferred-width + 2 * Tokens.sp3;
+    border-radius: Tokens.radius;
+    background: Tokens.chrome;
+    label := Text {
+        text: root.text;
+        color: Tokens.text-dim;
+        font-size: Tokens.font-sm;
+        font-family: Tokens.mono;
+    }
+}
+
+// Icon button with hover fill; glyph-based to stay resolution-crisp.
+export component GlyphButton inherits Rectangle {
+    in property <string> glyph;
+    in property <length> glyph-size: Tokens.font-md;
+    in property <bool> danger-hover: false; // close button: red fill + white glyph
+    callback clicked;
+    width: 28px;
+    height: 28px;
+    border-radius: Tokens.radius;
+    background: ta.has-hover ? (danger-hover ? Tokens.error : Tokens.border) : transparent;
+    animate background { duration: Tokens.fade; }
+    Text {
+        text: root.glyph;
+        color: ta.has-hover && root.danger-hover ? white : Tokens.text-dim;
+        font-size: root.glyph-size;
+    }
+    ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+// macOS-style window controls (– □ ×), right-aligned in the design.
+export component WindowControls inherits HorizontalLayout {
+    callback minimize;
+    callback maximize;
+    callback close-window;
+    spacing: Tokens.sp1;
+    GlyphButton { glyph: "–"; clicked => { root.minimize(); } }
+    GlyphButton { glyph: "□"; glyph-size: 12px; clicked => { root.maximize(); } }
+    GlyphButton { glyph: "×"; danger-hover: true; clicked => { root.close-window(); } }
+}
+
+// Filter/search input used in sidebars (white rounded box + magnifier).
+export component FilterField inherits Rectangle {
+    in property <string> placeholder;
+    in-out property <string> text <=> input.text;
+    in property <string> trailing-cap: "";
+    callback edited(string);
+    callback submitted;
+    height: 30px;
+    border-radius: Tokens.radius;
+    border-width: 1px;
+    border-color: input.has-focus ? Tokens.accent : Tokens.border;
+    background: Tokens.card;
+    HorizontalLayout {
+        padding-left: Tokens.sp2;
+        padding-right: 6px;
+        spacing: 6px;
+        Text {
+            text: "⌕";
+            color: Tokens.text-faint;
+            font-size: Tokens.font-md;
+            vertical-alignment: center;
+        }
+        input := TextInput {
+            font-size: Tokens.font-sm;
+            color: Tokens.text;
+            vertical-alignment: center;
+            single-line: true;
+            horizontal-stretch: 1;
+            accepted => { root.submitted(); }
+            edited => { root.edited(self.text); }
+        }
+        if root.trailing-cap != "": VerticalLayout {
+            alignment: center;
+            KeyCap { text: root.trailing-cap; }
+        }
+    }
+    if input.text == "": Text {
+        x: Tokens.sp2 + 6px + 14px;
+        text: root.placeholder;
+        color: Tokens.text-faint;
+        font-size: Tokens.font-sm;
+        vertical-alignment: center;
+        height: 100%;
+    }
+}

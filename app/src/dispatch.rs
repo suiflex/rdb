@@ -35,6 +35,16 @@ impl AnyDriver {
         }
     }
 
+    /// Stable lowercase key the UI's `DbBadge` switches on.
+    pub fn badge(engine: Engine) -> &'static str {
+        match engine {
+            Engine::Postgres => "postgres",
+            Engine::MySql => "mysql",
+            Engine::Redis => "redis",
+            Engine::Mongo => "mongo",
+        }
+    }
+
     /// Connect using the concrete driver for `engine`.
     pub async fn connect(engine: Engine, cfg: &ConnConfig) -> Result<Self> {
         Ok(match engine {

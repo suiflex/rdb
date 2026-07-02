@@ -1,5 +1,10 @@
 import { Theme } from "theme.slint";
 export { Theme }
+import { Tokens } from "tokens.slint";
+export { Tokens }
+import {
+    SearchCommandPill, WindowControls, BreadcrumbChip, GlyphButton
+} from "components.slint";
 import { Sidebar } from "sidebar.slint";
 import { ConnPicker } from "picker.slint";
 import { WorkArea } from "workarea.slint";
@@ -11,22 +16,35 @@ import {
     GridCell,
     TreeNode,
     ConnItem,
+    KvRow,
     TabItem,
     StructField,
 } from "structs.slint";
 
 export component MainWindow inherits Window {
-    title: "RDBS";
-    preferred-width: 1100px;
-    preferred-height: 720px;
+    title: "Tabula";
+    preferred-width: 1102px;
+    preferred-height: 702px;
     min-width: 400px;
     min-height: 320px;
-    background: Theme.bg;
+    no-frame: true;
+    background: Tokens.chrome;
+    default-font-size: 13px;
 
     // ----- status bar text (fed from Rust) -----
     in property <string> status-conn: "no connection";
     in property <string> status-latency: "";
     in property <string> status-rows: "";
+
+    // ----- window chrome -----
+    // Breadcrumb parts (workspace titlebar); empty db/schema hide their chip.
+    in property <string> bc-conn;
+    in property <string> bc-db;
+    in property <string> bc-schema;
+    callback win-minimize();
+    callback win-maximize();
+    callback win-close();
+    callback win-drag(length, length); // (dx, dy) while titlebar is dragged
 
     // ----- sidebar models -----
     in property <[ConnItem]> connections;
@@ -41,6 +59,17 @@ export component MainWindow inherits Window {
     callback toggle-schema-node(string);
     callback select-schema(string);
     callback filter-tree(string);
+
+    // ----- connections screen detail panel -----
+    in property <string> sel-name;
+    in property <string> sel-engine;
+    in property <string> sel-sub;
+    in property <bool> sel-local;
+    in property <[KvRow]> sel-rows;
+    in property <[string]> sel-tags;
+    in property <string> sel-footer;
+    callback select-conn(int);
+    callback test-conn-quick(int);
 
     // ----- view state: false = connection picker, true = workspace -----
     in property <bool> connected: false;
@@ -134,7 +163,7 @@ export component MainWindow inherits Window {
     callback form-cancel();
 
     // ----- layout splitters (local, no Rust binding) -----
-    property <length> sidebar-w: 260px;
+    property <length> sidebar-w: Tokens.sidebar-w;
 
     // ----- keyboard shortcuts -----
     FocusScope {
@@ -212,32 +241,148 @@ export component MainWindow inherits Window {
     VerticalLayout {
         spacing: 0px;
 
-        // ----- accent top border (per-connection color) -----
+        // ================= titlebar (44px, frameless chrome) =================
         Rectangle {
-            height: 2px;
-            background: Theme.accent;
+            height: Tokens.titlebar-h;
+            background: Tokens.chrome;
+
+            // whole-bar drag surface (buttons/chips sit above it)
+            drag-ta := TouchArea {
+                moved => {
+                    root.win-drag(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+                }
+            }
+
+            HorizontalLayout {
+                padding-left: Tokens.sp4;
+                padding-right: Tokens.sp3;
+                spacing: Tokens.sp3;
+
+                // --- left: brand (connections) or breadcrumb (workspace) ---
+                if !root.connected: HorizontalLayout {
+                    spacing: Tokens.sp3;
+                    alignment: start;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 26px;
+                            height: 26px;
+                            border-radius: Tokens.radius;
+                            background: Tokens.accent;
+                            Text {
+                                text: "T";
+                                color: white;
+                                font-size: 14px;
+                                font-weight: 700;
+                            }
+                        }
+                    }
+                    Text {
+                        text: "Tabula";
+                        color: Tokens.text;
+                        font-size: 15px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: "Connections";
+                        color: Tokens.text-dim;
+                        font-size: Tokens.font-md;
+                        vertical-alignment: center;
+                    }
+                }
+
+                if root.connected: HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    alignment: start;
+                    VerticalLayout {
+                        alignment: center;
+                        BreadcrumbChip {
+                            text: root.bc-conn;
+                            show-dot: true;
+                            mono: true;
+                        }
+                    }
+                    if root.bc-db != "": Text {
+                        text: "›";
+                        color: Tokens.text-faint;
+                        font-size: Tokens.font-md;
+                        vertical-alignment: center;
+                    }
+                    if root.bc-db != "": VerticalLayout {
+                        alignment: center;
+                        BreadcrumbChip { text: root.bc-db; mono: true; }
+                    }
+                    if root.bc-schema != "": Text {
+                        text: "›";
+                        color: Tokens.text-faint;
+                        font-size: Tokens.font-md;
+                        vertical-alignment: center;
+                    }
+                    if root.bc-schema != "": VerticalLayout {
+                        alignment: center;
+                        BreadcrumbChip { text: root.bc-schema; caret: true; mono: true; }
+                    }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                // --- right: ⌘K pill + aux buttons + window controls ---
+                VerticalLayout {
+                    alignment: center;
+                    SearchCommandPill {
+                        width: 248px;
+                        activated => { root.toggle-palette(); }
+                    }
+                }
+                if root.connected: VerticalLayout {
+                    alignment: center;
+                    HorizontalLayout {
+                        spacing: 2px;
+                        GlyphButton { glyph: "◷"; clicked => { root.select-tab(root.active-tab); } }
+                        GlyphButton { glyph: "▭"; glyph-size: 11px; clicked => { root.toggle-theme(); } }
+                        GlyphButton { glyph: "⚙"; clicked => { root.open-add-form(); } }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    WindowControls {
+                        minimize => { root.win-minimize(); }
+                        maximize => { root.win-maximize(); }
+                        close-window => { root.win-close(); }
+                    }
+                }
+            }
+
+            // bottom hairline under the titlebar
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                width: parent.width;
+                background: Tokens.border;
+            }
         }
 
         // ===== connection picker (shown while not connected) =====
         if !root.connected: ConnPicker {
+            vertical-stretch: 1;
             connections: root.connections;
             selected-conn: root.selected-conn;
             error: root.picker-error;
-            connect-clicked(i) => {
-                root.connect-clicked(i);
-            }
-            add-clicked() => {
-                root.open-add-form();
-            }
-            edit-clicked(i) => {
-                root.open-edit-form(i);
-            }
-            toggle-group(g) => {
-                root.toggle-group(g);
-            }
-            filter(t) => {
-                root.conn-filter(t);
-            }
+            sel-name: root.sel-name;
+            sel-engine: root.sel-engine;
+            sel-sub: root.sel-sub;
+            sel-local: root.sel-local;
+            sel-rows: root.sel-rows;
+            sel-tags: root.sel-tags;
+            sel-footer: root.sel-footer;
+            select-conn(i) => { root.select-conn(i); }
+            connect-clicked(i) => { root.connect-clicked(i); }
+            test-clicked(i) => { root.test-conn-quick(i); }
+            add-clicked() => { root.open-add-form(); }
+            edit-clicked(i) => { root.open-edit-form(i); }
+            toggle-group(g) => { root.toggle-group(g); }
+            filter(t) => { root.conn-filter(t); }
         }
 
         // ===== workspace (shown once connected) =====
@@ -279,8 +424,8 @@ export component MainWindow inherits Window {
 
                 // draggable vertical splitter (sidebar width)
                 Rectangle {
-                    width: 4px;
-                    background: split-h-area.has-hover || split-h-area.pressed ? Theme.accent : Theme.hairline;
+                    width: 1px;
+                    background: split-h-area.has-hover || split-h-area.pressed ? Tokens.accent : Tokens.border;
                     split-h-area := TouchArea {
                         mouse-cursor: col-resize;
                         moved => {
@@ -293,44 +438,45 @@ export component MainWindow inherits Window {
                 VerticalLayout {
                     horizontal-stretch: 1;
                     spacing: 0px;
-                    // ----- tab bar (flat, TablePlus-style) -----
+                    // ----- doc-tab row (36px, tabs h30, active = card + accent top inset) -----
                     Rectangle {
-                        height: 34px;
-                        background: Theme.surface;
+                        height: Tokens.doc-tab-row-h;
+                        background: Tokens.chrome;
                         HorizontalLayout {
-                            padding: 0px;
-                            spacing: 0px;
+                            padding-left: Tokens.sp2;
+                            padding-top: Tokens.doc-tab-row-h - Tokens.doc-tab-h;
+                            spacing: 2px;
                             for tab[i] in root.tabs: Rectangle {
-                                width: 150px;
-                                background: i == root.active-tab ? Theme.bg : (tab-ta.has-hover ? Theme.surface-2 : transparent);
+                                width: min(170px, tab-content.preferred-width + 2 * Tokens.sp3);
+                                height: Tokens.doc-tab-h;
+                                background: i == root.active-tab ? Tokens.card
+                                    : (tab-ta.has-hover ? Tokens.card.with-alpha(0.5) : transparent);
+                                border-radius: 0;
                                 tab-ta := TouchArea {
                                     clicked => {
                                         root.select-tab(i);
                                     }
                                 }
 
-                                // hairline separator between tabs
-                                Rectangle { width: 1px; x: parent.width - 1px; background: Theme.hairline; }
-                                HorizontalLayout {
-                                    padding-left: Theme.sp2;
-                                    padding-right: Theme.sp1;
-                                    spacing: Theme.sp1;
-                                    // engine accent dot
-                                    Rectangle {
-                                        width: 6px;
-                                        height: 6px;
-                                        y: (parent.height - self.height) / 2;
-                                        border-radius: 3px;
-                                        background: i == root.active-tab ? Theme.accent : Theme.text-faint;
-                                    }
+                                // active tab: 2px accent top inset
+                                if i == root.active-tab: Rectangle {
+                                    y: 0;
+                                    height: 2px;
+                                    width: parent.width;
+                                    background: Tokens.accent;
+                                }
 
+                                tab-content := HorizontalLayout {
+                                    padding-left: Tokens.sp3;
+                                    padding-right: Tokens.sp1;
+                                    spacing: Tokens.sp1;
                                     Text {
                                         vertical-alignment: center;
                                         horizontal-stretch: 1;
                                         text: tab.title;
-                                        color: i == root.active-tab ? Theme.text : Theme.text-dim;
-                                        font-size: Theme.font-label;
-                                        font-weight: i == root.active-tab ? 600 : 400;
+                                        color: i == root.active-tab ? Tokens.text : Tokens.text-dim;
+                                        font-size: Tokens.font-sm;
+                                        font-weight: i == root.active-tab ? Tokens.weight-emphasis : 400;
                                         overflow: elide;
                                     }
                                     // close affordance (active or hovered tab)
@@ -338,8 +484,8 @@ export component MainWindow inherits Window {
                                         width: 18px;
                                         height: 18px;
                                         y: (parent.height - self.height) / 2;
-                                        border-radius: Theme.radius-control;
-                                        background: close-ta.has-hover ? Theme.surface-2 : transparent;
+                                        border-radius: 4px;
+                                        background: close-ta.has-hover ? Tokens.error : transparent;
                                         visible: i == root.active-tab || tab-ta.has-hover;
                                         close-ta := TouchArea {
                                             clicked => {
@@ -350,15 +496,9 @@ export component MainWindow inherits Window {
                                         AppIcon {
                                             name: "close";
                                             size: 11px;
-                                            color: Theme.text-dim;
+                                            color: close-ta.has-hover ? white : Tokens.text-dim;
                                         }
                                     }
-                                }
-                                // active-tab accent underline
-                                if i == root.active-tab: Rectangle {
-                                    y: parent.height - self.height;
-                                    height: 2px;
-                                    background: Theme.accent;
                                 }
                             }
                             // new-tab button
@@ -366,8 +506,8 @@ export component MainWindow inherits Window {
                                 width: 30px;
                                 y: (parent.height - self.height) / 2;
                                 height: 26px;
-                                border-radius: Theme.radius-control;
-                                background: add-ta.has-hover ? Theme.surface-2 : transparent;
+                                border-radius: Tokens.radius;
+                                background: add-ta.has-hover ? Tokens.border : transparent;
                                 add-ta := TouchArea {
                                     clicked => {
                                         root.new-tab();
@@ -376,8 +516,8 @@ export component MainWindow inherits Window {
 
                                 AppIcon {
                                     name: "plus";
-                                    size: Theme.icon-sm;
-                                    color: Theme.text-dim;
+                                    size: Tokens.icon-sm;
+                                    color: Tokens.text-dim;
                                 }
                             }
                             // trailing filler: gives the tab bar an infinite max-width
@@ -390,7 +530,7 @@ export component MainWindow inherits Window {
 
                     Rectangle {
                         height: 1px;
-                        background: Theme.hairline;
+                        background: Tokens.border;
                     }
 
                     WorkArea {
@@ -475,64 +615,48 @@ export component MainWindow inherits Window {
             // ----- status bar -----
             Rectangle {
                 height: 1px;
-                background: Theme.hairline;
+                background: Tokens.border;
             }
 
             Rectangle {
-                height: 28px;
-                background: Theme.surface;
+                height: Tokens.status-bar-h;
+                background: Tokens.chrome;
                 HorizontalLayout {
-                    padding-left: Theme.sp3;
-                    padding-right: Theme.sp2;
-                    spacing: Theme.sp2;
-                    // live status dot
-                    Rectangle {
-                        width: 7px;
-                        height: 7px;
-                        border-radius: 4px;
-                        y: (parent.height - self.height) / 2;
-                        background: #22c55e;
-                    }
-
+                    padding-left: Tokens.sp3;
+                    padding-right: Tokens.sp2;
+                    spacing: Tokens.sp2;
                     Text {
                         vertical-alignment: center;
                         text: root.status-conn;
-                        color: Theme.text;
-                        font-size: Theme.font-label;
-                        font-weight: 600;
-                    }
-
-                    Text {
-                        vertical-alignment: center;
-                        text: root.status-latency;
-                        color: Theme.text-dim;
-                        font-size: Theme.font-caption;
+                        color: Tokens.text;
+                        font-size: Tokens.font-sm;
+                        font-weight: Tokens.weight-emphasis;
                     }
 
                     Rectangle { } // spacer
                     Text {
                         vertical-alignment: center;
                         text: root.status-rows;
-                        color: Theme.text-dim;
-                        font-size: Theme.font-caption;
+                        color: Tokens.text-dim;
+                        font-size: Tokens.font-xs;
                     }
-                    // theme toggle
-                    Rectangle {
-                        width: 30px;
-                        height: 22px;
-                        y: (parent.height - self.height) / 2;
-                        border-radius: Theme.radius-control;
-                        background: theme-ta.has-hover ? Theme.surface-2 : transparent;
-                        theme-ta := TouchArea {
-                            clicked => {
-                                root.toggle-theme();
-                            }
+                    // live latency: ● 12 ms
+                    HorizontalLayout {
+                        spacing: 5px;
+                        alignment: end;
+                        Rectangle {
+                            width: 7px;
+                            height: 7px;
+                            border-radius: 4px;
+                            y: (parent.height - self.height) / 2;
+                            background: root.status-error ? Tokens.error : Tokens.ok;
                         }
-
-                        AppIcon {
-                            name: Theme.dark ? "sun" : "moon";
-                            size: Theme.icon-sm;
-                            color: Theme.text-dim;
+                        Text {
+                            vertical-alignment: center;
+                            text: root.status-latency;
+                            color: root.status-error ? Tokens.error : Tokens.ok;
+                            font-size: Tokens.font-xs;
+                            font-family: Tokens.mono;
                         }
                     }
                 }

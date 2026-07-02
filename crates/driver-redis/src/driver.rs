@@ -62,6 +62,7 @@ impl Driver for RedisDriver {
         // first time it is expanded (mirrors Mongo's database→collection tree).
         Ok(Schema {
             databases: vec![Database {
+                functions: Vec::new(),
                 name: format!("db{}", self.db),
                 containers: Vec::new(),
             }],

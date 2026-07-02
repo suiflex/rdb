@@ -13,8 +13,10 @@
 slint::include_modules!();
 
 mod dispatch;
+mod mock;
 mod model;
 mod query_parse;
+mod shot;
 mod theme;
 
 use std::cell::RefCell;
@@ -62,20 +64,23 @@ fn build_conn_items(
 
     let mut rows: Vec<ConnItem> = Vec::new();
     for g in &order {
-        // Ungrouped connections list flat with no header and are never collapsed,
-        // so an empty "Ungrouped" header never shows when the user has no groups.
-        let is_ungrouped = g == UNGROUPED;
+        // Ungrouped connections list flat (no header) when they are the only
+        // bucket; once real groups exist they get their own UNGROUPED header.
+        let is_ungrouped = g == UNGROUPED && order.len() == 1;
         let expanded = is_ungrouped || !collapsed.contains(g);
         if !is_ungrouped {
             rows.push(ConnItem {
                 id: SharedString::default(),
-                name: g.clone().into(),
+                name: g.to_uppercase().into(),
                 engine: SharedString::default(),
                 color: theme::accent_or_default(""),
                 is_header: true,
                 expanded,
                 index: -1,
                 group: g.clone().into(),
+                subline: SharedString::default(),
+                local: false,
+                count: buckets[g].len() as i32,
             });
         }
         if !expanded {
@@ -83,15 +88,22 @@ fn build_conn_items(
         }
         for &i in &buckets[g] {
             let s = &store.list()[i];
+            let subline = match &s.database {
+                Some(db) => format!("{} : {}", s.host, db),
+                None => s.host.clone(),
+            };
             rows.push(ConnItem {
                 id: s.id.clone().into(),
                 name: s.name.clone().into(),
-                engine: AnyDriver::label(s.engine).into(),
+                engine: AnyDriver::badge(s.engine).into(),
                 color: theme::accent_or_default(s.color.as_deref().unwrap_or("")),
                 is_header: false,
                 expanded: true,
                 index: i as i32,
                 group: g.clone().into(),
+                subline: subline.into(),
+                local: s.local,
+                count: 0,
             });
         }
     }
@@ -501,14 +513,65 @@ fn main() -> Result<(), slint::PlatformError> {
     let window = MainWindow::new()?;
 
     // One store for the app lifetime; all CRUD + password ops go through it.
-    let store: Rc<RefCell<rdbs_connstore::ConnStore>> = Rc::new(RefCell::new(
+    // RDBS_MOCK=1 swaps in a seeded temp store (never the user's real one).
+    let store: Rc<RefCell<rdbs_connstore::ConnStore>> = Rc::new(RefCell::new(if mock::mock_mode()
+    {
+        mock::mock_store(std::env::temp_dir().join(format!("rdbs-mock-{}", std::process::id())))
+    } else {
         rdbs_connstore::ConnStore::open_default().unwrap_or_else(|_| {
             let dir = std::env::temp_dir().join("dbm");
             let _ = std::fs::create_dir_all(&dir);
             let backend = rdbs_connstore::secret::select_backend(&dir).expect("secret backend");
             rdbs_connstore::ConnStore::new(dir.join("connections.json"), backend)
-        }),
-    ));
+        })
+    }));
+
+    // ----- frameless-window chrome: drag + minimize/maximize/close -----
+    {
+        let weak = window.as_weak();
+        window.on_win_drag(move |dx, dy| {
+            if let Some(w) = weak.upgrade() {
+                let win = w.window();
+                let pos = win.position();
+                let sf = win.scale_factor();
+                win.set_position(slint::PhysicalPosition::new(
+                    pos.x + (dx * sf) as i32,
+                    pos.y + (dy * sf) as i32,
+                ));
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_win_minimize(move || {
+            if let Some(w) = weak.upgrade() {
+                w.window().set_minimized(true);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_win_maximize(move || {
+            if let Some(w) = weak.upgrade() {
+                let m = w.window().is_maximized();
+                w.window().set_maximized(!m);
+            }
+        });
+    }
+    window.on_win_close(|| {
+        let _ = slint::quit_event_loop();
+    });
+
+    // Fixed window size for the screenshot loop: RDBS_WIN=WxH (logical px).
+    if let Ok(spec) = std::env::var("RDBS_WIN") {
+        if let Some((w, h)) = spec.split_once('x') {
+            if let (Ok(w), Ok(h)) = (w.parse::<f32>(), h.parse::<f32>()) {
+                window
+                    .window()
+                    .set_size(slint::LogicalSize::new(w, h));
+            }
+        }
+    }
 
     // (engine, driver) so run-query can parse text for the right paradigm.
     let current: Arc<tokio::sync::Mutex<Option<(rdbs_connstore::Engine, AnyDriver)>>> =
@@ -516,6 +579,13 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // Set of group labels the user has collapsed in the sidebar.
     let collapsed: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
+    if mock::mock_mode() {
+        // Reference boots with only PROFIN expanded.
+        let mut c = collapsed.borrow_mut();
+        for g in ["OSS", "LOCAL", "SPMB", UNGROUPED] {
+            c.insert(g.to_string());
+        }
+    }
     // Current connection-picker search text.
     let conn_filter: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
 
@@ -569,6 +639,73 @@ fn main() -> Result<(), slint::PlatformError> {
     };
     rebuild_sidebar();
     window.set_schema_tree(ModelRc::from(Rc::new(VecModel::<TreeNode>::default())));
+
+    // ----- connections screen: selection fills the right detail panel -----
+    let fill_detail = {
+        let weak = window.as_weak();
+        let store = store.clone();
+        move |idx: i32| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let store = store.borrow();
+            let Some(s) = store.list().get(idx as usize) else {
+                w.set_selected_conn(-1);
+                return;
+            };
+            w.set_selected_conn(idx);
+            w.set_sel_name(s.name.clone().into());
+            w.set_sel_engine(AnyDriver::badge(s.engine).into());
+            let label = AnyDriver::label(s.engine);
+            let sub = match s.group.as_deref().filter(|g| !g.trim().is_empty()) {
+                Some(g) => format!("{label} · grup {}", g.to_lowercase()),
+                None => label.to_string(),
+            };
+            w.set_sel_sub(sub.into());
+            w.set_sel_local(s.local);
+            let ssl = match s.sslmode {
+                rdbs_core::conn::SslMode::Disable => "disable",
+                rdbs_core::conn::SslMode::Prefer => "prefer",
+                rdbs_core::conn::SslMode::Require => "require",
+            };
+            let mut rows = vec![
+                KvRow { k: "Host".into(), v: s.host.clone().into() },
+                KvRow { k: "Port".into(), v: s.port.to_string().into() },
+            ];
+            if let Some(db) = &s.database {
+                rows.push(KvRow { k: "Database".into(), v: db.clone().into() });
+            }
+            rows.push(KvRow { k: "User".into(), v: s.user.clone().into() });
+            rows.push(KvRow { k: "SSL".into(), v: ssl.into() });
+            if mock::mock_mode() && s.engine == rdbs_connstore::Engine::Postgres {
+                rows.push(KvRow { k: "Server".into(), v: "PostgreSQL 16.14".into() });
+            }
+            w.set_sel_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
+            let tags: Vec<SharedString> = s.tags.iter().map(|t| t.as_str().into()).collect();
+            w.set_sel_tags(ModelRc::from(Rc::new(VecModel::from(tags))));
+            let footer = if mock::mock_mode() {
+                "Terakhir terhubung · 2 menit lalu · Tabula 1.2.0 open source".to_string()
+            } else {
+                format!("Tabula {} open source", env!("CARGO_PKG_VERSION"))
+            };
+            w.set_sel_footer(footer.into());
+        }
+    };
+    {
+        let fill_detail = fill_detail.clone();
+        window.on_select_conn(move |idx| fill_detail(idx));
+    }
+    // Mock mode boots with the reference selection ("bot ai tele").
+    if mock::mock_mode() {
+        let idx = store
+            .borrow()
+            .list()
+            .iter()
+            .position(|s| s.name == "bot ai tele")
+            .map(|i| i as i32)
+            .unwrap_or(-1);
+        fill_detail(idx);
+    }
 
     // Per-tab query text. MVP: switching tabs swaps the editor text.
     let tab_texts: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(vec![String::new()]));
@@ -2093,6 +2230,7 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    shot::install(&window);
     window.run()
 }
 

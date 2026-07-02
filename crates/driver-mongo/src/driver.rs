@@ -84,6 +84,7 @@ impl Driver for MongoDriver {
             .into_iter()
             .filter(|n| !is_system_db(n))
             .map(|name| Database {
+                functions: Vec::new(),
                 name,
                 containers: Vec::new(),
             })

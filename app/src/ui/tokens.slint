@@ -1,0 +1,96 @@
+// Design tokens — single source of truth for the Tabula design.
+// Every color/metric in the UI resolves here; no magic hex outside this file.
+import "../../assets/fonts/IBMPlexMono-Regular.ttf";
+import "../../assets/fonts/IBMPlexMono-Medium.ttf";
+import "../../assets/fonts/IBMPlexMono-SemiBold.ttf";
+
+export global Tokens {
+    // ----- surfaces -----
+    out property <color> chrome:  #F5F4F1;   // titlebar / toolbars / doc-tab row
+    out property <color> sidebar: #F0EFEC;
+    out property <color> canvas:  #FBFAF8;   // main content background
+    out property <color> card:    #FFFFFF;
+
+    // ----- hairline -----
+    out property <color> border:        #1C1914.with-alpha(0.09);
+    out property <color> border-strong: #1C1914.with-alpha(0.16);
+
+    // ----- text -----
+    out property <color> text:        #23242A;
+    out property <color> text-dim:    #71747C;
+    out property <color> text-faint:  #A6A9B0;
+    out property <color> text-ghost:  #C2C4C9;   // NULL cells (italic), disabled
+
+    // ----- accent -----
+    out property <color> accent:         #2C5FD8;
+    out property <color> accent-hover:   #2451BA;
+    out property <color> accent-tint:    #E9EFFC;
+    out property <color> on-tint:        #1D3F8F; // text on accent-tint
+
+    // ----- status -----
+    out property <color> ok:    #239D5C;
+    out property <color> warn:  #D9962F;
+    out property <color> error: #E05A4E;
+    out property <color> ok-tint:    #239D5C.with-alpha(0.12);
+    out property <color> warn-tint:  #D9962F.with-alpha(0.14);
+    out property <color> error-tint: #E05A4E.with-alpha(0.14);
+
+    // ----- db engine badges -----
+    out property <color> db-pg: #3577D4;
+    out property <color> db-my: #E08A3C;
+    out property <color> db-re: #B93C2E;
+    out property <color> db-sl: #8E44AD;
+    out property <color> db-mo: #58B98A;
+
+    // ----- special cell colors -----
+    out property <color> fk-text: #4A6BB0;   // foreign-key cells, with ↗
+
+    // ----- syntax highlight (SQL editor) -----
+    out property <color> syn-keyword:  #2C5FD8; // weight 600
+    out property <color> syn-string:   #C14953;
+    out property <color> syn-function: #8250C4;
+    out property <color> syn-comment:  #A6A9B0; // italic
+    out property <color> editor-line:  #F3F1EC; // current-line highlight
+
+    // ----- edit-pending states -----
+    out property <color> edit-outline: #E05A4E; // 2px pending-cell outline
+
+    // ----- modal / palette -----
+    out property <color> veil: #FAFAF9.with-alpha(0.55);
+    out property <length> modal-radius: 12px;
+    out property <length> palette-width: 400px;
+
+    // ----- metrics -----
+    out property <length> titlebar-h: 44px;
+    out property <length> doc-tab-row-h: 36px;
+    out property <length> doc-tab-h: 30px;
+    out property <length> sidebar-w: 242px;
+    out property <length> grid-row-h: 24px;
+    out property <length> grid-header-h: 27px;
+    out property <length> status-bar-h: 34px;
+    out property <length> radius: 7px;
+    out property <length> radius-lg: 8px;
+    out property <length> button-h: 26px;
+    out property <length> selection-bar-w: 2px; // accent left bar on selection
+
+    // ----- spacing (4px grid) -----
+    out property <length> sp1: 4px;
+    out property <length> sp2: 8px;
+    out property <length> sp3: 12px;
+    out property <length> sp4: 16px;
+    out property <length> sp6: 24px;
+
+    // ----- typography -----
+    out property <length> font-xs: 11px;
+    out property <length> font-sm: 12px;
+    out property <length> font-md: 13px;
+    out property <int>    weight-emphasis: 600;
+    out property <string> mono: "IBM Plex Mono";
+
+    // ----- icons -----
+    out property <length> icon-sm: 14px;
+    out property <length> icon-md: 16px;
+
+    // ----- motion -----
+    out property <duration> fade: 100ms;
+}

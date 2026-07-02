@@ -341,6 +341,7 @@ mod tests {
     fn schema_flattens_to_indented_tree_nodes() {
         let schema = Schema {
             databases: vec![Database {
+                functions: Vec::new(),
                 name: "app".into(),
                 containers: vec![Container {
                     name: "users".into(),

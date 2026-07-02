@@ -262,6 +262,7 @@ async fn schema_impl(client: &Client) -> Result<Schema> {
 
     Ok(Schema {
         databases: vec![Database {
+            functions: Vec::new(),
             name: db_name,
             containers,
         }],

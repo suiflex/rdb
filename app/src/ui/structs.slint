@@ -23,6 +23,14 @@ export struct ConnItem {
     expanded: bool,
     index: int,
     group: string,
+    // "host : database" mono subline under the name (empty for headers).
+    subline: string,
+    // Show the LOCAL outline chip on this row / detail header.
+    local: bool,
+    // Direct children count shown next to a header row (headers only).
+    count: int,
 }
+// One Host/Port/… row of the connection-detail card.
+export struct KvRow { k: string, v: string }
 export struct StructField { name: string, type-name: string, nullable: bool }
 export struct TabItem { title: string }
