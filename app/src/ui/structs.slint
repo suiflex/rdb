@@ -9,7 +9,9 @@ export struct GridCell { text: string, is-null: bool, state: int }
 export struct KvRow { key: string, value: GridCell }
 // `db` tags the owning database for container rows (Mongo db→collection tree);
 // empty for SQL/Redis where the category path is used instead.
-export struct TreeNode { label: string, depth: int, kind: string, expanded: bool, db: string }
+// `count` is the number of (filter-matching) containers under a header row;
+// 0 hides the badge. Non-header rows always carry 0.
+export struct TreeNode { label: string, depth: int, kind: string, expanded: bool, db: string, count: int }
 // A sidebar row is either a group header (is-header=true, name holds the group
 // label, expanded holds its toggle state) or a connection. `index` is the
 // connection's index in the underlying store (-1 for headers) so connect/edit

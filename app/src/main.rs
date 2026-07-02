@@ -126,31 +126,44 @@ fn schema_display_rows(
     collapsed_cats: &HashSet<String>,
     loaded_dbs: &HashSet<String>,
     engine: Option<rdbs_connstore::Engine>,
+    filter: &str,
 ) -> Vec<TreeNode> {
     // Mongo (database→collection) and Redis (database→key) both render as a
     // collapsible database header nesting its own lazily-loaded leaves.
     // `expanded_tables` is the set of OPEN databases (default closed).
     match engine {
         Some(rdbs_connstore::Engine::Mongo) => {
-            return nested_display_rows(nodes, expanded_tables, loaded_dbs, "collection");
+            return nested_display_rows(nodes, expanded_tables, loaded_dbs, "collection", filter);
         }
         Some(rdbs_connstore::Engine::Redis) => {
-            return nested_display_rows(nodes, expanded_tables, loaded_dbs, "key");
+            return nested_display_rows(nodes, expanded_tables, loaded_dbs, "key", filter);
         }
         _ => {}
     }
 
+    let needle = filter.to_lowercase();
+    let filtering = !needle.is_empty();
+    let matches = |label: &str| !filtering || label.to_lowercase().contains(&needle);
     let categories = sidebar_categories(engine);
     let primary = categories[0];
+    // Matching containers all live under the primary category today.
+    let container_count = nodes
+        .iter()
+        .filter(|n| {
+            matches!(n.kind.as_str(), "table" | "collection" | "keyspace") && matches(&n.label)
+        })
+        .count() as i32;
     let mut rows: Vec<TreeNode> = Vec::new();
     for &cat in categories {
-        let cat_open = !collapsed_cats.contains(cat);
+        // While filtering, categories are forced open so matches stay visible.
+        let cat_open = filtering || !collapsed_cats.contains(cat);
         rows.push(TreeNode {
             label: cat.into(),
             depth: 0,
             kind: "category".into(),
             expanded: cat_open,
             db: SharedString::default(),
+            count: if cat == primary { container_count } else { 0 },
         });
         if !cat_open || cat != primary {
             continue;
@@ -169,8 +182,13 @@ fn schema_display_rows(
                     kind: "field".into(),
                     expanded: false,
                     db: SharedString::default(),
+                    count: 0,
                 });
             } else if is_container {
+                if !matches(&n.label) {
+                    show_fields = false;
+                    continue;
+                }
                 show_fields = expanded_tables.contains(&n.label);
                 rows.push(TreeNode {
                     label: n.label.clone().into(),
@@ -178,6 +196,7 @@ fn schema_display_rows(
                     kind: n.kind.clone().into(),
                     expanded: show_fields,
                     db: SharedString::default(),
+                    count: 0,
                 });
             } else {
                 // database row: categories replace it; reset field visibility
@@ -200,55 +219,74 @@ fn nested_display_rows(
     expanded_dbs: &HashSet<String>,
     loaded_dbs: &HashSet<String>,
     leaf_kind: &str,
+    filter: &str,
 ) -> Vec<TreeNode> {
-    let mut rows: Vec<TreeNode> = Vec::new();
-    let mut current_db = String::new();
-    let mut db_open = false;
-    let mut leaf_count = 0usize;
-    // Push the loading/empty hint for an open database that emitted no rows.
-    let hint_row = |db: &str| TreeNode {
-        label: if loaded_dbs.contains(db) {
-            "(empty)".into()
-        } else {
-            "(loading…)".into()
-        },
-        depth: 1,
-        kind: "hint".into(),
-        expanded: false,
-        db: db.to_string().into(),
-    };
+    let needle = filter.to_lowercase();
+    let filtering = !needle.is_empty();
+    let matches = |label: &str| !filtering || label.to_lowercase().contains(&needle);
+
+    // Group the flat list into (database, leaves) so headers can carry a
+    // matching-leaf count badge before their rows are emitted.
+    let mut groups: Vec<(String, Vec<&model::VmTreeNode>)> = Vec::new();
     for n in nodes {
         match n.kind.as_str() {
-            "database" => {
-                if db_open && leaf_count == 0 {
-                    rows.push(hint_row(&current_db));
+            "database" => groups.push((n.label.clone(), Vec::new())),
+            "collection" | "table" | "keyspace" | "key" => {
+                if let Some((_, leaves)) = groups.last_mut() {
+                    if matches(&n.label) {
+                        leaves.push(n);
+                    }
                 }
-                current_db = n.label.clone();
-                db_open = expanded_dbs.contains(&current_db);
-                leaf_count = 0;
-                rows.push(TreeNode {
-                    label: n.label.clone().into(),
-                    depth: 0,
-                    kind: "database".into(),
-                    expanded: db_open,
-                    db: current_db.clone().into(),
-                });
-            }
-            "collection" | "table" | "keyspace" | "key" if db_open => {
-                leaf_count += 1;
-                rows.push(TreeNode {
-                    label: n.label.clone().into(),
-                    depth: 1,
-                    kind: leaf_kind.into(),
-                    expanded: false,
-                    db: current_db.clone().into(),
-                });
             }
             _ => {}
         }
     }
-    if db_open && leaf_count == 0 {
-        rows.push(hint_row(&current_db));
+
+    let mut rows: Vec<TreeNode> = Vec::new();
+    for (db, leaves) in &groups {
+        // While filtering, loaded databases are forced open so matches show.
+        let db_open =
+            expanded_dbs.contains(db) || (filtering && loaded_dbs.contains(db) && !leaves.is_empty());
+        rows.push(TreeNode {
+            label: db.clone().into(),
+            depth: 0,
+            kind: "database".into(),
+            expanded: db_open,
+            db: db.clone().into(),
+            count: leaves.len() as i32,
+        });
+        if !db_open {
+            continue;
+        }
+        if leaves.is_empty() {
+            // Loading/empty hint so an open header never looks stuck. While
+            // filtering an already-loaded db, empty means "no match".
+            rows.push(TreeNode {
+                label: if !loaded_dbs.contains(db) {
+                    "(loading…)".into()
+                } else if filtering {
+                    "(no match)".into()
+                } else {
+                    "(empty)".into()
+                },
+                depth: 1,
+                kind: "hint".into(),
+                expanded: false,
+                db: db.clone().into(),
+                count: 0,
+            });
+            continue;
+        }
+        for n in leaves {
+            rows.push(TreeNode {
+                label: n.label.clone().into(),
+                depth: 1,
+                kind: leaf_kind.into(),
+                expanded: false,
+                db: db.clone().into(),
+                count: 0,
+            });
+        }
     }
     rows
 }
@@ -410,6 +448,9 @@ fn main() -> Result<(), slint::PlatformError> {
         Arc::new(std::sync::Mutex::new(HashSet::new()));
     // Sidebar category headers the user has collapsed (Tables/Views/Functions).
     let collapsed_categories: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
+    // Sidebar tree filter text. Arc<Mutex> so lazy-load tasks can read it.
+    let sidebar_filter: Arc<std::sync::Mutex<String>> =
+        Arc::new(std::sync::Mutex::new(String::new()));
     // Engine of the live connection, kept on the UI thread so table clicks can
     // build an engine-appropriate "browse this table" query synchronously.
     let cur_engine: Rc<RefCell<Option<rdbs_connstore::Engine>>> = Rc::new(RefCell::new(None));
@@ -619,6 +660,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             &HashSet::new(),
                             &HashSet::new(),
                             Some(engine),
+                            "",
                         );
                         // Real database/schema names from introspection; fall back
                         // to "public" only when the driver exposed none.
@@ -816,6 +858,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let cur_engine = cur_engine.clone();
         let current = current.clone();
         let rt = rt.clone();
+        let sidebar_filter = sidebar_filter.clone();
         window.on_toggle_schema_node(move |label| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -858,6 +901,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let raw_nodes = raw_nodes.clone();
                     let expanded_tables = expanded_tables.clone();
                     let loaded_dbs = loaded_dbs.clone();
+                    let sidebar_filter = sidebar_filter.clone();
                     let weak2 = weak.clone();
                     let db = label.clone();
                     rt.spawn(async move {
@@ -890,6 +934,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 &HashSet::new(),
                                 &loaded_dbs.lock().unwrap(),
                                 engine,
+                                &sidebar_filter.lock().unwrap(),
                             )
                         };
                         let _ = slint::invoke_from_event_loop(move || {
@@ -908,6 +953,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     &HashSet::new(),
                     &loaded_dbs.lock().unwrap(),
                     engine,
+                    &sidebar_filter.lock().unwrap(),
                 );
                 w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
                 return;
@@ -927,6 +973,34 @@ fn main() -> Result<(), slint::PlatformError> {
                 &collapsed_categories.borrow(),
                 &loaded_dbs.lock().unwrap(),
                 engine,
+                &sidebar_filter.lock().unwrap(),
+            );
+            w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
+        });
+    }
+
+    // ----- sidebar tree filter -----
+    {
+        let weak = window.as_weak();
+        let raw_nodes = raw_nodes.clone();
+        let expanded_tables = expanded_tables.clone();
+        let loaded_dbs = loaded_dbs.clone();
+        let collapsed_categories = collapsed_categories.clone();
+        let cur_engine = cur_engine.clone();
+        let sidebar_filter = sidebar_filter.clone();
+        window.on_filter_tree(move |text| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            *sidebar_filter.lock().unwrap() = text.to_string();
+            let nodes = raw_nodes.lock().unwrap();
+            let rows = schema_display_rows(
+                &nodes,
+                &expanded_tables.lock().unwrap(),
+                &collapsed_categories.borrow(),
+                &loaded_dbs.lock().unwrap(),
+                *cur_engine.borrow(),
+                &sidebar_filter.lock().unwrap(),
             );
             w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
         });
@@ -1515,4 +1589,71 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     window.run()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn nodes() -> Vec<model::VmTreeNode> {
+        vec![
+            model::VmTreeNode {
+                label: "users".into(),
+                kind: "table".into(),
+            },
+            model::VmTreeNode {
+                label: "orders".into(),
+                kind: "table".into(),
+            },
+            model::VmTreeNode {
+                label: "audit_log".into(),
+                kind: "table".into(),
+            },
+        ]
+    }
+
+    #[test]
+    fn sidebar_filter_keeps_matching_containers_and_counts() {
+        let rows = schema_display_rows(
+            &nodes(),
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::new(),
+            Some(rdbs_connstore::Engine::Postgres),
+            "or",
+        );
+        let tables: Vec<_> = rows.iter().filter(|r| r.kind == "table").collect();
+        assert_eq!(tables.len(), 1);
+        assert_eq!(tables[0].label.as_str(), "orders");
+        let header = rows.iter().find(|r| r.label.as_str() == "Tables").unwrap();
+        assert_eq!(header.count, 1);
+    }
+
+    #[test]
+    fn sidebar_filter_empty_keeps_all_with_total_count() {
+        let rows = schema_display_rows(
+            &nodes(),
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::new(),
+            Some(rdbs_connstore::Engine::Postgres),
+            "",
+        );
+        assert_eq!(rows.iter().filter(|r| r.kind == "table").count(), 3);
+        let header = rows.iter().find(|r| r.label.as_str() == "Tables").unwrap();
+        assert_eq!(header.count, 3);
+    }
+
+    #[test]
+    fn sidebar_filter_is_case_insensitive() {
+        let rows = schema_display_rows(
+            &nodes(),
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::new(),
+            Some(rdbs_connstore::Engine::Postgres),
+            "USERS",
+        );
+        assert_eq!(rows.iter().filter(|r| r.kind == "table").count(), 1);
+    }
 }

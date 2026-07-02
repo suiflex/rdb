@@ -41,6 +41,7 @@ export component MainWindow inherits Window {
     callback open-table(string, string);   // (database, container)
     callback toggle-schema-node(string);
     callback select-schema(string);
+    callback filter-tree(string);
 
     // ----- view state: false = connection picker, true = workspace -----
     in property <bool> connected: false;
@@ -250,6 +251,9 @@ export component MainWindow inherits Window {
                     select-schema(s) => {
                         root.select-schema(s);
                     }
+                    filter-tree(t) => {
+                        root.filter-tree(t);
+                    }
                 }
 
                 // draggable vertical splitter (sidebar width)
@@ -268,19 +272,15 @@ export component MainWindow inherits Window {
                 VerticalLayout {
                     horizontal-stretch: 1;
                     spacing: 0px;
-                    // ----- tab bar -----
+                    // ----- tab bar (flat, TablePlus-style) -----
                     Rectangle {
-                        height: 38px;
+                        height: 34px;
                         background: Theme.surface;
                         HorizontalLayout {
-                            padding-left: Theme.sp2;
-                            padding-top: Theme.sp1;
-                            padding-bottom: 0px;
-                            spacing: Theme.sp1;
+                            padding: 0px;
+                            spacing: 0px;
                             for tab[i] in root.tabs: Rectangle {
                                 width: 150px;
-                                border-top-left-radius: Theme.radius-control;
-                                border-top-right-radius: Theme.radius-control;
                                 background: i == root.active-tab ? Theme.bg : (tab-ta.has-hover ? Theme.surface-2 : transparent);
                                 tab-ta := TouchArea {
                                     clicked => {
@@ -288,14 +288,19 @@ export component MainWindow inherits Window {
                                     }
                                 }
 
+                                // hairline separator between tabs
+                                Rectangle { width: 1px; x: parent.width - 1px; background: Theme.hairline; }
                                 HorizontalLayout {
                                     padding-left: Theme.sp2;
                                     padding-right: Theme.sp1;
                                     spacing: Theme.sp1;
-                                    AppIcon {
-                                        name: "terminal";
-                                        size: Theme.icon-sm;
-                                        color: i == root.active-tab ? Theme.accent : Theme.text-faint;
+                                    // engine accent dot
+                                    Rectangle {
+                                        width: 6px;
+                                        height: 6px;
+                                        y: (parent.height - self.height) / 2;
+                                        border-radius: 3px;
+                                        background: i == root.active-tab ? Theme.accent : Theme.text-faint;
                                     }
 
                                     Text {
@@ -338,7 +343,7 @@ export component MainWindow inherits Window {
                             // new-tab button
                             Rectangle {
                                 width: 30px;
-                                y: (parent.height - self.height) / 2 + Theme.sp1 / 2;
+                                y: (parent.height - self.height) / 2;
                                 height: 26px;
                                 border-radius: Theme.radius-control;
                                 background: add-ta.has-hover ? Theme.surface-2 : transparent;
