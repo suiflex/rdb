@@ -8,9 +8,11 @@ use rdbs_core::error::{RdbsError, Result};
 use rdbs_core::query::Query;
 use rdbs_core::result::{Column, ResultSet};
 use rdbs_core::schema::Schema;
+use rdbs_core::write::{TableRef, WriteOp};
 
 use crate::convert::{column_type_name, value_to_cell};
 use crate::schema::{columns_query, fold_rows, SchemaRow};
+use crate::write_sql;
 
 /// MySQL / MariaDB driver backed by a small mysql_async pool.
 pub struct MysqlDriver {
@@ -150,6 +152,75 @@ impl Driver for MysqlDriver {
             .collect::<Vec<_>>();
 
         Ok(ResultSet::Tabular { cols, rows })
+    }
+
+    async fn primary_key(&self, table: &TableRef) -> Result<Vec<String>> {
+        let mut conn = self
+            .pool
+            .get_conn()
+            .await
+            .map_err(|e| RdbsError::Connection(e.to_string()))?;
+        let cols: Vec<String> = conn
+            .exec(
+                "SELECT column_name FROM information_schema.key_column_usage \
+                 WHERE table_name = ? AND constraint_name = 'PRIMARY' \
+                   AND table_schema = COALESCE(?, DATABASE()) \
+                 ORDER BY ordinal_position",
+                (&table.name, &table.database),
+            )
+            .await
+            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+        Ok(cols)
+    }
+
+    async fn count(&self, table: &TableRef) -> Result<u64> {
+        let mut conn = self
+            .pool
+            .get_conn()
+            .await
+            .map_err(|e| RdbsError::Connection(e.to_string()))?;
+        let n: Option<u64> = conn
+            .query_first(format!(
+                "SELECT COUNT(*) FROM {}",
+                write_sql::table_name(table)
+            ))
+            .await
+            .map_err(|e| RdbsError::Query(e.to_string()))?;
+        Ok(n.unwrap_or(0))
+    }
+
+    async fn commit(&self, ops: &[WriteOp]) -> Result<u64> {
+        if ops.is_empty() {
+            return Ok(0);
+        }
+        let mut conn = self
+            .pool
+            .get_conn()
+            .await
+            .map_err(|e| RdbsError::Connection(e.to_string()))?;
+        let mut tx = conn
+            .start_transaction(mysql_async::TxOpts::default())
+            .await
+            .map_err(|e| RdbsError::Query(e.to_string()))?;
+        let mut affected = 0u64;
+        for op in ops {
+            let (sql, params) = match op {
+                WriteOp::Update { table, pk, changes } => {
+                    write_sql::update_sql(table, pk, changes)
+                }
+                WriteOp::Insert { table, values } => write_sql::insert_sql(table, values),
+                WriteOp::Delete { table, pk } => write_sql::delete_sql(table, pk),
+            };
+            // A failed statement drops `tx`, which rolls the batch back.
+            tx.exec_drop(sql, params)
+                .await
+                .map_err(|e| RdbsError::Query(e.to_string()))?;
+            affected += tx.affected_rows();
+        }
+        tx.commit()
+            .await
+            .map_err(|e| RdbsError::Query(e.to_string()))?;
+        Ok(affected)
     }
 
     async fn close(self) -> Result<()> {
