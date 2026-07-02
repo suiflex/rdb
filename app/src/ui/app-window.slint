@@ -60,6 +60,13 @@ export component MainWindow inherits Window {
     in property <bool> sql-capable: true;
     in property <string> result-status;
     in-out property <int> selected-row: 0;
+    in-out property <int> selected-col: -1;
+    in property <int> editing-row: -1;
+    in property <int> editing-col: -1;
+    callback select-cell(int, int);
+    callback edit-cell(int, int);
+    callback cell-edited(int, int, string);
+    callback edit-cancelled();
     in-out property <bool> show-structure: false;
     in property <[StructField]> structure-columns;
     in-out property <string> grid-filter;
@@ -372,6 +379,9 @@ export component MainWindow inherits Window {
                         sql-capable: root.sql-capable;
                         result-status: root.result-status;
                         selected-row: root.selected-row;
+                        selected-col: root.selected-col;
+                        editing-row: root.editing-row;
+                        editing-col: root.editing-col;
                         show-structure <=> root.show-structure;
                         structure-columns: root.structure-columns;
                         grid-filter <=> root.grid-filter;
@@ -387,6 +397,18 @@ export component MainWindow inherits Window {
                         }
                         resize-col(i, d) => {
                             root.resize-grid-col(i, d);
+                        }
+                        select-cell(r, c) => {
+                            root.select-cell(r, c);
+                        }
+                        edit-cell(r, c) => {
+                            root.edit-cell(r, c);
+                        }
+                        cell-edited(r, c, t) => {
+                            root.cell-edited(r, c, t);
+                        }
+                        edit-cancelled() => {
+                            root.edit-cancelled();
                         }
                     }
                 }

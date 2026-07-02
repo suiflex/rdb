@@ -20,6 +20,9 @@ export component WorkArea inherits Rectangle {
     in-out property <bool> doc-as-json: false;
     in property <string> result-status;    // Affected toast / errors
     in property <int> selected-row: 0;
+    in property <int> selected-col: -1;
+    in property <int> editing-row: -1;
+    in property <int> editing-col: -1;
     // ----- Data / Structure toggle (Feature B) -----
     in-out property <bool> show-structure: false;
     in property <[StructField]> structure-columns;
@@ -32,6 +35,10 @@ export component WorkArea inherits Rectangle {
     callback apply-filter();
     callback toggle-sql();
     callback resize-col(int, length);   // (column index, drag delta)
+    callback select-cell(int, int);     // (row, col)
+    callback edit-cell(int, int);       // double-click → inline editor
+    callback cell-edited(int, int, string);
+    callback edit-cancelled();
 
     background: Theme.bg;
 
@@ -361,7 +368,14 @@ export component WorkArea inherits Rectangle {
                 col-count: root.col-count;
                 col-widths: root.col-widths;
                 selected-row: root.selected-row;
+                selected-col: root.selected-col;
+                editing-row: root.editing-row;
+                editing-col: root.editing-col;
                 resize-col(i, d) => { root.resize-col(i, d); }
+                select-cell(r, c) => { root.select-cell(r, c); }
+                edit-cell(r, c) => { root.edit-cell(r, c); }
+                cell-edited(r, c, t) => { root.cell-edited(r, c, t); }
+                edit-cancelled() => { root.edit-cancelled(); }
             }
 
             // Redis key/value view (kind 2): two columns, no drag-resize

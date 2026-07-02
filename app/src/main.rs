@@ -279,6 +279,7 @@ fn push_grid(w: &MainWindow, g: &model::GridModel) {
             flat.push(GridCell {
                 text: cell.text.clone().into(),
                 is_null: cell.is_null,
+                state: 0,
             });
         }
     }
@@ -348,6 +349,7 @@ fn apply_result(w: &MainWindow, view: model::ResultView) {
                     value: GridCell {
                         text: c.text.clone().into(),
                         is_null: c.is_null,
+                        state: 0,
                     },
                 })
                 .collect();
@@ -1017,6 +1019,17 @@ fn main() -> Result<(), slint::PlatformError> {
                     let next = (w.get_selected_row() + delta).clamp(0, total - 1);
                     w.set_selected_row(next);
                 }
+            }
+        });
+    }
+
+    // ----- cell selection (click in the grid) -----
+    {
+        let weak = window.as_weak();
+        window.on_select_cell(move |r, c| {
+            if let Some(w) = weak.upgrade() {
+                w.set_selected_row(r);
+                w.set_selected_col(c);
             }
         });
     }

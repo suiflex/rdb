@@ -4,13 +4,23 @@ import { ScrollView } from "std-widgets.slint";
 
 // Shared row/column grid used by SQL results and the Mongo "Table" view.
 // Cells are flat row-major: row r, col c at r*col-count + c.
+// TablePlus-style: row-number gutter, zebra stripes, per-cell hairlines,
+// row hover, single-cell selection, per-cell edit-state tinting.
 export component TabularGrid inherits ScrollView {
     in property <[GridColumn]> columns;
     in property <[GridCell]> cells;
     in property <int> col-count;
     in property <[length]> col-widths;     // per-column pixel widths (drag-resizable)
-    in property <int> selected-row: 0;
+    in-out property <int> selected-row: 0;
+    in-out property <int> selected-col: -1;
+    // inline edit overlay (Phase 4): row/col currently being edited, -1 = none
+    in property <int> editing-row: -1;
+    in property <int> editing-col: -1;
     callback resize-col(int, length);      // (column index, drag delta)
+    callback select-cell(int, int);        // (row, col)
+    callback edit-cell(int, int);          // double-click → open inline editor
+    callback cell-edited(int, int, string); // Enter in the inline editor
+    callback edit-cancelled();
 
     VerticalLayout {
         // fill ScrollView width when few columns; grow past it (scroll) when many
@@ -18,19 +28,28 @@ export component TabularGrid inherits ScrollView {
         // header
         HorizontalLayout {
             height: Theme.row-height;
+            // gutter header (blank)
+            Rectangle {
+                width: Theme.gutter-width;
+                background: Theme.surface;
+                Rectangle { width: 1px; x: parent.width - 1px; background: Theme.hairline; }
+            }
             for col[c] in root.columns: Rectangle {
                 width: root.col-widths.length > c ? root.col-widths[c] : 140px;
                 background: Theme.surface;
                 clip: true;
                 Text {
                     vertical-alignment: center;
-                    x: Theme.sp1;
-                    width: parent.width - 2 * Theme.sp1;
+                    x: Theme.sp2;
+                    width: parent.width - 2 * Theme.sp2;
                     overflow: elide;
                     text: col.name;
                     color: Theme.text-dim;
                     font-size: Theme.font-label;
+                    font-weight: 600;
                 }
+                // column hairline
+                Rectangle { width: 1px; x: parent.width - 1px; background: Theme.hairline; }
                 // right-edge drag handle to resize this column
                 Rectangle {
                     width: 5px;
@@ -45,25 +64,94 @@ export component TabularGrid inherits ScrollView {
             // trailing filler so the header spans the full width
             Rectangle { horizontal-stretch: 1; background: Theme.surface; }
         }
-        Rectangle { height: 1px; background: Theme.hairline; }
+        Rectangle { height: 1px; background: Theme.hairline-strong; }
         // rows
         for r in (root.col-count > 0 ? root.cells.length / root.col-count : 0): Rectangle {
+            property <bool> row-deleted: root.cells[r * root.col-count].state == 2;
+            property <bool> row-inserted: root.cells[r * root.col-count].state == 3;
             height: Theme.row-height;
-            background: r == root.selected-row ? Theme.accent.with-alpha(0.14) : transparent;
+            background: row-deleted ? Theme.edit-delete-soft
+                : row-inserted ? Theme.edit-insert-soft
+                : r == root.selected-row ? Theme.accent-softer
+                : row-ta.has-hover ? Theme.surface-2
+                : mod(r, 2) == 1 ? Theme.surface
+                : transparent;
+            row-ta := TouchArea {}
             HorizontalLayout {
-                for c in root.col-count: Rectangle {
-                    width: root.col-widths.length > c ? root.col-widths[c] : 140px;
-                    clip: true;
+                // row-number gutter
+                Rectangle {
+                    width: Theme.gutter-width;
                     Text {
                         vertical-alignment: center;
-                        x: Theme.sp1;
-                        width: parent.width - 2 * Theme.sp1;
+                        horizontal-alignment: right;
+                        x: 0;
+                        width: parent.width - Theme.sp2;
+                        text: r + 1;
+                        color: Theme.text-faint;
+                        font-family: Theme.mono-family;
+                        font-size: Theme.font-caption;
+                    }
+                    Rectangle { width: 1px; x: parent.width - 1px; background: Theme.hairline; }
+                }
+                for c in root.col-count: Rectangle {
+                    property <GridCell> cell: root.cells[r * root.col-count + c];
+                    property <bool> is-selected: r == root.selected-row && c == root.selected-col;
+                    width: root.col-widths.length > c ? root.col-widths[c] : 140px;
+                    clip: true;
+                    background: cell.state == 1 ? Theme.edit-pending-soft : transparent;
+                    cell-ta := TouchArea {
+                        clicked => { root.select-cell(r, c); }
+                        double-clicked => { root.edit-cell(r, c); }
+                    }
+                    Text {
+                        vertical-alignment: center;
+                        x: Theme.sp2;
+                        width: parent.width - 2 * Theme.sp2;
                         overflow: elide;
-                        text: root.cells[r * root.col-count + c].text;
-                        color: root.cells[r * root.col-count + c].is-null
-                            ? Theme.text-dim : Theme.text;
+                        text: cell.text;
+                        color: cell.is-null ? Theme.text-faint : Theme.text;
+                        font-italic: cell.is-null;
                         font-family: Theme.mono-family;
                         font-size: Theme.font-mono;
+                    }
+                    // strikethrough for delete-marked rows
+                    if row-deleted: Rectangle {
+                        height: 1px;
+                        y: parent.height / 2;
+                        background: Theme.edit-delete;
+                    }
+                    // column hairline
+                    Rectangle { width: 1px; x: parent.width - 1px; background: Theme.hairline; }
+                    // selected-cell accent frame
+                    if is-selected: Rectangle {
+                        border-width: 1.5px;
+                        border-color: Theme.accent;
+                        background: transparent;
+                    }
+                    // inline editor overlay (Phase 4)
+                    if r == root.editing-row && c == root.editing-col: Rectangle {
+                        background: Theme.bg;
+                        border-width: 1.5px;
+                        border-color: Theme.accent;
+                        edit-input := TextInput {
+                            x: Theme.sp2;
+                            width: parent.width - 2 * Theme.sp2;
+                            vertical-alignment: center;
+                            text: cell.is-null ? "" : cell.text;
+                            color: Theme.text;
+                            font-family: Theme.mono-family;
+                            font-size: Theme.font-mono;
+                            single-line: true;
+                            accepted => { root.cell-edited(r, c, self.text); }
+                            key-pressed(e) => {
+                                if (e.text == Key.Escape) {
+                                    root.edit-cancelled();
+                                    return accept;
+                                }
+                                return reject;
+                            }
+                            init => { self.focus(); self.select-all(); }
+                        }
                     }
                 }
                 // trailing filler so the row spans the full width
