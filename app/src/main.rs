@@ -291,6 +291,72 @@ fn nested_display_rows(
     rows
 }
 
+/// Live browse-mode state: which container is open and where the page window
+/// sits. Shared (Arc<Mutex>) so async count/pk fetches can update it.
+#[derive(Default, Clone)]
+struct BrowseState {
+    table: Option<rdbs_core::write::TableRef>,
+    page: u64,
+    limit: u64,
+    total: Option<u64>,
+    pk_cols: Vec<String>,
+}
+
+/// 1-based display bounds of the current page window plus prev/next
+/// availability. `shown` is how many rows the page actually returned.
+fn page_bounds(page: u64, limit: u64, total: Option<u64>, shown: u64) -> (u64, u64, bool, bool) {
+    let start = if shown == 0 { 0 } else { page * limit + 1 };
+    let end = page * limit + shown;
+    let can_prev = page > 0;
+    let can_next = match total {
+        Some(t) => end < t,
+        None => shown == limit, // full page and unknown total: assume more
+    };
+    (start, end, can_prev, can_next)
+}
+
+/// Engine-appropriate browse text for one page of a container. The text also
+/// lands in the editor, so it stays a valid editor query for that engine.
+fn browse_text(
+    engine: rdbs_connstore::Engine,
+    table: &rdbs_core::write::TableRef,
+    page: u64,
+    limit: u64,
+) -> String {
+    let offset = page * limit;
+    match engine {
+        rdbs_connstore::Engine::Postgres => {
+            let schema = table.schema.as_deref().unwrap_or("public");
+            let q = |s: &str| s.replace('"', "\"\"");
+            format!(
+                "SELECT * FROM \"{}\".\"{}\" LIMIT {limit} OFFSET {offset}",
+                q(schema),
+                q(&table.name)
+            )
+        }
+        rdbs_connstore::Engine::MySql => {
+            format!(
+                "SELECT * FROM `{}` LIMIT {limit} OFFSET {offset}",
+                table.name.replace('`', "``")
+            )
+        }
+        rdbs_connstore::Engine::Mongo => {
+            let db = table
+                .database
+                .as_deref()
+                .map(|d| format!("\"database\":\"{d}\","))
+                .unwrap_or_default();
+            format!(
+                "{{\"collection\":\"{}\",{db}\"op\":\"find\",\"body\":{{}},\"limit\":{limit},\"skip\":{offset}}}",
+                table.name
+            )
+        }
+        rdbs_connstore::Engine::Redis => {
+            format!("BROWSE {} {offset} {limit}", table.name)
+        }
+    }
+}
+
 /// Rebuild the tab model titles "Query 1..N".
 fn set_tab_titles(w: &MainWindow, count: usize) {
     let items: Vec<TabItem> = (1..=count)
@@ -451,6 +517,12 @@ fn main() -> Result<(), slint::PlatformError> {
     // Sidebar tree filter text. Arc<Mutex> so lazy-load tasks can read it.
     let sidebar_filter: Arc<std::sync::Mutex<String>> =
         Arc::new(std::sync::Mutex::new(String::new()));
+    // Browse-mode pagination state (open container + page window + pk).
+    let browse: Arc<std::sync::Mutex<BrowseState>> =
+        Arc::new(std::sync::Mutex::new(BrowseState {
+            limit: 300,
+            ..Default::default()
+        }));
     // Engine of the live connection, kept on the UI thread so table clicks can
     // build an engine-appropriate "browse this table" query synchronously.
     let cur_engine: Rc<RefCell<Option<rdbs_connstore::Engine>>> = Rc::new(RefCell::new(None));
@@ -745,10 +817,12 @@ fn main() -> Result<(), slint::PlatformError> {
         let rt = rt.clone();
         let current = current.clone();
         let last_view = last_view.clone();
+        let browse = browse.clone();
         Rc::new(move |sql: String| {
             let weak2 = weak.clone();
             let current = current.clone();
             let last_view = last_view.clone();
+            let browse = browse.clone();
             rt.spawn(async move {
                 let guard = current.lock().await;
                 let outcome = match guard.as_ref() {
@@ -776,6 +850,12 @@ fn main() -> Result<(), slint::PlatformError> {
                                 };
                                 // Cache for client-side filtering, then reset the
                                 // filter input so the full result shows first.
+                                let shown = match &v {
+                                    model::ResultView::Table(g) => g.rows.len(),
+                                    model::ResultView::Documents(d) => d.grid.rows.len(),
+                                    model::ResultView::KeyValue(kv) => kv.rows.len(),
+                                    model::ResultView::Affected(_) => 0,
+                                } as u64;
                                 *last_view.lock().unwrap() = Some(v.clone());
                                 w.set_grid_filter(SharedString::default());
                                 apply_result(&w, v);
@@ -784,6 +864,17 @@ fn main() -> Result<(), slint::PlatformError> {
                                 w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(
                                     widths,
                                 ))));
+                                // Browse mode: refresh the pagination footer.
+                                let st = browse.lock().unwrap().clone();
+                                if st.table.is_some() {
+                                    let (start, end, prev, next) =
+                                        page_bounds(st.page, st.limit, st.total, shown);
+                                    w.set_page_start(start as i32);
+                                    w.set_page_end(end as i32);
+                                    w.set_total_rows(st.total.map(|t| t as i32).unwrap_or(-1));
+                                    w.set_can_prev(prev);
+                                    w.set_can_next(next);
+                                }
                             }
                             (None, Some(e)) => {
                                 *last_view.lock().unwrap() = None;
@@ -813,38 +904,170 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // ----- open table: build an engine-appropriate "browse" query, show it in
     // the editor, and run it (TablePlus-style click-to-view). -----
+    // Shared page runner: build the browse text for the current state, mirror
+    // it in the editor, and run it. Used by open-table and the footer nav.
+    let run_browse: Rc<dyn Fn()> = {
+        let weak = window.as_weak();
+        let cur_engine = cur_engine.clone();
+        let browse = browse.clone();
+        let run_sql = run_sql.clone();
+        Rc::new(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some(engine) = *cur_engine.borrow() else {
+                return;
+            };
+            let st = browse.lock().unwrap().clone();
+            let Some(table) = st.table else {
+                return;
+            };
+            let text = browse_text(engine, &table, st.page, st.limit);
+            w.set_query_text(SharedString::from(text.clone()));
+            run_sql(text);
+        })
+    };
+
     {
         let weak = window.as_weak();
         let cur_engine = cur_engine.clone();
-        let run_sql = run_sql.clone();
+        let browse = browse.clone();
+        let current = current.clone();
+        let rt = rt.clone();
+        let run_browse = run_browse.clone();
         window.on_open_table(move |db, label| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            let Some(engine) = *cur_engine.borrow() else {
+                return;
+            };
             let label = label.to_string();
             let db = db.to_string();
-            let text = match *cur_engine.borrow() {
-                Some(rdbs_connstore::Engine::Postgres) => {
-                    format!("SELECT * FROM \"{label}\" LIMIT 300")
-                }
-                Some(rdbs_connstore::Engine::MySql) => {
-                    format!("SELECT * FROM `{label}` LIMIT 300")
-                }
-                Some(rdbs_connstore::Engine::Mongo) => {
-                    format!(
-                        "{{\"collection\":\"{label}\",\"database\":\"{db}\",\"op\":\"find\",\"body\":{{}},\"limit\":50}}"
-                    )
-                }
-                Some(rdbs_connstore::Engine::Redis) => {
-                    // BROWSE is resolved by the Redis driver (TYPE + type-aware read).
-                    format!("BROWSE {label}")
-                }
-                None => return,
+            let table = rdbs_core::write::TableRef {
+                database: (!db.is_empty()).then(|| db.clone()),
+                schema: matches!(engine, rdbs_connstore::Engine::Postgres)
+                    .then(|| w.get_schema_name().to_string()),
+                name: label.clone(),
             };
+            // Fresh container: page 0, keep the user's limit, forget totals.
+            {
+                let mut st = browse.lock().unwrap();
+                st.table = Some(table.clone());
+                st.page = 0;
+                st.total = None;
+                st.pk_cols.clear();
+            }
             w.set_active_table(SharedString::from(label));
             w.set_show_structure(false);
-            w.set_query_text(SharedString::from(text.clone()));
-            run_sql(text);
+            w.set_total_rows(-1);
+            w.set_grid_read_only(true);
+            run_browse();
+
+            // Fetch total + primary key off-thread; footer updates when done.
+            let weak2 = weak.clone();
+            let current = current.clone();
+            let browse = browse.clone();
+            rt.spawn(async move {
+                let guard = current.lock().await;
+                let Some((_, driver)) = guard.as_ref() else {
+                    return;
+                };
+                let total = driver.count(&table).await.ok();
+                let pk = driver.primary_key(&table).await.unwrap_or_default();
+                let (page, limit) = {
+                    let mut st = browse.lock().unwrap();
+                    // Ignore a late reply if the user already opened another table.
+                    if st.table.as_ref() != Some(&table) {
+                        return;
+                    }
+                    st.total = total;
+                    st.pk_cols = pk.clone();
+                    (st.page, st.limit)
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak2.upgrade() {
+                        w.set_total_rows(total.map(|t| t as i32).unwrap_or(-1));
+                        w.set_grid_read_only(pk.is_empty());
+                        let shown = (w.get_page_end() - w.get_page_start()).max(0) as u64
+                            + u64::from(w.get_page_end() > 0);
+                        let (start, end, prev, next) = page_bounds(page, limit, total, shown);
+                        w.set_page_start(start as i32);
+                        w.set_page_end(end as i32);
+                        w.set_can_prev(prev);
+                        w.set_can_next(next);
+                    }
+                });
+            });
+        });
+    }
+
+    // ----- pagination footer: prev / next / refresh / limit -----
+    {
+        let browse = browse.clone();
+        let run_browse = run_browse.clone();
+        window.on_prev_page(move || {
+            {
+                let mut st = browse.lock().unwrap();
+                if st.page == 0 {
+                    return;
+                }
+                st.page -= 1;
+            }
+            run_browse();
+        });
+    }
+    {
+        let browse = browse.clone();
+        let run_browse = run_browse.clone();
+        window.on_next_page(move || {
+            browse.lock().unwrap().page += 1;
+            run_browse();
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let browse = browse.clone();
+        let current = current.clone();
+        let rt = rt.clone();
+        let run_browse = run_browse.clone();
+        window.on_refresh_page(move || {
+            run_browse();
+            // Re-count in the background so the total tracks external writes.
+            let table = browse.lock().unwrap().table.clone();
+            let Some(table) = table else { return };
+            let weak2 = weak.clone();
+            let current = current.clone();
+            let browse = browse.clone();
+            rt.spawn(async move {
+                let guard = current.lock().await;
+                let Some((_, driver)) = guard.as_ref() else {
+                    return;
+                };
+                let total = driver.count(&table).await.ok();
+                browse.lock().unwrap().total = total;
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak2.upgrade() {
+                        w.set_total_rows(total.map(|t| t as i32).unwrap_or(-1));
+                    }
+                });
+            });
+        });
+    }
+    {
+        let browse = browse.clone();
+        let run_browse = run_browse.clone();
+        window.on_set_limit(move |text| {
+            let parsed = text.trim().parse::<u64>().ok();
+            let Some(l) = parsed.map(|l| l.clamp(1, 10_000)) else {
+                return;
+            };
+            {
+                let mut st = browse.lock().unwrap();
+                st.limit = l;
+                st.page = 0;
+            }
+            run_browse();
         });
     }
 
@@ -1642,6 +1865,65 @@ mod tests {
         assert_eq!(rows.iter().filter(|r| r.kind == "table").count(), 3);
         let header = rows.iter().find(|r| r.label.as_str() == "Tables").unwrap();
         assert_eq!(header.count, 3);
+    }
+
+    #[test]
+    fn page_bounds_first_page_full() {
+        // 300 shown of 1000 total: 1–300, no prev, next available
+        assert_eq!(
+            page_bounds(0, 300, Some(1000), 300),
+            (1, 300, false, true)
+        );
+    }
+
+    #[test]
+    fn page_bounds_last_partial_page() {
+        // page 3 of 1000 rows at limit 300 → 901–1000, prev only
+        assert_eq!(
+            page_bounds(3, 300, Some(1000), 100),
+            (901, 1000, true, false)
+        );
+    }
+
+    #[test]
+    fn page_bounds_unknown_total_assumes_more_on_full_page() {
+        assert_eq!(page_bounds(0, 300, None, 300), (1, 300, false, true));
+        assert_eq!(page_bounds(0, 300, None, 120), (1, 120, false, false));
+    }
+
+    #[test]
+    fn page_bounds_empty_page_shows_zero() {
+        assert_eq!(page_bounds(0, 300, Some(0), 0), (0, 0, false, false));
+    }
+
+    #[test]
+    fn browse_text_per_engine() {
+        let t = rdbs_core::write::TableRef {
+            database: None,
+            schema: Some("public".into()),
+            name: "users".into(),
+        };
+        assert_eq!(
+            browse_text(rdbs_connstore::Engine::Postgres, &t, 1, 300),
+            "SELECT * FROM \"public\".\"users\" LIMIT 300 OFFSET 300"
+        );
+        assert_eq!(
+            browse_text(rdbs_connstore::Engine::MySql, &t, 0, 50),
+            "SELECT * FROM `users` LIMIT 50 OFFSET 0"
+        );
+        assert_eq!(
+            browse_text(rdbs_connstore::Engine::Redis, &t, 2, 100),
+            "BROWSE users 200 100"
+        );
+        let m = rdbs_core::write::TableRef {
+            database: Some("shop".into()),
+            schema: None,
+            name: "orders".into(),
+        };
+        assert_eq!(
+            browse_text(rdbs_connstore::Engine::Mongo, &m, 1, 50),
+            "{\"collection\":\"orders\",\"database\":\"shop\",\"op\":\"find\",\"body\":{},\"limit\":50,\"skip\":50}"
+        );
     }
 
     #[test]
