@@ -11,6 +11,7 @@ use rdbs_core::error::Result;
 use rdbs_core::query::Query;
 use rdbs_core::result::ResultSet;
 use rdbs_core::schema::{Container, Schema};
+use rdbs_core::write::{TableRef, WriteOp};
 use rdbs_driver_mongo::MongoDriver;
 use rdbs_driver_mysql::MysqlDriver;
 use rdbs_driver_postgres::PostgresDriver;
@@ -79,6 +80,33 @@ impl AnyDriver {
             AnyDriver::Mysql(d) => d.query(q).await,
             AnyDriver::Redis(d) => d.query(q).await,
             AnyDriver::Mongo(d) => d.query(q).await,
+        }
+    }
+
+    pub async fn primary_key(&self, table: &TableRef) -> Result<Vec<String>> {
+        match self {
+            AnyDriver::Postgres(d) => d.primary_key(table).await,
+            AnyDriver::Mysql(d) => d.primary_key(table).await,
+            AnyDriver::Redis(d) => d.primary_key(table).await,
+            AnyDriver::Mongo(d) => d.primary_key(table).await,
+        }
+    }
+
+    pub async fn count(&self, table: &TableRef) -> Result<u64> {
+        match self {
+            AnyDriver::Postgres(d) => d.count(table).await,
+            AnyDriver::Mysql(d) => d.count(table).await,
+            AnyDriver::Redis(d) => d.count(table).await,
+            AnyDriver::Mongo(d) => d.count(table).await,
+        }
+    }
+
+    pub async fn commit(&self, ops: &[WriteOp]) -> Result<u64> {
+        match self {
+            AnyDriver::Postgres(d) => d.commit(ops).await,
+            AnyDriver::Mysql(d) => d.commit(ops).await,
+            AnyDriver::Redis(d) => d.commit(ops).await,
+            AnyDriver::Mongo(d) => d.commit(ops).await,
         }
     }
 }
