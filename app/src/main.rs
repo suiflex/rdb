@@ -13,6 +13,7 @@
 slint::include_modules!();
 
 mod dispatch;
+mod editor;
 mod mock;
 mod model;
 mod query_parse;
@@ -354,7 +355,12 @@ fn page_bounds(page: u64, limit: u64, total: Option<u64>, shown: u64) -> (u64, u
 /// lands in the editor, so it stays a valid editor query for that engine.
 /// Default pixel width for a fresh result column, keyed on type then name.
 fn default_col_width(name: &str, type_name: &str) -> f32 {
+    if type_name == "bar" {
+        return 520.0;
+    }
     match name {
+        "sector" => 420.0,
+        "total" => 120.0,
         "name" | "email" => 265.0,
         "code" => 100.0,
         "short_name" => 115.0,
@@ -682,6 +688,248 @@ fn main() -> Result<(), slint::PlatformError> {
     rebuild_sidebar();
     window.set_schema_tree(ModelRc::from(Rc::new(VecModel::<TreeNode>::default())));
 
+    // ----- SQL editor: Rust-owned buffer + lexer feeding the span model -----
+    let ed_state: Rc<RefCell<editor::EditorState>> =
+        Rc::new(RefCell::new(editor::EditorState::from_text("")));
+    let sync_editor = {
+        let weak = window.as_weak();
+        let ed_state = ed_state.clone();
+        move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let ed = ed_state.borrow();
+            let lines: Vec<ModelRc<Span>> = ed
+                .lines
+                .iter()
+                .map(|l| {
+                    let spans: Vec<Span> = editor::lex_line(l)
+                        .into_iter()
+                        .map(|sp| Span {
+                            text: sp.text.into(),
+                            kind: sp.kind,
+                        })
+                        .collect();
+                    ModelRc::from(Rc::new(VecModel::from(spans)))
+                })
+                .collect();
+            w.set_editor_lines(ModelRc::from(Rc::new(VecModel::from(lines))));
+            w.set_cursor_line(ed.line as i32);
+            w.set_cursor_col(ed.col as i32);
+            w.set_query_text(SharedString::from(ed.text()));
+        }
+    };
+    let load_editor_text: Rc<dyn Fn(&str)> = {
+        let ed_state = ed_state.clone();
+        let sync_editor = sync_editor.clone();
+        Rc::new(move |text: &str| {
+            *ed_state.borrow_mut() = editor::EditorState::from_text(text);
+            sync_editor();
+        })
+    };
+    load_editor_text("");
+    {
+        let ed_state = ed_state.clone();
+        let sync_editor = sync_editor.clone();
+        window.on_editor_key(move |text, cmd, _shift| {
+            if cmd {
+                return false;
+            }
+            let handled = {
+                let mut ed = ed_state.borrow_mut();
+                let mut it = text.chars();
+                match (it.next(), it.next()) {
+                    (Some(c), None) => match c {
+                        '\u{8}' => {
+                            ed.backspace();
+                            true
+                        }
+                        '\u{7f}' => {
+                            ed.delete();
+                            true
+                        }
+                        '\n' | '\r' => {
+                            ed.newline();
+                            true
+                        }
+                        '\t' => {
+                            ed.insert("  ");
+                            true
+                        }
+                        '\u{f700}' => {
+                            ed.move_cursor(-1, 0);
+                            true
+                        }
+                        '\u{f701}' => {
+                            ed.move_cursor(1, 0);
+                            true
+                        }
+                        '\u{f702}' => {
+                            ed.move_cursor(0, -1);
+                            true
+                        }
+                        '\u{f703}' => {
+                            ed.move_cursor(0, 1);
+                            true
+                        }
+                        '\u{f729}' => {
+                            ed.home();
+                            true
+                        }
+                        '\u{f72b}' => {
+                            ed.end();
+                            true
+                        }
+                        c if !c.is_control() => {
+                            ed.insert(&c.to_string());
+                            true
+                        }
+                        _ => false,
+                    },
+                    (Some(_), Some(_)) if !text.starts_with('\u{f700}') => {
+                        ed.insert(&text);
+                        true
+                    }
+                    _ => false,
+                }
+            };
+            if handled {
+                sync_editor();
+            }
+            handled
+        });
+    }
+    {
+        let ed_state = ed_state.clone();
+        let sync_editor = sync_editor.clone();
+        window.on_editor_click_line(move |line| {
+            {
+                let mut ed = ed_state.borrow_mut();
+                ed.line = (line.max(0) as usize).min(ed.lines.len() - 1);
+                ed.end();
+            }
+            sync_editor();
+        });
+    }
+
+    // ----- saved/recent queries (sidebar Queries tab) -----
+    let saved_queries: Rc<Vec<(&str, &str)>> = Rc::new(vec![
+        (
+            "emiten-per-sektor",
+            "-- emiten per sektor\nSELECT s.name AS sector, count(*) AS total\nFROM emiten e\nJOIN sectors s ON s.id = e.id_sector\nWHERE e.country = 'indonesia'\nGROUP BY s.name\nORDER BY total DESC;",
+        ),
+        (
+            "seed-sectors",
+            "INSERT INTO sectors (name) VALUES\n  ('Financials'),\n  ('Energy'),\n  ('Healthcare'),\n  ('Industrials'),\n  ('Academic & Educational Services');",
+        ),
+        (
+            "dup-email-check",
+            "SELECT email, count(*)\nFROM users\nGROUP BY email\nHAVING count(*) > 1;",
+        ),
+        (
+            "tx-volume-daily",
+            "SELECT date_trunc('day', created_at) AS day, sum(amount)\nFROM transactions\nGROUP BY 1\nORDER BY 1 DESC;",
+        ),
+    ]);
+    let recent_queries: Rc<Vec<&str>> = Rc::new(vec![
+        "SELECT * FROM emiten LIMIT 100;",
+        "INSERT INTO sectors (name) VALUES ('Technology');",
+        "UPDATE emiten SET updated_at = now() WHERE code = '93344';",
+    ]);
+    let rebuild_query_tree = {
+        let weak = window.as_weak();
+        let saved = saved_queries.clone();
+        let recent = recent_queries.clone();
+        move |active: &str| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let mut rows: Vec<TreeNode> = Vec::new();
+            rows.push(TreeNode {
+                label: "Saved".into(),
+                depth: 0,
+                kind: "qcat".into(),
+                expanded: true,
+                db: SharedString::default(),
+                count: saved.len() as i32,
+            });
+            for (i, (name, _)) in saved.iter().enumerate() {
+                rows.push(TreeNode {
+                    label: (*name).into(),
+                    depth: 1,
+                    kind: "query".into(),
+                    expanded: *name == active,
+                    db: SharedString::default(),
+                    count: i as i32,
+                });
+            }
+            rows.push(TreeNode {
+                label: "Recent".into(),
+                depth: 0,
+                kind: "qcat".into(),
+                expanded: true,
+                db: SharedString::default(),
+                count: recent.len() as i32,
+            });
+            for (i, q) in recent.iter().enumerate() {
+                let label: String = if q.chars().count() > 24 {
+                    format!("{}…", q.chars().take(23).collect::<String>())
+                } else {
+                    (*q).to_string()
+                };
+                rows.push(TreeNode {
+                    label: label.into(),
+                    depth: 1,
+                    kind: "recent".into(),
+                    expanded: false,
+                    db: SharedString::default(),
+                    count: i as i32,
+                });
+            }
+            w.set_query_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
+        }
+    };
+    rebuild_query_tree("");
+    {
+        let weak = window.as_weak();
+        let saved = saved_queries.clone();
+        let recent = recent_queries.clone();
+        let load_editor_text = load_editor_text.clone();
+        let rebuild_query_tree = rebuild_query_tree.clone();
+        window.on_open_query(move |label, idx| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let (title, text, is_saved) =
+                if let Some((name, sql)) = saved.iter().find(|(n, _)| *n == label.as_str()) {
+                    ((*name).to_string(), (*sql).to_string(), true)
+                } else if let Some(sql) = recent.get(idx.max(0) as usize) {
+                    ("Query".to_string(), (*sql).to_string(), false)
+                } else {
+                    return;
+                };
+            load_editor_text(&text);
+            w.set_active_table(SharedString::default()); // editor mode
+            w.set_query_label(SharedString::from(if is_saved {
+                format!("{title}.sql · saved")
+            } else {
+                "unsaved".to_string()
+            }));
+            let tabs = w.get_tabs();
+            let ti = w.get_active_tab().max(0) as usize;
+            if ti < tabs.row_count() {
+                tabs.set_row_data(
+                    ti,
+                    TabItem {
+                        title: SharedString::from(title.clone()),
+                        kind: "sql".into(),
+                    },
+                );
+            }
+            rebuild_query_tree(&title);
+        });
+    }
+
     // ----- connections screen: selection fills the right detail panel -----
     let fill_detail = {
         let weak = window.as_weak();
@@ -780,6 +1028,31 @@ fn main() -> Result<(), slint::PlatformError> {
                                 w.get_grid_cells().row_count() + 100000 * w.get_grid_columns().row_count(),
                                 w.get_result_kind()
                             );
+                        }
+                    },
+                );
+            }
+            if screen.starts_with("sql") {
+                let weak = window.as_weak();
+                let t2 = Box::leak(Box::new(slint::Timer::default()));
+                t2.start(
+                    slint::TimerMode::SingleShot,
+                    std::time::Duration::from_millis(1800),
+                    move || {
+                        if let Some(w) = weak.upgrade() {
+                            w.set_sidebar_mode(1);
+                            w.invoke_open_query("emiten-per-sektor".into(), 0);
+                        }
+                    },
+                );
+                let weak = window.as_weak();
+                let t3 = Box::leak(Box::new(slint::Timer::default()));
+                t3.start(
+                    slint::TimerMode::SingleShot,
+                    std::time::Duration::from_millis(2300),
+                    move || {
+                        if let Some(w) = weak.upgrade() {
+                            w.invoke_run_query();
                         }
                     },
                 );
@@ -935,6 +1208,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let loaded_dbs = loaded_dbs.clone();
         let collapsed_categories = collapsed_categories.clone();
         let cur_engine = cur_engine.clone();
+        let load_editor_text = load_editor_text.clone();
         window.on_connect_clicked(move |idx| {
             let i = idx as usize;
             let (sc, cfg) = {
@@ -960,9 +1234,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         ""
                     },
                 ));
-                w.set_query_text(SharedString::from(crate::query_parse::editor_hint(
-                    sc.engine,
-                )));
+                load_editor_text(crate::query_parse::editor_hint(sc.engine));
                 w.set_active_table(SharedString::default());
             }
             // Fresh connection: nothing browsed, nothing expanded.
@@ -1152,6 +1424,9 @@ fn main() -> Result<(), slint::PlatformError> {
                                 w.set_status_error(false);
                                 w.set_status_latency(SharedString::from(format!(
                                     "{elapsed_ms} ms"
+                                )));
+                                w.set_results_meta(SharedString::from(format!(
+                                    "{shown} rows · {elapsed_ms} ms"
                                 )));
                                 // Fresh result: type-aware default column widths.
                                 let widths: Vec<f32> = match &v {

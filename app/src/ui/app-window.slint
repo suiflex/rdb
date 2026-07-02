@@ -19,6 +19,7 @@ import {
     KvRow,
     TabItem,
     StructField,
+    Span,
 } from "structs.slint";
 
 export component MainWindow inherits Window {
@@ -108,6 +109,16 @@ export component MainWindow inherits Window {
     callback run-query();
     callback apply-filter();
     callback resize-grid-col(int, length);
+
+    // ----- SQL editor (lexer-highlighted) -----
+    in property <[[Span]]> editor-lines;
+    in property <int> cursor-line;
+    in property <int> cursor-col;
+    in property <string> query-label;
+    in property <string> results-meta;
+    in-out property <int> sidebar-mode: 0;
+    callback editor-key(string, bool, bool) -> bool;
+    callback editor-click-line(int);
 
     // ----- pagination + edit footer -----
     in property <int> page-start;
@@ -411,6 +422,7 @@ export component MainWindow inherits Window {
                     active-table: root.active-table;
                     active-count: root.total-rows;
                     query-tree: root.query-tree;
+                    mode <=> root.sidebar-mode;
                     schema-list: root.schema-list;
                     schema-name <=> root.schema-name;
                     disconnect() => {
@@ -586,6 +598,13 @@ export component MainWindow inherits Window {
                         status-error: root.status-error;
                         status-latency: root.status-latency;
                         sort-text: root.sort-text;
+                        editor-lines: root.editor-lines;
+                        cursor-line: root.cursor-line;
+                        cursor-col: root.cursor-col;
+                        query-label: root.query-label;
+                        results-meta: root.results-meta;
+                        editor-key(t, cmd, shift) => { root.editor-key(t, cmd, shift) }
+                        editor-click-line(l) => { root.editor-click-line(l); }
                         selected-row: root.selected-row;
                         selected-col: root.selected-col;
                         editing-row: root.editing-row;

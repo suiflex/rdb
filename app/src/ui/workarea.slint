@@ -2,7 +2,8 @@
 // editor + results split. References: design/2-workspace.png,
 // design/3-sql-editor.png, design/11-filter-edit-t2.png.
 import { Tokens } from "tokens.slint";
-import { GridColumn, GridCell, StructField } from "structs.slint";
+import { GridColumn, GridCell, StructField, Span } from "structs.slint";
+import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import {
     UnderlineSegment, SecondaryButton, PrimaryButton, TextButton, FilterField, KeyCap
@@ -32,6 +33,14 @@ export component WorkArea inherits Rectangle {
     in property <string> active-table;
     in property <string> sort-text;      // e.g. "sort: id ↑"
     in-out property <bool> sql-open: false;
+    // SQL editor model (Rust lexer output) + cursor
+    in property <[[Span]]> editor-lines;
+    in property <int> cursor-line;
+    in property <int> cursor-col;
+    in property <string> query-label;    // "emiten-per-sektor.sql · saved"
+    in property <string> results-meta;   // "10 rows · 38 ms"
+    callback editor-key(string, bool, bool) -> bool;
+    callback editor-click-line(int);
 
     // ----- pagination + edit footer -----
     in property <int> page-start;
@@ -211,55 +220,83 @@ export component WorkArea inherits Rectangle {
 
         // ================= SQL editor (non-browse tabs) =================
         if !root.browse-mode: Rectangle {
-            height: 200px;
+            height: 340px;
             background: Tokens.canvas;
             VerticalLayout {
+                width: 100%;
+                height: 100%;
                 spacing: 0;
                 HorizontalLayout {
-                    height: 42px;
+                    height: 44px;
                     padding-left: Tokens.sp3;
                     padding-right: Tokens.sp3;
                     spacing: Tokens.sp2;
                     VerticalLayout {
                         alignment: center;
                         PrimaryButton {
-                            text: "▶ Run  ⌘↵";
+                            text: "▶ Run  ⌘⏎";
+                            height: 28px;
                             clicked => { root.run(); }
                         }
                     }
                     VerticalLayout {
                         alignment: center;
-                        SecondaryButton { text: "Run Selection"; clicked => { root.run(); } }
+                        SecondaryButton { text: "Run Selection"; height: 28px; clicked => { root.run(); } }
                     }
                     VerticalLayout {
                         alignment: center;
-                        SecondaryButton { text: "Format"; }
+                        SecondaryButton { text: "Format"; height: 28px; }
                     }
                     VerticalLayout {
                         alignment: center;
-                        SecondaryButton { text: "Explain"; }
+                        SecondaryButton { text: "Explain"; height: 28px; }
                     }
                     Rectangle { horizontal-stretch: 1; }
+                    Text {
+                        text: root.query-label;
+                        color: Tokens.text-faint;
+                        font-size: Tokens.font-sm;
+                        vertical-alignment: center;
+                    }
                     VerticalLayout {
                         alignment: center;
-                        SecondaryButton { text: "Limit 500  ⇅"; }
+                        SecondaryButton { text: "Limit 500  ⇅"; height: 28px; }
                     }
                 }
-                Rectangle { height: 1px; background: Tokens.border; }
-                ScrollView {
+                CodeEditor {
                     vertical-stretch: 1;
-                    TextInput {
-                        x: Tokens.sp3;
-                        width: parent.visible-width - 2 * Tokens.sp3;
-                        text <=> root.query-text;
-                        color: Tokens.text;
-                        font-family: Tokens.mono;
-                        font-size: Tokens.font-md;
-                        single-line: false;
-                        wrap: word-wrap;
-                    }
+                    lines: root.editor-lines;
+                    cursor-line: root.cursor-line;
+                    cursor-col: root.cursor-col;
+                    edit-key(t, cmd, shift) => { root.editor-key(t, cmd, shift) }
+                    clicked-line(l) => { root.editor-click-line(l); }
                 }
                 Rectangle { height: 1px; background: Tokens.border; }
+                // results header strip
+                HorizontalLayout {
+                    height: 34px;
+                    padding-left: Tokens.sp3;
+                    padding-right: Tokens.sp3;
+                    spacing: Tokens.sp2;
+                    Text {
+                        text: "Results";
+                        color: Tokens.text;
+                        font-size: Tokens.font-sm;
+                        font-weight: Tokens.weight-emphasis;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: root.results-meta;
+                        color: Tokens.text-faint;
+                        font-size: Tokens.font-sm;
+                        font-family: Tokens.mono;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    TextButton { text: "Copy"; }
+                    TextButton { text: "Export CSV"; }
+                    TextButton { text: "Chart"; }
+                }
             }
         }
 

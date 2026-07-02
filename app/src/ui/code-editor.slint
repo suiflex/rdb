@@ -1,0 +1,108 @@
+// Syntax-highlighted SQL editor (Tabula): line-number gutter, current-line
+// highlight, colored spans fed by the Rust lexer, custom caret.
+// Reference: design/3-sql-editor.png.
+import { Tokens } from "tokens.slint";
+import { Span } from "structs.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export component CodeEditor inherits Rectangle {
+    in property <[[Span]]> lines;
+    in property <int> cursor-line: 0;
+    in property <int> cursor-col: 0;
+    // (key text, meta/ctrl, shift) -> true when the editor consumed the key.
+    callback edit-key(string, bool, bool) -> bool;
+    callback clicked-line(int);
+
+    property <length> line-h: 21px;
+    property <length> gutter-w: 40px;
+    // IBM Plex Mono advance width, measured from a hidden probe.
+    property <length> charw: probe.preferred-width / 10;
+
+    background: Tokens.canvas;
+
+    probe := Text {
+        text: "0000000000";
+        font-family: Tokens.mono;
+        font-size: Tokens.font-md;
+        visible: false;
+    }
+
+    focus-scope := FocusScope {
+        key-pressed(e) => {
+            if (root.edit-key(e.text, e.modifiers.meta || e.modifiers.control, e.modifiers.shift)) {
+                return accept;
+            }
+            return reject;
+        }
+
+        ScrollView {
+            width: 100%;
+            height: 100%;
+            VerticalLayout {
+                width: max(self.preferred-width, parent.visible-width);
+                alignment: start;
+                padding-top: Tokens.sp2;
+                padding-bottom: Tokens.sp2;
+
+                for line[li] in root.lines: Rectangle {
+                    height: root.line-h;
+                    background: li == root.cursor-line ? Tokens.editor-line : transparent;
+
+                    line-ta := TouchArea {
+                        clicked => {
+                            root.clicked-line(li);
+                            focus-scope.focus();
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 0;
+                        // gutter number
+                        Rectangle {
+                            width: root.gutter-w;
+                            Text {
+                                width: parent.width - 12px;
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                                text: li + 1;
+                                color: li == root.cursor-line ? Tokens.text : Tokens.text-ghost;
+                                font-family: Tokens.mono;
+                                font-size: Tokens.font-sm;
+                                font-weight: li == root.cursor-line ? 600 : 400;
+                            }
+                        }
+                        Rectangle { width: Tokens.sp3; }
+                        // colored spans
+                        HorizontalLayout {
+                            spacing: 0;
+                            alignment: start;
+                            for span in line: Text {
+                                vertical-alignment: center;
+                                text: span.text;
+                                font-family: Tokens.mono;
+                                font-size: Tokens.font-md;
+                                color: span.kind == 1 ? Tokens.syn-keyword
+                                    : span.kind == 2 ? Tokens.syn-string
+                                    : span.kind == 3 ? Tokens.syn-function
+                                    : span.kind == 4 ? Tokens.syn-comment
+                                    : Tokens.text;
+                                font-weight: span.kind == 1 ? Tokens.weight-emphasis : 400;
+                                font-italic: span.kind == 4;
+                            }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+
+                    // caret
+                    if li == root.cursor-line && focus-scope.has-focus: Rectangle {
+                        x: root.gutter-w + Tokens.sp3 + root.cursor-col * root.charw;
+                        y: 2px;
+                        width: 1.5px;
+                        height: parent.height - 4px;
+                        background: Tokens.accent;
+                    }
+                }
+            }
+        }
+    }
+}

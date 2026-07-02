@@ -180,7 +180,7 @@ export component Sidebar inherits Rectangle {
                             color: is-active ? Tokens.on-tint : Tokens.text-faint;
                             font-size: node.kind == "recent" ? 12px : 9px;
                             width: 16px;
-                            font-family: Tokens.mono;
+                            font-family: node.kind == "recent" ? "" : Tokens.mono;
                             vertical-alignment: center;
                         }
 
