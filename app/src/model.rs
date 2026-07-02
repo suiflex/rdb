@@ -347,3 +347,344 @@ mod tests {
         assert_eq!(nodes[2].kind, "field");
     }
 }
+
+// ===== buffered edits (TablePlus-style pending writes) =====
+
+use rdbs_core::write::{TableRef, WriteOp};
+use std::collections::{BTreeSet, HashMap};
+
+/// Buffered, uncommitted grid mutations for the open browse container.
+/// `changes` keys are (row, col) into the CURRENT page grid; rows at
+/// `grid.rows.len()..` address `inserts` instead. ⌘S turns the buffer into
+/// `WriteOp`s via [`EditBuffer::to_ops`]; Esc/Discard drops it.
+#[derive(Debug, Default, Clone)]
+pub struct EditBuffer {
+    pub table: Option<TableRef>,
+    pub pk_cols: Vec<String>,
+    pub changes: HashMap<(usize, usize), String>,
+    pub deletes: BTreeSet<usize>,
+    pub inserts: Vec<Vec<String>>,
+}
+
+impl EditBuffer {
+    pub fn is_empty(&self) -> bool {
+        self.changes.is_empty() && self.deletes.is_empty() && self.inserts.is_empty()
+    }
+
+    /// Rows whose edits still count: changes on delete-marked rows die with
+    /// the row, so they don't inflate the pending badge.
+    pub fn pending_count(&self) -> usize {
+        let live_changes = self
+            .changes
+            .keys()
+            .filter(|(r, _)| !self.deletes.contains(r))
+            .count();
+        live_changes + self.deletes.len() + self.inserts.len()
+    }
+
+    /// Reset for a new container/page.
+    pub fn clear(&mut self) {
+        self.changes.clear();
+        self.deletes.clear();
+        self.inserts.clear();
+    }
+
+    /// The effective column name for op payloads. Redis kv grids label the
+    /// identity column "key" while the driver addresses it by its typed
+    /// identity ("field"/"index"/"member"); a single-pk grid whose first
+    /// column is "key" maps column 0 to that pk name.
+    fn col_name<'a>(&'a self, grid: &'a GridModel, idx: usize) -> &'a str {
+        if idx == 0
+            && self.pk_cols.len() == 1
+            && grid.columns.first().map(|c| c.name.as_str()) == Some("key")
+            && self.pk_cols[0] != "key"
+        {
+            return &self.pk_cols[0];
+        }
+        grid.columns.get(idx).map(|c| c.name.as_str()).unwrap_or("")
+    }
+
+    /// Identity pairs of one ORIGINAL row (pre-edit values), typed by column.
+    fn row_pk(&self, grid: &GridModel, row: usize) -> Result<Vec<(String, Cell)>, String> {
+        let mut pk = Vec::new();
+        for name in &self.pk_cols {
+            let idx = grid
+                .columns
+                .iter()
+                .position(|c| &c.name == name)
+                .or({
+                    // single-identity grids (Redis): identity lives in column 0
+                    if self.pk_cols.len() == 1 { Some(0) } else { None }
+                })
+                .ok_or_else(|| format!("primary key column \"{name}\" not in result"))?;
+            let cell = grid
+                .rows
+                .get(row)
+                .and_then(|r| r.get(idx))
+                .ok_or_else(|| format!("row {row} out of range"))?;
+            let value = if cell.is_null {
+                Cell::Null
+            } else {
+                coerce(&cell.text, &grid.columns[idx].type_name)
+            };
+            pk.push((name.clone(), value));
+        }
+        Ok(pk)
+    }
+
+    /// Turn the buffer into driver ops against `grid` (the ORIGINAL page as
+    /// fetched — pk values must predate the user's edits). Delete beats edit
+    /// on the same row. Insert rows skip empty cells so column defaults apply.
+    pub fn to_ops(&self, grid: &GridModel) -> Result<Vec<WriteOp>, String> {
+        let table = self.table.clone().ok_or("no table open")?;
+        if self.pk_cols.is_empty() {
+            return Err("container has no primary key (read-only)".into());
+        }
+        let mut ops = Vec::new();
+
+        // updates: group live per-row changes
+        let mut by_row: HashMap<usize, Vec<(usize, &String)>> = HashMap::new();
+        for (&(r, c), text) in &self.changes {
+            if r < grid.rows.len() && !self.deletes.contains(&r) {
+                by_row.entry(r).or_default().push((c, text));
+            }
+        }
+        let mut rows: Vec<_> = by_row.into_iter().collect();
+        rows.sort_by_key(|(r, _)| *r);
+        for (r, mut cells) in rows {
+            cells.sort_by_key(|(c, _)| *c);
+            let changes = cells
+                .into_iter()
+                .map(|(c, text)| {
+                    let type_name = grid
+                        .columns
+                        .get(c)
+                        .map(|col| col.type_name.as_str())
+                        .unwrap_or("");
+                    (self.col_name(grid, c).to_string(), coerce(text, type_name))
+                })
+                .collect();
+            ops.push(WriteOp::Update {
+                table: table.clone(),
+                pk: self.row_pk(grid, r)?,
+                changes,
+            });
+        }
+
+        // deletes
+        for &r in &self.deletes {
+            ops.push(WriteOp::Delete {
+                table: table.clone(),
+                pk: self.row_pk(grid, r)?,
+            });
+        }
+
+        // inserts
+        for row in &self.inserts {
+            let values: Vec<(String, Cell)> = row
+                .iter()
+                .enumerate()
+                .filter(|(_, text)| !text.is_empty())
+                .map(|(c, text)| {
+                    let type_name = grid
+                        .columns
+                        .get(c)
+                        .map(|col| col.type_name.as_str())
+                        .unwrap_or("");
+                    (self.col_name(grid, c).to_string(), coerce(text, type_name))
+                })
+                .collect();
+            if values.is_empty() {
+                continue;
+            }
+            ops.push(WriteOp::Insert {
+                table: table.clone(),
+                values,
+            });
+        }
+        Ok(ops)
+    }
+}
+
+/// Edited text → typed `Cell`, guided by the column type. The literal `NULL`
+/// (any case) is SQL NULL — TablePlus convention. Unparseable numerics fall
+/// back to text so the server reports the real error.
+pub fn coerce(text: &str, type_name: &str) -> Cell {
+    if text.eq_ignore_ascii_case("null") {
+        return Cell::Null;
+    }
+    let t = type_name.to_ascii_lowercase();
+    if t.contains("int") || t.contains("serial") {
+        if let Ok(i) = text.trim().parse::<i64>() {
+            return Cell::Int(i);
+        }
+    }
+    if ["float", "double", "numeric", "decimal", "real"]
+        .iter()
+        .any(|k| t.contains(k))
+    {
+        if let Ok(f) = text.trim().parse::<f64>() {
+            return Cell::Float(f);
+        }
+    }
+    if t.contains("bool") {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "true" | "t" | "1" | "yes" => return Cell::Bool(true),
+            "false" | "f" | "0" | "no" => return Cell::Bool(false),
+            _ => {}
+        }
+    }
+    Cell::Text(text.to_string())
+}
+
+#[cfg(test)]
+mod edit_tests {
+    use super::*;
+
+    fn grid() -> GridModel {
+        GridModel {
+            columns: vec![
+                VmColumn { name: "id".into(), type_name: "int4".into() },
+                VmColumn { name: "name".into(), type_name: "text".into() },
+            ],
+            rows: vec![
+                vec![
+                    VmCell { text: "1".into(), is_null: false },
+                    VmCell { text: "alice".into(), is_null: false },
+                ],
+                vec![
+                    VmCell { text: "2".into(), is_null: false },
+                    VmCell { text: "bob".into(), is_null: false },
+                ],
+            ],
+        }
+    }
+
+    fn buf() -> EditBuffer {
+        EditBuffer {
+            table: Some(TableRef::named("users")),
+            pk_cols: vec!["id".into()],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn single_edit_becomes_update_with_original_pk() {
+        let mut b = buf();
+        b.changes.insert((0, 1), "carol".into());
+        let ops = b.to_ops(&grid()).unwrap();
+        assert_eq!(ops.len(), 1);
+        match &ops[0] {
+            WriteOp::Update { pk, changes, .. } => {
+                assert_eq!(pk[0].0, "id");
+                assert!(matches!(pk[0].1, Cell::Int(1)));
+                assert_eq!(changes[0].0, "name");
+                assert!(matches!(&changes[0].1, Cell::Text(s) if s == "carol"));
+            }
+            _ => panic!("expected update"),
+        }
+    }
+
+    #[test]
+    fn delete_wins_over_edit_on_same_row() {
+        let mut b = buf();
+        b.changes.insert((1, 1), "x".into());
+        b.deletes.insert(1);
+        let ops = b.to_ops(&grid()).unwrap();
+        assert_eq!(ops.len(), 1);
+        assert!(matches!(ops[0], WriteOp::Delete { .. }));
+        assert_eq!(b.pending_count(), 1);
+    }
+
+    #[test]
+    fn insert_skips_empty_cells() {
+        let mut b = buf();
+        b.inserts.push(vec![String::new(), "dave".into()]);
+        let ops = b.to_ops(&grid()).unwrap();
+        match &ops[0] {
+            WriteOp::Insert { values, .. } => {
+                assert_eq!(values.len(), 1);
+                assert_eq!(values[0].0, "name");
+            }
+            _ => panic!("expected insert"),
+        }
+    }
+
+    #[test]
+    fn null_keyword_coerces_to_null() {
+        assert!(matches!(coerce("NULL", "text"), Cell::Null));
+        assert!(matches!(coerce("null", "int4"), Cell::Null));
+        assert!(matches!(coerce("42", "int4"), Cell::Int(42)));
+        assert!(matches!(coerce("4.5", "numeric"), Cell::Float(_)));
+        assert!(matches!(coerce("true", "boolean"), Cell::Bool(true)));
+        assert!(matches!(coerce("notanum", "int4"), Cell::Text(_)));
+    }
+
+    #[test]
+    fn missing_pk_is_an_error() {
+        let mut b = buf();
+        b.pk_cols.clear();
+        b.changes.insert((0, 1), "x".into());
+        assert!(b.to_ops(&grid()).is_err());
+    }
+
+    #[test]
+    fn redis_style_key_column_renames_to_pk_identity() {
+        let g = GridModel {
+            columns: vec![
+                VmColumn { name: "key".into(), type_name: "text".into() },
+                VmColumn { name: "value".into(), type_name: "text".into() },
+            ],
+            rows: vec![vec![
+                VmCell { text: "color".into(), is_null: false },
+                VmCell { text: "red".into(), is_null: false },
+            ]],
+        };
+        let mut b = EditBuffer {
+            table: Some(TableRef::named("prefs")),
+            pk_cols: vec!["field".into()],
+            ..Default::default()
+        };
+        b.changes.insert((0, 1), "blue".into());
+        let ops = b.to_ops(&g).unwrap();
+        match &ops[0] {
+            WriteOp::Update { pk, changes, .. } => {
+                assert_eq!(pk[0].0, "field");
+                assert!(matches!(&pk[0].1, Cell::Text(s) if s == "color"));
+                assert_eq!(changes[0].0, "value");
+            }
+            _ => panic!("expected update"),
+        }
+    }
+
+    #[test]
+    fn composite_pk_reads_both_columns() {
+        let g = GridModel {
+            columns: vec![
+                VmColumn { name: "a".into(), type_name: "int4".into() },
+                VmColumn { name: "b".into(), type_name: "text".into() },
+                VmColumn { name: "v".into(), type_name: "text".into() },
+            ],
+            rows: vec![vec![
+                VmCell { text: "1".into(), is_null: false },
+                VmCell { text: "x".into(), is_null: false },
+                VmCell { text: "old".into(), is_null: false },
+            ]],
+        };
+        let mut b = EditBuffer {
+            table: Some(TableRef::named("t")),
+            pk_cols: vec!["a".into(), "b".into()],
+            ..Default::default()
+        };
+        b.changes.insert((0, 2), "new".into());
+        let ops = b.to_ops(&g).unwrap();
+        match &ops[0] {
+            WriteOp::Update { pk, .. } => {
+                assert_eq!(pk.len(), 2);
+                assert!(matches!(pk[0].1, Cell::Int(1)));
+                assert!(matches!(&pk[1].1, Cell::Text(s) if s == "x"));
+            }
+            _ => panic!("expected update"),
+        }
+    }
+}
