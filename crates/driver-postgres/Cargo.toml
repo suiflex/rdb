@@ -7,7 +7,10 @@ edition = "2021"
 rdbs-core = { path = "../core" }
 async-trait = "0.1"
 tokio = { version = "1", features = ["full"] }
-tokio-postgres = "0.7"
+tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-chrono-0_4"] }
+uuid = "1"
+chrono = { version = "0.4", default-features = false }
+rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
 native-tls = "0.2"
 postgres-native-tls = "0.5"
 

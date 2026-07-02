@@ -183,7 +183,11 @@ fn schema_display_rows(
             kind: "category".into(),
             expanded: cat_open,
             db: SharedString::default(),
-            count: if is_fn_cat { function_count } else { container_count },
+            count: if is_fn_cat {
+                function_count
+            } else {
+                container_count
+            },
         });
         if !cat_open {
             continue;
@@ -562,17 +566,26 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // One store for the app lifetime; all CRUD + password ops go through it.
     // RDBS_MOCK=1 swaps in a seeded temp store (never the user's real one).
-    let store: Rc<RefCell<rdbs_connstore::ConnStore>> = Rc::new(RefCell::new(if mock::mock_mode()
-    {
-        mock::mock_store(std::env::temp_dir().join(format!("rdbs-mock-{}", std::process::id())))
-    } else {
-        rdbs_connstore::ConnStore::open_default().unwrap_or_else(|_| {
-            let dir = std::env::temp_dir().join("dbm");
-            let _ = std::fs::create_dir_all(&dir);
-            let backend = rdbs_connstore::secret::select_backend(&dir).expect("secret backend");
-            rdbs_connstore::ConnStore::new(dir.join("connections.json"), backend)
-        })
-    }));
+    let store: Rc<RefCell<rdbs_connstore::ConnStore>> = Rc::new(RefCell::new(
+        if let Ok(dir) = std::env::var("RDBS_STORE_DIR") {
+            // Explicit store dir (e2e harness): file-backed, real drivers.
+            let dir = std::path::PathBuf::from(dir);
+            let backend = Box::new(
+                rdbs_connstore::EncryptedFileBackend::new(&dir).expect("file secret backend"),
+            );
+            rdbs_connstore::ConnStore::load(dir.join("connections.json"), backend)
+                .expect("load RDBS_STORE_DIR store")
+        } else if mock::mock_mode() {
+            mock::mock_store(std::env::temp_dir().join(format!("rdbs-mock-{}", std::process::id())))
+        } else {
+            rdbs_connstore::ConnStore::open_default().unwrap_or_else(|_| {
+                let dir = std::env::temp_dir().join("dbm");
+                let _ = std::fs::create_dir_all(&dir);
+                let backend = rdbs_connstore::secret::select_backend(&dir).expect("secret backend");
+                rdbs_connstore::ConnStore::new(dir.join("connections.json"), backend)
+            })
+        },
+    ));
 
     // ----- frameless-window chrome: drag + minimize/maximize/close -----
     {
@@ -614,9 +627,7 @@ fn main() -> Result<(), slint::PlatformError> {
     if let Ok(spec) = std::env::var("RDBS_WIN") {
         if let Some((w, h)) = spec.split_once('x') {
             if let (Ok(w), Ok(h)) = (w.parse::<f32>(), h.parse::<f32>()) {
-                window
-                    .window()
-                    .set_size(slint::LogicalSize::new(w, h));
+                window.window().set_size(slint::LogicalSize::new(w, h));
             }
         }
     }
@@ -1113,16 +1124,34 @@ fn main() -> Result<(), slint::PlatformError> {
                 rdbs_core::conn::SslMode::Require => "require",
             };
             let mut rows = vec![
-                KvRow { k: "Host".into(), v: s.host.clone().into() },
-                KvRow { k: "Port".into(), v: s.port.to_string().into() },
+                KvRow {
+                    k: "Host".into(),
+                    v: s.host.clone().into(),
+                },
+                KvRow {
+                    k: "Port".into(),
+                    v: s.port.to_string().into(),
+                },
             ];
             if let Some(db) = &s.database {
-                rows.push(KvRow { k: "Database".into(), v: db.clone().into() });
+                rows.push(KvRow {
+                    k: "Database".into(),
+                    v: db.clone().into(),
+                });
             }
-            rows.push(KvRow { k: "User".into(), v: s.user.clone().into() });
-            rows.push(KvRow { k: "SSL".into(), v: ssl.into() });
+            rows.push(KvRow {
+                k: "User".into(),
+                v: s.user.clone().into(),
+            });
+            rows.push(KvRow {
+                k: "SSL".into(),
+                v: ssl.into(),
+            });
             if mock::mock_mode() && s.engine == rdbs_connstore::Engine::Postgres {
-                rows.push(KvRow { k: "Server".into(), v: "PostgreSQL 16.14".into() });
+                rows.push(KvRow {
+                    k: "Server".into(),
+                    v: "PostgreSQL 16.14".into(),
+                });
             }
             w.set_sel_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
             let tags: Vec<SharedString> = s.tags.iter().map(|t| t.as_str().into()).collect();
@@ -1137,7 +1166,7 @@ fn main() -> Result<(), slint::PlatformError> {
     };
     {
         let fill_detail = fill_detail.clone();
-        window.on_select_conn(move |idx| fill_detail(idx));
+        window.on_select_conn(fill_detail);
     }
     // Mock mode boots with the reference selection ("bot ai tele").
     if mock::mock_mode() {
@@ -1149,100 +1178,92 @@ fn main() -> Result<(), slint::PlatformError> {
             .map(|i| i as i32)
             .unwrap_or(-1);
         fill_detail(idx);
+    }
 
-        // RDBS_SCREEN drives the app to a reference state for screenshots:
-        // "workspace" connects + opens emiten; "sql" stops at the editor.
-        if let Ok(screen) = std::env::var("RDBS_SCREEN") {
+    // RDBS_SCREEN drives the app to a reference state for screenshots and the
+    // e2e harness: "workspace" connects + opens emiten; "sql" opens + runs the
+    // saved query; the rest open a specific modal/view.
+    if let Ok(screen) = std::env::var("RDBS_SCREEN") {
+        let idx = store
+            .borrow()
+            .list()
+            .iter()
+            .position(|s| s.name == "bot ai tele")
+            .map(|i| i as i32)
+            .unwrap_or(0);
+        {
             let weak = window.as_weak();
             let t1 = Box::leak(Box::new(slint::Timer::default()));
             t1.start(
                 slint::TimerMode::SingleShot,
                 std::time::Duration::from_millis(250),
                 move || {
-                    eprintln!("RDBS_SCREEN: auto-connect idx={idx}");
                     if let Some(w) = weak.upgrade() {
                         w.invoke_connect_clicked(idx);
                     }
                 },
             );
-            {
-                let weak = window.as_weak();
-                let td = Box::leak(Box::new(slint::Timer::default()));
-                td.start(
-                    slint::TimerMode::SingleShot,
-                    std::time::Duration::from_millis(2600),
-                    move || {
-                        if let Some(w) = weak.upgrade() {
-                            eprintln!(
-                                "debug@2s: connected={} active_table={:?} tabs={} cols={} cells={} kind={}",
-                                w.get_connected(),
-                                w.get_active_table(),
-                                w.get_tabs().row_count(),
-                                w.get_grid_col_count(),
-                                w.get_grid_cells().row_count() + 100000 * w.get_grid_columns().row_count(),
-                                w.get_result_kind()
-                            );
+        }
+        if screen.starts_with("sql") {
+            let weak = window.as_weak();
+            let t2 = Box::leak(Box::new(slint::Timer::default()));
+            t2.start(
+                slint::TimerMode::SingleShot,
+                std::time::Duration::from_millis(1800),
+                move || {
+                    if let Some(w) = weak.upgrade() {
+                        w.set_sidebar_mode(1);
+                        w.invoke_open_query("emiten-per-sektor".into(), 0);
+                    }
+                },
+            );
+            let weak = window.as_weak();
+            let t3 = Box::leak(Box::new(slint::Timer::default()));
+            t3.start(
+                slint::TimerMode::SingleShot,
+                std::time::Duration::from_millis(2300),
+                move || {
+                    if let Some(w) = weak.upgrade() {
+                        w.invoke_run_query();
+                    }
+                },
+            );
+        }
+        if screen == "modal-db"
+            || screen == "modal-conn"
+            || screen == "function"
+            || screen == "palette"
+        {
+            let weak = window.as_weak();
+            let which = screen.clone();
+            let t4 = Box::leak(Box::new(slint::Timer::default()));
+            t4.start(
+                slint::TimerMode::SingleShot,
+                std::time::Duration::from_millis(1800),
+                move || {
+                    if let Some(w) = weak.upgrade() {
+                        match which.as_str() {
+                            "modal-db" => w.invoke_open_db_modal(),
+                            "modal-conn" => w.invoke_open_conn_modal(),
+                            "palette" => w.invoke_toggle_palette(),
+                            _ => w.invoke_open_function("uuid_generate_v3".into()),
                         }
-                    },
-                );
-            }
-            if screen.starts_with("sql") {
-                let weak = window.as_weak();
-                let t2 = Box::leak(Box::new(slint::Timer::default()));
-                t2.start(
-                    slint::TimerMode::SingleShot,
-                    std::time::Duration::from_millis(1800),
-                    move || {
-                        if let Some(w) = weak.upgrade() {
-                            w.set_sidebar_mode(1);
-                            w.invoke_open_query("emiten-per-sektor".into(), 0);
-                        }
-                    },
-                );
-                let weak = window.as_weak();
-                let t3 = Box::leak(Box::new(slint::Timer::default()));
-                t3.start(
-                    slint::TimerMode::SingleShot,
-                    std::time::Duration::from_millis(2300),
-                    move || {
-                        if let Some(w) = weak.upgrade() {
-                            w.invoke_run_query();
-                        }
-                    },
-                );
-            }
-            if screen == "modal-db" || screen == "modal-conn" || screen == "function" || screen == "palette" {
-                let weak = window.as_weak();
-                let which = screen.clone();
-                let t4 = Box::leak(Box::new(slint::Timer::default()));
-                t4.start(
-                    slint::TimerMode::SingleShot,
-                    std::time::Duration::from_millis(1800),
-                    move || {
-                        if let Some(w) = weak.upgrade() {
-                            match which.as_str() {
-                                "modal-db" => w.invoke_open_db_modal(),
-                                "modal-conn" => w.invoke_open_conn_modal(),
-                                "palette" => w.invoke_toggle_palette(),
-                                _ => w.invoke_open_function("uuid_generate_v3".into()),
-                            }
-                        }
-                    },
-                );
-            }
-            if screen.starts_with("workspace") {
-                let weak = window.as_weak();
-                let t2 = Box::leak(Box::new(slint::Timer::default()));
-                t2.start(
-                    slint::TimerMode::SingleShot,
-                    std::time::Duration::from_millis(1800),
-                    move || {
-                        if let Some(w) = weak.upgrade() {
-                            w.invoke_open_table("ai_bot_fintech".into(), "emiten".into());
-                        }
-                    },
-                );
-            }
+                    }
+                },
+            );
+        }
+        if screen.starts_with("workspace") {
+            let weak = window.as_weak();
+            let t2 = Box::leak(Box::new(slint::Timer::default()));
+            t2.start(
+                slint::TimerMode::SingleShot,
+                std::time::Duration::from_millis(1800),
+                move || {
+                    if let Some(w) = weak.upgrade() {
+                        w.invoke_open_table("".into(), "emiten".into());
+                    }
+                },
+            );
         }
     }
 
@@ -1437,9 +1458,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
                 match result {
                     Ok((driver, schema)) => {
-                        eprintln!("connect ok: schema dbs={}", schema.databases.len());
                         *store_driver.lock().await = Some((engine, driver));
-                        eprintln!("driver stored");
                         let nodes = model::to_tree_model(&schema);
                         let fields = model::to_structure_model(&schema);
                         // Stash raw nodes for later expand/collapse rebuilds, and
@@ -1452,13 +1471,19 @@ fn main() -> Result<(), slint::PlatformError> {
                             Some(engine),
                             "",
                         );
-                        // Real database/schema names from introspection; fall back
-                        // to "public" only when the driver exposed none.
-                        let mut schema_names: Vec<SharedString> = schema
-                            .databases
-                            .iter()
-                            .map(|d| SharedString::from(d.name.clone()))
-                            .collect();
+                        // Postgres browses namespaces, not databases: the
+                        // selector must say "public", never the db name (a
+                        // `"dbname"."table"` query would fail).
+                        let mut schema_names: Vec<SharedString> =
+                            if matches!(engine, rdbs_connstore::Engine::Postgres) {
+                                vec![SharedString::from("public")]
+                            } else {
+                                schema
+                                    .databases
+                                    .iter()
+                                    .map(|d| SharedString::from(d.name.clone()))
+                                    .collect()
+                            };
                         if schema_names.is_empty() {
                             schema_names.push(SharedString::from("public"));
                         }
@@ -1500,7 +1525,6 @@ fn main() -> Result<(), slint::PlatformError> {
                                 w.set_status_latency(SharedString::from("connected"));
                                 w.set_picker_error(SharedString::default());
                                 // Swap the picker for the workspace.
-                                eprintln!("connect: switching to workspace");
                                 w.set_connected(true);
                             }
                         });
@@ -1566,12 +1590,9 @@ fn main() -> Result<(), slint::PlatformError> {
                             Err(msg) => Err(rdbs_core::error::RdbsError::Query(msg)),
                         }
                     }
-                    None => {
-                        eprintln!("run_sql: no driver yet");
-                        Err(rdbs_core::error::RdbsError::Connection(
-                            "not connected".into(),
-                        ))
-                    }
+                    None => Err(rdbs_core::error::RdbsError::Connection(
+                        "not connected".into(),
+                    )),
                 };
                 let elapsed_ms = t0.elapsed().as_millis().max(1) as u64;
                 let view = outcome.as_ref().ok().map(model::to_result_view);
@@ -2842,9 +2863,6 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    if std::env::var("RDBS_FORCE_CONNECTED").is_ok() {
-        window.set_connected(true);
-    }
     shot::install(&window);
     window.run()
 }

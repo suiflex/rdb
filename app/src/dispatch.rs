@@ -50,7 +50,9 @@ impl AnyDriver {
     /// Connect using the concrete driver for `engine`.
     pub async fn connect(engine: Engine, cfg: &ConnConfig) -> Result<Self> {
         if crate::mock::mock_mode() {
-            return Ok(AnyDriver::Mock(crate::mock::MockDriver::connect(cfg).await?));
+            return Ok(AnyDriver::Mock(
+                crate::mock::MockDriver::connect(cfg).await?,
+            ));
         }
         Ok(match engine {
             Engine::Postgres => AnyDriver::Postgres(PostgresDriver::connect(cfg).await?),

@@ -11,6 +11,10 @@ pub enum CellKind {
     Bool,
     Text,
     Bytes,
+    Uuid,
+    Timestamp,
+    Date,
+    Numeric,
 }
 
 /// Classify a pg `Type` into a `CellKind`. Unknown types -> `Text` (string
@@ -21,6 +25,10 @@ pub fn classify(ty: &Type) -> CellKind {
         Type::FLOAT4 | Type::FLOAT8 => CellKind::Float,
         Type::BOOL => CellKind::Bool,
         Type::BYTEA => CellKind::Bytes,
+        Type::UUID => CellKind::Uuid,
+        Type::TIMESTAMPTZ | Type::TIMESTAMP => CellKind::Timestamp,
+        Type::DATE => CellKind::Date,
+        Type::NUMERIC => CellKind::Numeric,
         Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME => CellKind::Text,
         _ => CellKind::Text,
     }
@@ -60,6 +68,30 @@ pub fn extract_cell(row: &Row, idx: usize) -> Cell {
         },
         CellKind::Bytes => match row.try_get::<_, Option<Vec<u8>>>(idx) {
             Ok(Some(v)) => Cell::Bytes(v),
+            Ok(None) => Cell::Null,
+            Err(_) => string_fallback(row, idx),
+        },
+        CellKind::Uuid => match row.try_get::<_, Option<uuid::Uuid>>(idx) {
+            Ok(Some(v)) => Cell::Text(v.to_string()),
+            Ok(None) => Cell::Null,
+            Err(_) => string_fallback(row, idx),
+        },
+        CellKind::Timestamp => match row.try_get::<_, Option<chrono::DateTime<chrono::Utc>>>(idx) {
+            Ok(Some(v)) => Cell::Text(v.format("%Y-%m-%d %H:%M:%S%.3f").to_string()),
+            Ok(None) => Cell::Null,
+            Err(_) => match row.try_get::<_, Option<chrono::NaiveDateTime>>(idx) {
+                Ok(Some(v)) => Cell::Text(v.format("%Y-%m-%d %H:%M:%S%.3f").to_string()),
+                Ok(None) => Cell::Null,
+                Err(_) => string_fallback(row, idx),
+            },
+        },
+        CellKind::Date => match row.try_get::<_, Option<chrono::NaiveDate>>(idx) {
+            Ok(Some(v)) => Cell::Text(v.to_string()),
+            Ok(None) => Cell::Null,
+            Err(_) => string_fallback(row, idx),
+        },
+        CellKind::Numeric => match row.try_get::<_, Option<rust_decimal::Decimal>>(idx) {
+            Ok(Some(v)) => Cell::Text(v.to_string()),
             Ok(None) => Cell::Null,
             Err(_) => string_fallback(row, idx),
         },
@@ -103,8 +135,16 @@ mod tests {
     }
 
     #[test]
+    fn uuid_timestamp_date_numeric_have_branches() {
+        assert_eq!(classify(&Type::UUID), CellKind::Uuid);
+        assert_eq!(classify(&Type::TIMESTAMPTZ), CellKind::Timestamp);
+        assert_eq!(classify(&Type::TIMESTAMP), CellKind::Timestamp);
+        assert_eq!(classify(&Type::DATE), CellKind::Date);
+        assert_eq!(classify(&Type::NUMERIC), CellKind::Numeric);
+    }
+
+    #[test]
     fn unknown_type_falls_back_to_text() {
-        // UUID has no dedicated branch -> string fallback bucket.
-        assert_eq!(classify(&Type::UUID), CellKind::Text);
+        assert_eq!(classify(&Type::INTERVAL), CellKind::Text);
     }
 }

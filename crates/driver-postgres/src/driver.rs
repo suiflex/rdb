@@ -190,7 +190,13 @@ async fn query_impl(client: &Client, q: &Query) -> Result<ResultSet> {
 /// leading keywords. Anything else (INSERT/UPDATE/DELETE/CREATE/DROP/...) is
 /// treated as a write and routed to `execute` for an affected-row count.
 fn is_row_returning(sql: &str) -> bool {
-    let head = sql.trim_start().to_ascii_lowercase();
+    // Skip leading `-- line` comments and blank lines before classifying.
+    let head = sql
+        .lines()
+        .map(str::trim_start)
+        .find(|l| !l.is_empty() && !l.starts_with("--"))
+        .unwrap_or("")
+        .to_ascii_lowercase();
     head.starts_with("select")
         || head.starts_with("with")
         || head.starts_with("show")
@@ -260,9 +266,35 @@ async fn schema_impl(client: &Client) -> Result<Schema> {
         }
     }
 
+    // Stored functions (public schema): name + full CREATE source for the
+    // function view. Per-row source failures (e.g. C-language internals that
+    // pg_get_functiondef rejects) are skipped, never fatal.
+    let mut functions: Vec<rdbs_core::schema::Function> = Vec::new();
+    if let Ok(rows) = client
+        .query(
+            "SELECT p.proname, pg_catalog.pg_get_functiondef(p.oid) \
+             FROM pg_catalog.pg_proc p \
+             JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
+             WHERE n.nspname = 'public' AND p.prokind = 'f' \
+             ORDER BY p.proname",
+            &[],
+        )
+        .await
+    {
+        for row in &rows {
+            let name: String = row.get(0);
+            if let Ok(def) = row.try_get::<_, String>(1) {
+                functions.push(rdbs_core::schema::Function {
+                    name,
+                    definition: def,
+                });
+            }
+        }
+    }
+
     Ok(Schema {
         databases: vec![Database {
-            functions: Vec::new(),
+            functions,
             name: db_name,
             containers,
         }],

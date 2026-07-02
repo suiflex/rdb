@@ -12,18 +12,78 @@ pub struct Span {
 }
 
 const KEYWORDS: &[&str] = &[
-    "SELECT", "FROM", "WHERE", "GROUP", "BY", "ORDER", "LIMIT", "OFFSET", "JOIN", "LEFT", "RIGHT",
-    "INNER", "OUTER", "ON", "AS", "AND", "OR", "NOT", "IN", "IS", "NULL", "INSERT", "INTO",
-    "VALUES", "UPDATE", "SET", "DELETE", "CREATE", "TABLE", "FUNCTION", "REPLACE", "RETURNS",
-    "LANGUAGE", "BEGIN", "END", "RETURN", "DESC", "ASC", "HAVING", "UNION", "ALL", "DISTINCT",
-    "CASE", "WHEN", "THEN", "ELSE", "LIKE", "ILIKE", "BETWEEN", "EXISTS", "WITH", "IMMUTABLE",
-    "PARALLEL", "SAFE", "STRICT", "OR",
+    "SELECT",
+    "FROM",
+    "WHERE",
+    "GROUP",
+    "BY",
+    "ORDER",
+    "LIMIT",
+    "OFFSET",
+    "JOIN",
+    "LEFT",
+    "RIGHT",
+    "INNER",
+    "OUTER",
+    "ON",
+    "AS",
+    "AND",
+    "OR",
+    "NOT",
+    "IN",
+    "IS",
+    "NULL",
+    "INSERT",
+    "INTO",
+    "VALUES",
+    "UPDATE",
+    "SET",
+    "DELETE",
+    "CREATE",
+    "TABLE",
+    "FUNCTION",
+    "REPLACE",
+    "RETURNS",
+    "LANGUAGE",
+    "BEGIN",
+    "END",
+    "RETURN",
+    "DESC",
+    "ASC",
+    "HAVING",
+    "UNION",
+    "ALL",
+    "DISTINCT",
+    "CASE",
+    "WHEN",
+    "THEN",
+    "ELSE",
+    "LIKE",
+    "ILIKE",
+    "BETWEEN",
+    "EXISTS",
+    "WITH",
+    "IMMUTABLE",
+    "PARALLEL",
+    "SAFE",
+    "STRICT",
+    "OR",
 ];
 
 /// Redis / Mongo dialects reuse the SQL lexer with extra command words.
 const COMMAND_WORDS: &[&str] = &[
-    "GET", "MGET", "HGETALL", "LRANGE", "ZRANGE", "SMEMBERS", "SCAN", "TYPE", "TTL", "KEYS",
-    "FIND", "AGGREGATE", "COUNT",
+    "GET",
+    "MGET",
+    "HGETALL",
+    "LRANGE",
+    "ZRANGE",
+    "SMEMBERS",
+    "SCAN",
+    "TYPE",
+    "TTL",
+    "KEYS",
+    "FIND",
+    "AGGREGATE",
 ];
 
 fn is_ident(c: char) -> bool {
@@ -92,11 +152,11 @@ pub fn lex_line(line: &str) -> Vec<Span> {
             }
             let word: String = chars[i..j].iter().collect();
             let upper = word.to_uppercase();
-            let kind = if KEYWORDS.contains(&upper.as_str()) || COMMAND_WORDS.contains(&upper.as_str())
+            let kind = if chars.get(j) == Some(&'(') && !KEYWORDS.contains(&upper.as_str()) {
+                3
+            } else if KEYWORDS.contains(&upper.as_str()) || COMMAND_WORDS.contains(&upper.as_str())
             {
                 1
-            } else if chars.get(j) == Some(&'(') {
-                3
             } else {
                 0
             };
@@ -227,6 +287,7 @@ impl EditorState {
     }
 
     /// Current line text — the "Run Selection" fallback unit.
+    #[allow(dead_code)] // wired up when Run Selection gains a real selection
     pub fn current_line(&self) -> &str {
         &self.lines[self.line]
     }

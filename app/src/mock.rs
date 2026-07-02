@@ -39,7 +39,15 @@ pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
         ("jdih bkpm", "jdih_bkpm_2025"),
         ("primbon", "primbon"),
     ] {
-        add(conn(name, Engine::Postgres, host, 5432, Some(db), "OSS", false));
+        add(conn(
+            name,
+            Engine::Postgres,
+            host,
+            5432,
+            Some(db),
+            "OSS",
+            false,
+        ));
     }
     for (name, engine, port, db) in [
         ("pg local", Engine::Postgres, 5432, Some("postgres")),
@@ -50,7 +58,15 @@ pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
         add(conn(name, engine, "127.0.0.1", port, db, "LOCAL", true));
     }
     // PROFIN — the expanded group in the reference.
-    add(conn("portfolio", Engine::Postgres, host, 5432, Some("portfolio"), "PROFIN", false));
+    add(conn(
+        "portfolio",
+        Engine::Postgres,
+        host,
+        5432,
+        Some("portfolio"),
+        "PROFIN",
+        false,
+    ));
     {
         let mut c = conn(
             "bot ai tele",
@@ -65,9 +81,33 @@ pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
         c.tags = vec!["profin".into(), "fintech".into()];
         add(c);
     }
-    add(conn("profin", Engine::Postgres, host, 5432, Some("profin"), "PROFIN", false));
-    add(conn("POS", Engine::Postgres, host, 5432, Some("pos"), "PROFIN", false));
-    add(conn("redis portfolio", Engine::Redis, host, 6379, None, "PROFIN", false));
+    add(conn(
+        "profin",
+        Engine::Postgres,
+        host,
+        5432,
+        Some("profin"),
+        "PROFIN",
+        false,
+    ));
+    add(conn(
+        "POS",
+        Engine::Postgres,
+        host,
+        5432,
+        Some("pos"),
+        "PROFIN",
+        false,
+    ));
+    add(conn(
+        "redis portfolio",
+        Engine::Redis,
+        host,
+        6379,
+        None,
+        "PROFIN",
+        false,
+    ));
 
     for (name, db) in [
         ("spmb pusat", "spmb"),
@@ -77,7 +117,15 @@ pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
         ("spmb dki", "spmb_dki"),
         ("spmb diy", "spmb_diy"),
     ] {
-        add(conn(name, Engine::Postgres, host, 5432, Some(db), "SPMB", false));
+        add(conn(
+            name,
+            Engine::Postgres,
+            host,
+            5432,
+            Some(db),
+            "SPMB",
+            false,
+        ));
     }
     for (name, engine, port, db) in [
         ("suitest", Engine::Postgres, 5432, Some("suitest")),
@@ -243,9 +291,24 @@ fn gen_emiten() -> Vec<Row> {
         "Tirta", "Utama", "Wahana",
     ];
     const B: &[&str] = &[
-        "Abadi", "Buana", "Cemerlang", "Dinamika", "Energi", "Finansial", "Gemilang", "Harmoni",
-        "Investama", "Kapital", "Logistik", "Mandiri", "Niaga", "Pratama", "Resources",
-        "Sejahtera", "Teknologi", "Ventura",
+        "Abadi",
+        "Buana",
+        "Cemerlang",
+        "Dinamika",
+        "Energi",
+        "Finansial",
+        "Gemilang",
+        "Harmoni",
+        "Investama",
+        "Kapital",
+        "Logistik",
+        "Mandiri",
+        "Niaga",
+        "Pratama",
+        "Resources",
+        "Sejahtera",
+        "Teknologi",
+        "Ventura",
     ];
     for i in 0..(986 - EMITEN_FIXED.len()) {
         let a = A[rng.below(A.len() as u64) as usize];
@@ -352,21 +415,33 @@ impl MockDriver {
         tables.insert(
             "sectors".to_string(),
             simple_table(
-                &[("id", "uuid"), ("name", "text"), ("created_at", "timestamptz")],
+                &[
+                    ("id", "uuid"),
+                    ("name", "text"),
+                    ("created_at", "timestamptz"),
+                ],
                 sector_rows,
             ),
         );
-        let referral_rows: Vec<Row> = ["organic", "ads", "referral", "partner", "affiliate", "sosmed", "other"]
-            .iter()
-            .enumerate()
-            .map(|(i, n)| {
-                vec![
-                    Cell::Int(i as i64 + 1),
-                    Cell::Text((*n).to_string()),
-                    Cell::Null,
-                ]
-            })
-            .collect();
+        let referral_rows: Vec<Row> = [
+            "organic",
+            "ads",
+            "referral",
+            "partner",
+            "affiliate",
+            "sosmed",
+            "other",
+        ]
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            vec![
+                Cell::Int(i as i64 + 1),
+                Cell::Text((*n).to_string()),
+                Cell::Null,
+            ]
+        })
+        .collect();
         tables.insert(
             "referral_sources".to_string(),
             simple_table(
@@ -382,9 +457,12 @@ impl MockDriver {
                     Cell::Text(uuid_from(&mut rng)),
                     Cell::Float((rng.below(900_000) as f64 + 1000.0) / 100.0),
                     Cell::Text("IDR".into()),
-                    Cell::Text(
-                        format!("2025-09-{:02} 09:{:02}:{:02}", 1 + rng.below(27), rng.below(60), rng.below(60)),
-                    ),
+                    Cell::Text(format!(
+                        "2025-09-{:02} 09:{:02}:{:02}",
+                        1 + rng.below(27),
+                        rng.below(60),
+                        rng.below(60)
+                    )),
                 ]
             })
             .collect();
@@ -482,9 +560,17 @@ impl Driver for MockDriver {
         let functions = vec![
             uuid_fn("uuid_generate_v1", "", "uuid_generate_v1"),
             uuid_fn("uuid_generate_v1mc", "", "uuid_generate_v1mc"),
-            uuid_fn("uuid_generate_v3", "namespace uuid, name text", "uuid_generate_v3"),
+            uuid_fn(
+                "uuid_generate_v3",
+                "namespace uuid, name text",
+                "uuid_generate_v3",
+            ),
             uuid_fn("uuid_generate_v4", "", "uuid_generate_v4"),
-            uuid_fn("uuid_generate_v5", "namespace uuid, name text", "uuid_generate_v5"),
+            uuid_fn(
+                "uuid_generate_v5",
+                "namespace uuid, name text",
+                "uuid_generate_v5",
+            ),
             uuid_fn("uuid_nil", "", "uuid_nil"),
             uuid_fn("uuid_ns_dns", "", "uuid_ns_dns"),
             uuid_fn("uuid_ns_oid", "", "uuid_ns_oid"),
@@ -524,9 +610,18 @@ impl Driver for MockDriver {
                 .collect();
             return Ok(ResultSet::Tabular {
                 cols: vec![
-                    Column { name: "sector".into(), type_name: "text".into() },
-                    Column { name: "total".into(), type_name: "int8".into() },
-                    Column { name: "share".into(), type_name: "bar".into() },
+                    Column {
+                        name: "sector".into(),
+                        type_name: "text".into(),
+                    },
+                    Column {
+                        name: "total".into(),
+                        type_name: "int8".into(),
+                    },
+                    Column {
+                        name: "share".into(),
+                        type_name: "bar".into(),
+                    },
                 ],
                 rows,
             });
@@ -538,7 +633,9 @@ impl Driver for MockDriver {
             };
             let tables = self.tables.lock().unwrap();
             let Some(t) = tables.get(&table) else {
-                return Err(RdbsError::Query(format!("relation \"{table}\" does not exist")));
+                return Err(RdbsError::Query(format!(
+                    "relation \"{table}\" does not exist"
+                )));
             };
             let limit = keyword_num(&upper, sql, "LIMIT ").unwrap_or(u64::MAX) as usize;
             let offset = keyword_num(&upper, sql, "OFFSET ").unwrap_or(0) as usize;
