@@ -242,6 +242,12 @@ pub fn to_tree_model(schema: &Schema) -> Vec<VmTreeNode> {
                 });
             }
         }
+        for f in &db.functions {
+            out.push(VmTreeNode {
+                label: f.name.clone(),
+                kind: "function".into(),
+            });
+        }
     }
     out
 }

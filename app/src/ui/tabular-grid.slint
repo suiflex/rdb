@@ -1,11 +1,10 @@
-import { Theme } from "theme.slint";
+// Data grid (Tabula): row-number gutter, mono cells, vertical hairlines,
+// NULL italics, fk links, red pending-edit outline.
+// Cells are flat row-major: row r, col c at r*col-count + c.
+import { Tokens } from "tokens.slint";
 import { GridColumn, GridCell } from "structs.slint";
 import { ScrollView } from "std-widgets.slint";
 
-// Shared row/column grid used by SQL results and the Mongo "Table" view.
-// Cells are flat row-major: row r, col c at r*col-count + c.
-// TablePlus-style: row-number gutter, zebra stripes, per-cell hairlines,
-// row hover, single-cell selection, per-cell edit-state tinting.
 export component TabularGrid inherits ScrollView {
     in property <[GridColumn]> columns;
     in property <[GridCell]> cells;
@@ -13,7 +12,7 @@ export component TabularGrid inherits ScrollView {
     in property <[length]> col-widths;     // per-column pixel widths (drag-resizable)
     in-out property <int> selected-row: 0;
     in-out property <int> selected-col: -1;
-    // inline edit overlay (Phase 4): row/col currently being edited, -1 = none
+    // inline edit overlay: row/col currently being edited, -1 = none
     in property <int> editing-row: -1;
     in property <int> editing-col: -1;
     callback resize-col(int, length);      // (column index, drag delta)
@@ -25,122 +24,141 @@ export component TabularGrid inherits ScrollView {
     VerticalLayout {
         // fill ScrollView width when few columns; grow past it (scroll) when many
         width: max(self.preferred-width, parent.visible-width);
-        // header
+
+        // ----- header (27px): "name" 600 + type dim, mono -----
         HorizontalLayout {
-            height: Theme.row-height;
-            // gutter header (blank)
+            height: Tokens.grid-header-h;
             Rectangle {
-                width: Theme.gutter-width;
-                background: Theme.surface;
-                Rectangle { width: 1px; x: parent.width - 1px; background: Theme.hairline; }
+                width: 44px;
+                background: Tokens.canvas;
+                Rectangle { width: 1px; x: parent.width - 1px; background: Tokens.border; }
             }
             for col[c] in root.columns: Rectangle {
                 width: root.col-widths.length > c ? root.col-widths[c] : 140px;
-                background: Theme.surface;
+                background: Tokens.canvas;
                 clip: true;
-                Text {
-                    vertical-alignment: center;
-                    x: Theme.sp2;
-                    width: parent.width - 2 * Theme.sp2;
-                    overflow: elide;
-                    text: col.name;
-                    color: Theme.text-dim;
-                    font-size: Theme.font-label;
-                    font-weight: 600;
+                HorizontalLayout {
+                    padding-left: Tokens.sp2;
+                    padding-right: Tokens.sp2;
+                    spacing: 6px;
+                    alignment: start;
+                    Text {
+                        vertical-alignment: center;
+                        text: col.name;
+                        color: Tokens.text;
+                        font-family: Tokens.mono;
+                        font-size: Tokens.font-sm;
+                        font-weight: Tokens.weight-emphasis;
+                        overflow: elide;
+                    }
+                    Text {
+                        vertical-alignment: center;
+                        text: col.type-name;
+                        color: Tokens.text-faint;
+                        font-family: Tokens.mono;
+                        font-size: Tokens.font-xs;
+                    }
                 }
-                // column hairline
-                Rectangle { width: 1px; x: parent.width - 1px; background: Theme.hairline; }
+                Rectangle { width: 1px; x: parent.width - 1px; background: Tokens.border; }
                 // right-edge drag handle to resize this column
                 Rectangle {
                     width: 5px;
                     x: parent.width - self.width;
-                    background: hdl.has-hover || hdl.pressed ? Theme.accent : transparent;
+                    background: hdl.has-hover || hdl.pressed ? Tokens.accent : transparent;
                     hdl := TouchArea {
                         mouse-cursor: col-resize;
                         moved => { root.resize-col(c, self.mouse-x - self.pressed-x); }
                     }
                 }
             }
-            // trailing filler so the header spans the full width
-            Rectangle { horizontal-stretch: 1; background: Theme.surface; }
+            Rectangle { horizontal-stretch: 1; background: Tokens.canvas; }
         }
-        Rectangle { height: 1px; background: Theme.hairline-strong; }
-        // rows
+        Rectangle { height: 1px; background: Tokens.border-strong; }
+
+        // ----- rows (24px) -----
         for r in (root.col-count > 0 ? root.cells.length / root.col-count : 0): Rectangle {
             property <bool> row-deleted: root.cells[r * root.col-count].state == 2;
             property <bool> row-inserted: root.cells[r * root.col-count].state == 3;
-            height: Theme.row-height;
-            background: row-deleted ? Theme.edit-delete-soft
-                : row-inserted ? Theme.edit-insert-soft
-                : r == root.selected-row ? Theme.accent-softer
-                : row-ta.has-hover ? Theme.surface-2
-                : mod(r, 2) == 1 ? Theme.surface
+            height: Tokens.grid-row-h;
+            background: row-deleted ? Tokens.error-tint
+                : row-inserted ? Tokens.ok-tint
+                : r == root.selected-row ? Tokens.accent-tint.with-alpha(0.55)
+                : row-ta.has-hover ? Tokens.chrome.with-alpha(0.6)
                 : transparent;
             row-ta := TouchArea {}
             HorizontalLayout {
                 // row-number gutter
                 Rectangle {
-                    width: Theme.gutter-width;
+                    width: 44px;
                     Text {
                         vertical-alignment: center;
                         horizontal-alignment: right;
                         x: 0;
-                        width: parent.width - Theme.sp2;
+                        width: parent.width - Tokens.sp2;
                         text: r + 1;
-                        color: Theme.text-faint;
-                        font-family: Theme.mono-family;
-                        font-size: Theme.font-caption;
+                        color: Tokens.text-faint;
+                        font-family: Tokens.mono;
+                        font-size: Tokens.font-xs;
                     }
-                    Rectangle { width: 1px; x: parent.width - 1px; background: Theme.hairline; }
+                    Rectangle { width: 1px; x: parent.width - 1px; background: Tokens.border; }
                 }
                 for c in root.col-count: Rectangle {
                     property <GridCell> cell: root.cells[r * root.col-count + c];
                     property <bool> is-selected: r == root.selected-row && c == root.selected-col;
+                    property <bool> is-fk: root.columns[c].type-name == "fk";
                     width: root.col-widths.length > c ? root.col-widths[c] : 140px;
                     clip: true;
-                    background: cell.state == 1 ? Theme.edit-pending-soft : transparent;
+                    background: transparent;
                     cell-ta := TouchArea {
                         clicked => { root.select-cell(r, c); }
                         double-clicked => { root.edit-cell(r, c); }
                     }
                     Text {
                         vertical-alignment: center;
-                        x: Theme.sp2;
-                        width: parent.width - 2 * Theme.sp2;
+                        x: Tokens.sp2;
+                        width: parent.width - 2 * Tokens.sp2;
                         overflow: elide;
-                        text: cell.text;
-                        color: cell.is-null ? Theme.text-faint : Theme.text;
+                        text: cell.is-null ? "NULL"
+                            : is-fk ? cell.text + " ↗" : cell.text;
+                        color: cell.is-null ? Tokens.text-ghost
+                            : is-fk ? Tokens.fk-text : Tokens.text;
                         font-italic: cell.is-null;
-                        font-family: Theme.mono-family;
-                        font-size: Theme.font-mono;
+                        font-family: Tokens.mono;
+                        font-size: Tokens.font-sm;
                     }
                     // strikethrough for delete-marked rows
                     if row-deleted: Rectangle {
                         height: 1px;
                         y: parent.height / 2;
-                        background: Theme.edit-delete;
+                        background: Tokens.error;
                     }
                     // column hairline
-                    Rectangle { width: 1px; x: parent.width - 1px; background: Theme.hairline; }
-                    // selected-cell accent frame
-                    if is-selected: Rectangle {
-                        border-width: 1.5px;
-                        border-color: Theme.accent;
+                    Rectangle { width: 1px; x: parent.width - 1px; background: Tokens.border; }
+                    // pending (uncommitted) edit: 2px red outline
+                    if cell.state == 1: Rectangle {
+                        border-width: 2px;
+                        border-color: Tokens.edit-outline;
                         background: transparent;
                     }
-                    // inline editor overlay (Phase 4)
-                    if r == root.editing-row && c == root.editing-col: Rectangle {
-                        background: Theme.bg;
+                    // selected-cell accent frame
+                    if is-selected && cell.state != 1: Rectangle {
                         border-width: 1.5px;
-                        border-color: Theme.accent;
+                        border-color: Tokens.accent;
+                        background: transparent;
+                    }
+                    // inline editor overlay
+                    if r == root.editing-row && c == root.editing-col: Rectangle {
+                        background: Tokens.card;
+                        border-width: 2px;
+                        border-color: Tokens.edit-outline;
                         edit-input := TextInput {
-                            x: Theme.sp2;
-                            width: parent.width - 2 * Theme.sp2;
+                            x: Tokens.sp2;
+                            width: parent.width - 2 * Tokens.sp2;
                             vertical-alignment: center;
                             text: cell.is-null ? "" : cell.text;
-                            color: Theme.text;
-                            font-family: Theme.mono-family;
-                            font-size: Theme.font-mono;
+                            color: Tokens.text;
+                            font-family: Tokens.mono;
+                            font-size: Tokens.font-sm;
                             single-line: true;
                             accepted => { root.cell-edited(r, c, self.text); }
                             key-pressed(e) => {

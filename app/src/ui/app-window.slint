@@ -51,6 +51,9 @@ export component MainWindow inherits Window {
     in property <[TreeNode]> schema-tree;
     in property <int> selected-conn: -1;
     in property <string> active-table;
+    in property <int> active-count: -1;   // sidebar badge: rows in active table
+    in property <string> sort-text;
+    in property <[TreeNode]> query-tree;  // sidebar Queries/History rows
     in property <[string]> schema-list;
     in-out property <string> schema-name: "public";
     callback connect-clicked(int);
@@ -59,6 +62,9 @@ export component MainWindow inherits Window {
     callback toggle-schema-node(string);
     callback select-schema(string);
     callback filter-tree(string);
+    callback open-function(string);
+    callback open-query(string, int);
+    callback sidebar-mode-changed(int);
 
     // ----- connections screen detail panel -----
     in property <string> sel-name;
@@ -403,10 +409,21 @@ export component MainWindow inherits Window {
                     tree: root.schema-tree;
                     conn-name: root.status-conn;
                     active-table: root.active-table;
+                    active-count: root.total-rows;
+                    query-tree: root.query-tree;
                     schema-list: root.schema-list;
                     schema-name <=> root.schema-name;
                     disconnect() => {
                         root.disconnect();
+                    }
+                    open-function(f) => {
+                        root.open-function(f);
+                    }
+                    open-query(q, i) => {
+                        root.open-query(q, i);
+                    }
+                    mode-changed(m) => {
+                        root.sidebar-mode-changed(m);
                     }
                     open-table(db, t) => {
                         root.open-table(db, t);
@@ -469,7 +486,29 @@ export component MainWindow inherits Window {
                                 tab-content := HorizontalLayout {
                                     padding-left: Tokens.sp3;
                                     padding-right: Tokens.sp1;
-                                    spacing: Tokens.sp1;
+                                    spacing: 6px;
+                                    if tab.kind == "table": VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 8px;
+                                            height: 8px;
+                                            border-radius: 2px;
+                                            background: i == root.active-tab ? Tokens.accent : Tokens.text-faint;
+                                        }
+                                    }
+                                    if tab.kind == "sql": Text {
+                                        text: ">_";
+                                        color: Tokens.text-faint;
+                                        font-size: 9px;
+                                        font-family: Tokens.mono;
+                                        vertical-alignment: center;
+                                    }
+                                    if tab.kind == "function": Text {
+                                        text: "ƒ";
+                                        color: Tokens.warn;
+                                        font-size: Tokens.font-sm;
+                                        vertical-alignment: center;
+                                    }
                                     Text {
                                         vertical-alignment: center;
                                         horizontal-stretch: 1;
@@ -534,6 +573,7 @@ export component MainWindow inherits Window {
                     }
 
                     WorkArea {
+                        vertical-stretch: 1;
                         query-text <=> root.query-text;
                         columns: root.grid-columns;
                         cells: root.grid-cells;
@@ -544,6 +584,8 @@ export component MainWindow inherits Window {
                         sql-capable: root.sql-capable;
                         result-status: root.result-status;
                         status-error: root.status-error;
+                        status-latency: root.status-latency;
+                        sort-text: root.sort-text;
                         selected-row: root.selected-row;
                         selected-col: root.selected-col;
                         editing-row: root.editing-row;
@@ -607,56 +649,6 @@ export component MainWindow inherits Window {
                         }
                         discard-edits() => {
                             root.discard-edits();
-                        }
-                    }
-                }
-            }
-
-            // ----- status bar -----
-            Rectangle {
-                height: 1px;
-                background: Tokens.border;
-            }
-
-            Rectangle {
-                height: Tokens.status-bar-h;
-                background: Tokens.chrome;
-                HorizontalLayout {
-                    padding-left: Tokens.sp3;
-                    padding-right: Tokens.sp2;
-                    spacing: Tokens.sp2;
-                    Text {
-                        vertical-alignment: center;
-                        text: root.status-conn;
-                        color: Tokens.text;
-                        font-size: Tokens.font-sm;
-                        font-weight: Tokens.weight-emphasis;
-                    }
-
-                    Rectangle { } // spacer
-                    Text {
-                        vertical-alignment: center;
-                        text: root.status-rows;
-                        color: Tokens.text-dim;
-                        font-size: Tokens.font-xs;
-                    }
-                    // live latency: ● 12 ms
-                    HorizontalLayout {
-                        spacing: 5px;
-                        alignment: end;
-                        Rectangle {
-                            width: 7px;
-                            height: 7px;
-                            border-radius: 4px;
-                            y: (parent.height - self.height) / 2;
-                            background: root.status-error ? Tokens.error : Tokens.ok;
-                        }
-                        Text {
-                            vertical-alignment: center;
-                            text: root.status-latency;
-                            color: root.status-error ? Tokens.error : Tokens.ok;
-                            font-size: Tokens.font-xs;
-                            font-family: Tokens.mono;
                         }
                     }
                 }

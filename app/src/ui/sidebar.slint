@@ -1,205 +1,260 @@
-import { Theme } from "theme.slint";
+// Workspace sidebar (Tabula): Items/Queries/History tabs, filter field,
+// FUNCTIONS/TABLES sections, pinned schema selector.
+// Reference: design/2-workspace.png (left column).
+import { Tokens } from "tokens.slint";
 import { TreeNode } from "structs.slint";
-import { AppIcon } from "icons.slint";
-import { ScrollView, ComboBox, LineEdit } from "std-widgets.slint";
+import { FilterField, KeyCap } from "components.slint";
+import { ScrollView } from "std-widgets.slint";
 
-// Workspace sidebar (TablePlus-style). Three stacked regions:
-//   1. connection header card (click to disconnect / go back)
-//   2. scrollable object tree: collapsible "Tables/Views/Functions" categories,
-//      each holding container rows that expand to show columns
-//   3. a pinned schema selector glued to the bottom while (2) scrolls
 export component Sidebar inherits Rectangle {
     in property <[TreeNode]> tree;
     in property <string> conn-name;
     in property <string> active-table;   // highlighted (currently open) table
+    in property <int> active-count: -1;  // row count badge on the active table
     in property <[string]> schema-list;
     in-out property <string> schema-name;
+    // 0 = Items, 1 = Queries, 2 = History
+    in-out property <int> mode: 0;
+    // Query tab rows reuse TreeNode: kind "qcat" headers / "query" / "recent".
+    in property <[TreeNode]> query-tree;
     callback disconnect();
     callback open-table(string, string);   // (database, container)
+    callback open-function(string);
+    callback open-query(string, int);      // (label, index in its section)
     callback toggle-node(string);
     callback select-schema(string);
     callback filter-tree(string);
+    callback mode-changed(int);
+    callback add-item();
 
-    background: Theme.surface;
+    background: Tokens.sidebar;
 
     VerticalLayout {
-        padding: Theme.sp2;
-        spacing: Theme.sp1;
+        spacing: 0;
 
-        // ----- connection header card -----
+        // ----- Items | Queries | History -----
         Rectangle {
-            height: 44px;
-            border-radius: Theme.radius-panel;
-            background: back-ta.has-hover ? Theme.surface-2 : transparent;
-            back-ta := TouchArea { clicked => { root.disconnect(); } }
+            height: 40px;
             HorizontalLayout {
-                padding-left: Theme.sp2;
-                padding-right: Theme.sp2;
-                spacing: Theme.sp2;
-                // accent disc with a database glyph
-                Rectangle {
-                    width: 28px;
-                    height: 28px;
-                    y: (parent.height - self.height) / 2;
-                    border-radius: 8px;
-                    background: Theme.accent-soft;
-                    AppIcon { name: "database"; size: Theme.icon-md; color: Theme.accent; }
-                }
-                VerticalLayout {
-                    alignment: center;
-                    spacing: 0px;
-                    Text {
-                        text: root.conn-name;
-                        color: Theme.text;
-                        font-size: Theme.font-h;
-                        font-weight: 600;
-                        overflow: elide;
+                padding-left: Tokens.sp4;
+                spacing: Tokens.sp4;
+                alignment: start;
+                for label[m] in ["Items", "Queries", "History"]: Rectangle {
+                    width: t.preferred-width;
+                    t := Text {
+                        text: label;
+                        color: root.mode == m ? Tokens.text
+                            : (mt.has-hover ? Tokens.text-dim : Tokens.text-faint);
+                        font-size: Tokens.font-md;
+                        font-weight: root.mode == m ? Tokens.weight-emphasis : 500;
+                        vertical-alignment: center;
                     }
-                    Text {
-                        text: "Connected";
-                        color: Theme.text-faint;
-                        font-size: Theme.font-caption;
+                    if root.mode == m: Rectangle {
+                        y: parent.height - 2px;
+                        height: 2px;
+                        width: parent.width;
+                        background: Tokens.accent;
                     }
-                }
-                Rectangle {}
-                // disconnect affordance
-                AppIcon {
-                    name: "close";
-                    size: Theme.icon-sm;
-                    color: back-ta.has-hover ? Theme.text-dim : Theme.text-faint;
+                    mt := TouchArea {
+                        clicked => {
+                            root.mode = m;
+                            root.mode-changed(m);
+                        }
+                    }
                 }
             }
         }
-        Rectangle { height: 1px; background: Theme.hairline; }
 
-        // ----- tree filter (TablePlus-style table search) -----
-        LineEdit {
-            placeholder-text: "Filter tables…";
-            font-size: Theme.font-label;
-            edited(t) => { root.filter-tree(t); }
+        // ----- filter -----
+        HorizontalLayout {
+            padding-left: Tokens.sp3;
+            padding-right: Tokens.sp3;
+            padding-bottom: Tokens.sp3;
+            FilterField {
+                height: 28px;
+                placeholder: root.mode == 1 ? "Filter queries..." : "Filter items...";
+                trailing-cap: root.mode == 0 ? "⌘P" : "";
+                edited(t) => { root.filter-tree(t); }
+            }
         }
 
-        // ----- scrollable object tree (fills the gap above the pinned footer) -----
+        // ----- tree (Items) / query list (Queries, History) -----
         ScrollView {
             vertical-stretch: 1;
             VerticalLayout {
-                // Lock content width to the viewport so a bolded active row can't
-                // widen the content and feed a relayout loop (the "jittering"
-                // sidebar). Rows elide instead of growing horizontally.
                 width: parent.visible-width;
-                padding-top: Theme.sp1;
-                spacing: 2px;
-                for node[i] in root.tree: Rectangle {
-                    // headers = SQL categories + Mongo database names (collapsible)
-                    property <bool> is-header: node.kind == "category" || node.kind == "database";
-                    property <bool> is-category: node.kind == "category";
+                padding-left: Tokens.sp2;
+                padding-right: Tokens.sp2;
+                spacing: 0;
+                alignment: start;
+
+                for node[i] in root.mode == 0 ? root.tree : root.query-tree: Rectangle {
+                    property <bool> is-category: node.kind == "category" || node.kind == "qcat";
                     property <bool> is-database: node.kind == "database";
                     property <bool> is-container: node.kind == "table" || node.kind == "collection" || node.kind == "keyspace" || node.kind == "key";
+                    property <bool> is-function: node.kind == "function";
+                    property <bool> is-query: node.kind == "query" || node.kind == "recent";
                     property <bool> is-field: node.kind == "field";
-                    // placeholder row (loading / no collections): dim, non-clickable
                     property <bool> is-hint: node.kind == "hint";
-                    property <bool> is-active: is-container && node.label == root.active-table;
-                    height: is-category ? 28px : Theme.tree-row-height;
-                    border-radius: Theme.radius-control;
-                    background: is-active ? Theme.accent-soft
-                        : (row-ta.has-hover && (is-container || is-header) ? Theme.surface-2 : transparent);
-                    // active-row accent bar
+                    property <bool> is-active: (is-container && node.label == root.active-table)
+                        || (is-query && node.expanded);
+                    height: is-category ? 30px : 26px;
+                    border-radius: Tokens.radius;
+                    background: is-active ? Tokens.accent-tint
+                        : (row-ta.has-hover && !is-category && !is-field && !is-hint
+                            ? Tokens.border : transparent);
+
+                    // selection = 2px accent left bar + tint (never a pill)
                     if is-active: Rectangle {
                         x: 0;
-                        width: 3px;
-                        height: parent.height - 8px;
-                        y: 4px;
-                        border-radius: 2px;
-                        background: Theme.accent;
+                        width: Tokens.selection-bar-w;
+                        height: parent.height;
+                        border-radius: 1px;
+                        background: Tokens.accent;
                     }
+
                     row-ta := TouchArea {
-                        enabled: is-container || is-header;
+                        enabled: !is-hint && !is-field;
                         clicked => {
-                            if (is-header) { root.toggle-node(node.label); }
-                            else { root.open-table(node.db, node.label); }
-                        }
-                    }
-                    HorizontalLayout {
-                        padding-left: Theme.sp2 + node.depth * Theme.sp3;
-                        padding-right: Theme.sp1;
-                        spacing: Theme.sp1;
-                        // chevron: only headers expand/collapse (rotates when open).
-                        // Containers open data on click — no chevron, cleaner column.
-                        if is-header: AppIcon {
-                            name: "chevron";
-                            size: Theme.icon-sm;
-                            color: Theme.text-faint;
-                            transform-rotation: node.expanded ? 90deg : 0;
-                        }
-                        // leading type icon
-                        if is-category: AppIcon {
-                            name: node.label == "Views" ? "view"
-                                : (node.label == "Functions" ? "function" : "rows");
-                            size: Theme.icon-sm;
-                            color: Theme.text-faint;
-                        }
-                        if is-database: AppIcon {
-                            name: "database";
-                            size: Theme.icon-sm;
-                            color: Theme.text-faint;
-                        }
-                        if is-container: AppIcon {
-                            name: "table";
-                            size: Theme.icon-sm;
-                            color: is-active ? Theme.accent : Theme.text-dim;
-                        }
-                        // field marker dot
-                        if is-field: Rectangle {
-                            width: Theme.icon-sm;
-                            Rectangle {
-                                width: 4px; height: 4px; border-radius: 2px;
-                                background: Theme.text-faint;
+                            if (is-category || is-database) {
+                                root.toggle-node(node.label);
+                            } else if (is-container) {
+                                root.open-table(node.db, node.label);
+                            } else if (is-function) {
+                                root.open-function(node.label);
+                            } else if (is-query) {
+                                root.open-query(node.label, node.count);
                             }
                         }
-                        Text {
+                    }
+
+                    HorizontalLayout {
+                        padding-left: is-category ? Tokens.sp2 : Tokens.sp2 + (node.depth - 1) * Tokens.sp3;
+                        padding-right: Tokens.sp2;
+                        spacing: 7px;
+
+                        // category: "FUNCTIONS · 10"
+                        if is-category: HorizontalLayout {
+                            spacing: 5px;
+                            alignment: start;
+                            Text {
+                                text: node.label.to-uppercase();
+                                color: Tokens.text-dim;
+                                font-size: Tokens.font-xs;
+                                font-weight: 700;
+                                letter-spacing: 0.7px;
+                                vertical-alignment: center;
+                            }
+                            if node.count > 0: Text {
+                                text: "· " + node.count;
+                                color: Tokens.text-faint;
+                                font-size: Tokens.font-xs;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        // leading glyph per row type
+                        if is-function: Text {
+                            text: "ƒ";
+                            color: Tokens.warn;
+                            font-size: Tokens.font-md;
+                            font-weight: 600;
+                            width: 13px;
                             vertical-alignment: center;
+                            horizontal-alignment: center;
+                        }
+                        if is-container || is-database: Rectangle {
+                            width: 13px;
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 9px;
+                                    height: 9px;
+                                    border-radius: 2px;
+                                    background: is-active ? Tokens.accent : Tokens.db-pg.with-alpha(0.85);
+                                }
+                            }
+                        }
+                        if is-query: Text {
+                            text: node.kind == "recent" ? "◷" : ">_";
+                            color: is-active ? Tokens.on-tint : Tokens.text-faint;
+                            font-size: node.kind == "recent" ? 12px : 9px;
+                            width: 16px;
+                            font-family: Tokens.mono;
+                            vertical-alignment: center;
+                        }
+
+                        // label
+                        if !is-category: Text {
+                            horizontal-stretch: 1;
                             text: node.label;
-                            color: is-header ? Theme.text-faint
-                                : (is-field || is-hint ? Theme.text-dim
-                                    : (is-active ? Theme.accent : Theme.text));
-                            font-size: is-header ? Theme.font-caption
-                                : (is-field ? Theme.font-label : Theme.font-body);
-                            font-weight: is-header ? 700 : (is-active ? 600 : 400);
-                            font-family: is-field ? Theme.mono-family : "";
+                            color: is-hint || is-field ? Tokens.text-faint
+                                : is-active ? Tokens.on-tint : Tokens.text;
+                            font-size: Tokens.font-sm;
+                            font-family: is-field || is-hint ? "" : Tokens.mono;
+                            font-weight: is-active ? Tokens.weight-emphasis : 400;
                             font-italic: is-hint;
+                            vertical-alignment: center;
                             overflow: elide;
                         }
-                        // matching-container count badge on header rows
-                        if is-header && node.count > 0: Text {
+
+                        // active table row-count badge (e.g. emiten · 986)
+                        if is-active && is-container && root.active-count >= 0: Text {
+                            text: root.active-count;
+                            color: Tokens.on-tint;
+                            font-size: Tokens.font-xs;
                             vertical-alignment: center;
-                            text: node.count;
-                            color: Theme.text-faint;
-                            font-size: Theme.font-caption;
                         }
                     }
                 }
             }
         }
 
-        // ----- pinned schema selector (always glued to the bottom) -----
-        Rectangle { height: 1px; background: Theme.hairline; }
+        // ----- pinned schema selector -----
+        Rectangle { height: 1px; background: Tokens.border; }
         Rectangle {
             height: 46px;
             HorizontalLayout {
-                padding: Theme.sp1;
-                spacing: Theme.sp2;
+                padding: Tokens.sp2;
+                spacing: Tokens.sp2;
+                Rectangle {
+                    border-radius: Tokens.radius;
+                    border-width: 1px;
+                    border-color: Tokens.border;
+                    background: Tokens.card;
+                    horizontal-stretch: 1;
+                    HorizontalLayout {
+                        padding-left: Tokens.sp3;
+                        padding-right: Tokens.sp2;
+                        Text {
+                            text: "schema: " + root.schema-name;
+                            color: Tokens.text;
+                            font-size: Tokens.font-sm;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: "⇅";
+                            color: Tokens.text-faint;
+                            font-size: Tokens.font-sm;
+                            vertical-alignment: center;
+                        }
+                    }
+                    schema-ta := TouchArea {
+                        clicked => { root.select-schema(root.schema-name); }
+                    }
+                }
                 Rectangle {
                     width: 30px;
-                    height: 30px;
-                    y: (parent.height - self.height) / 2;
-                    border-radius: Theme.radius-control;
-                    background: Theme.surface-2;
-                    AppIcon { name: "layers"; size: Theme.icon-sm; color: Theme.text-dim; }
-                }
-                ComboBox {
-                    model: root.schema-list;
-                    current-value <=> root.schema-name;
-                    selected(v) => { root.select-schema(v); }
+                    border-radius: Tokens.radius;
+                    background: plus-ta.has-hover ? Tokens.border : transparent;
+                    Text {
+                        text: "+";
+                        color: Tokens.text-dim;
+                        font-size: 16px;
+                    }
+                    plus-ta := TouchArea { clicked => { root.add-item(); } }
                 }
             }
         }

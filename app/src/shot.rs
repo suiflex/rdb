@@ -12,6 +12,22 @@ pub fn install<W: ComponentHandle + 'static>(window: &W) {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1200);
+    // Nudge a redraw shortly before capturing: property changes made from
+    // background tasks may not repaint an idle window, and take_snapshot
+    // would return the stale first frame.
+    {
+        let weak = window.as_weak();
+        let redraw = Box::leak(Box::new(slint::Timer::default()));
+        redraw.start(
+            slint::TimerMode::SingleShot,
+            std::time::Duration::from_millis(delay.saturating_sub(150)),
+            move || {
+                if let Some(w) = weak.upgrade() {
+                    w.window().request_redraw();
+                }
+            },
+        );
+    }
     let weak = window.as_weak();
     let timer = Box::leak(Box::new(slint::Timer::default()));
     timer.start(

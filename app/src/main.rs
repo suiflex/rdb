@@ -118,7 +118,7 @@ fn sidebar_categories(engine: Option<rdbs_connstore::Engine>) -> &'static [&'sta
     match engine {
         // Mongo/Redis use the nested database→leaf path, not these categories.
         Some(rdbs_connstore::Engine::Mongo) => &["Collections"],
-        _ => &["Tables", "Views", "Functions"],
+        _ => &["Functions", "Tables"],
     }
 }
 
@@ -157,16 +157,23 @@ fn schema_display_rows(
     let filtering = !needle.is_empty();
     let matches = |label: &str| !filtering || label.to_lowercase().contains(&needle);
     let categories = sidebar_categories(engine);
-    let primary = categories[0];
-    // Matching containers all live under the primary category today.
+    // Matching containers live under "Tables"; functions under "Functions".
     let container_count = nodes
         .iter()
         .filter(|n| {
             matches!(n.kind.as_str(), "table" | "collection" | "keyspace") && matches(&n.label)
         })
         .count() as i32;
+    let function_count = nodes
+        .iter()
+        .filter(|n| n.kind == "function" && matches(&n.label))
+        .count() as i32;
     let mut rows: Vec<TreeNode> = Vec::new();
     for &cat in categories {
+        let is_fn_cat = cat == "Functions";
+        if is_fn_cat && function_count == 0 && !filtering {
+            continue; // engines without routines skip the header entirely
+        }
         // While filtering, categories are forced open so matches stay visible.
         let cat_open = filtering || !collapsed_cats.contains(cat);
         rows.push(TreeNode {
@@ -175,9 +182,25 @@ fn schema_display_rows(
             kind: "category".into(),
             expanded: cat_open,
             db: SharedString::default(),
-            count: if cat == primary { container_count } else { 0 },
+            count: if is_fn_cat { function_count } else { container_count },
         });
-        if !cat_open || cat != primary {
+        if !cat_open {
+            continue;
+        }
+        if is_fn_cat {
+            for n in nodes.iter().filter(|n| n.kind == "function") {
+                if !matches(&n.label) {
+                    continue;
+                }
+                rows.push(TreeNode {
+                    label: n.label.clone().into(),
+                    depth: 1,
+                    kind: "function".into(),
+                    expanded: false,
+                    db: SharedString::default(),
+                    count: 0,
+                });
+            }
             continue;
         }
         // Walk the flat nodes: containers + (when expanded) their fields.
@@ -210,7 +233,7 @@ fn schema_display_rows(
                     db: SharedString::default(),
                     count: 0,
                 });
-            } else {
+            } else if n.kind != "function" {
                 // database row: categories replace it; reset field visibility
                 show_fields = false;
             }
@@ -329,6 +352,24 @@ fn page_bounds(page: u64, limit: u64, total: Option<u64>, shown: u64) -> (u64, u
 
 /// Engine-appropriate browse text for one page of a container. The text also
 /// lands in the editor, so it stays a valid editor query for that engine.
+/// Default pixel width for a fresh result column, keyed on type then name.
+fn default_col_width(name: &str, type_name: &str) -> f32 {
+    match name {
+        "name" | "email" => 265.0,
+        "code" => 100.0,
+        "short_name" => 115.0,
+        "country" => 100.0,
+        "exch" => 95.0,
+        "ccy" => 64.0,
+        _ => match type_name {
+            "uuid" | "fk" => 185.0,
+            "timestamptz" | "timestamp" => 190.0,
+            "int4" | "int8" | "numeric" => 80.0,
+            _ => 140.0,
+        },
+    }
+}
+
 fn browse_text(
     engine: rdbs_connstore::Engine,
     table: &rdbs_core::write::TableRef,
@@ -373,6 +414,7 @@ fn browse_text(
 fn set_tab_titles(w: &MainWindow, count: usize) {
     let items: Vec<TabItem> = (1..=count)
         .map(|n| TabItem {
+            kind: "sql".into(),
             title: format!("Query {n}").into(),
         })
         .collect();
@@ -705,12 +747,64 @@ fn main() -> Result<(), slint::PlatformError> {
             .map(|i| i as i32)
             .unwrap_or(-1);
         fill_detail(idx);
+
+        // RDBS_SCREEN drives the app to a reference state for screenshots:
+        // "workspace" connects + opens emiten; "sql" stops at the editor.
+        if let Ok(screen) = std::env::var("RDBS_SCREEN") {
+            let weak = window.as_weak();
+            let t1 = Box::leak(Box::new(slint::Timer::default()));
+            t1.start(
+                slint::TimerMode::SingleShot,
+                std::time::Duration::from_millis(250),
+                move || {
+                    eprintln!("RDBS_SCREEN: auto-connect idx={idx}");
+                    if let Some(w) = weak.upgrade() {
+                        w.invoke_connect_clicked(idx);
+                    }
+                },
+            );
+            {
+                let weak = window.as_weak();
+                let td = Box::leak(Box::new(slint::Timer::default()));
+                td.start(
+                    slint::TimerMode::SingleShot,
+                    std::time::Duration::from_millis(2600),
+                    move || {
+                        if let Some(w) = weak.upgrade() {
+                            eprintln!(
+                                "debug@2s: connected={} active_table={:?} tabs={} cols={} cells={} kind={}",
+                                w.get_connected(),
+                                w.get_active_table(),
+                                w.get_tabs().row_count(),
+                                w.get_grid_col_count(),
+                                w.get_grid_cells().row_count() + 100000 * w.get_grid_columns().row_count(),
+                                w.get_result_kind()
+                            );
+                        }
+                    },
+                );
+            }
+            if screen.starts_with("workspace") {
+                let weak = window.as_weak();
+                let t2 = Box::leak(Box::new(slint::Timer::default()));
+                t2.start(
+                    slint::TimerMode::SingleShot,
+                    std::time::Duration::from_millis(1800),
+                    move || {
+                        if let Some(w) = weak.upgrade() {
+                            w.invoke_open_table("ai_bot_fintech".into(), "emiten".into());
+                        }
+                    },
+                );
+            }
+        }
     }
 
     // Per-tab query text. MVP: switching tabs swaps the editor text.
     let tab_texts: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(vec![String::new()]));
     window.set_tabs(ModelRc::from(Rc::new(VecModel::from(vec![TabItem {
         title: "Query 1".into(),
+        kind: "sql".into(),
     }]))));
 
     // Last result view kept in memory so the client-side filter (Feature C)
@@ -857,6 +951,15 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.global::<Theme>()
                     .set_accent(theme::accent_or_default(sc.color.as_deref().unwrap_or("")));
                 w.set_status_conn(SharedString::from(sc.name.clone()));
+                w.set_bc_conn(SharedString::from(sc.name.clone()));
+                w.set_bc_db(SharedString::from(sc.database.clone().unwrap_or_default()));
+                w.set_bc_schema(SharedString::from(
+                    if matches!(sc.engine, rdbs_connstore::Engine::Postgres) {
+                        "public"
+                    } else {
+                        ""
+                    },
+                ));
                 w.set_query_text(SharedString::from(crate::query_parse::editor_hint(
                     sc.engine,
                 )));
@@ -883,7 +986,9 @@ fn main() -> Result<(), slint::PlatformError> {
 
                 match result {
                     Ok((driver, schema)) => {
+                        eprintln!("connect ok: schema dbs={}", schema.databases.len());
                         *store_driver.lock().await = Some((engine, driver));
+                        eprintln!("driver stored");
                         let nodes = model::to_tree_model(&schema);
                         let fields = model::to_structure_model(&schema);
                         // Stash raw nodes for later expand/collapse rebuilds, and
@@ -935,11 +1040,13 @@ fn main() -> Result<(), slint::PlatformError> {
                                 w.set_status_latency(SharedString::from("connected"));
                                 w.set_picker_error(SharedString::default());
                                 // Swap the picker for the workspace.
+                                eprintln!("connect: switching to workspace");
                                 w.set_connected(true);
                             }
                         });
                     }
                     Err(e) => {
+                        eprintln!("connect failed: {e}");
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(w) = weak2.upgrade() {
                                 // Stay on the picker; surface the failure there.
@@ -991,6 +1098,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let displayed_grid = displayed_grid.clone();
             rt.spawn(async move {
                 let guard = current.lock().await;
+                let t0 = std::time::Instant::now();
                 let outcome = match guard.as_ref() {
                     Some((engine, driver)) => {
                         match crate::query_parse::parse_query(*engine, &sql) {
@@ -998,10 +1106,14 @@ fn main() -> Result<(), slint::PlatformError> {
                             Err(msg) => Err(rdbs_core::error::RdbsError::Query(msg)),
                         }
                     }
-                    None => Err(rdbs_core::error::RdbsError::Connection(
-                        "not connected".into(),
-                    )),
+                    None => {
+                        eprintln!("run_sql: no driver yet");
+                        Err(rdbs_core::error::RdbsError::Connection(
+                            "not connected".into(),
+                        ))
+                    }
                 };
+                let elapsed_ms = t0.elapsed().as_millis().max(1) as u64;
                 let view = outcome.as_ref().ok().map(model::to_result_view);
                 let err = outcome.err();
                 let _ = slint::invoke_from_event_loop(move || {
@@ -1038,12 +1150,22 @@ fn main() -> Result<(), slint::PlatformError> {
                                 w.set_editing_row(-1);
                                 w.set_editing_col(-1);
                                 w.set_status_error(false);
-                                apply_result(&w, v);
-                                // Fresh result: reset every column to a default width.
-                                let widths: Vec<f32> = vec![140.0; ncols];
+                                w.set_status_latency(SharedString::from(format!(
+                                    "{elapsed_ms} ms"
+                                )));
+                                // Fresh result: type-aware default column widths.
+                                let widths: Vec<f32> = match &v {
+                                    model::ResultView::Table(g) => g
+                                        .columns
+                                        .iter()
+                                        .map(|c| default_col_width(&c.name, &c.type_name))
+                                        .collect(),
+                                    _ => vec![140.0; ncols],
+                                };
                                 w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(
                                     widths,
                                 ))));
+                                apply_result(&w, v);
                                 // Browse mode: refresh the pagination footer.
                                 let st = browse.lock().unwrap().clone();
                                 if st.table.is_some() {
@@ -1139,6 +1261,19 @@ fn main() -> Result<(), slint::PlatformError> {
                 st.total = None;
                 st.pk_cols.clear();
             }
+            {
+                let tabs = w.get_tabs();
+                let ti = w.get_active_tab().max(0) as usize;
+                if ti < tabs.row_count() {
+                    tabs.set_row_data(
+                        ti,
+                        TabItem {
+                            title: SharedString::from(label.clone()),
+                            kind: "table".into(),
+                        },
+                    );
+                }
+            }
             w.set_active_table(SharedString::from(label));
             w.set_show_structure(false);
             w.set_total_rows(-1);
@@ -1178,6 +1313,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     if let Some(w) = weak2.upgrade() {
                         w.set_total_rows(total.map(|t| t as i32).unwrap_or(-1));
                         w.set_grid_read_only(pk.is_empty());
+                        w.set_sort_text(if pk.is_empty() {
+                            SharedString::default()
+                        } else {
+                            SharedString::from(format!("sort: {} ↑", pk[0]))
+                        });
                         let shown = (w.get_page_end() - w.get_page_start()).max(0) as u64
                             + u64::from(w.get_page_end() > 0);
                         let (start, end, prev, next) = page_bounds(page, limit, total, shown);
@@ -2230,6 +2370,9 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    if std::env::var("RDBS_FORCE_CONNECTED").is_ok() {
+        window.set_connected(true);
+    }
     shot::install(&window);
     window.run()
 }

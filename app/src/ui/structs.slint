@@ -33,4 +33,5 @@ export struct ConnItem {
 // One Host/Port/… row of the connection-detail card.
 export struct KvRow { k: string, v: string }
 export struct StructField { name: string, type-name: string, nullable: bool }
-export struct TabItem { title: string }
+// `kind` picks the tab glyph: "table" | "sql" | "function".
+export struct TabItem { title: string, kind: string }

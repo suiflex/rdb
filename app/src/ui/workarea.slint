@@ -1,51 +1,62 @@
-import { Theme } from "theme.slint";
+// Work area (Tabula): browse toolbar + data grid + footer strip, or the SQL
+// editor + results split. References: design/2-workspace.png,
+// design/3-sql-editor.png, design/11-filter-edit-t2.png.
+import { Tokens } from "tokens.slint";
 import { GridColumn, GridCell, StructField } from "structs.slint";
-import { AppIcon } from "icons.slint";
 import { TabularGrid } from "tabular-grid.slint";
-import { ScrollView, Button, TextEdit, LineEdit } from "std-widgets.slint";
+import {
+    UnderlineSegment, SecondaryButton, PrimaryButton, TextButton, FilterField, KeyCap
+} from "components.slint";
+import { ScrollView, ComboBox } from "std-widgets.slint";
 
 export component WorkArea inherits Rectangle {
+    // ----- editor / results state (wired 1:1 from MainWindow) -----
     in-out property <string> query-text;
     in property <[GridColumn]> columns;
-    in property <[GridCell]> cells;        // flat row-major: row r, col c at r*col-count + c
+    in property <[GridCell]> cells;
     in property <int> col-count;
-    in property <[length]> col-widths;     // per-column pixel widths (drag-resizable)
+    in property <[length]> col-widths;
     in property <string> doc-json;
-    // result shape: 0 Table (SQL), 1 Documents (Mongo), 2 KeyValue (Redis), 3 Affected
-    in property <int> result-kind: 0;
-    property <bool> is-documents: root.result-kind == 1;
-    // SQL editor only for SQL engines; documents can switch grid <-> raw JSON.
+    in property <int> result-kind: 0;   // 0 Table, 1 Documents, 2 KeyValue, 3 Affected
     in property <bool> sql-capable: true;
-    in-out property <bool> doc-as-json: false;
-    in property <string> result-status;    // Affected toast / errors
-    in property <bool> status-error;       // paint the status line red
-    in property <int> selected-row: 0;
-    in property <int> selected-col: -1;
+    in property <string> result-status;
+    in property <bool> status-error;
+    in property <string> status-latency;
+    in-out property <int> selected-row: 0;
+    in-out property <int> selected-col: -1;
     in property <int> editing-row: -1;
     in property <int> editing-col: -1;
-    // ----- Data / Structure toggle (Feature B) -----
     in-out property <bool> show-structure: false;
     in property <[StructField]> structure-columns;
-    // ----- client-side grid filter (Feature C) -----
     in-out property <string> grid-filter;
-    // ----- SQL editor toggle + active table title (TablePlus-style) -----
-    in-out property <bool> sql-open: false;
     in property <string> active-table;
-    // ----- pagination + edit footer (browse mode only) -----
-    in property <int> page-start;       // 1-based first row shown
-    in property <int> page-end;         // last row shown
-    in property <int> total-rows: -1;   // -1 = unknown (count pending)
+    in property <string> sort-text;      // e.g. "sort: id ↑"
+    in-out property <bool> sql-open: false;
+
+    // ----- pagination + edit footer -----
+    in property <int> page-start;
+    in property <int> page-end;
+    in property <int> total-rows: -1;
     in property <bool> can-prev;
     in property <bool> can-next;
-    in property <int> pending-count;    // buffered edits awaiting ⌘S
-    in property <bool> read-only;       // no primary key → editing disabled
-    in-out property <string> limit-text: "300";
+    in property <int> pending-count;
+    in property <bool> read-only: true;
+    in-out property <string> limit-text;
+
+    // Browse chrome shows whenever a table is open in this tab.
+    property <bool> browse-mode: root.active-table != "";
+    // Footer view segments: 0 Data · 1 Structure · 2 Indexes
+    property <int> view-mode: root.show-structure ? 1 : 0;
+    // Expandable filter panel (up to 3 condition rows).
+    in-out property <bool> filter-open: false;
+    in-out property <int> filter-rows: 1;
+
     callback run();
     callback apply-filter();
     callback toggle-sql();
-    callback resize-col(int, length);   // (column index, drag delta)
-    callback select-cell(int, int);     // (row, col)
-    callback edit-cell(int, int);       // double-click → inline editor
+    callback resize-col(int, length);
+    callback select-cell(int, int);
+    callback edit-cell(int, int);
     callback cell-edited(int, int, string);
     callback edit-cancelled();
     callback prev-page();
@@ -57,335 +68,216 @@ export component WorkArea inherits Rectangle {
     callback commit-edits();
     callback discard-edits();
 
-    background: Theme.bg;
-
-    // local splitter state (no Rust binding)
-    property <length> editor-h: 140px;
-    // a result is present when a table is open / a query has run
-    property <bool> has-content: root.col-count > 0 || root.is-documents
-        || root.result-status != "";
+    background: Tokens.canvas;
 
     VerticalLayout {
-        padding: Theme.sp4;
-        spacing: Theme.sp3;
+        width: 100%;
+        height: 100%;
+        spacing: 0;
 
-        // ----- top toolbar: SQL toggle + active table / status -----
-        HorizontalLayout {
-            spacing: Theme.sp2;
-            // SQL editor toggle pill (SQL engines only)
-            if root.sql-capable: Rectangle {
-                width: 66px;
-                height: Theme.row-height;
-                border-radius: Theme.radius-control;
-                background: root.sql-open ? Theme.accent-soft
-                    : (sql-ta.has-hover ? Theme.surface-2 : Theme.surface);
-                border-width: 1px;
-                border-color: root.sql-open ? Theme.accent.with-alpha(0.4) : Theme.hairline;
-                sql-ta := TouchArea { clicked => { root.toggle-sql(); } }
-                HorizontalLayout {
-                    alignment: center;
-                    spacing: Theme.sp1;
-                    AppIcon {
-                        name: "terminal";
-                        size: Theme.icon-sm;
-                        color: root.sql-open ? Theme.accent : Theme.text-dim;
-                    }
-                    Text {
-                        vertical-alignment: center;
-                        text: "SQL";
-                        color: root.sql-open ? Theme.accent : Theme.text-dim;
-                        font-size: Theme.font-label;
-                        font-weight: 600;
-                    }
-                }
-            }
-            // active table name with a table glyph
-            if root.active-table != "": AppIcon {
-                name: "table";
-                size: Theme.icon-sm;
-                color: Theme.text-dim;
-                y: (parent.height - self.height) / 2;
-            }
-            Text {
-                vertical-alignment: center;
-                text: root.active-table;
-                color: Theme.text;
-                font-size: Theme.font-h;
-                font-weight: 600;
-            }
-            Rectangle {} // spacer
-            Text {
-                vertical-alignment: center;
-                text: root.result-status;
-                color: root.status-error ? Theme.edit-delete : Theme.text-dim;
-                font-size: Theme.font-label;
-            }
-        }
+        // ================= browse toolbar =================
+        if root.browse-mode: Rectangle {
+            height: 42px;
+            background: Tokens.canvas;
+            HorizontalLayout {
+                padding-left: Tokens.sp3;
+                padding-right: Tokens.sp3;
+                spacing: Tokens.sp3;
 
-        // ----- query editor (only when SQL mode is toggled on) -----
-        if root.sql-open: Rectangle {
-            height: root.editor-h;
-            border-radius: Theme.radius-panel;
-            border-width: 1px;
-            border-color: Theme.hairline;
-            background: Theme.surface;
-            TextEdit {
-                text <=> root.query-text;
-                font-size: Theme.font-mono;
-                wrap: no-wrap;
-            }
-        }
-
-        if root.sql-open: HorizontalLayout {
-            spacing: Theme.sp2;
-            Rectangle {
-                width: 132px;
-                height: Theme.row-height;
-                border-radius: Theme.radius-control;
-                background: run-ta.has-hover ? Theme.accent.darker(0.1) : Theme.accent;
-                run-ta := TouchArea { clicked => { root.run(); } }
-                HorizontalLayout {
-                    alignment: center;
-                    spacing: Theme.sp1;
-                    AppIcon { name: "bolt"; size: Theme.icon-sm; color: #ffffff; }
-                    Text {
-                        vertical-alignment: center;
-                        text: "Run  ⌘↵";
-                        color: #ffffff;
-                        font-size: Theme.font-label;
-                        font-weight: 600;
-                    }
-                }
-            }
-            Rectangle {} // spacer
-        }
-
-        // draggable editor-height splitter
-        if root.sql-open: Rectangle {
-            height: 4px;
-            background: split-v-area.has-hover || split-v-area.pressed ? Theme.accent : Theme.hairline;
-            split-v-area := TouchArea {
-                mouse-cursor: row-resize;
-                moved => {
-                    root.editor-h = clamp(root.editor-h + (self.mouse-y - self.pressed-y), 80px, 400px);
-                }
-            }
-        }
-
-        // ----- empty state: nothing open yet, SQL mode off -----
-        if !root.has-content && !root.sql-open: Rectangle {
-            vertical-stretch: 1;
-            VerticalLayout {
-                alignment: center;
-                spacing: Theme.sp3;
-                HorizontalLayout {
+                // "+ Filter" dashed chip
+                VerticalLayout {
                     alignment: center;
                     Rectangle {
-                        width: 56px;
-                        height: 56px;
-                        border-radius: 16px;
-                        background: Theme.surface;
+                        height: 26px;
+                        width: fl.preferred-width + 2 * Tokens.sp3;
+                        border-radius: Tokens.radius;
                         border-width: 1px;
-                        border-color: Theme.hairline;
-                        AppIcon { name: "table"; size: 26px; color: Theme.text-faint; }
+                        border-color: filter-ta.has-hover ? Tokens.text-faint : Tokens.border-strong;
+                        // Slint has no dashed borders; hairline chip approximates
+                        background: root.filter-open ? Tokens.accent-tint : Tokens.card;
+                        fl := Text {
+                            text: "+ Filter";
+                            color: root.filter-open ? Tokens.on-tint : Tokens.text-dim;
+                            font-size: Tokens.font-sm;
+                            font-weight: 500;
+                        }
+                        filter-ta := TouchArea {
+                            clicked => { root.filter-open = !root.filter-open; }
+                        }
                     }
                 }
+                // sort text
                 Text {
-                    horizontal-alignment: center;
-                    text: "Select a table to view its data";
-                    color: Theme.text-dim;
-                    font-size: Theme.font-body;
+                    text: root.sort-text;
+                    color: Tokens.text-faint;
+                    font-size: Tokens.font-sm;
+                    font-family: Tokens.mono;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                // search-in-table
+                VerticalLayout {
+                    alignment: center;
+                    FilterField {
+                        width: 200px;
+                        height: 28px;
+                        placeholder: "Search in " + root.active-table + "...";
+                        text <=> root.grid-filter;
+                        edited(t) => { root.apply-filter(); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    SecondaryButton {
+                        text: "+ Row";
+                        enabled: !root.read-only;
+                        clicked => { root.add-row(); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 26px;
+                        height: 26px;
+                        border-radius: Tokens.radius;
+                        border-width: 1px;
+                        border-color: Tokens.border-strong;
+                        background: refresh-ta.has-hover ? Tokens.chrome : Tokens.card;
+                        Text {
+                            text: "⟳";
+                            color: Tokens.text-dim;
+                            font-size: 13px;
+                        }
+                        refresh-ta := TouchArea { clicked => { root.refresh-page(); } }
+                    }
                 }
             }
         }
 
-        // ----- Data/Structure tabs + filter input (only with content) -----
-        if root.has-content: HorizontalLayout {
-            spacing: Theme.sp1;
-            // segmented Data | Structure control
-            Rectangle {
-                width: 168px;
-                height: Theme.row-height;
-                border-radius: Theme.radius-control;
-                background: Theme.surface;
-                border-width: 1px;
-                border-color: Theme.hairline;
+        // ================= expandable filter panel =================
+        if root.browse-mode && root.filter-open: Rectangle {
+            height: root.filter-rows * 34px + 40px;
+            background: Tokens.chrome.with-alpha(0.5);
+            VerticalLayout {
+                padding: Tokens.sp2;
+                padding-left: Tokens.sp3;
+                padding-right: Tokens.sp3;
+                spacing: 4px;
+                for fr in root.filter-rows: HorizontalLayout {
+                    height: 30px;
+                    spacing: Tokens.sp2;
+                    ComboBox {
+                        width: 150px;
+                        model: ["id", "code", "name", "short_name", "country", "ccy", "exch", "id_sector", "created_at", "updated_at"];
+                    }
+                    ComboBox {
+                        width: 110px;
+                        model: ["contains", "=", "≠", ">", "<", "is null", "not null"];
+                    }
+                    FilterField {
+                        horizontal-stretch: 1;
+                        height: 28px;
+                        placeholder: "value";
+                        text <=> root.grid-filter;
+                        submitted => { root.apply-filter(); }
+                    }
+                }
                 HorizontalLayout {
-                    padding: 2px;
-                    spacing: 2px;
-                    Rectangle {
-                        border-radius: Theme.radius-control - 1px;
-                        background: !root.show-structure ? Theme.accent-soft : transparent;
-                        data-ta := TouchArea { clicked => { root.show-structure = false; } }
-                        HorizontalLayout {
-                            alignment: center;
-                            spacing: Theme.sp1;
-                            AppIcon { name: "rows"; size: Theme.icon-sm; color: !root.show-structure ? Theme.accent : Theme.text-dim; }
-                            Text {
-                                vertical-alignment: center;
-                                text: "Data";
-                                color: !root.show-structure ? Theme.accent : Theme.text-dim;
-                                font-size: Theme.font-label;
-                                font-weight: !root.show-structure ? 600 : 400;
-                            }
+                    height: 28px;
+                    spacing: Tokens.sp2;
+                    TextButton {
+                        text: "+ Add condition";
+                        clicked => {
+                            if (root.filter-rows < 3) { root.filter-rows += 1; }
                         }
                     }
-                    Rectangle {
-                        border-radius: Theme.radius-control - 1px;
-                        background: root.show-structure ? Theme.accent-soft : transparent;
-                        struct-ta := TouchArea { clicked => { root.show-structure = true; } }
-                        HorizontalLayout {
-                            alignment: center;
-                            spacing: Theme.sp1;
-                            AppIcon { name: "columns"; size: Theme.icon-sm; color: root.show-structure ? Theme.accent : Theme.text-dim; }
-                            Text {
-                                vertical-alignment: center;
-                                text: "Structure";
-                                color: root.show-structure ? Theme.accent : Theme.text-dim;
-                                font-size: Theme.font-label;
-                                font-weight: root.show-structure ? 600 : 400;
-                            }
+                    Rectangle { horizontal-stretch: 1; }
+                    SecondaryButton {
+                        text: "Clear";
+                        clicked => {
+                            root.grid-filter = "";
+                            root.filter-rows = 1;
+                            root.apply-filter();
                         }
+                    }
+                    PrimaryButton {
+                        text: "Apply";
+                        clicked => { root.apply-filter(); }
                     }
                 }
             }
-            Rectangle { width: Theme.sp2; } // gap
-            // Table | JSON toggle — documents only (Feature: Mongo preview)
-            if root.is-documents && !root.show-structure: Rectangle {
-                width: 132px;
-                height: Theme.row-height;
-                border-radius: Theme.radius-control;
-                background: Theme.surface;
-                border-width: 1px;
-                border-color: Theme.hairline;
-                HorizontalLayout {
-                    padding: 2px;
-                    spacing: 2px;
-                    Rectangle {
-                        border-radius: Theme.radius-control - 1px;
-                        background: !root.doc-as-json ? Theme.accent-soft : transparent;
-                        table-ta := TouchArea { clicked => { root.doc-as-json = false; } }
-                        Text {
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                            text: "Table";
-                            color: !root.doc-as-json ? Theme.accent : Theme.text-dim;
-                            font-size: Theme.font-label;
-                            font-weight: !root.doc-as-json ? 600 : 400;
-                        }
-                    }
-                    Rectangle {
-                        border-radius: Theme.radius-control - 1px;
-                        background: root.doc-as-json ? Theme.accent-soft : transparent;
-                        json-ta := TouchArea { clicked => { root.doc-as-json = true; } }
-                        Text {
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                            text: "JSON";
-                            color: root.doc-as-json ? Theme.accent : Theme.text-dim;
-                            font-size: Theme.font-label;
-                            font-weight: root.doc-as-json ? 600 : 400;
-                        }
-                    }
-                }
-            }
-            if root.is-documents: Rectangle { width: Theme.sp2; } // gap
-            // client-side filter (only meaningful for Data view); flexes with width
-            AppIcon {
-                name: "filter";
-                size: Theme.icon-sm;
-                color: Theme.text-faint;
-                y: (parent.height - self.height) / 2;
-            }
-            LineEdit {
-                min-width: 80px;
-                horizontal-stretch: 1;
-                placeholder-text: "Filter rows…";
-                text <=> root.grid-filter;
-                edited => { root.apply-filter(); }
-            }
+            Rectangle { y: parent.height - 1px; height: 1px; width: parent.width; background: Tokens.border; }
         }
 
-        // ----- result region -----
-        if root.has-content: Rectangle {
-            vertical-stretch: 1;
-            border-radius: Theme.radius-panel;
-            border-width: 1px;
-            border-color: Theme.hairline;
-            background: Theme.surface;
-
-            // structure (column definitions) view
-            if root.show-structure: ScrollView {
-                VerticalLayout {
-                    width: max(self.preferred-width, parent.visible-width);
-                    HorizontalLayout {
-                        height: Theme.row-height;
-                        Rectangle {
-                            min-width: 200px;
-                            horizontal-stretch: 2;
-                            background: Theme.surface;
-                            Text { x: Theme.sp1; vertical-alignment: center; text: "Column"; color: Theme.text-dim; font-size: Theme.font-label; }
-                        }
-                        Rectangle {
-                            min-width: 160px;
-                            horizontal-stretch: 1;
-                            background: Theme.surface;
-                            Text { x: Theme.sp1; vertical-alignment: center; text: "Type"; color: Theme.text-dim; font-size: Theme.font-label; }
-                        }
-                        Rectangle {
-                            min-width: 90px;
-                            background: Theme.surface;
-                            Text { x: Theme.sp1; vertical-alignment: center; text: "Nullable"; color: Theme.text-dim; font-size: Theme.font-label; }
+        // ================= SQL editor (non-browse tabs) =================
+        if !root.browse-mode: Rectangle {
+            height: 200px;
+            background: Tokens.canvas;
+            VerticalLayout {
+                spacing: 0;
+                HorizontalLayout {
+                    height: 42px;
+                    padding-left: Tokens.sp3;
+                    padding-right: Tokens.sp3;
+                    spacing: Tokens.sp2;
+                    VerticalLayout {
+                        alignment: center;
+                        PrimaryButton {
+                            text: "▶ Run  ⌘↵";
+                            clicked => { root.run(); }
                         }
                     }
-                    Rectangle { height: 1px; background: Theme.hairline; }
-                    for f in root.structure-columns: Rectangle {
-                        height: Theme.row-height;
-                        HorizontalLayout {
-                            Rectangle {
-                                min-width: 200px;
-                                horizontal-stretch: 2;
-                                Text { x: Theme.sp1; vertical-alignment: center; text: f.name; color: Theme.text; font-family: Theme.mono-family; font-size: Theme.font-mono; }
-                            }
-                            Rectangle {
-                                min-width: 160px;
-                                horizontal-stretch: 1;
-                                Text { x: Theme.sp1; vertical-alignment: center; text: f.type-name; color: Theme.text-dim; font-family: Theme.mono-family; font-size: Theme.font-mono; }
-                            }
-                            Rectangle {
-                                min-width: 90px;
-                                Text { x: Theme.sp1; vertical-alignment: center; text: f.nullable ? "YES" : "NO"; color: Theme.text-dim; font-size: Theme.font-mono; }
-                            }
-                        }
+                    VerticalLayout {
+                        alignment: center;
+                        SecondaryButton { text: "Run Selection"; clicked => { root.run(); } }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        SecondaryButton { text: "Format"; }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        SecondaryButton { text: "Explain"; }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout {
+                        alignment: center;
+                        SecondaryButton { text: "Limit 500  ⇅"; }
                     }
                 }
-            }
-
-            // documents raw-JSON view (toggled on); pinned top-left, full width
-            if !root.show-structure && root.result-kind == 1 && root.doc-as-json: ScrollView {
-                VerticalLayout {
-                    alignment: start;
-                    padding: Theme.sp2;
-                    Text {
-                        text: root.doc-json;
-                        color: Theme.text;
-                        horizontal-alignment: left;
+                Rectangle { height: 1px; background: Tokens.border; }
+                ScrollView {
+                    vertical-stretch: 1;
+                    TextInput {
+                        x: Tokens.sp3;
+                        width: parent.visible-width - 2 * Tokens.sp3;
+                        text <=> root.query-text;
+                        color: Tokens.text;
+                        font-family: Tokens.mono;
+                        font-size: Tokens.font-md;
+                        single-line: false;
                         wrap: word-wrap;
-                        font-family: Theme.mono-family;
-                        font-size: Theme.font-mono;
                     }
                 }
+                Rectangle { height: 1px; background: Tokens.border; }
             }
+        }
 
-            // SQL grid (kind 0) + Mongo flattened-document "Table" view (kind 1)
-            if !root.show-structure
-                && (root.result-kind == 0 || (root.result-kind == 1 && !root.doc-as-json)): TabularGrid {
+        // ================= result body =================
+        Rectangle {
+            vertical-stretch: 1;
+            background: Tokens.canvas;
+
+            // Data grid
+            if root.view-mode == 0 && (root.result-kind == 0 || root.result-kind == 2): TabularGrid {
+                width: 100%;
+                height: 100%;
                 columns: root.columns;
                 cells: root.cells;
                 col-count: root.col-count;
                 col-widths: root.col-widths;
-                selected-row: root.selected-row;
-                selected-col: root.selected-col;
+                selected-row <=> root.selected-row;
+                selected-col <=> root.selected-col;
                 editing-row: root.editing-row;
                 editing-col: root.editing-col;
                 resize-col(i, d) => { root.resize-col(i, d); }
@@ -395,145 +287,223 @@ export component WorkArea inherits Rectangle {
                 edit-cancelled() => { root.edit-cancelled(); }
             }
 
-            // Affected (kind 3): no grid, just the centered status
-            if !root.show-structure && root.result-kind == 3: VerticalLayout {
-                alignment: center;
+            // Documents (Mongo)
+            if root.view-mode == 0 && root.result-kind == 1: ScrollView {
+                width: 100%;
+                height: 100%;
+                VerticalLayout {
+                    padding: Tokens.sp3;
+                    Text {
+                        text: root.doc-json;
+                        color: Tokens.text;
+                        font-family: Tokens.mono;
+                        font-size: Tokens.font-sm;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            // Affected-rows toast
+            if root.view-mode == 0 && root.result-kind == 3: Text {
+                text: root.result-status;
+                color: root.status-error ? Tokens.error : Tokens.text-dim;
+                font-size: Tokens.font-md;
+            }
+
+            // Structure view
+            if root.view-mode == 1: ScrollView {
+                width: 100%;
+                height: 100%;
+                VerticalLayout {
+                    width: parent.visible-width;
+                    padding: Tokens.sp3;
+                    spacing: 0;
+                    alignment: start;
+                    HorizontalLayout {
+                        height: Tokens.grid-header-h;
+                        Text { width: 220px; text: "column"; color: Tokens.text; font-family: Tokens.mono; font-size: Tokens.font-sm; font-weight: 600; vertical-alignment: center; }
+                        Text { width: 180px; text: "type"; color: Tokens.text; font-family: Tokens.mono; font-size: Tokens.font-sm; font-weight: 600; vertical-alignment: center; }
+                        Text { text: "nullable"; color: Tokens.text; font-family: Tokens.mono; font-size: Tokens.font-sm; font-weight: 600; vertical-alignment: center; }
+                    }
+                    Rectangle { height: 1px; background: Tokens.border-strong; }
+                    for f in root.structure-columns: HorizontalLayout {
+                        height: Tokens.grid-row-h;
+                        Text { width: 220px; text: f.name; color: Tokens.text; font-family: Tokens.mono; font-size: Tokens.font-sm; vertical-alignment: center; }
+                        Text { width: 180px; text: f.type-name; color: Tokens.text-dim; font-family: Tokens.mono; font-size: Tokens.font-sm; vertical-alignment: center; }
+                        Text { text: f.nullable ? "YES" : "NO"; color: f.nullable ? Tokens.text-faint : Tokens.text-dim; font-family: Tokens.mono; font-size: Tokens.font-sm; vertical-alignment: center; }
+                    }
+                }
+            }
+
+            // Indexes placeholder
+            if root.view-mode == 2: Text {
+                text: "No indexes to show";
+                color: Tokens.text-faint;
+                font-size: Tokens.font-md;
+            }
+        }
+
+        // ================= pending-edits strip =================
+        if root.pending-count > 0: Rectangle {
+            height: 30px;
+            background: Tokens.warn-tint;
+            HorizontalLayout {
+                padding-left: Tokens.sp3;
+                padding-right: Tokens.sp2;
+                spacing: Tokens.sp2;
                 Text {
-                    horizontal-alignment: center;
-                    text: root.result-status;
-                    color: Theme.text-dim;
-                    font-size: Theme.font-body;
+                    text: root.pending-count + " pending change" + (root.pending-count == 1 ? "" : "s");
+                    color: Tokens.warn;
+                    font-size: Tokens.font-sm;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                TextButton { text: "Discard"; clicked => { root.discard-edits(); } }
+                VerticalLayout {
+                    alignment: center;
+                    PrimaryButton { text: "Commit  ⌘S"; height: 22px; clicked => { root.commit-edits(); } }
                 }
             }
         }
 
-        // ----- pagination + edit footer (TablePlus-style, browse mode only) -----
-        if root.has-content && root.active-table != "": Rectangle {
-            height: 32px;
+        // ================= footer strip (34px) =================
+        Rectangle { height: 1px; background: Tokens.border; }
+        Rectangle {
+            height: Tokens.status-bar-h;
+            background: Tokens.chrome;
             HorizontalLayout {
-                spacing: Theme.sp1;
-                // + insert row
-                Rectangle {
-                    width: 26px;
-                    border-radius: Theme.radius-control;
-                    background: add-row-ta.has-hover && !root.read-only ? Theme.surface-2 : transparent;
-                    add-row-ta := TouchArea { enabled: !root.read-only; clicked => { root.add-row(); } }
-                    Text {
-                        horizontal-alignment: center; vertical-alignment: center;
-                        text: "+"; font-size: 15px;
-                        color: root.read-only ? Theme.text-faint : Theme.text-dim;
+                padding-left: Tokens.sp3;
+                padding-right: Tokens.sp3;
+                spacing: Tokens.sp4;
+
+                // view segments
+                if root.browse-mode: HorizontalLayout {
+                    spacing: Tokens.sp4;
+                    alignment: start;
+                    UnderlineSegment {
+                        text: "Data";
+                        active: root.view-mode == 0;
+                        clicked => { root.view-mode = 0; root.show-structure = false; }
+                    }
+                    UnderlineSegment {
+                        text: "Structure";
+                        active: root.view-mode == 1;
+                        clicked => { root.view-mode = 1; root.show-structure = true; }
+                    }
+                    UnderlineSegment {
+                        text: "Indexes";
+                        active: root.view-mode == 2;
+                        clicked => { root.view-mode = 2; root.show-structure = false; }
                     }
                 }
-                // − mark selected row deleted
-                Rectangle {
-                    width: 26px;
-                    border-radius: Theme.radius-control;
-                    background: del-row-ta.has-hover && !root.read-only ? Theme.surface-2 : transparent;
-                    del-row-ta := TouchArea { enabled: !root.read-only; clicked => { root.mark-delete(); } }
+                if !root.browse-mode: HorizontalLayout {
+                    spacing: Tokens.sp4;
+                    alignment: start;
+                    UnderlineSegment { text: "Data"; active: true; }
+                    UnderlineSegment { text: "Message"; }
+                    UnderlineSegment { text: "Chart"; }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                // pagination: ‹ 1–300 of 986 ›
+                if root.browse-mode: HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    alignment: center;
+                    Rectangle {
+                        width: 22px;
+                        height: 22px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: Tokens.radius;
+                        background: prev-ta.has-hover && root.can-prev ? Tokens.border : transparent;
+                        Text {
+                            text: "‹";
+                            color: root.can-prev ? Tokens.text : Tokens.text-ghost;
+                            font-size: 14px;
+                        }
+                        prev-ta := TouchArea {
+                            enabled: root.can-prev;
+                            clicked => { root.prev-page(); }
+                        }
+                    }
                     Text {
-                        horizontal-alignment: center; vertical-alignment: center;
-                        text: "−"; font-size: 15px;
-                        color: root.read-only ? Theme.text-faint : Theme.text-dim;
+                        text: root.total-rows >= 0
+                            ? root.page-start + "–" + root.page-end + " of " + root.total-rows
+                            : root.page-start + "–" + root.page-end;
+                        color: Tokens.text-dim;
+                        font-size: Tokens.font-sm;
+                        font-family: Tokens.mono;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        width: 22px;
+                        height: 22px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: Tokens.radius;
+                        background: next-ta.has-hover && root.can-next ? Tokens.border : transparent;
+                        Text {
+                            text: "›";
+                            color: root.can-next ? Tokens.text : Tokens.text-ghost;
+                            font-size: 14px;
+                        }
+                        next-ta := TouchArea {
+                            enabled: root.can-next;
+                            clicked => { root.next-page(); }
+                        }
                     }
                 }
-                // ⟳ refresh page
-                Rectangle {
-                    width: 26px;
-                    border-radius: Theme.radius-control;
-                    background: refresh-ta.has-hover ? Theme.surface-2 : transparent;
-                    refresh-ta := TouchArea { clicked => { root.refresh-page(); } }
-                    Text {
-                        horizontal-alignment: center; vertical-alignment: center;
-                        text: "⟳"; font-size: 13px; color: Theme.text-dim;
-                    }
-                }
-                if root.read-only: Text {
+                if !root.browse-mode: Text {
+                    text: root.result-status;
+                    color: Tokens.text-dim;
+                    font-size: Tokens.font-sm;
                     vertical-alignment: center;
-                    text: "read-only (no primary key)";
-                    color: Theme.text-faint;
-                    font-size: Theme.font-caption;
                 }
-                Rectangle {} // spacer
-                // ‹ page window ›
-                Rectangle {
-                    width: 24px;
-                    border-radius: Theme.radius-control;
-                    background: prev-ta.has-hover && root.can-prev ? Theme.surface-2 : transparent;
-                    prev-ta := TouchArea { enabled: root.can-prev; clicked => { root.prev-page(); } }
-                    Text {
-                        horizontal-alignment: center; vertical-alignment: center;
-                        text: "‹"; font-size: 14px;
-                        color: root.can-prev ? Theme.text-dim : Theme.text-faint;
+
+                Rectangle { horizontal-stretch: 1; }
+
+                // right-side actions + latency
+                if root.browse-mode: HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    alignment: end;
+                    VerticalLayout {
+                        alignment: center;
+                        SecondaryButton { text: "Filters"; height: 24px; clicked => { root.filter-open = !root.filter-open; } }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        SecondaryButton { text: "Columns"; height: 24px; }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        SecondaryButton { text: "Export"; height: 24px; }
                     }
                 }
-                Text {
-                    vertical-alignment: center;
-                    text: root.total-rows < 0
-                        ? "\{root.page-start}–\{root.page-end}"
-                        : "\{root.page-start}–\{root.page-end} of \{root.total-rows}";
-                    color: Theme.text-dim;
-                    font-size: Theme.font-label;
-                }
-                Rectangle {
-                    width: 24px;
-                    border-radius: Theme.radius-control;
-                    background: next-ta.has-hover && root.can-next ? Theme.surface-2 : transparent;
-                    next-ta := TouchArea { enabled: root.can-next; clicked => { root.next-page(); } }
-                    Text {
-                        horizontal-alignment: center; vertical-alignment: center;
-                        text: "›"; font-size: 14px;
-                        color: root.can-next ? Theme.text-dim : Theme.text-faint;
+                if !root.browse-mode: HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    alignment: end;
+                    VerticalLayout {
+                        alignment: center;
+                        SecondaryButton { text: "Export"; height: 24px; }
                     }
                 }
-                Rectangle { width: Theme.sp2; }
-                Text {
-                    vertical-alignment: center;
-                    text: "limit";
-                    color: Theme.text-faint;
-                    font-size: Theme.font-caption;
-                }
-                LineEdit {
-                    width: 56px;
-                    text <=> root.limit-text;
-                    font-size: Theme.font-label;
-                    accepted(t) => { root.set-limit(t); }
-                }
-                Rectangle { width: Theme.sp2; }
-                // pending edits badge + commit/discard (hidden when clean)
-                if root.pending-count > 0: Rectangle {
-                    width: 8px; height: 8px;
-                    y: (parent.height - self.height) / 2;
-                    border-radius: 4px;
-                    background: Theme.edit-pending;
-                }
-                if root.pending-count > 0: Text {
-                    vertical-alignment: center;
-                    text: "\{root.pending-count} pending";
-                    color: Theme.text-dim;
-                    font-size: Theme.font-label;
-                }
-                if root.pending-count > 0: Rectangle {
-                    width: 92px;
-                    border-radius: Theme.radius-control;
-                    background: commit-ta.has-hover ? Theme.accent.darker(0.1) : Theme.accent;
-                    commit-ta := TouchArea { clicked => { root.commit-edits(); } }
-                    Text {
-                        horizontal-alignment: center; vertical-alignment: center;
-                        text: "Commit ⌘S"; color: #ffffff;
-                        font-size: Theme.font-label; font-weight: 600;
+                // ● 12 ms
+                HorizontalLayout {
+                    spacing: 5px;
+                    alignment: end;
+                    Rectangle {
+                        width: 7px;
+                        height: 7px;
+                        border-radius: 4px;
+                        y: (parent.height - self.height) / 2;
+                        background: root.status-error ? Tokens.error : Tokens.ok;
                     }
-                }
-                if root.pending-count > 0: Rectangle {
-                    width: 64px;
-                    border-radius: Theme.radius-control;
-                    border-width: 1px;
-                    border-color: Theme.hairline-strong;
-                    background: discard-ta.has-hover ? Theme.surface-2 : transparent;
-                    discard-ta := TouchArea { clicked => { root.discard-edits(); } }
                     Text {
-                        horizontal-alignment: center; vertical-alignment: center;
-                        text: "Discard"; color: Theme.text-dim;
-                        font-size: Theme.font-label;
+                        text: root.status-latency;
+                        color: root.status-error ? Tokens.error : Tokens.ok;
+                        font-size: Tokens.font-sm;
+                        font-family: Tokens.mono;
+                        vertical-alignment: center;
                     }
                 }
             }
