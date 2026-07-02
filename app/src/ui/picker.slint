@@ -64,7 +64,7 @@ export component ConnPicker inherits Rectangle {
             VerticalLayout {
                 spacing: Theme.sp1;
                 for conn[i] in root.connections: Rectangle {
-                    height: Theme.row-height + Theme.sp2;
+                    height: Theme.tree-row-height + Theme.sp2;
                     // group header
                     if conn.is-header: Rectangle {
                         TouchArea { clicked => { root.toggle-group(conn.group); } }

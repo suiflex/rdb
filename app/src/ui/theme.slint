@@ -25,7 +25,10 @@ export global Theme {
     out property <length> sp6: 24px;
 
     // ----- metrics -----
-    out property <length> row-height: 32px;
+    // Dense TablePlus-style data rows; the sidebar tree keeps taller rows.
+    out property <length> row-height: 28px;
+    out property <length> tree-row-height: 32px;
+    out property <length> gutter-width: 44px;
     out property <length> radius-panel: 8px;
     out property <length> radius-control: 6px;
     out property <length> radius-pill: 999px;
@@ -46,6 +49,14 @@ export global Theme {
     // ----- accent tints -----
     out property <color> accent-soft: accent.with-alpha(0.16);
     out property <color> accent-softer: accent.with-alpha(0.10);
+
+    // ----- edit states (pending write buffer) -----
+    out property <color> edit-pending: #f59e0b;
+    out property <color> edit-delete: #ef4444;
+    out property <color> edit-insert: #22c55e;
+    out property <color> edit-pending-soft: edit-pending.with-alpha(0.16);
+    out property <color> edit-delete-soft: edit-delete.with-alpha(0.16);
+    out property <color> edit-insert-soft: edit-insert.with-alpha(0.16);
 
     // ----- motion -----
     out property <duration> fade: 100ms; // functional fades only, 80–120ms band

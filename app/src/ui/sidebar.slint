@@ -91,7 +91,7 @@ export component Sidebar inherits Rectangle {
                     // placeholder row (loading / no collections): dim, non-clickable
                     property <bool> is-hint: node.kind == "hint";
                     property <bool> is-active: is-container && node.label == root.active-table;
-                    height: is-category ? 28px : Theme.row-height;
+                    height: is-category ? 28px : Theme.tree-row-height;
                     border-radius: Theme.radius-control;
                     background: is-active ? Theme.accent-soft
                         : (row-ta.has-hover && (is-container || is-header) ? Theme.surface-2 : transparent);

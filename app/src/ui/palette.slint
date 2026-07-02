@@ -35,7 +35,7 @@ export component CommandPalette inherits Rectangle {
             ScrollView {
                 VerticalLayout {
                     for it[i] in root.items: Rectangle {
-                        height: Theme.row-height;
+                        height: Theme.tree-row-height;
                         border-radius: Theme.radius-control;
                         TouchArea { clicked => { root.choose(i); } }
                         HorizontalLayout {
