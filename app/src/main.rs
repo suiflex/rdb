@@ -909,6 +909,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     return;
                 };
             load_editor_text(&text);
+            w.set_fn_mode(false);
             w.set_active_table(SharedString::default()); // editor mode
             w.set_query_label(SharedString::from(if is_saved {
                 format!("{title}.sql · saved")
@@ -927,6 +928,159 @@ fn main() -> Result<(), slint::PlatformError> {
                 );
             }
             rebuild_query_tree(&title);
+        });
+    }
+
+    // ----- function definitions captured at connect (name → CREATE source) -----
+    let fn_defs: Arc<std::sync::Mutex<std::collections::HashMap<String, String>>> =
+        Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+    {
+        let weak = window.as_weak();
+        let fn_defs = fn_defs.clone();
+        window.on_open_function(move |name| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let def = fn_defs
+                .lock()
+                .unwrap()
+                .get(name.as_str())
+                .cloned()
+                .unwrap_or_default();
+            let lines: Vec<ModelRc<Span>> = def
+                .lines()
+                .map(|l| {
+                    let spans: Vec<Span> = editor::lex_line(l)
+                        .into_iter()
+                        .map(|sp| Span {
+                            text: sp.text.into(),
+                            kind: sp.kind,
+                        })
+                        .collect();
+                    ModelRc::from(Rc::new(VecModel::from(spans)))
+                })
+                .collect();
+            w.set_fn_lines(ModelRc::from(Rc::new(VecModel::from(lines))));
+            w.set_fn_name(name.clone());
+            w.set_fn_mode(true);
+            w.set_active_table(SharedString::default());
+            let tabs = w.get_tabs();
+            let ti = w.get_active_tab().max(0) as usize;
+            if ti < tabs.row_count() {
+                tabs.set_row_data(
+                    ti,
+                    TabItem {
+                        title: name,
+                        kind: "function".into(),
+                    },
+                );
+            }
+        });
+    }
+
+    // ----- Open database (⌘⇧O) / Open Connection (⌘O) modals -----
+    let conn_modal_map: Rc<RefCell<Vec<i32>>> = Rc::new(RefCell::new(Vec::new()));
+    {
+        let weak = window.as_weak();
+        window.on_open_db_modal(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            // Mock database catalogue matching the reference; real listing
+            // arrives with multi-database introspection.
+            let dbs = [
+                "ai_bot_fintech",
+                "jdih_bkpm_2025",
+                "oss_rba_master",
+                "portfolio",
+                "pos",
+                "postgres",
+                "primbon",
+                "profin",
+                "rtmanagement",
+                "suitest",
+                "suitest_m1d_9fabae77c4a44d51aedc4ffebf39eb71",
+                "suitest_test",
+                "template0",
+                "template1",
+            ];
+            let items: Vec<PaletteItem> = dbs
+                .iter()
+                .map(|d| PaletteItem {
+                    label: (*d).into(),
+                    kind: "database".into(),
+                    sub: SharedString::default(),
+                    local: false,
+                })
+                .collect();
+            w.set_db_items(ModelRc::from(Rc::new(VecModel::from(items))));
+            w.set_db_modal_open(true);
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_db_choose(move |idx| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if let Some(it) = w.get_db_items().row_data(idx.max(0) as usize) {
+                w.set_bc_db(it.label);
+            }
+            w.set_db_modal_open(false);
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let conn_modal_map = conn_modal_map.clone();
+        window.on_open_conn_modal(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            // Flatten groups + connections (all groups expanded in the modal).
+            let rows = build_conn_items(&store.borrow(), &HashSet::new(), "");
+            let mut items: Vec<PaletteItem> = Vec::new();
+            let mut map: Vec<i32> = Vec::new();
+            for r in rows {
+                if r.is_header {
+                    items.push(PaletteItem {
+                        label: r.group.to_lowercase().into(),
+                        kind: "group".into(),
+                        sub: SharedString::default(),
+                        local: false,
+                    });
+                    map.push(-1);
+                } else {
+                    items.push(PaletteItem {
+                        label: r.name,
+                        kind: r.engine,
+                        sub: r.subline,
+                        local: r.local,
+                    });
+                    map.push(r.index);
+                }
+            }
+            *conn_modal_map.borrow_mut() = map;
+            w.set_conn_items(ModelRc::from(Rc::new(VecModel::from(items))));
+            w.set_conn_modal_open(true);
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let conn_modal_map = conn_modal_map.clone();
+        window.on_conn_choose(move |idx| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let store_idx = conn_modal_map
+                .borrow()
+                .get(idx.max(0) as usize)
+                .copied()
+                .unwrap_or(-1);
+            w.set_conn_modal_open(false);
+            if store_idx >= 0 {
+                w.invoke_connect_clicked(store_idx);
+            }
         });
     }
 
@@ -1053,6 +1207,25 @@ fn main() -> Result<(), slint::PlatformError> {
                     move || {
                         if let Some(w) = weak.upgrade() {
                             w.invoke_run_query();
+                        }
+                    },
+                );
+            }
+            if screen == "modal-db" || screen == "modal-conn" || screen == "function" || screen == "palette" {
+                let weak = window.as_weak();
+                let which = screen.clone();
+                let t4 = Box::leak(Box::new(slint::Timer::default()));
+                t4.start(
+                    slint::TimerMode::SingleShot,
+                    std::time::Duration::from_millis(1800),
+                    move || {
+                        if let Some(w) = weak.upgrade() {
+                            match which.as_str() {
+                                "modal-db" => w.invoke_open_db_modal(),
+                                "modal-conn" => w.invoke_open_conn_modal(),
+                                "palette" => w.invoke_toggle_palette(),
+                                _ => w.invoke_open_function("uuid_generate_v3".into()),
+                            }
                         }
                     },
                 );
@@ -1209,6 +1382,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let collapsed_categories = collapsed_categories.clone();
         let cur_engine = cur_engine.clone();
         let load_editor_text = load_editor_text.clone();
+        let fn_defs = fn_defs.clone();
         window.on_connect_clicked(move |idx| {
             let i = idx as usize;
             let (sc, cfg) = {
@@ -1234,7 +1408,11 @@ fn main() -> Result<(), slint::PlatformError> {
                         ""
                     },
                 ));
-                load_editor_text(crate::query_parse::editor_hint(sc.engine));
+                load_editor_text(if mock::mock_mode() {
+                    ""
+                } else {
+                    crate::query_parse::editor_hint(sc.engine)
+                });
                 w.set_active_table(SharedString::default());
             }
             // Fresh connection: nothing browsed, nothing expanded.
@@ -1246,6 +1424,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let store_driver = current.clone();
             let engine = sc.engine;
             let raw_nodes = raw_nodes.clone();
+            let fn_defs = fn_defs.clone();
             rt.spawn(async move {
                 let result = async {
                     let cfg =
@@ -1290,6 +1469,15 @@ fn main() -> Result<(), slint::PlatformError> {
                             rdbs_connstore::Engine::Postgres | rdbs_connstore::Engine::MySql
                         );
                         *raw_nodes.lock().unwrap() = nodes;
+                        {
+                            let mut defs = fn_defs.lock().unwrap();
+                            defs.clear();
+                            for db in &schema.databases {
+                                for f in &db.functions {
+                                    defs.insert(f.name.clone(), f.definition.clone());
+                                }
+                            }
+                        }
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(w) = weak2.upgrade() {
                                 w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
@@ -1549,6 +1737,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     );
                 }
             }
+            w.set_fn_mode(false);
             w.set_active_table(SharedString::from(label));
             w.set_show_structure(false);
             w.set_total_rows(-1);
@@ -2174,23 +2363,27 @@ fn main() -> Result<(), slint::PlatformError> {
                 let opening = !w.get_palette_open();
                 w.set_palette_open(opening);
                 if opening {
-                    let names: Vec<String> = store
+                    let names: Vec<(String, &'static str)> = store
                         .borrow()
                         .list()
                         .iter()
-                        .map(|s| s.name.clone())
+                        .map(|s| (s.name.clone(), AnyDriver::badge(s.engine)))
                         .collect();
                     let mut items: Vec<PaletteItem> = names
                         .iter()
-                        .map(|n| PaletteItem {
+                        .map(|(n, badge)| PaletteItem {
                             label: n.clone().into(),
-                            kind: "connection".into(),
+                            kind: (*badge).into(),
+                            sub: SharedString::default(),
+                            local: false,
                         })
                         .collect();
                     for n in w.get_schema_tree().iter().filter(|n| n.kind == "table") {
                         items.push(PaletteItem {
                             label: n.label.clone(),
                             kind: "table".into(),
+                            sub: SharedString::default(),
+                            local: false,
                         });
                     }
                     w.set_palette_items(ModelRc::from(Rc::new(VecModel::from(items))));
@@ -2206,18 +2399,20 @@ fn main() -> Result<(), slint::PlatformError> {
         window.on_palette_filter(move |q| {
             if let Some(w) = weak.upgrade() {
                 let needle = q.to_lowercase();
-                let names: Vec<String> = store
+                let names: Vec<(String, &'static str)> = store
                     .borrow()
                     .list()
                     .iter()
-                    .map(|s| s.name.clone())
+                    .map(|s| (s.name.clone(), AnyDriver::badge(s.engine)))
                     .collect();
                 let mut items: Vec<PaletteItem> = names
                     .iter()
-                    .filter(|n| n.to_lowercase().contains(&needle))
-                    .map(|n| PaletteItem {
+                    .filter(|(n, _)| n.to_lowercase().contains(&needle))
+                    .map(|(n, badge)| PaletteItem {
                         label: n.clone().into(),
-                        kind: "connection".into(),
+                        kind: (*badge).into(),
+                        sub: SharedString::default(),
+                        local: false,
                     })
                     .collect();
                 for n in w
@@ -2228,6 +2423,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     items.push(PaletteItem {
                         label: n.label.clone(),
                         kind: "table".into(),
+                        sub: SharedString::default(),
+                        local: false,
                     });
                 }
                 w.set_palette_items(ModelRc::from(Rc::new(VecModel::from(items))));

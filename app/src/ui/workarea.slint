@@ -41,6 +41,12 @@ export component WorkArea inherits Rectangle {
     in property <string> results-meta;   // "10 rows · 38 ms"
     callback editor-key(string, bool, bool) -> bool;
     callback editor-click-line(int);
+    // Function view: read-only highlighted CREATE FUNCTION source.
+    in property <bool> fn-mode: false;
+    in property <string> fn-name;
+    in property <[[Span]]> fn-lines;
+    // Fresh SQL tab with nothing typed yet → empty-state hint.
+    property <bool> empty-mode: !root.browse-mode && !root.fn-mode && root.query-text == "";
 
     // ----- pagination + edit footer -----
     in property <int> page-start;
@@ -218,8 +224,101 @@ export component WorkArea inherits Rectangle {
             Rectangle { y: parent.height - 1px; height: 1px; width: parent.width; background: Tokens.border; }
         }
 
+        // ================= function view =================
+        if root.fn-mode: Rectangle {
+            vertical-stretch: 1;
+            background: Tokens.canvas;
+            VerticalLayout {
+                width: 100%;
+                height: 100%;
+                spacing: 0;
+                HorizontalLayout {
+                    height: 56px;
+                    padding-left: Tokens.sp4;
+                    padding-right: Tokens.sp4;
+                    spacing: Tokens.sp3;
+                    Text {
+                        text: "Name";
+                        color: Tokens.text-dim;
+                        font-size: Tokens.font-md;
+                        vertical-alignment: center;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 420px;
+                            height: 32px;
+                            border-radius: Tokens.radius;
+                            border-width: 1px;
+                            border-color: Tokens.border-strong;
+                            background: Tokens.card;
+                            Text {
+                                x: Tokens.sp3;
+                                text: root.fn-name;
+                                color: Tokens.text;
+                                font-size: Tokens.font-md;
+                                font-family: Tokens.mono;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                CodeEditor {
+                    vertical-stretch: 1;
+                    lines: root.fn-lines;
+                    cursor-line: -1;
+                    cursor-col: 0;
+                }
+            }
+        }
+
+        // ================= empty state (nothing open) =================
+        if root.empty-mode: Rectangle {
+            vertical-stretch: 1;
+            background: Tokens.canvas;
+            VerticalLayout {
+                alignment: center;
+                spacing: Tokens.sp4;
+                HorizontalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 300px;
+                        height: 190px;
+                        border-radius: Tokens.radius-lg;
+                        border-width: 1px;
+                        border-color: Tokens.accent.with-alpha(0.35);
+                        background: Tokens.accent-tint.with-alpha(0.45);
+                        Text {
+                            text: "empty-state illustration";
+                            color: Tokens.accent.with-alpha(0.65);
+                            font-size: Tokens.font-sm;
+                            font-family: Tokens.mono;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 6px;
+                    Text {
+                        text: "Open a table from the sidebar, or press";
+                        color: Tokens.text-dim;
+                        font-size: Tokens.font-md;
+                        vertical-alignment: center;
+                    }
+                    KeyCap { text: "⌘P"; }
+                    Text {
+                        text: "to jump anywhere";
+                        color: Tokens.text-dim;
+                        font-size: Tokens.font-md;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
         // ================= SQL editor (non-browse tabs) =================
-        if !root.browse-mode: Rectangle {
+        if !root.browse-mode && !root.fn-mode && !root.empty-mode: Rectangle {
             height: 340px;
             background: Tokens.canvas;
             VerticalLayout {
@@ -301,7 +400,7 @@ export component WorkArea inherits Rectangle {
         }
 
         // ================= result body =================
-        Rectangle {
+        if !root.fn-mode && !root.empty-mode: Rectangle {
             vertical-stretch: 1;
             background: Tokens.canvas;
 
