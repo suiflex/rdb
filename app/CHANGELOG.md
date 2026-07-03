@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.0](https://github.com/suiflex/rdb/compare/v0.3.0...v0.4.0) (2026-07-03)
+
+
+### Features
+
+* **app:** dispatch write API through AnyDriver ([62e0726](https://github.com/suiflex/rdb/commit/62e072610395ff31f7139d4a9959cb78686b7b07))
+* **app:** edit buffer model mapping buffered grid edits to WriteOps ([b60901b](https://github.com/suiflex/rdb/commit/b60901b1c2b404b7edb2dd03f4f878b84c539a1a))
+* **app:** inline cell editing with buffered ⌘S commit ([365406b](https://github.com/suiflex/rdb/commit/365406ba97d6153802e0f1d64df56bff8c2e8188))
+* **app:** live pagination in browse mode (page state, footer wiring, per-engine browse text) ([a9cdea3](https://github.com/suiflex/rdb/commit/a9cdea3f30ac53fccc3d8bd803ffd52e9b436bcb))
+* **app:** modals, command palette, function view, empty state ([695d295](https://github.com/suiflex/rdb/commit/695d29509d2aa8ebe9b2e21eb1416c140dabd373))
+* **app:** pagination + edit footer strip ([3b85166](https://github.com/suiflex/rdb/commit/3b851668b7875ffbd4a5b04827642f7313660ee8))
+* **app:** pixel-matched SQL editor with incremental lexer + share bars ([25c2882](https://github.com/suiflex/rdb/commit/25c28826f3d80d5aeb7102483b71f7d23749b102))
+* **app:** pixel-matched Tabula workspace (sidebar, grid, footer strip) ([1b13537](https://github.com/suiflex/rdb/commit/1b135373e2f9936d7dc01a3c504fd0a627d4f62d))
+* **app:** sidebar filter + category counts, flat TablePlus-style tab bar ([d06a096](https://github.com/suiflex/rdb/commit/d06a09696be49262db7687fafbdddfe5e9ea7dca))
+* **app:** TablePlus-style grid (gutter, zebra, hairlines, cell selection) ([3d4ece2](https://github.com/suiflex/rdb/commit/3d4ece26b804fd679a16f01ba399274c15bbff48))
+* **app:** Tabula design system + pixel-matched Connections screen ([cf9bbff](https://github.com/suiflex/rdb/commit/cf9bbff4c4bff7073db4ae626ab7bc8fac61cda4))
+* **app:** theme tokens for grid density + edit states ([ca4645f](https://github.com/suiflex/rdb/commit/ca4645fc374fe17a727fafc76da2123919e88cb6))
+* **mongo:** write path via _id + skip pagination on find ([2b3a8af](https://github.com/suiflex/rdb/commit/2b3a8afddf916a27186b4f41ba707a31c1abf4ec))
+* real-PostgreSQL end-to-end + driver type decoding + CI gate green ([ef08ba1](https://github.com/suiflex/rdb/commit/ef08ba1007a95773f989d7c1025d3c5030f9b1c3))
+
 ## [0.3.0](https://github.com/suiflex/rdb/compare/v0.2.0...v0.3.0) (2026-07-01)
 
 
