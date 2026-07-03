@@ -1,63 +1,205 @@
-import { Theme } from "theme.slint";
-import { ScrollView, LineEdit } from "std-widgets.slint";
+// Modal layer (Tabula): command palette (⌘K), Open database (⌘⇧O) and
+// Open Connection (⌘O) pickers. One shared list-modal shell.
+// References: design/4-modal-open-database.png, design/5-modal-open-connection.png.
+import { Tokens } from "tokens.slint";
+import { DbBadge, PrimaryButton, SecondaryButton, FilterField } from "components.slint";
 
-export struct PaletteItem { label: string, kind: string }
+// `kind` picks the leading icon: "database" | "group" | engine badge keys
+// ("postgres"…) | "table" | "function" | "command". `sub` is the mono second
+// line (host : db); `local` appends the green "(local)" tag.
+export struct PaletteItem {
+    label: string,
+    kind: string,
+    sub: string,
+    local: bool,
+}
 
-export component CommandPalette inherits Rectangle {
+export component ListModal inherits Rectangle {
     in property <bool> open;
+    in property <string> title;
+    in property <string> placeholder: "Search...";
     in property <[PaletteItem]> items;
+    in-out property <int> selected: 0;
+    in property <length> card-width: 520px;
+    in property <string> confirm-label: "Open";
     callback filter(string);
     callback choose(int);
+    callback new-item();
+    callback dismiss();
 
     visible: root.open;
-    background: #00000066; // dim scrim
+    background: Tokens.veil;
 
-    if root.open: Rectangle {
-        width: 520px;
-        height: 360px;
-        y: 80px;
+    veil-ta := TouchArea {
+        clicked => { root.dismiss(); }
+    }
+
+    Rectangle {
+        width: root.card-width;
         x: (parent.width - self.width) / 2;
-        border-radius: Theme.radius-panel;
-        background: Theme.surface;
+        y: 96px;
+        height: card.preferred-height;
+        border-radius: Tokens.modal-radius;
+        background: Tokens.card;
         border-width: 1px;
-        border-color: Theme.hairline;
-        // single elevation shadow (spec: shadow only on modals/popovers)
-        drop-shadow-blur: 24px;
-        drop-shadow-color: #00000088;
+        border-color: Tokens.border;
+        drop-shadow-blur: 42px;
+        drop-shadow-offset-y: 12px;
+        drop-shadow-color: #1C191426;
 
-        VerticalLayout {
-            padding: Theme.sp3;
-            spacing: Theme.sp2;
-            LineEdit {
-                placeholder-text: "Jump to connection or table…";
-                edited(t) => { root.filter(t); }
+        // swallow veil clicks under the card
+        card-ta := TouchArea {}
+
+        card := VerticalLayout {
+            padding: Tokens.sp4;
+            padding-top: 18px;
+            spacing: Tokens.sp3;
+
+            if root.title != "": Text {
+                text: root.title;
+                color: Tokens.text;
+                font-size: 15px;
+                font-weight: 700;
+                horizontal-alignment: center;
             }
-            ScrollView {
-                VerticalLayout {
-                    for it[i] in root.items: Rectangle {
-                        height: Theme.row-height;
-                        border-radius: Theme.radius-control;
-                        TouchArea { clicked => { root.choose(i); } }
-                        HorizontalLayout {
-                            padding-left: Theme.sp2;
-                            spacing: Theme.sp2;
-                            Text {
-                                vertical-alignment: center;
-                                text: it.label;
-                                color: Theme.text;
-                                font-size: Theme.font-body;
+
+            search := FilterField {
+                height: 34px;
+                placeholder: root.placeholder;
+                edited(t) => {
+                    root.selected = 0;
+                    root.filter(t);
+                }
+                submitted => { root.choose(root.selected); }
+            }
+
+            Rectangle {
+                height: min(list.preferred-height, 500px);
+                clip: true;
+                Flickable {
+                    viewport-height: list.preferred-height;
+                    list := VerticalLayout {
+                        spacing: 1px;
+                        alignment: start;
+                        for it[i] in root.items: Rectangle {
+                            property <bool> is-group: it.kind == "group";
+                            property <bool> two-line: it.sub != "";
+                            height: two-line ? 44px : 34px;
+                            border-radius: Tokens.radius;
+                            background: i == root.selected ? Tokens.chrome
+                                : it-ta.has-hover ? Tokens.canvas : transparent;
+                            it-ta := TouchArea {
+                                clicked => { root.selected = i; }
+                                double-clicked => { root.choose(i); }
                             }
-                            Rectangle {}
-                            Text {
-                                vertical-alignment: center;
-                                text: it.kind;
-                                color: Theme.text-dim;
-                                font-size: Theme.font-label;
+                            HorizontalLayout {
+                                padding-left: Tokens.sp2;
+                                padding-right: Tokens.sp2;
+                                spacing: Tokens.sp3;
+
+                                // leading icon
+                                VerticalLayout {
+                                    alignment: center;
+                                    if it.kind == "database" || it.kind == "table": Rectangle {
+                                        width: 15px;
+                                        height: 15px;
+                                        border-radius: 4px;
+                                        background: Tokens.db-pg.with-alpha(0.85);
+                                    }
+                                    if is-group: Rectangle {
+                                        width: 20px;
+                                        height: 20px;
+                                        border-radius: 10px;
+                                        border-width: 1.5px;
+                                        border-color: Tokens.warn;
+                                        Text {
+                                            text: "▸";
+                                            color: Tokens.warn;
+                                            font-size: 8px;
+                                        }
+                                    }
+                                    if it.kind == "function": Text {
+                                        text: "ƒ";
+                                        color: Tokens.warn;
+                                        font-size: Tokens.font-md;
+                                        font-weight: 600;
+                                    }
+                                    if it.kind == "command": Text {
+                                        text: "›_";
+                                        color: Tokens.text-faint;
+                                        font-size: 10px;
+                                        font-family: Tokens.mono;
+                                    }
+                                    if it.kind == "postgres" || it.kind == "mysql" || it.kind == "redis" || it.kind == "mongo" || it.kind == "sqlite": DbBadge {
+                                        engine: it.kind;
+                                        size: 24px;
+                                    }
+                                }
+
+                                // label (+ optional sub line)
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 1px;
+                                    horizontal-stretch: 1;
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        alignment: start;
+                                        Text {
+                                            text: it.label;
+                                            color: Tokens.text;
+                                            font-size: Tokens.font-md;
+                                            font-weight: is-group ? Tokens.weight-emphasis : 500;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                        if it.local: Text {
+                                            text: "(local)";
+                                            color: Tokens.ok;
+                                            font-size: Tokens.font-sm;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    if two-line: Text {
+                                        text: it.sub;
+                                        color: Tokens.text-dim;
+                                        font-size: Tokens.font-xs;
+                                        font-family: Tokens.mono;
+                                        overflow: elide;
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
+
+            // footer: Cancel · stretch · New… · Open
+            HorizontalLayout {
+                spacing: Tokens.sp2;
+                SecondaryButton {
+                    text: "Cancel";
+                    height: 30px;
+                    clicked => { root.dismiss(); }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                SecondaryButton {
+                    text: "New...";
+                    height: 30px;
+                    clicked => { root.new-item(); }
+                }
+                PrimaryButton {
+                    text: root.confirm-label;
+                    height: 30px;
+                    clicked => { root.choose(root.selected); }
+                }
+            }
         }
     }
+}
+
+// ⌘K command palette: 400w, r12, veil per spec.
+export component CommandPalette inherits ListModal {
+    card-width: Tokens.palette-width;
+    placeholder: "Search or run a command...";
+    confirm-label: "Open";
 }

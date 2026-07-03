@@ -10,8 +10,10 @@ use rdbs_core::error::{RdbsError, Result};
 use rdbs_core::query::Query;
 use rdbs_core::result::{Column, ResultSet, Row};
 use rdbs_core::schema::{Container, ContainerKind, Database, Field, Schema};
+use rdbs_core::write::{TableRef, WriteOp};
 
 use crate::conn_string::build_conn_string;
+use crate::write_sql;
 
 /// A `Driver` backed by tokio-postgres over a single connection.
 ///
@@ -75,6 +77,72 @@ impl Driver for PostgresDriver {
         query_impl(&self.client, q).await
     }
 
+    async fn primary_key(&self, table: &TableRef) -> Result<Vec<String>> {
+        let schema = table.schema.as_deref().unwrap_or("public");
+        let rows = self
+            .client
+            .query(
+                "SELECT a.attname \
+                 FROM pg_index i \
+                 JOIN pg_class c ON c.oid = i.indrelid \
+                 JOIN pg_namespace n ON n.oid = c.relnamespace \
+                 JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(i.indkey) \
+                 WHERE i.indisprimary AND c.relname = $1 AND n.nspname = $2 \
+                 ORDER BY array_position(i.indkey, a.attnum)",
+                &[&table.name, &schema],
+            )
+            .await
+            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+        Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect())
+    }
+
+    async fn count(&self, table: &TableRef) -> Result<u64> {
+        let sql = format!("SELECT count(*) FROM {}", write_sql::table_name(table));
+        let row = self
+            .client
+            .query_one(&sql, &[])
+            .await
+            .map_err(|e| RdbsError::Query(e.to_string()))?;
+        let n: i64 = row.get(0);
+        Ok(n as u64)
+    }
+
+    async fn commit(&self, ops: &[WriteOp]) -> Result<u64> {
+        if ops.is_empty() {
+            return Ok(0);
+        }
+        let run = |sql: String| async move {
+            self.client
+                .execute(&sql, &[])
+                .await
+                .map_err(|e| RdbsError::Query(e.to_string()))
+        };
+        self.client
+            .execute("BEGIN", &[])
+            .await
+            .map_err(|e| RdbsError::Query(e.to_string()))?;
+        let mut affected = 0u64;
+        for op in ops {
+            let sql = match op {
+                WriteOp::Update { table, pk, changes } => write_sql::update_sql(table, pk, changes),
+                WriteOp::Insert { table, values } => write_sql::insert_sql(table, values),
+                WriteOp::Delete { table, pk } => write_sql::delete_sql(table, pk),
+            };
+            match run(sql).await {
+                Ok(n) => affected += n,
+                Err(e) => {
+                    let _ = self.client.execute("ROLLBACK", &[]).await;
+                    return Err(e);
+                }
+            }
+        }
+        self.client
+            .execute("COMMIT", &[])
+            .await
+            .map_err(|e| RdbsError::Query(e.to_string()))?;
+        Ok(affected)
+    }
+
     async fn close(self) -> Result<()> {
         // Drop the client first so the connection future can complete, then
         // abort the connection task to release the spawned future promptly.
@@ -122,7 +190,13 @@ async fn query_impl(client: &Client, q: &Query) -> Result<ResultSet> {
 /// leading keywords. Anything else (INSERT/UPDATE/DELETE/CREATE/DROP/...) is
 /// treated as a write and routed to `execute` for an affected-row count.
 fn is_row_returning(sql: &str) -> bool {
-    let head = sql.trim_start().to_ascii_lowercase();
+    // Skip leading `-- line` comments and blank lines before classifying.
+    let head = sql
+        .lines()
+        .map(str::trim_start)
+        .find(|l| !l.is_empty() && !l.starts_with("--"))
+        .unwrap_or("")
+        .to_ascii_lowercase();
     head.starts_with("select")
         || head.starts_with("with")
         || head.starts_with("show")
@@ -192,8 +266,35 @@ async fn schema_impl(client: &Client) -> Result<Schema> {
         }
     }
 
+    // Stored functions (public schema): name + full CREATE source for the
+    // function view. Per-row source failures (e.g. C-language internals that
+    // pg_get_functiondef rejects) are skipped, never fatal.
+    let mut functions: Vec<rdbs_core::schema::Function> = Vec::new();
+    if let Ok(rows) = client
+        .query(
+            "SELECT p.proname, pg_catalog.pg_get_functiondef(p.oid) \
+             FROM pg_catalog.pg_proc p \
+             JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
+             WHERE n.nspname = 'public' AND p.prokind = 'f' \
+             ORDER BY p.proname",
+            &[],
+        )
+        .await
+    {
+        for row in &rows {
+            let name: String = row.get(0);
+            if let Ok(def) = row.try_get::<_, String>(1) {
+                functions.push(rdbs_core::schema::Function {
+                    name,
+                    definition: def,
+                });
+            }
+        }
+    }
+
     Ok(Schema {
         databases: vec![Database {
+            functions,
             name: db_name,
             containers,
         }],

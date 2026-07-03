@@ -51,8 +51,9 @@ fn parse_mongo(text: &str) -> Result<Query, String> {
         .and_then(|o| o.as_str())
         .ok_or_else(|| "missing \"op\"".to_string())?;
     let body = v.get("body").cloned().unwrap_or(serde_json::Value::Null);
-    // Optional row cap for `find`; omitted means unbounded.
+    // Optional row cap / offset for `find`; omitted means unbounded / 0.
     let limit = v.get("limit").and_then(|l| l.as_i64());
+    let skip = v.get("skip").and_then(|s| s.as_i64());
 
     let kind = match op {
         "find" => MongoKind::Find(body),
@@ -73,6 +74,7 @@ fn parse_mongo(text: &str) -> Result<Query, String> {
         collection,
         database,
         limit,
+        skip,
         kind,
     }))
 }

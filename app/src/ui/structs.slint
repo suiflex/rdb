@@ -2,12 +2,14 @@
 // file with no component imports so sidebar/workarea/app-window can all import
 // them without an import cycle.
 export struct GridColumn { name: string, type-name: string }
-export struct GridCell { text: string, is-null: bool }
-// A Redis key/value row: the key (or list index / hash field) and its value cell.
-export struct KvRow { key: string, value: GridCell }
+// `state` mirrors the app-side edit buffer: 0 normal, 1 edited (pending
+// update), 2 delete-marked, 3 inserted (pending insert).
+export struct GridCell { text: string, is-null: bool, state: int }
 // `db` tags the owning database for container rows (Mongo db→collection tree);
 // empty for SQL/Redis where the category path is used instead.
-export struct TreeNode { label: string, depth: int, kind: string, expanded: bool, db: string }
+// `count` is the number of (filter-matching) containers under a header row;
+// 0 hides the badge. Non-header rows always carry 0.
+export struct TreeNode { label: string, depth: int, kind: string, expanded: bool, db: string, count: int }
 // A sidebar row is either a group header (is-header=true, name holds the group
 // label, expanded holds its toggle state) or a connection. `index` is the
 // connection's index in the underlying store (-1 for headers) so connect/edit
@@ -21,6 +23,18 @@ export struct ConnItem {
     expanded: bool,
     index: int,
     group: string,
+    // "host : database" mono subline under the name (empty for headers).
+    subline: string,
+    // Show the LOCAL outline chip on this row / detail header.
+    local: bool,
+    // Direct children count shown next to a header row (headers only).
+    count: int,
 }
+// One Host/Port/… row of the connection-detail card.
+export struct KvRow { k: string, v: string }
 export struct StructField { name: string, type-name: string, nullable: bool }
-export struct TabItem { title: string }
+// `kind` picks the tab glyph: "table" | "sql" | "function".
+export struct TabItem { title: string, kind: string }
+// One lexed editor token; `kind`: 0 plain · 1 keyword · 2 string ·
+// 3 function · 4 comment · 5 number (mirrors app/src/editor.rs).
+export struct Span { text: string, kind: int }

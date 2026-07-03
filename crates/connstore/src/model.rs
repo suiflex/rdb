@@ -33,6 +33,13 @@ pub struct SavedConnection {
     /// `None` => connection renders under the default "Ungrouped" header.
     #[serde(default)]
     pub group: Option<String>,
+    /// Marks a connection reached over a local tunnel/socket; the UI shows a
+    /// LOCAL chip next to it.
+    #[serde(default)]
+    pub local: bool,
+    /// Free-form labels shown as chips in the connection detail panel.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 impl SavedConnection {
@@ -55,6 +62,8 @@ impl SavedConnection {
             sslmode: SslMode::default(),
             color: None,
             group: None,
+            local: false,
+            tags: Vec::new(),
         }
     }
 
@@ -88,6 +97,8 @@ mod tests {
             sslmode: SslMode::Require,
             color: Some("#3b82f6".into()),
             group: Some("Local".into()),
+            local: false,
+            tags: Vec::new(),
         }
     }
 

@@ -10,6 +10,16 @@ pub struct Schema {
 pub struct Database {
     pub name: String,
     pub containers: Vec<Container>,
+    /// Stored routines (Postgres/MySQL functions). Engines without the
+    /// concept leave this empty.
+    pub functions: Vec<Function>,
+}
+
+/// A stored routine: name plus its full CREATE source for the function view.
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub name: String,
+    pub definition: String,
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +51,7 @@ mod tests {
     fn schema_unifies_table_and_collection_under_container() {
         let schema = Schema {
             databases: vec![Database {
+                functions: Vec::new(),
                 name: "app".into(),
                 containers: vec![
                     Container {

@@ -11,6 +11,7 @@ use rdbs_core::error::Result;
 use rdbs_core::query::Query;
 use rdbs_core::result::ResultSet;
 use rdbs_core::schema::{Container, Schema};
+use rdbs_core::write::{TableRef, WriteOp};
 use rdbs_driver_mongo::MongoDriver;
 use rdbs_driver_mysql::MysqlDriver;
 use rdbs_driver_postgres::PostgresDriver;
@@ -21,6 +22,8 @@ pub enum AnyDriver {
     Mysql(MysqlDriver),
     Redis(RedisDriver),
     Mongo(MongoDriver),
+    /// In-process demo driver (RDBS_MOCK=1); no network, seeded data.
+    Mock(crate::mock::MockDriver),
 }
 
 impl AnyDriver {
@@ -34,8 +37,23 @@ impl AnyDriver {
         }
     }
 
+    /// Stable lowercase key the UI's `DbBadge` switches on.
+    pub fn badge(engine: Engine) -> &'static str {
+        match engine {
+            Engine::Postgres => "postgres",
+            Engine::MySql => "mysql",
+            Engine::Redis => "redis",
+            Engine::Mongo => "mongo",
+        }
+    }
+
     /// Connect using the concrete driver for `engine`.
     pub async fn connect(engine: Engine, cfg: &ConnConfig) -> Result<Self> {
+        if crate::mock::mock_mode() {
+            return Ok(AnyDriver::Mock(
+                crate::mock::MockDriver::connect(cfg).await?,
+            ));
+        }
         Ok(match engine {
             Engine::Postgres => AnyDriver::Postgres(PostgresDriver::connect(cfg).await?),
             Engine::MySql => AnyDriver::Mysql(MysqlDriver::connect(cfg).await?),
@@ -52,6 +70,7 @@ impl AnyDriver {
             AnyDriver::Mysql(d) => d.ping().await,
             AnyDriver::Redis(d) => d.ping().await,
             AnyDriver::Mongo(d) => d.ping().await,
+            AnyDriver::Mock(d) => d.ping().await,
         }
     }
 
@@ -61,6 +80,7 @@ impl AnyDriver {
             AnyDriver::Mysql(d) => d.schema().await,
             AnyDriver::Redis(d) => d.schema().await,
             AnyDriver::Mongo(d) => d.schema().await,
+            AnyDriver::Mock(d) => d.schema().await,
         }
     }
 
@@ -70,6 +90,7 @@ impl AnyDriver {
             AnyDriver::Mysql(d) => d.containers(database).await,
             AnyDriver::Redis(d) => d.containers(database).await,
             AnyDriver::Mongo(d) => d.containers(database).await,
+            AnyDriver::Mock(d) => d.containers(database).await,
         }
     }
 
@@ -79,6 +100,37 @@ impl AnyDriver {
             AnyDriver::Mysql(d) => d.query(q).await,
             AnyDriver::Redis(d) => d.query(q).await,
             AnyDriver::Mongo(d) => d.query(q).await,
+            AnyDriver::Mock(d) => d.query(q).await,
+        }
+    }
+
+    pub async fn primary_key(&self, table: &TableRef) -> Result<Vec<String>> {
+        match self {
+            AnyDriver::Postgres(d) => d.primary_key(table).await,
+            AnyDriver::Mysql(d) => d.primary_key(table).await,
+            AnyDriver::Redis(d) => d.primary_key(table).await,
+            AnyDriver::Mongo(d) => d.primary_key(table).await,
+            AnyDriver::Mock(d) => d.primary_key(table).await,
+        }
+    }
+
+    pub async fn count(&self, table: &TableRef) -> Result<u64> {
+        match self {
+            AnyDriver::Postgres(d) => d.count(table).await,
+            AnyDriver::Mysql(d) => d.count(table).await,
+            AnyDriver::Redis(d) => d.count(table).await,
+            AnyDriver::Mongo(d) => d.count(table).await,
+            AnyDriver::Mock(d) => d.count(table).await,
+        }
+    }
+
+    pub async fn commit(&self, ops: &[WriteOp]) -> Result<u64> {
+        match self {
+            AnyDriver::Postgres(d) => d.commit(ops).await,
+            AnyDriver::Mysql(d) => d.commit(ops).await,
+            AnyDriver::Redis(d) => d.commit(ops).await,
+            AnyDriver::Mongo(d) => d.commit(ops).await,
+            AnyDriver::Mock(d) => d.commit(ops).await,
         }
     }
 }

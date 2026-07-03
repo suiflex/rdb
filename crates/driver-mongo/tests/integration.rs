@@ -35,6 +35,7 @@ async fn connect_insert_find_aggregate_schema_against_real_mongo() {
                 collection: "users".into(),
                 database: None,
                 limit: None,
+                skip: None,
                 kind: MongoKind::Insert(serde_json::json!({ "name": name, "age": age })),
             }))
             .await
@@ -47,6 +48,7 @@ async fn connect_insert_find_aggregate_schema_against_real_mongo() {
             collection: "users".into(),
             database: None,
             limit: None,
+            skip: None,
             kind: MongoKind::Find(serde_json::json!({ "age": { "$gte": 18 } })),
         }))
         .await
@@ -64,6 +66,7 @@ async fn connect_insert_find_aggregate_schema_against_real_mongo() {
             collection: "users".into(),
             database: None,
             limit: None,
+            skip: None,
             kind: MongoKind::Aggregate(vec![
                 serde_json::json!({ "$group": { "_id": null, "total": { "$sum": 1 } } }),
             ]),

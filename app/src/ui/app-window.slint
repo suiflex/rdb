@@ -1,39 +1,60 @@
 import { Theme } from "theme.slint";
 export { Theme }
+import { Tokens } from "tokens.slint";
+export { Tokens }
+import {
+    SearchCommandPill, WindowControls, BreadcrumbChip, GlyphButton
+} from "components.slint";
 import { Sidebar } from "sidebar.slint";
 import { ConnPicker } from "picker.slint";
 import { WorkArea } from "workarea.slint";
-import { CommandPalette, PaletteItem } from "palette.slint";
+import { CommandPalette, ListModal, PaletteItem } from "palette.slint";
 import { ConnForm } from "conn-form.slint";
 import { AppIcon } from "icons.slint";
 import {
     GridColumn,
     GridCell,
-    KvRow,
     TreeNode,
     ConnItem,
+    KvRow,
     TabItem,
     StructField,
+    Span,
 } from "structs.slint";
 
 export component MainWindow inherits Window {
-    title: "RDBS";
-    preferred-width: 1100px;
-    preferred-height: 720px;
+    title: "Tabula";
+    preferred-width: 1102px;
+    preferred-height: 702px;
     min-width: 400px;
     min-height: 320px;
-    background: Theme.bg;
+    no-frame: true;
+    background: Tokens.chrome;
+    default-font-size: 13px;
 
     // ----- status bar text (fed from Rust) -----
     in property <string> status-conn: "no connection";
     in property <string> status-latency: "";
     in property <string> status-rows: "";
 
+    // ----- window chrome -----
+    // Breadcrumb parts (workspace titlebar); empty db/schema hide their chip.
+    in property <string> bc-conn;
+    in property <string> bc-db;
+    in property <string> bc-schema;
+    callback win-minimize();
+    callback win-maximize();
+    callback win-close();
+    callback win-drag(length, length); // (dx, dy) while titlebar is dragged
+
     // ----- sidebar models -----
     in property <[ConnItem]> connections;
     in property <[TreeNode]> schema-tree;
     in property <int> selected-conn: -1;
     in property <string> active-table;
+    in property <int> active-count: -1;   // sidebar badge: rows in active table
+    in property <string> sort-text;
+    in property <[TreeNode]> query-tree;  // sidebar Queries/History rows
     in property <[string]> schema-list;
     in-out property <string> schema-name: "public";
     callback connect-clicked(int);
@@ -41,6 +62,21 @@ export component MainWindow inherits Window {
     callback open-table(string, string);   // (database, container)
     callback toggle-schema-node(string);
     callback select-schema(string);
+    callback filter-tree(string);
+    callback open-function(string);
+    callback open-query(string, int);
+    callback sidebar-mode-changed(int);
+
+    // ----- connections screen detail panel -----
+    in property <string> sel-name;
+    in property <string> sel-engine;
+    in property <string> sel-sub;
+    in property <bool> sel-local;
+    in property <[KvRow]> sel-rows;
+    in property <[string]> sel-tags;
+    in property <string> sel-footer;
+    callback select-conn(int);
+    callback test-conn-quick(int);
 
     // ----- view state: false = connection picker, true = workspace -----
     in property <bool> connected: false;
@@ -54,12 +90,18 @@ export component MainWindow inherits Window {
     in property <[GridCell]> grid-cells;
     in property <int> grid-col-count;
     in property <string> doc-json;
-    in property <[KvRow]> kv-rows;
     // result shape: 0 Table, 1 Documents, 2 KeyValue, 3 Affected
     in property <int> result-kind: 0;
     in property <bool> sql-capable: true;
     in property <string> result-status;
     in-out property <int> selected-row: 0;
+    in-out property <int> selected-col: -1;
+    in property <int> editing-row: -1;
+    in property <int> editing-col: -1;
+    callback select-cell(int, int);
+    callback edit-cell(int, int);
+    callback cell-edited(int, int, string);
+    callback edit-cancelled();
     in-out property <bool> show-structure: false;
     in property <[StructField]> structure-columns;
     in-out property <string> grid-filter;
@@ -67,6 +109,50 @@ export component MainWindow inherits Window {
     callback run-query();
     callback apply-filter();
     callback resize-grid-col(int, length);
+
+    // ----- SQL editor (lexer-highlighted) -----
+    in property <[[Span]]> editor-lines;
+    in property <int> cursor-line;
+    in property <int> cursor-col;
+    in property <string> query-label;
+    in property <string> results-meta;
+    in-out property <int> sidebar-mode: 0;
+    callback editor-key(string, bool, bool) -> bool;
+    callback editor-click-line(int);
+
+    // ----- function view -----
+    in property <bool> fn-mode: false;
+    in property <string> fn-name;
+    in property <[[Span]]> fn-lines;
+
+    // ----- open-database / open-connection modals -----
+    in-out property <bool> db-modal-open: false;
+    in-out property <bool> conn-modal-open: false;
+    in property <[PaletteItem]> db-items;
+    in property <[PaletteItem]> conn-items;
+    callback db-choose(int);
+    callback conn-choose(int);
+    callback open-db-modal();
+    callback open-conn-modal();
+
+    // ----- pagination + edit footer -----
+    in property <int> page-start;
+    in property <int> page-end;
+    in property <int> total-rows: -1;
+    in property <bool> can-prev;
+    in property <bool> can-next;
+    in property <int> pending-count;
+    in property <bool> grid-read-only: true;
+    in property <bool> status-error;
+    in-out property <string> limit-text: "300";
+    callback prev-page();
+    callback next-page();
+    callback refresh-page();
+    callback set-limit(string);
+    callback add-row();
+    callback mark-delete();
+    callback commit-edits();
+    callback discard-edits();
 
     // ----- tabs + palette -----
     in property <[TabItem]> tabs;
@@ -109,18 +195,43 @@ export component MainWindow inherits Window {
     callback form-cancel();
 
     // ----- layout splitters (local, no Rust binding) -----
-    property <length> sidebar-w: 260px;
+    property <length> sidebar-w: Tokens.sidebar-w;
 
     // ----- keyboard shortcuts -----
     FocusScope {
         key-pressed(e) => {
+            if (e.text == Key.Escape) {
+                if (root.db-modal-open || root.conn-modal-open || root.palette-open) {
+                    root.db-modal-open = false;
+                    root.conn-modal-open = false;
+                    if (root.palette-open) { root.toggle-palette(); }
+                    return accept;
+                }
+                return reject;
+            }
             if (e.modifiers.control || e.modifiers.meta) {
                 if (e.text == "k") {
                     root.toggle-palette();
                     return accept;
                 }
+                if (e.text == "o" && e.modifiers.shift) {
+                    root.open-db-modal();
+                    return accept;
+                }
+                if (e.text == "o") {
+                    root.open-conn-modal();
+                    return accept;
+                }
+                if (e.text == "p") {
+                    root.toggle-palette();
+                    return accept;
+                }
                 if (e.text == Key.Return) {
                     root.run-query();
+                    return accept;
+                }
+                if (e.text == "s") {
+                    root.commit-edits();
                     return accept;
                 }
                 if (e.text == "t") {
@@ -183,32 +294,148 @@ export component MainWindow inherits Window {
     VerticalLayout {
         spacing: 0px;
 
-        // ----- accent top border (per-connection color) -----
+        // ================= titlebar (44px, frameless chrome) =================
         Rectangle {
-            height: 2px;
-            background: Theme.accent;
+            height: Tokens.titlebar-h;
+            background: Tokens.chrome;
+
+            // whole-bar drag surface (buttons/chips sit above it)
+            drag-ta := TouchArea {
+                moved => {
+                    root.win-drag(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+                }
+            }
+
+            HorizontalLayout {
+                padding-left: Tokens.sp4;
+                padding-right: Tokens.sp3;
+                spacing: Tokens.sp3;
+
+                // --- left: brand (connections) or breadcrumb (workspace) ---
+                if !root.connected: HorizontalLayout {
+                    spacing: Tokens.sp3;
+                    alignment: start;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 26px;
+                            height: 26px;
+                            border-radius: Tokens.radius;
+                            background: Tokens.accent;
+                            Text {
+                                text: "T";
+                                color: white;
+                                font-size: 14px;
+                                font-weight: 700;
+                            }
+                        }
+                    }
+                    Text {
+                        text: "Tabula";
+                        color: Tokens.text;
+                        font-size: 15px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: "Connections";
+                        color: Tokens.text-dim;
+                        font-size: Tokens.font-md;
+                        vertical-alignment: center;
+                    }
+                }
+
+                if root.connected: HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    alignment: start;
+                    VerticalLayout {
+                        alignment: center;
+                        BreadcrumbChip {
+                            text: root.bc-conn;
+                            show-dot: true;
+                            mono: true;
+                        }
+                    }
+                    if root.bc-db != "": Text {
+                        text: "›";
+                        color: Tokens.text-faint;
+                        font-size: Tokens.font-md;
+                        vertical-alignment: center;
+                    }
+                    if root.bc-db != "": VerticalLayout {
+                        alignment: center;
+                        BreadcrumbChip { text: root.bc-db; mono: true; }
+                    }
+                    if root.bc-schema != "": Text {
+                        text: "›";
+                        color: Tokens.text-faint;
+                        font-size: Tokens.font-md;
+                        vertical-alignment: center;
+                    }
+                    if root.bc-schema != "": VerticalLayout {
+                        alignment: center;
+                        BreadcrumbChip { text: root.bc-schema; caret: true; mono: true; }
+                    }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                // --- right: ⌘K pill + aux buttons + window controls ---
+                VerticalLayout {
+                    alignment: center;
+                    SearchCommandPill {
+                        width: 248px;
+                        activated => { root.toggle-palette(); }
+                    }
+                }
+                if root.connected: VerticalLayout {
+                    alignment: center;
+                    HorizontalLayout {
+                        spacing: 2px;
+                        GlyphButton { glyph: "◷"; clicked => { root.select-tab(root.active-tab); } }
+                        GlyphButton { glyph: "▭"; glyph-size: 11px; clicked => { root.toggle-theme(); } }
+                        GlyphButton { glyph: "⚙"; clicked => { root.open-add-form(); } }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    WindowControls {
+                        minimize => { root.win-minimize(); }
+                        maximize => { root.win-maximize(); }
+                        close-window => { root.win-close(); }
+                    }
+                }
+            }
+
+            // bottom hairline under the titlebar
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                width: parent.width;
+                background: Tokens.border;
+            }
         }
 
         // ===== connection picker (shown while not connected) =====
         if !root.connected: ConnPicker {
+            vertical-stretch: 1;
             connections: root.connections;
             selected-conn: root.selected-conn;
             error: root.picker-error;
-            connect-clicked(i) => {
-                root.connect-clicked(i);
-            }
-            add-clicked() => {
-                root.open-add-form();
-            }
-            edit-clicked(i) => {
-                root.open-edit-form(i);
-            }
-            toggle-group(g) => {
-                root.toggle-group(g);
-            }
-            filter(t) => {
-                root.conn-filter(t);
-            }
+            sel-name: root.sel-name;
+            sel-engine: root.sel-engine;
+            sel-sub: root.sel-sub;
+            sel-local: root.sel-local;
+            sel-rows: root.sel-rows;
+            sel-tags: root.sel-tags;
+            sel-footer: root.sel-footer;
+            select-conn(i) => { root.select-conn(i); }
+            connect-clicked(i) => { root.connect-clicked(i); }
+            test-clicked(i) => { root.test-conn-quick(i); }
+            add-clicked() => { root.open-add-form(); }
+            edit-clicked(i) => { root.open-edit-form(i); }
+            toggle-group(g) => { root.toggle-group(g); }
+            filter(t) => { root.conn-filter(t); }
         }
 
         // ===== workspace (shown once connected) =====
@@ -229,10 +456,22 @@ export component MainWindow inherits Window {
                     tree: root.schema-tree;
                     conn-name: root.status-conn;
                     active-table: root.active-table;
+                    active-count: root.total-rows;
+                    query-tree: root.query-tree;
+                    mode <=> root.sidebar-mode;
                     schema-list: root.schema-list;
                     schema-name <=> root.schema-name;
                     disconnect() => {
                         root.disconnect();
+                    }
+                    open-function(f) => {
+                        root.open-function(f);
+                    }
+                    open-query(q, i) => {
+                        root.open-query(q, i);
+                    }
+                    mode-changed(m) => {
+                        root.sidebar-mode-changed(m);
                     }
                     open-table(db, t) => {
                         root.open-table(db, t);
@@ -243,12 +482,15 @@ export component MainWindow inherits Window {
                     select-schema(s) => {
                         root.select-schema(s);
                     }
+                    filter-tree(t) => {
+                        root.filter-tree(t);
+                    }
                 }
 
                 // draggable vertical splitter (sidebar width)
                 Rectangle {
-                    width: 4px;
-                    background: split-h-area.has-hover || split-h-area.pressed ? Theme.accent : Theme.hairline;
+                    width: 1px;
+                    background: split-h-area.has-hover || split-h-area.pressed ? Tokens.accent : Tokens.border;
                     split-h-area := TouchArea {
                         mouse-cursor: col-resize;
                         moved => {
@@ -261,43 +503,67 @@ export component MainWindow inherits Window {
                 VerticalLayout {
                     horizontal-stretch: 1;
                     spacing: 0px;
-                    // ----- tab bar -----
+                    // ----- doc-tab row (36px, tabs h30, active = card + accent top inset) -----
                     Rectangle {
-                        height: 38px;
-                        background: Theme.surface;
+                        height: Tokens.doc-tab-row-h;
+                        background: Tokens.chrome;
                         HorizontalLayout {
-                            padding-left: Theme.sp2;
-                            padding-top: Theme.sp1;
-                            padding-bottom: 0px;
-                            spacing: Theme.sp1;
+                            padding-left: Tokens.sp2;
+                            padding-top: Tokens.doc-tab-row-h - Tokens.doc-tab-h;
+                            spacing: 2px;
                             for tab[i] in root.tabs: Rectangle {
-                                width: 150px;
-                                border-top-left-radius: Theme.radius-control;
-                                border-top-right-radius: Theme.radius-control;
-                                background: i == root.active-tab ? Theme.bg : (tab-ta.has-hover ? Theme.surface-2 : transparent);
+                                width: min(170px, tab-content.preferred-width + 2 * Tokens.sp3);
+                                height: Tokens.doc-tab-h;
+                                background: i == root.active-tab ? Tokens.card
+                                    : (tab-ta.has-hover ? Tokens.card.with-alpha(0.5) : transparent);
+                                border-radius: 0;
                                 tab-ta := TouchArea {
                                     clicked => {
                                         root.select-tab(i);
                                     }
                                 }
 
-                                HorizontalLayout {
-                                    padding-left: Theme.sp2;
-                                    padding-right: Theme.sp1;
-                                    spacing: Theme.sp1;
-                                    AppIcon {
-                                        name: "terminal";
-                                        size: Theme.icon-sm;
-                                        color: i == root.active-tab ? Theme.accent : Theme.text-faint;
-                                    }
+                                // active tab: 2px accent top inset
+                                if i == root.active-tab: Rectangle {
+                                    y: 0;
+                                    height: 2px;
+                                    width: parent.width;
+                                    background: Tokens.accent;
+                                }
 
+                                tab-content := HorizontalLayout {
+                                    padding-left: Tokens.sp3;
+                                    padding-right: Tokens.sp1;
+                                    spacing: 6px;
+                                    if tab.kind == "table": VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 8px;
+                                            height: 8px;
+                                            border-radius: 2px;
+                                            background: i == root.active-tab ? Tokens.accent : Tokens.text-faint;
+                                        }
+                                    }
+                                    if tab.kind == "sql": Text {
+                                        text: ">_";
+                                        color: Tokens.text-faint;
+                                        font-size: 9px;
+                                        font-family: Tokens.mono;
+                                        vertical-alignment: center;
+                                    }
+                                    if tab.kind == "function": Text {
+                                        text: "ƒ";
+                                        color: Tokens.warn;
+                                        font-size: Tokens.font-sm;
+                                        vertical-alignment: center;
+                                    }
                                     Text {
                                         vertical-alignment: center;
                                         horizontal-stretch: 1;
                                         text: tab.title;
-                                        color: i == root.active-tab ? Theme.text : Theme.text-dim;
-                                        font-size: Theme.font-label;
-                                        font-weight: i == root.active-tab ? 600 : 400;
+                                        color: i == root.active-tab ? Tokens.text : Tokens.text-dim;
+                                        font-size: Tokens.font-sm;
+                                        font-weight: i == root.active-tab ? Tokens.weight-emphasis : 400;
                                         overflow: elide;
                                     }
                                     // close affordance (active or hovered tab)
@@ -305,8 +571,8 @@ export component MainWindow inherits Window {
                                         width: 18px;
                                         height: 18px;
                                         y: (parent.height - self.height) / 2;
-                                        border-radius: Theme.radius-control;
-                                        background: close-ta.has-hover ? Theme.surface-2 : transparent;
+                                        border-radius: 4px;
+                                        background: close-ta.has-hover ? Tokens.error : transparent;
                                         visible: i == root.active-tab || tab-ta.has-hover;
                                         close-ta := TouchArea {
                                             clicked => {
@@ -317,24 +583,18 @@ export component MainWindow inherits Window {
                                         AppIcon {
                                             name: "close";
                                             size: 11px;
-                                            color: Theme.text-dim;
+                                            color: close-ta.has-hover ? white : Tokens.text-dim;
                                         }
                                     }
-                                }
-                                // active-tab accent underline
-                                if i == root.active-tab: Rectangle {
-                                    y: parent.height - self.height;
-                                    height: 2px;
-                                    background: Theme.accent;
                                 }
                             }
                             // new-tab button
                             Rectangle {
                                 width: 30px;
-                                y: (parent.height - self.height) / 2 + Theme.sp1 / 2;
+                                y: (parent.height - self.height) / 2;
                                 height: 26px;
-                                border-radius: Theme.radius-control;
-                                background: add-ta.has-hover ? Theme.surface-2 : transparent;
+                                border-radius: Tokens.radius;
+                                background: add-ta.has-hover ? Tokens.border : transparent;
                                 add-ta := TouchArea {
                                     clicked => {
                                         root.new-tab();
@@ -343,8 +603,8 @@ export component MainWindow inherits Window {
 
                                 AppIcon {
                                     name: "plus";
-                                    size: Theme.icon-sm;
-                                    color: Theme.text-dim;
+                                    size: Tokens.icon-sm;
+                                    color: Tokens.text-dim;
                                 }
                             }
                             // trailing filler: gives the tab bar an infinite max-width
@@ -357,25 +617,49 @@ export component MainWindow inherits Window {
 
                     Rectangle {
                         height: 1px;
-                        background: Theme.hairline;
+                        background: Tokens.border;
                     }
 
                     WorkArea {
+                        vertical-stretch: 1;
                         query-text <=> root.query-text;
                         columns: root.grid-columns;
                         cells: root.grid-cells;
                         col-count: root.grid-col-count;
                         col-widths: root.grid-col-widths;
                         doc-json: root.doc-json;
-                        kv-rows: root.kv-rows;
                         result-kind: root.result-kind;
                         sql-capable: root.sql-capable;
                         result-status: root.result-status;
+                        status-error: root.status-error;
+                        status-latency: root.status-latency;
+                        sort-text: root.sort-text;
+                        editor-lines: root.editor-lines;
+                        cursor-line: root.cursor-line;
+                        cursor-col: root.cursor-col;
+                        query-label: root.query-label;
+                        results-meta: root.results-meta;
+                        fn-mode: root.fn-mode;
+                        fn-name: root.fn-name;
+                        fn-lines: root.fn-lines;
+                        editor-key(t, cmd, shift) => { root.editor-key(t, cmd, shift) }
+                        editor-click-line(l) => { root.editor-click-line(l); }
                         selected-row: root.selected-row;
+                        selected-col: root.selected-col;
+                        editing-row: root.editing-row;
+                        editing-col: root.editing-col;
                         show-structure <=> root.show-structure;
                         structure-columns: root.structure-columns;
                         grid-filter <=> root.grid-filter;
                         active-table: root.active-table;
+                        page-start: root.page-start;
+                        page-end: root.page-end;
+                        total-rows: root.total-rows;
+                        can-prev: root.can-prev;
+                        can-next: root.can-next;
+                        pending-count: root.pending-count;
+                        read-only: root.grid-read-only;
+                        limit-text <=> root.limit-text;
                         run => {
                             root.run-query();
                         }
@@ -388,71 +672,41 @@ export component MainWindow inherits Window {
                         resize-col(i, d) => {
                             root.resize-grid-col(i, d);
                         }
-                    }
-                }
-            }
-
-            // ----- status bar -----
-            Rectangle {
-                height: 1px;
-                background: Theme.hairline;
-            }
-
-            Rectangle {
-                height: 28px;
-                background: Theme.surface;
-                HorizontalLayout {
-                    padding-left: Theme.sp3;
-                    padding-right: Theme.sp2;
-                    spacing: Theme.sp2;
-                    // live status dot
-                    Rectangle {
-                        width: 7px;
-                        height: 7px;
-                        border-radius: 4px;
-                        y: (parent.height - self.height) / 2;
-                        background: #22c55e;
-                    }
-
-                    Text {
-                        vertical-alignment: center;
-                        text: root.status-conn;
-                        color: Theme.text;
-                        font-size: Theme.font-label;
-                        font-weight: 600;
-                    }
-
-                    Text {
-                        vertical-alignment: center;
-                        text: root.status-latency;
-                        color: Theme.text-dim;
-                        font-size: Theme.font-caption;
-                    }
-
-                    Rectangle { } // spacer
-                    Text {
-                        vertical-alignment: center;
-                        text: root.status-rows;
-                        color: Theme.text-dim;
-                        font-size: Theme.font-caption;
-                    }
-                    // theme toggle
-                    Rectangle {
-                        width: 30px;
-                        height: 22px;
-                        y: (parent.height - self.height) / 2;
-                        border-radius: Theme.radius-control;
-                        background: theme-ta.has-hover ? Theme.surface-2 : transparent;
-                        theme-ta := TouchArea {
-                            clicked => {
-                                root.toggle-theme();
-                            }
+                        select-cell(r, c) => {
+                            root.select-cell(r, c);
                         }
-
-                        AppIcon {
-                            name: Theme.dark ? "sun" : "moon";
-                            size: Theme.icon-sm;
-                            color: Theme.text-dim;
+                        edit-cell(r, c) => {
+                            root.edit-cell(r, c);
+                        }
+                        cell-edited(r, c, t) => {
+                            root.cell-edited(r, c, t);
+                        }
+                        edit-cancelled() => {
+                            root.edit-cancelled();
+                        }
+                        prev-page() => {
+                            root.prev-page();
+                        }
+                        next-page() => {
+                            root.next-page();
+                        }
+                        refresh-page() => {
+                            root.refresh-page();
+                        }
+                        set-limit(t) => {
+                            root.set-limit(t);
+                        }
+                        add-row() => {
+                            root.add-row();
+                        }
+                        mark-delete() => {
+                            root.mark-delete();
+                        }
+                        commit-edits() => {
+                            root.commit-edits();
+                        }
+                        discard-edits() => {
+                            root.discard-edits();
                         }
                     }
                 }
@@ -469,6 +723,46 @@ export component MainWindow inherits Window {
         }
         choose(i) => {
             root.palette-choose(i);
+        }
+        dismiss => {
+            if (root.palette-open) { root.toggle-palette(); }
+        }
+        new-item => {
+            root.open-add-form();
+        }
+    }
+
+    // ----- Open database (⌘⇧O) -----
+    ListModal {
+        title: "Open database";
+        placeholder: "Search for database...";
+        open: root.db-modal-open;
+        items: root.db-items;
+        choose(i) => {
+            root.db-choose(i);
+        }
+        dismiss => {
+            root.db-modal-open = false;
+        }
+        new-item => {
+            root.open-add-form();
+        }
+    }
+
+    // ----- Open Connection (⌘O) -----
+    ListModal {
+        title: "Open Connection";
+        placeholder: "Search for connection...";
+        open: root.conn-modal-open;
+        items: root.conn-items;
+        choose(i) => {
+            root.conn-choose(i);
+        }
+        dismiss => {
+            root.conn-modal-open = false;
+        }
+        new-item => {
+            root.open-add-form();
         }
     }
 

@@ -5,6 +5,7 @@ use crate::error::Result;
 use crate::query::Query;
 use crate::result::ResultSet;
 use crate::schema::Schema;
+use crate::write::{TableRef, WriteOp};
 
 /// The single interface the UI depends on. The UI NEVER imports a concrete
 /// driver crate — adding an engine is a new crate that implements this trait.
@@ -33,6 +34,24 @@ pub trait Driver: Send + Sync {
     /// Run a query. Drivers handle the `Query` variant(s) they support and
     /// return `RdbsError::UnsupportedQuery` for the rest.
     async fn query(&self, q: &Query) -> Result<ResultSet>;
+
+    /// Primary-key column names of `table` (row identity for editing). An
+    /// empty vec means the container is not editable. Default: not editable.
+    async fn primary_key(&self, _table: &TableRef) -> Result<Vec<String>> {
+        Ok(Vec::new())
+    }
+
+    /// Total rows/members of `table`, for the pagination footer.
+    async fn count(&self, _table: &TableRef) -> Result<u64> {
+        Err(crate::error::RdbsError::UnsupportedQuery)
+    }
+
+    /// Apply buffered writes. SQL engines run the batch in one transaction
+    /// (all-or-nothing); document/KV engines apply sequentially and stop at
+    /// the first failure. Returns the number of ops applied.
+    async fn commit(&self, _ops: &[WriteOp]) -> Result<u64> {
+        Err(crate::error::RdbsError::UnsupportedQuery)
+    }
 
     /// Close the connection, consuming the driver.
     async fn close(self) -> Result<()>
@@ -69,6 +88,15 @@ mod tests {
         async fn close(self) -> crate::error::Result<()> {
             Ok(())
         }
+    }
+
+    #[tokio::test]
+    async fn write_api_defaults_are_read_only() {
+        let d = FakeDriver;
+        let t = crate::write::TableRef::named("users");
+        assert!(d.primary_key(&t).await.unwrap().is_empty());
+        assert!(d.count(&t).await.is_err());
+        assert!(d.commit(&[]).await.is_err());
     }
 
     #[tokio::test]

@@ -54,10 +54,16 @@ fn value_to_redis(value: Value) -> RedisValue {
 /// Rows for a list/set browse: index → member. Presented as key/value where the
 /// key column is the position and the value is the member.
 pub fn pairs_from_members(members: Vec<String>) -> Vec<(String, RedisValue)> {
+    pairs_from_members_at(members, 0)
+}
+
+/// Like [`pairs_from_members`] but numbering from `start`, so a windowed
+/// LRANGE page still shows (and edits by) absolute list indices.
+pub fn pairs_from_members_at(members: Vec<String>, start: usize) -> Vec<(String, RedisValue)> {
     members
         .into_iter()
         .enumerate()
-        .map(|(i, m)| (i.to_string(), RedisValue::Str(m)))
+        .map(|(i, m)| ((start + i).to_string(), RedisValue::Str(m)))
         .collect()
 }
 
@@ -158,6 +164,13 @@ mod tests {
         assert!(matches!(rows[0].1, RedisValue::Str(ref s) if s == "x"));
         assert_eq!(rows[1].0, "1");
         assert!(matches!(rows[1].1, RedisValue::Str(ref s) if s == "y"));
+    }
+
+    #[test]
+    fn members_at_offset_use_absolute_indices() {
+        let rows = pairs_from_members_at(vec!["x".into(), "y".into()], 300);
+        assert_eq!(rows[0].0, "300");
+        assert_eq!(rows[1].0, "301");
     }
 
     #[test]

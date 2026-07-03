@@ -104,6 +104,7 @@ async fn non_sql_queries_are_unsupported() {
             collection: "c".into(),
             database: None,
             limit: None,
+            skip: None,
             kind: MongoKind::Find(serde_json::json!({})),
         }))
         .await;

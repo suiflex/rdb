@@ -1,0 +1,1576 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><meta name="design_doc_mode" content="canvas"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"><style>body{margin:0;background:#f0eee9;font-family:system-ui,sans-serif}.dv-turn{padding:40px 44px 32px;border-bottom:1px solid rgba(0,0,0,.08);scroll-margin-top:16px}.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 20px}.dv-tid{font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:#1a1a1a;color:#fff;border-radius:4px;text-decoration:none}.dv-tname{font:600 13px/1.2 system-ui,sans-serif;color:#1a1a1a}.dv-opts{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}.dv-opt{flex:none;display:flex;flex-direction:column;gap:9px;scroll-margin-top:16px}.dv-oid{font:600 10.5px ui-monospace,Menlo,monospace;padding:3px 7px;background:rgba(0,0,0,.08);color:#1a1a1a;border-radius:5px;text-decoration:none}.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 system-ui,sans-serif;color:rgba(0,0,0,.55)}.dv-card{max-width:100%;background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden}.dv-opt:target .dv-oid{background:#2a78d6;color:#fff}.dv-next{margin:22px 0 0;font:12px/1.5 system-ui,sans-serif;color:rgba(0,0,0,.5)}</style></helmet>
+
+<section class="dv-turn" id="t4">
+<div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">Tabula — identitas sendiri: chrome netral hangat, breadcrumb chip, tab kiri, seleksi garis-aksen, panel detail koneksi. Fungsi setara, wajah berbeda.</span></div>
+<div class="dv-opts">
+
+<!-- ============ 4a : CONNECTIONS REDESIGNED ============ -->
+<div class="dv-opt" id="4a">
+<div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Connections — daftar + panel detail (bukan lagi splash logo)</div>
+<div class="dv-card" style="width:1100px">
+<div style="width:1100px;height:700px;display:flex;flex-direction:column;background:#f5f4f1;font-family:system-ui,-apple-system,sans-serif;color:#23242a">
+  <div style="height:44px;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid rgba(28,25,20,.09)">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="width:19px;height:19px;border-radius:6px;background:#2c5fd8;display:grid;place-items:center;color:#fff;font:600 11px 'IBM Plex Mono',monospace">T</div>
+      <span style="font:600 13px system-ui;color:#23242a">Tabula</span>
+      <span style="font:11px system-ui;color:#a6a9b0">Connections</span>
+    </div>
+    <div style="flex:1"></div>
+    <div style="display:flex;align-items:center;gap:8px;width:250px;height:28px;padding:0 11px;background:#fff;border:1px solid rgba(28,25,20,.11);border-radius:8px;font:11.5px system-ui;color:#a6a9b0">⌕ Search or run a command…<span style="margin-left:auto;font:10px 'IBM Plex Mono',monospace;padding:1px 5px;border:1px solid rgba(28,25,20,.13);border-radius:4px;color:#71747c">⌘K</span></div>
+    <div style="display:flex;gap:2px;color:#71747c;font:13px system-ui">
+      <div style="width:28px;height:26px;display:grid;place-items:center;border-radius:6px" style-hover="background:rgba(28,25,20,.06)">–</div>
+      <div style="width:28px;height:26px;display:grid;place-items:center;border-radius:6px;font-size:10px" style-hover="background:rgba(28,25,20,.06)">▢</div>
+      <div style="width:28px;height:26px;display:grid;place-items:center;border-radius:6px" style-hover="background:#e05a4e;color:#fff">✕</div>
+    </div>
+  </div>
+  <div style="flex:1;display:flex;min-height:0">
+    <!-- list -->
+    <div style="width:350px;display:flex;flex-direction:column;background:#f0efec;border-right:1px solid rgba(28,25,20,.09)">
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 12px 6px">
+        <div style="flex:1;display:flex;align-items:center;gap:7px;height:28px;padding:0 10px;background:#fff;border:1px solid rgba(28,25,20,.11);border-radius:8px;font:11.5px system-ui;color:#a6a9b0">⌕ Filter connections…</div>
+        <div style="width:28px;height:28px;display:grid;place-items:center;background:#fff;border:1px solid rgba(28,25,20,.11);border-radius:8px;color:#71747c" style-hover="color:#2c5fd8;border-color:#2c5fd8">＋</div>
+      </div>
+      <div style="flex:1;overflow:hidden;padding:4px 8px">
+        <div style="display:flex;align-items:center;gap:7px;height:28px;padding:0 8px;font:600 11px system-ui;letter-spacing:.06em;color:#8b8e95">▸ OSS <span style="font:10px 'IBM Plex Mono',monospace;color:#a6a9b0">3</span></div>
+        <div style="display:flex;align-items:center;gap:7px;height:28px;padding:0 8px;font:600 11px system-ui;letter-spacing:.06em;color:#8b8e95">▸ LOCAL <span style="font:10px 'IBM Plex Mono',monospace;color:#a6a9b0">4</span></div>
+        <div style="display:flex;align-items:center;gap:7px;height:28px;padding:0 8px;font:600 11px system-ui;letter-spacing:.06em;color:#8b8e95">▾ PROFIN <span style="font:10px 'IBM Plex Mono',monospace;color:#a6a9b0">5</span></div>
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <div style="display:flex;align-items:center;gap:10px;height:40px;padding:0 10px;border-radius:7px" style-hover="background:rgba(28,25,20,.04)">
+            <span style="width:24px;height:24px;border-radius:7px;background:#3577d4;display:grid;place-items:center;color:#fff;font:600 9px system-ui;flex:none">Pg</span>
+            <div style="min-width:0"><div style="font:600 12px system-ui;color:#23242a">portfolio</div><div style="font:10.5px 'IBM Plex Mono',monospace;color:#a6a9b0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">128.199.74.52 : portfolio</div></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;height:40px;padding:0 10px;border-radius:7px;background:#e9effc;box-shadow:inset 2px 0 0 #2c5fd8">
+            <span style="width:24px;height:24px;border-radius:7px;background:#3577d4;display:grid;place-items:center;color:#fff;font:600 9px system-ui;flex:none">Pg</span>
+            <div style="min-width:0;flex:1"><div style="font:600 12px system-ui;color:#1d3f8f">bot ai tele</div><div style="font:10.5px 'IBM Plex Mono',monospace;color:#7d94c9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">128.199.74.52 : ai_bot_fintech</div></div>
+            <span style="font:600 9px system-ui;letter-spacing:.06em;padding:2px 6px;border:1px solid #9fbd6f;border-radius:9px;color:#4f7d24">LOCAL</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;height:40px;padding:0 10px;border-radius:7px" style-hover="background:rgba(28,25,20,.04)">
+            <span style="width:24px;height:24px;border-radius:7px;background:#3577d4;display:grid;place-items:center;color:#fff;font:600 9px system-ui;flex:none">Pg</span>
+            <div style="min-width:0"><div style="font:600 12px system-ui;color:#23242a">profin</div><div style="font:10.5px 'IBM Plex Mono',monospace;color:#a6a9b0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">128.199.74.52 : profin</div></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;height:40px;padding:0 10px;border-radius:7px" style-hover="background:rgba(28,25,20,.04)">
+            <span style="width:24px;height:24px;border-radius:7px;background:#3577d4;display:grid;place-items:center;color:#fff;font:600 9px system-ui;flex:none">Pg</span>
+            <div style="min-width:0"><div style="font:600 12px system-ui;color:#23242a">POS</div><div style="font:10.5px 'IBM Plex Mono',monospace;color:#a6a9b0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">128.199.74.52 : pos</div></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;height:40px;padding:0 10px;border-radius:7px" style-hover="background:rgba(28,25,20,.04)">
+            <span style="width:24px;height:24px;border-radius:7px;background:#b93c2e;display:grid;place-items:center;color:#fff;font:600 9px system-ui;flex:none">Re</span>
+            <div style="min-width:0"><div style="font:600 12px system-ui;color:#23242a">redis portfolio</div><div style="font:10.5px 'IBM Plex Mono',monospace;color:#a6a9b0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">128.199.74.52</div></div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:7px;height:28px;padding:0 8px;font:600 11px system-ui;letter-spacing:.06em;color:#8b8e95">▸ SPMB <span style="font:10px 'IBM Plex Mono',monospace;color:#a6a9b0">6</span></div>
+        <div style="display:flex;align-items:center;gap:7px;height:28px;padding:0 8px;font:600 11px system-ui;letter-spacing:.06em;color:#8b8e95">▸ UNGROUPED <span style="font:10px 'IBM Plex Mono',monospace;color:#a6a9b0">9</span></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;padding:9px 14px;border-top:1px solid rgba(28,25,20,.09);font:11.5px system-ui;color:#71747c">
+        <span style-hover="color:#2c5fd8">＋ New Connection</span>
+        <span style="flex:1"></span>
+        <span style-hover="color:#2c5fd8">Import</span>
+        <span style-hover="color:#2c5fd8">Backup</span>
+      </div>
+    </div>
+    <!-- detail -->
+    <div style="flex:1;display:flex;flex-direction:column;background:#fbfaf8">
+      <div style="flex:1;padding:30px 34px">
+        <div style="display:flex;align-items:center;gap:14px">
+          <span style="width:44px;height:44px;border-radius:12px;background:#3577d4;display:grid;place-items:center;color:#fff;font:600 15px system-ui">Pg</span>
+          <div>
+            <div style="display:flex;align-items:center;gap:9px"><span style="font:600 19px system-ui;color:#23242a">bot ai tele</span><span style="font:600 9px system-ui;letter-spacing:.06em;padding:2px 7px;border:1px solid #9fbd6f;border-radius:9px;color:#4f7d24">LOCAL</span></div>
+            <div style="font:11.5px system-ui;color:#8b8e95;margin-top:2px">PostgreSQL · grup profin</div>
+          </div>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:6px;height:30px;padding:0 16px;background:#2c5fd8;border-radius:8px;font:600 12px system-ui;color:#fff" style-hover="background:#2451ba">Connect</div>
+          <div style="display:flex;align-items:center;height:30px;padding:0 13px;background:#fff;border:1px solid rgba(28,25,20,.13);border-radius:8px;font:12px system-ui;color:#3a3d42" style-hover="border-color:#2c5fd8">Test</div>
+          <div style="display:flex;align-items:center;height:30px;padding:0 13px;background:#fff;border:1px solid rgba(28,25,20,.13);border-radius:8px;font:12px system-ui;color:#3a3d42" style-hover="border-color:#2c5fd8">Edit</div>
+        </div>
+        <div style="margin-top:26px;display:grid;grid-template-columns:110px 1fr;gap:0;border:1px solid rgba(28,25,20,.09);border-radius:10px;background:#fff;overflow:hidden">
+          <div style="padding:9px 14px;font:11px system-ui;color:#8b8e95;border-bottom:1px solid rgba(28,25,20,.06)">Host</div><div style="padding:9px 14px;font:11.5px 'IBM Plex Mono',monospace;color:#23242a;border-bottom:1px solid rgba(28,25,20,.06)">128.199.74.52</div>
+          <div style="padding:9px 14px;font:11px system-ui;color:#8b8e95;border-bottom:1px solid rgba(28,25,20,.06)">Port</div><div style="padding:9px 14px;font:11.5px 'IBM Plex Mono',monospace;color:#23242a;border-bottom:1px solid rgba(28,25,20,.06)">5432</div>
+          <div style="padding:9px 14px;font:11px system-ui;color:#8b8e95;border-bottom:1px solid rgba(28,25,20,.06)">Database</div><div style="padding:9px 14px;font:11.5px 'IBM Plex Mono',monospace;color:#23242a;border-bottom:1px solid rgba(28,25,20,.06)">ai_bot_fintech</div>
+          <div style="padding:9px 14px;font:11px system-ui;color:#8b8e95;border-bottom:1px solid rgba(28,25,20,.06)">User</div><div style="padding:9px 14px;font:11.5px 'IBM Plex Mono',monospace;color:#23242a;border-bottom:1px solid rgba(28,25,20,.06)">fintech_admin</div>
+          <div style="padding:9px 14px;font:11px system-ui;color:#8b8e95;border-bottom:1px solid rgba(28,25,20,.06)">SSL</div><div style="padding:9px 14px;font:11.5px 'IBM Plex Mono',monospace;color:#23242a;border-bottom:1px solid rgba(28,25,20,.06)">require</div>
+          <div style="padding:9px 14px;font:11px system-ui;color:#8b8e95">Server</div><div style="padding:9px 14px;font:11.5px 'IBM Plex Mono',monospace;color:#23242a">PostgreSQL 16.14</div>
+        </div>
+        <div style="margin-top:14px;display:flex;gap:8px">
+          <span style="font:11px 'IBM Plex Mono',monospace;padding:3px 9px;background:#eef0f4;border-radius:10px;color:#5a5e66">profin</span>
+          <span style="font:11px 'IBM Plex Mono',monospace;padding:3px 9px;background:#eef0f4;border-radius:10px;color:#5a5e66">fintech</span>
+        </div>
+      </div>
+      <div style="padding:10px 34px;border-top:1px solid rgba(28,25,20,.07);font:11px system-ui;color:#a6a9b0">Terakhir terhubung · 2 menit lalu &nbsp;·&nbsp; Tabula 1.2.0 open source</div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+<!-- ============ 4b : DATA GRID REDESIGNED ============ -->
+<div class="dv-opt" id="4b">
+<div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Data grid — breadcrumb chip, tab kiri, seleksi garis-aksen</div>
+<div class="dv-card" style="width:1440px">
+<div style="width:1440px;height:720px;display:flex;flex-direction:column;background:#f5f4f1;font-family:system-ui,-apple-system,sans-serif;color:#23242a">
+  <div style="height:44px;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid rgba(28,25,20,.09)">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="width:19px;height:19px;border-radius:6px;background:#2c5fd8;display:grid;place-items:center;color:#fff;font:600 11px 'IBM Plex Mono',monospace">T</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:4px;font:11.5px 'IBM Plex Mono',monospace">
+      <div style="display:flex;align-items:center;gap:6px;height:26px;padding:0 10px;background:#fff;border:1px solid rgba(28,25,20,.11);border-radius:7px;color:#3a3d42"><span style="width:7px;height:7px;border-radius:50%;background:#239d5c"></span>bot ai tele</div>
+      <span style="color:#c2c4c9">›</span>
+      <div style="display:flex;align-items:center;height:26px;padding:0 10px;background:#fff;border:1px solid rgba(28,25,20,.11);border-radius:7px;color:#3a3d42">ai_bot_fintech</div>
+      <span style="color:#c2c4c9">›</span>
+      <div style="display:flex;align-items:center;gap:5px;height:26px;padding:0 10px;background:#fff;border:1px solid rgba(28,25,20,.11);border-radius:7px;color:#3a3d42">public <span style="color:#a6a9b0;font-size:9px">▾</span></div>
+    </div>
+    <div style="flex:1"></div>
+    <div style="display:flex;align-items:center;gap:8px;width:250px;height:28px;padding:0 11px;background:#fff;border:1px solid rgba(28,25,20,.11);border-radius:8px;font:11.5px system-ui;color:#a6a9b0">⌕ Search or run a command…<span style="margin-left:auto;font:10px 'IBM Plex Mono',monospace;padding:1px 5px;border:1px solid rgba(28,25,20,.13);border-radius:4px;color:#71747c">⌘K</span></div>
+    <div style="display:flex;gap:2px;color:#71747c;font-size:13px">
+      <div style="width:28px;height:26px;display:grid;place-items:center;border-radius:6px" style-hover="background:rgba(28,25,20,.06)">◷</div>
+      <div style="width:28px;height:26px;display:grid;place-items:center;border-radius:6px" style-hover="background:rgba(28,25,20,.06)">▭</div>
+      <div style="width:28px;height:26px;display:grid;place-items:center;border-radius:6px" style-hover="background:rgba(28,25,20,.06)">⚙</div>
+    </div>
+    <div style="display:flex;gap:2px;color:#71747c;font:13px system-ui;border-left:1px solid rgba(28,25,20,.09);padding-left:8px">
+      <div style="width:28px;height:26px;display:grid;place-items:center;border-radius:6px" style-hover="background:rgba(28,25,20,.06)">–</div>
+      <div style="width:28px;height:26px;display:grid;place-items:center;border-radius:6px;font-size:10px" style-hover="background:rgba(28,25,20,.06)">▢</div>
+      <div style="width:28px;height:26px;display:grid;place-items:center;border-radius:6px" style-hover="background:#e05a4e;color:#fff">✕</div>
+    </div>
+  </div>
+  <div style="flex:1;display:flex;min-height:0">
+    <!-- sidebar -->
+    <div style="width:242px;display:flex;flex-direction:column;background:#f0efec;border-right:1px solid rgba(28,25,20,.09)">
+      <div style="display:flex;gap:0;padding:8px 12px 0;border-bottom:1px solid rgba(28,25,20,.09)">
+        <div style="padding:5px 10px 7px;font:600 11.5px system-ui;color:#2c5fd8;box-shadow:inset 0 -2px 0 #2c5fd8">Items</div>
+        <div style="padding:5px 10px 7px;font:11.5px system-ui;color:#8b8e95" style-hover="color:#3a3d42">Queries</div>
+        <div style="padding:5px 10px 7px;font:11.5px system-ui;color:#8b8e95" style-hover="color:#3a3d42">History</div>
+      </div>
+      <div style="padding:8px 10px 4px">
+        <div style="display:flex;align-items:center;gap:7px;height:27px;padding:0 9px;background:#fff;border:1px solid rgba(28,25,20,.11);border-radius:7px;font:11.5px system-ui;color:#a6a9b0">⌕ Filter items… <span style="margin-left:auto;font:10px 'IBM Plex Mono',monospace;color:#c2c4c9">⌘P</span></div>
+      </div>
+      <div style="flex:1;overflow:hidden;padding:2px 8px">
+        <div style="padding:6px 6px 2px;font:600 10px system-ui;letter-spacing:.08em;color:#8b8e95">FUNCTIONS · 10</div>
+        <sc-for list="{{ fns }}" as="f" hint-placeholder-count="10">
+          <div style="display:flex;align-items:center;gap:7px;height:21px;padding:0 6px;border-radius:5px;font:11.5px 'IBM Plex Mono',monospace;color:#4a4d54" style-hover="background:rgba(28,25,20,.045)"><span style="color:#d9962f;font:600 11px 'IBM Plex Mono',monospace;width:11px;text-align:center">ƒ</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.n }}</span></div>
+        </sc-for>
+        <div style="padding:8px 6px 2px;font:600 10px system-ui;letter-spacing:.08em;color:#8b8e95">TABLES · 5</div>
+        <div style="display:flex;align-items:center;gap:7px;height:23px;padding:0 6px;border-radius:5px;font:600 11.5px 'IBM Plex Mono',monospace;background:#e9effc;box-shadow:inset 2px 0 0 #2c5fd8;color:#1d3f8f"><span style="font-size:10px;width:11px;text-align:center;color:#2c5fd8">▦</span>emiten<span style="margin-left:auto;font:400 10px 'IBM Plex Mono',monospace;color:#7d94c9">986</span></div>
+        <div style="display:flex;align-items:center;gap:7px;height:21px;padding:0 6px;border-radius:5px;font:11.5px 'IBM Plex Mono',monospace;color:#4a4d54" style-hover="background:rgba(28,25,20,.045)"><span style="color:#8b8e95;font-size:10px;width:11px;text-align:center">▦</span>referral_sources</div>
+        <div style="display:flex;align-items:center;gap:7px;height:21px;padding:0 6px;border-radius:5px;font:11.5px 'IBM Plex Mono',monospace;color:#4a4d54" style-hover="background:rgba(28,25,20,.045)"><span style="color:#8b8e95;font-size:10px;width:11px;text-align:center">▦</span>sectors</div>
+        <div style="display:flex;align-items:center;gap:7px;height:21px;padding:0 6px;border-radius:5px;font:11.5px 'IBM Plex Mono',monospace;color:#4a4d54" style-hover="background:rgba(28,25,20,.045)"><span style="color:#8b8e95;font-size:10px;width:11px;text-align:center">▦</span>transactions</div>
+        <div style="display:flex;align-items:center;gap:7px;height:21px;padding:0 6px;border-radius:5px;font:11.5px 'IBM Plex Mono',monospace;color:#4a4d54" style-hover="background:rgba(28,25,20,.045)"><span style="color:#8b8e95;font-size:10px;width:11px;text-align:center">▦</span>users</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid rgba(28,25,20,.09)">
+        <div style="flex:1;display:flex;align-items:center;justify-content:space-between;height:25px;padding:0 9px;background:#fff;border:1px solid rgba(28,25,20,.11);border-radius:7px;font:11.5px system-ui;color:#3a3d42">schema: public <span style="color:#a6a9b0;font-size:9px">⇅</span></div>
+        <span style="color:#71747c" style-hover="color:#2c5fd8">＋</span>
+      </div>
+    </div>
+    <!-- main -->
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0;background:#fbfaf8">
+      <!-- tabs -->
+      <div style="height:36px;display:flex;align-items:flex-end;gap:3px;padding:0 10px;background:#f5f4f1;border-bottom:1px solid rgba(28,25,20,.09)">
+        <div style="display:flex;align-items:center;gap:8px;height:30px;padding:0 13px;background:#fbfaf8;border:1px solid rgba(28,25,20,.09);border-bottom:none;border-radius:8px 8px 0 0;box-shadow:inset 0 2px 0 #2c5fd8;font:600 11.5px system-ui;color:#23242a"><span style="color:#2c5fd8;font-size:10px">▦</span>emiten<span style="color:#a6a9b0;font-weight:400">✕</span></div>
+        <div style="display:flex;align-items:center;gap:8px;height:30px;padding:0 13px;font:11.5px system-ui;color:#71747c;border-radius:8px 8px 0 0" style-hover="background:rgba(28,25,20,.04)"><span style="font:600 10px 'IBM Plex Mono',monospace">&gt;_</span>SQL Query</div>
+        <div style="display:flex;align-items:center;gap:8px;height:30px;padding:0 13px;font:11.5px system-ui;color:#71747c;border-radius:8px 8px 0 0" style-hover="background:rgba(28,25,20,.04)"><span style="color:#d9962f;font:600 11px 'IBM Plex Mono',monospace">ƒ</span>uuid_generate_v3</div>
+        <div style="width:26px;height:26px;display:grid;place-items:center;color:#8b8e95;margin-bottom:2px;border-radius:6px" style-hover="background:rgba(28,25,20,.05)">＋</div>
+      </div>
+      <!-- table toolbar -->
+      <div style="height:36px;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid rgba(28,25,20,.08)">
+        <div style="display:flex;align-items:center;gap:6px;height:24px;padding:0 10px;background:#fff;border:1px dashed rgba(28,25,20,.2);border-radius:12px;font:11px system-ui;color:#71747c" style-hover="border-color:#2c5fd8;color:#2c5fd8">＋ Filter</div>
+        <div style="font:10.5px 'IBM Plex Mono',monospace;color:#a6a9b0">sort: id ↑</div>
+        <div style="flex:1"></div>
+        <div style="display:flex;align-items:center;gap:7px;width:210px;height:26px;padding:0 10px;background:#fff;border:1px solid rgba(28,25,20,.11);border-radius:7px;font:11.5px system-ui;color:#a6a9b0">⌕ Search in emiten…</div>
+        <div style="display:flex;align-items:center;gap:5px;height:26px;padding:0 11px;background:#fff;border:1px solid rgba(28,25,20,.13);border-radius:7px;font:11.5px system-ui;color:#3a3d42" style-hover="border-color:#2c5fd8">＋ Row</div>
+        <div style="width:28px;height:26px;display:grid;place-items:center;background:#fff;border:1px solid rgba(28,25,20,.13);border-radius:7px;color:#71747c" style-hover="border-color:#2c5fd8">⟳</div>
+      </div>
+      <!-- grid header -->
+      <div style="display:grid;grid-template-columns:36px 240px 70px minmax(200px,1fr) 76px 78px 44px 62px 240px 175px 60px;background:#f5f4f1;border-bottom:1px solid rgba(28,25,20,.12)">
+        <div style="line-height:27px;border-right:1px solid rgba(28,25,20,.06)"></div>
+        <div style="padding:0 8px;line-height:27px;font:600 10.5px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(28,25,20,.06)">id <span style="color:#a6a9b0;font-weight:400">uuid</span></div>
+        <div style="padding:0 8px;line-height:27px;font:600 10.5px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(28,25,20,.06)">code</div>
+        <div style="padding:0 8px;line-height:27px;font:600 10.5px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(28,25,20,.06)">name <span style="color:#a6a9b0;font-weight:400">varchar</span></div>
+        <div style="padding:0 8px;line-height:27px;font:600 10.5px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(28,25,20,.06)">short_name</div>
+        <div style="padding:0 8px;line-height:27px;font:600 10.5px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(28,25,20,.06)">country</div>
+        <div style="padding:0 8px;line-height:27px;font:600 10.5px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(28,25,20,.06)">ccy</div>
+        <div style="padding:0 8px;line-height:27px;font:600 10.5px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(28,25,20,.06)">exch</div>
+        <div style="padding:0 8px;line-height:27px;font:600 10.5px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(28,25,20,.06)">id_sector <span style="color:#a6a9b0;font-weight:400">fk</span></div>
+        <div style="padding:0 8px;line-height:27px;font:600 10.5px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(28,25,20,.06)">created_at</div>
+        <div style="padding:0 8px;line-height:27px;font:600 10.5px 'IBM Plex Mono',monospace;color:#3a3d42">upd…</div>
+      </div>
+      <!-- rows -->
+      <div style="flex:1;overflow:hidden">
+        <sc-for list="{{ emitenQ }}" as="r" hint-placeholder-count="18">
+          <div style="display:grid;grid-template-columns:36px 240px 70px minmax(200px,1fr) 76px 78px 44px 62px 240px 175px 60px;border-bottom:1px solid rgba(28,25,20,.045)" style-hover="background:#f2f5fc">
+            <div style="padding:0 6px;line-height:24px;font:10px 'IBM Plex Mono',monospace;color:#b6b9bf;text-align:right;border-right:1px solid rgba(28,25,20,.045)">{{ r.num }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#71747c;border-right:1px solid rgba(28,25,20,.04);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.id }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#23242a;border-right:1px solid rgba(28,25,20,.04)">{{ r.code }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#23242a;border-right:1px solid rgba(28,25,20,.04);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#23242a;border-right:1px solid rgba(28,25,20,.04)">{{ r.short }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#71747c;border-right:1px solid rgba(28,25,20,.04);text-align:center">indonesia</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#71747c;border-right:1px solid rgba(28,25,20,.04);text-align:center">IDR</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#71747c;border-right:1px solid rgba(28,25,20,.04);text-align:center">Jakarta</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#4a6bb0;border-right:1px solid rgba(28,25,20,.04);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.sector }} ↗</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#71747c;border-right:1px solid rgba(28,25,20,.04);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.created }}</div>
+            <div style="padding:0 8px;line-height:24px;font:italic 11px 'IBM Plex Mono',monospace;color:#c2c4c9">NULL</div>
+          </div>
+        </sc-for>
+      </div>
+      <!-- bottom bar -->
+      <div style="height:34px;display:flex;align-items:center;gap:2px;padding:0 12px;background:#f5f4f1;border-top:1px solid rgba(28,25,20,.09)">
+        <div style="padding:8px 10px 9px;font:600 11.5px system-ui;color:#2c5fd8;box-shadow:inset 0 -2px 0 #2c5fd8">Data</div>
+        <div style="padding:8px 10px 9px;font:11.5px system-ui;color:#71747c" style-hover="color:#23242a">Structure</div>
+        <div style="padding:8px 10px 9px;font:11.5px system-ui;color:#71747c" style-hover="color:#23242a">Indexes</div>
+        <div style="flex:1;text-align:center;font:11px 'IBM Plex Mono',monospace;color:#71747c">‹&nbsp; 1–300 of 986 &nbsp;›</div>
+        <div style="display:flex;align-items:center;height:23px;padding:0 11px;background:#fff;border:1px solid rgba(28,25,20,.13);border-radius:7px;font:11px system-ui;color:#3a3d42" style-hover="border-color:#2c5fd8">Filters</div>
+        <div style="display:flex;align-items:center;height:23px;padding:0 11px;background:#fff;border:1px solid rgba(28,25,20,.13);border-radius:7px;font:11px system-ui;color:#3a3d42;margin-left:6px" style-hover="border-color:#2c5fd8">Columns</div>
+        <div style="display:flex;align-items:center;height:23px;padding:0 11px;background:#fff;border:1px solid rgba(28,25,20,.13);border-radius:7px;font:11px system-ui;color:#3a3d42;margin-left:6px" style-hover="border-color:#2c5fd8">Export</div>
+        <span style="margin-left:10px;font:10.5px 'IBM Plex Mono',monospace;color:#239d5c">● 12 ms</span>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+<!-- ============ 4c : SQL QUERY REDESIGNED ============ -->
+<div class="dv-opt" id="4c">
+<div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>SQL Query — Run di kiri editor, hasil agregat dengan bar inline</div>
+<div class="dv-card" style="width:1440px">
+<div style="width:1440px;height:690px;display:flex;flex-direction:column;background:#f5f4f1;font-family:system-ui,-apple-system,sans-serif;color:#23242a">
+  <div style="height:44px;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid rgba(28,25,20,.09)">
+    <div style="width:19px;height:19px;border-radius:6px;background:#2c5fd8;display:grid;place-items:center;color:#fff;font:600 11px 'IBM Plex Mono',monospace">T</div>
+    <div style="display:flex;align-items:center;gap:4px;font:11.5px 'IBM Plex Mono',monospace">
+      <div style="display:flex;align-items:center;gap:6px;height:26px;padding:0 10px;background:#fff;border:1px solid rgba(28,25,20,.11);border-radius:7px;color:#3a3d42"><span style="width:7px;height:7px;border-radius:50%;background:#239d5c"></span>bot ai tele</div>
+      <span style="color:#c2c4c9">›</span>
+      <div style="display:flex;align-items:center;height:26px;padding:0 10px;background:#fff;border:1px solid rgba(28,25,20,.11);border-radius:7px;color:#3a3d42">ai_bot_fintech</div>
+      <span style="color:#c2c4c9">›</span>
+      <div style="display:flex;align-items:center;gap:5px;height:26px;padding:0 10px;background:#fff;border:1px solid rgba(28,25,20,.11);border-radius:7px;color:#3a3d42">public <span style="color:#a6a9b0;font-size:9px">▾</span></div>
+    </div>
+    <div style="flex:1"></div>
+    <div style="display:flex;align-items:center;gap:8px;width:250px;height:28px;padding:0 11px;background:#fff;border:1px solid rgba(28,25,20,.11);border-radius:8px;font:11.5px system-ui;color:#a6a9b0">⌕ Search or run a command…<span style="margin-left:auto;font:10px 'IBM Plex Mono',monospace;padding:1px 5px;border:1px solid rgba(28,25,20,.13);border-radius:4px;color:#71747c">⌘K</span></div>
+    <div style="display:flex;gap:2px;color:#71747c;font-size:13px">
+      <div style="width:28px;height:26px;display:grid;place-items:center;border-radius:6px" style-hover="background:rgba(28,25,20,.06)">◷</div>
+      <div style="width:28px;height:26px;display:grid;place-items:center;border-radius:6px" style-hover="background:rgba(28,25,20,.06)">▭</div>
+      <div style="width:28px;height:26px;display:grid;place-items:center;border-radius:6px" style-hover="background:rgba(28,25,20,.06)">⚙</div>
+    </div>
+    <div style="display:flex;gap:2px;color:#71747c;font:13px system-ui;border-left:1px solid rgba(28,25,20,.09);padding-left:8px">
+      <div style="width:28px;height:26px;display:grid;place-items:center;border-radius:6px" style-hover="background:rgba(28,25,20,.06)">–</div>
+      <div style="width:28px;height:26px;display:grid;place-items:center;border-radius:6px;font-size:10px" style-hover="background:rgba(28,25,20,.06)">▢</div>
+      <div style="width:28px;height:26px;display:grid;place-items:center;border-radius:6px" style-hover="background:#e05a4e;color:#fff">✕</div>
+    </div>
+  </div>
+  <div style="flex:1;display:flex;min-height:0">
+    <!-- sidebar (Queries tab aktif) -->
+    <div style="width:242px;display:flex;flex-direction:column;background:#f0efec;border-right:1px solid rgba(28,25,20,.09)">
+      <div style="display:flex;gap:0;padding:8px 12px 0;border-bottom:1px solid rgba(28,25,20,.09)">
+        <div style="padding:5px 10px 7px;font:11.5px system-ui;color:#8b8e95" style-hover="color:#3a3d42">Items</div>
+        <div style="padding:5px 10px 7px;font:600 11.5px system-ui;color:#2c5fd8;box-shadow:inset 0 -2px 0 #2c5fd8">Queries</div>
+        <div style="padding:5px 10px 7px;font:11.5px system-ui;color:#8b8e95" style-hover="color:#3a3d42">History</div>
+      </div>
+      <div style="padding:8px 10px 4px">
+        <div style="display:flex;align-items:center;gap:7px;height:27px;padding:0 9px;background:#fff;border:1px solid rgba(28,25,20,.11);border-radius:7px;font:11.5px system-ui;color:#a6a9b0">⌕ Filter queries…</div>
+      </div>
+      <div style="flex:1;overflow:hidden;padding:2px 8px">
+        <div style="padding:6px 6px 2px;font:600 10px system-ui;letter-spacing:.08em;color:#8b8e95">SAVED · 4</div>
+        <div style="display:flex;align-items:center;gap:7px;height:23px;padding:0 6px;border-radius:5px;font:600 11.5px 'IBM Plex Mono',monospace;background:#e9effc;box-shadow:inset 2px 0 0 #2c5fd8;color:#1d3f8f"><span style="font:600 10px 'IBM Plex Mono',monospace">&gt;_</span>emiten-per-sektor</div>
+        <div style="display:flex;align-items:center;gap:7px;height:21px;padding:0 6px;border-radius:5px;font:11.5px 'IBM Plex Mono',monospace;color:#4a4d54" style-hover="background:rgba(28,25,20,.045)"><span style="color:#8b8e95;font:600 10px 'IBM Plex Mono',monospace">&gt;_</span>seed-sectors</div>
+        <div style="display:flex;align-items:center;gap:7px;height:21px;padding:0 6px;border-radius:5px;font:11.5px 'IBM Plex Mono',monospace;color:#4a4d54" style-hover="background:rgba(28,25,20,.045)"><span style="color:#8b8e95;font:600 10px 'IBM Plex Mono',monospace">&gt;_</span>dup-email-check</div>
+        <div style="display:flex;align-items:center;gap:7px;height:21px;padding:0 6px;border-radius:5px;font:11.5px 'IBM Plex Mono',monospace;color:#4a4d54" style-hover="background:rgba(28,25,20,.045)"><span style="color:#8b8e95;font:600 10px 'IBM Plex Mono',monospace">&gt;_</span>tx-volume-daily</div>
+        <div style="padding:8px 6px 2px;font:600 10px system-ui;letter-spacing:.08em;color:#8b8e95">RECENT · 3</div>
+        <div style="display:flex;align-items:center;gap:7px;height:21px;padding:0 6px;border-radius:5px;font:11.5px 'IBM Plex Mono',monospace;color:#8b8e95" style-hover="background:rgba(28,25,20,.045)"><span style="font-size:10px">◷</span>SELECT * FROM emiten…</div>
+        <div style="display:flex;align-items:center;gap:7px;height:21px;padding:0 6px;border-radius:5px;font:11.5px 'IBM Plex Mono',monospace;color:#8b8e95" style-hover="background:rgba(28,25,20,.045)"><span style="font-size:10px">◷</span>INSERT INTO sectors…</div>
+        <div style="display:flex;align-items:center;gap:7px;height:21px;padding:0 6px;border-radius:5px;font:11.5px 'IBM Plex Mono',monospace;color:#8b8e95" style-hover="background:rgba(28,25,20,.045)"><span style="font-size:10px">◷</span>UPDATE emiten SET…</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid rgba(28,25,20,.09)">
+        <div style="flex:1;display:flex;align-items:center;justify-content:space-between;height:25px;padding:0 9px;background:#fff;border:1px solid rgba(28,25,20,.11);border-radius:7px;font:11.5px system-ui;color:#3a3d42">schema: public <span style="color:#a6a9b0;font-size:9px">⇅</span></div>
+        <span style="color:#71747c" style-hover="color:#2c5fd8">＋</span>
+      </div>
+    </div>
+    <!-- main -->
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0;background:#fbfaf8">
+      <div style="height:36px;display:flex;align-items:flex-end;gap:3px;padding:0 10px;background:#f5f4f1;border-bottom:1px solid rgba(28,25,20,.09)">
+        <div style="display:flex;align-items:center;gap:8px;height:30px;padding:0 13px;font:11.5px system-ui;color:#71747c;border-radius:8px 8px 0 0" style-hover="background:rgba(28,25,20,.04)"><span style="color:#8b8e95;font-size:10px">▦</span>emiten</div>
+        <div style="display:flex;align-items:center;gap:8px;height:30px;padding:0 13px;background:#fbfaf8;border:1px solid rgba(28,25,20,.09);border-bottom:none;border-radius:8px 8px 0 0;box-shadow:inset 0 2px 0 #2c5fd8;font:600 11.5px system-ui;color:#23242a"><span style="color:#2c5fd8;font:600 10px 'IBM Plex Mono',monospace">&gt;_</span>emiten-per-sektor<span style="color:#a6a9b0;font-weight:400">✕</span></div>
+        <div style="width:26px;height:26px;display:grid;place-items:center;color:#8b8e95;margin-bottom:2px;border-radius:6px" style-hover="background:rgba(28,25,20,.05)">＋</div>
+      </div>
+      <!-- editor toolbar -->
+      <div style="height:38px;display:flex;align-items:center;gap:7px;padding:0 12px;border-bottom:1px solid rgba(28,25,20,.08)">
+        <div style="display:flex;align-items:center;gap:7px;height:26px;padding:0 13px;background:#2c5fd8;border-radius:7px;font:600 11.5px system-ui;color:#fff" style-hover="background:#2451ba">▶ Run <span style="opacity:.65;font:400 10px 'IBM Plex Mono',monospace">⌘↵</span></div>
+        <div style="display:flex;align-items:center;height:26px;padding:0 11px;background:#fff;border:1px solid rgba(28,25,20,.13);border-radius:7px;font:11.5px system-ui;color:#3a3d42" style-hover="border-color:#2c5fd8">Run Selection</div>
+        <div style="display:flex;align-items:center;height:26px;padding:0 11px;background:#fff;border:1px solid rgba(28,25,20,.13);border-radius:7px;font:11.5px system-ui;color:#3a3d42" style-hover="border-color:#2c5fd8">Format</div>
+        <div style="display:flex;align-items:center;height:26px;padding:0 11px;background:#fff;border:1px solid rgba(28,25,20,.13);border-radius:7px;font:11.5px system-ui;color:#3a3d42" style-hover="border-color:#2c5fd8">Explain</div>
+        <div style="flex:1"></div>
+        <span style="font:10.5px 'IBM Plex Mono',monospace;color:#a6a9b0">emiten-per-sektor.sql · saved</span>
+        <div style="display:flex;align-items:center;gap:5px;height:24px;padding:0 10px;background:#fff;border:1px solid rgba(28,25,20,.13);border-radius:7px;font:11px system-ui;color:#3a3d42">Limit 500 <span style="color:#a6a9b0;font-size:9px">▾</span></div>
+      </div>
+      <!-- editor -->
+      <div style="padding:9px 0;font:13px/24px 'IBM Plex Mono',monospace;color:#23242a;border-bottom:1px solid rgba(28,25,20,.08)">
+        <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:#c2c4c9">1</span><div><span style="color:#a6a9b0;font-style:italic">-- emiten per sektor</span></div></div>
+        <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:#c2c4c9">2</span><div><span style="color:#2c5fd8;font-weight:600">SELECT</span> s.name <span style="color:#2c5fd8;font-weight:600">AS</span> sector, <span style="color:#8250c4">count</span>(*) <span style="color:#2c5fd8;font-weight:600">AS</span> total</div></div>
+        <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:#c2c4c9">3</span><div><span style="color:#2c5fd8;font-weight:600">FROM</span> emiten e</div></div>
+        <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:#c2c4c9">4</span><div><span style="color:#2c5fd8;font-weight:600">JOIN</span> sectors s <span style="color:#2c5fd8;font-weight:600">ON</span> s.id = e.id_sector</div></div>
+        <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:#c2c4c9">5</span><div><span style="color:#2c5fd8;font-weight:600">WHERE</span> e.country = <span style="color:#c14953">'indonesia'</span></div></div>
+        <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:#c2c4c9">6</span><div><span style="color:#2c5fd8;font-weight:600">GROUP BY</span> s.name</div></div>
+        <div style="display:flex;background:#f3f1ec"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:#3a3d42;font-weight:600">7</span><div><span style="color:#2c5fd8;font-weight:600">ORDER BY</span> total <span style="color:#2c5fd8;font-weight:600">DESC</span>;<span style="display:inline-block;width:2px;height:15px;background:#2c5fd8;vertical-align:-2px;margin-left:1px"></span></div></div>
+      </div>
+      <!-- results header -->
+      <div style="height:30px;display:flex;align-items:center;gap:12px;padding:0 12px;border-bottom:1px solid rgba(28,25,20,.08)">
+        <span style="font:600 11px system-ui;color:#23242a">Results</span>
+        <span style="font:10.5px 'IBM Plex Mono',monospace;color:#8b8e95">10 rows · 38 ms</span>
+        <div style="flex:1"></div>
+        <span style="font:11px system-ui;color:#71747c" style-hover="color:#2c5fd8">Copy</span>
+        <span style="font:11px system-ui;color:#71747c" style-hover="color:#2c5fd8">Export CSV</span>
+        <span style="font:11px system-ui;color:#71747c" style-hover="color:#2c5fd8">Chart</span>
+      </div>
+      <div style="display:grid;grid-template-columns:36px 300px 90px 1fr;background:#f5f4f1;border-bottom:1px solid rgba(28,25,20,.12)">
+        <div style="line-height:26px;border-right:1px solid rgba(28,25,20,.06)"></div>
+        <div style="padding:0 10px;line-height:26px;font:600 10.5px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(28,25,20,.06)">sector <span style="color:#a6a9b0;font-weight:400">text</span></div>
+        <div style="padding:0 10px;line-height:26px;font:600 10.5px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(28,25,20,.06);text-align:right">total</div>
+        <div style="padding:0 10px;line-height:26px;font:600 10.5px 'IBM Plex Mono',monospace;color:#3a3d42">share</div>
+      </div>
+      <div style="flex:1;overflow:hidden">
+        <sc-for list="{{ sectorsAgg }}" as="s" hint-placeholder-count="10">
+          <div style="display:grid;grid-template-columns:36px 300px 90px 1fr;border-bottom:1px solid rgba(28,25,20,.045);align-items:center" style-hover="background:#f2f5fc">
+            <div style="padding:0 6px;line-height:28px;font:10px 'IBM Plex Mono',monospace;color:#b6b9bf;text-align:right;border-right:1px solid rgba(28,25,20,.045)">{{ s.num }}</div>
+            <div style="padding:0 10px;line-height:28px;font:11.5px 'IBM Plex Mono',monospace;color:#23242a;border-right:1px solid rgba(28,25,20,.04);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ s.sector }}</div>
+            <div style="padding:0 10px;line-height:28px;font:11.5px 'IBM Plex Mono',monospace;color:#23242a;border-right:1px solid rgba(28,25,20,.04);text-align:right">{{ s.total }}</div>
+            <div style="padding:0 10px"><div style="height:9px;border-radius:5px;background:#eceae5;overflow:hidden"><div style="height:9px;border-radius:5px;background:#8fb0ec;width:{{ s.bar }}"></div></div></div>
+          </div>
+        </sc-for>
+      </div>
+      <!-- bottom bar -->
+      <div style="height:34px;display:flex;align-items:center;gap:2px;padding:0 12px;background:#f5f4f1;border-top:1px solid rgba(28,25,20,.09)">
+        <div style="padding:8px 10px 9px;font:600 11.5px system-ui;color:#2c5fd8;box-shadow:inset 0 -2px 0 #2c5fd8">Data</div>
+        <div style="padding:8px 10px 9px;font:11.5px system-ui;color:#71747c" style-hover="color:#23242a">Message</div>
+        <div style="padding:8px 10px 9px;font:11.5px system-ui;color:#71747c" style-hover="color:#23242a">Chart</div>
+        <div style="flex:1;text-align:center;font:11px 'IBM Plex Mono',monospace;color:#71747c">10 rows</div>
+        <div style="display:flex;align-items:center;height:23px;padding:0 11px;background:#fff;border:1px solid rgba(28,25,20,.13);border-radius:7px;font:11px system-ui;color:#3a3d42" style-hover="border-color:#2c5fd8">Export</div>
+        <span style="margin-left:10px;font:10.5px 'IBM Plex Mono',monospace;color:#239d5c">● 38 ms</span>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+</div>
+<p class="dv-next">Coba selanjutnya: "terapkan gaya <a class="dv-oid" href="#4b">4b</a> ke welcome &amp; modal dari turn 3" · "versi dark <a class="dv-oid" href="#4b">4b</a>" · "kembali ke gaya turn 2 tapi dengan breadcrumb <a class="dv-oid" href="#4b">4b</a>"</p>
+</section>
+
+<section class="dv-turn" id="t3">
+<div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">SQL editor, function view, dan modal Open database / Open Connection — lanjutan gaya <a class="dv-oid" href="#2c">2c</a></span></div>
+<div class="dv-opts">
+
+<!-- ============ 3a : SQL QUERY EDITOR + RESULTS ============ -->
+<div class="dv-opt" id="3a">
+<div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>SQL Query — editor + hasil, Data/Message/Chart</div>
+<div class="dv-card" style="width:1440px">
+<div style="width:1440px;height:810px;display:flex;flex-direction:column;background:#fff;font-family:system-ui,-apple-system,sans-serif;color:#1f2124">
+  <div style="height:44px;display:flex;align-items:center;gap:7px;padding:0 14px;background:#ececea;border-bottom:1px solid rgba(0,0,0,.1)">
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">◧</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⌁</span>
+    </div>
+    <div style="display:flex;gap:2px;padding:3px">
+      <span style="width:26px;height:23px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">⊘</span>
+      <span style="width:26px;height:23px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">◎</span>
+      <span style="width:26px;height:23px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">☰</span>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">▤</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⛁</span>
+      <span style="width:30px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font:700 9px system-ui" style-hover="background:rgba(0,0,0,.06)">SQL</span>
+    </div>
+    <div style="flex:1;display:flex;justify-content:center;min-width:0">
+      <div style="max-width:620px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;height:28px;line-height:28px;padding:0 16px;background:#fff;border-radius:8px;font:11px 'IBM Plex Mono',monospace;color:#4b4f55;box-shadow:0 1px 2px rgba(0,0,0,.07)">LOCAL | PostgreSQL 16.14 : bot ai tele : ai_bot_fintech : SQL Query</div>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">∿</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⟳</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⌘</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⊞</span>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">▭</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">◨</span>
+    </div>
+  </div>
+  <div style="flex:1;display:flex;min-height:0">
+    <div style="width:230px;display:flex;flex-direction:column;background:#f0f0ee;border-right:1px solid rgba(0,0,0,.09)">
+      <div style="display:flex;justify-content:center;gap:2px;padding:8px 10px 4px">
+        <div style="padding:3px 12px;background:#dcdcda;border-radius:6px;font:600 11.5px system-ui;color:#2c2e33">Items</div>
+        <div style="padding:3px 12px;border-radius:6px;font:11.5px system-ui;color:#6b6f76" style-hover="background:rgba(0,0,0,.05)">Queries</div>
+        <div style="padding:3px 12px;border-radius:6px;font:11.5px system-ui;color:#6b6f76" style-hover="background:rgba(0,0,0,.05)">History</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin:4px 10px 6px;height:26px;padding:0 9px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:13px;font:11.5px system-ui;color:#a0a4ab">⌕ Search for item…<span style="margin-left:auto;color:#8a8e95">≔</span></div>
+      <div style="flex:1;overflow:hidden;padding:2px 8px">
+        <div style="display:flex;align-items:center;gap:5px;height:22px;font:600 11.5px 'IBM Plex Mono',monospace;color:#3a3d42">▾ Functions</div>
+        <sc-for list="{{ fns }}" as="f" hint-placeholder-count="10">
+          <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:16px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="width:12px;height:12px;border-radius:3px;background:#e8a33d;color:#fff;font:600 8px 'IBM Plex Mono',monospace;display:grid;place-items:center;flex:none">f</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.n }}</span></div>
+        </sc-for>
+        <div style="display:flex;align-items:center;gap:5px;height:22px;font:600 11.5px 'IBM Plex Mono',monospace;color:#3a3d42;margin-top:2px">▾ Tables</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>emiten</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>referral_sources</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>sectors</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>transactions</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>users</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-top:1px solid rgba(0,0,0,.09)">
+        <span style="color:#6b6f76">＋</span><span style="color:#6b6f76;font-size:9px">▾</span>
+        <div style="flex:1;display:flex;align-items:center;justify-content:space-between;height:24px;padding:0 9px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:6px;font:11.5px system-ui;color:#2c2e33">public <span style="color:#8a8e95;font-size:9px">⇅</span></div>
+      </div>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+      <!-- split tab title -->
+      <div style="height:28px;display:flex;border-bottom:1px solid rgba(0,0,0,.08)">
+        <div style="flex:1;display:flex;align-items:center;gap:8px;padding:0 10px;background:#e7e7e5"><span style="color:#8a8e95">‹</span><span style="color:#c4c7cc">›</span><div style="flex:1;text-align:center;font:12px system-ui;color:#6b6f76">emiten</div></div>
+        <div style="flex:1;display:flex;align-items:center;background:#fff;border-left:1px solid rgba(0,0,0,.08)"><div style="flex:1;text-align:center;font:600 12px system-ui;color:#2c2e33">SQL Query</div><span style="padding-right:10px;color:#8a8e95;font-size:12px">◫</span></div>
+      </div>
+      <!-- editor -->
+      <div style="padding:8px 0;font:13px/22px 'IBM Plex Mono',monospace;color:#24282e">
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">22</span><div>(<span style="color:#d6336c">'Energy'</span>),</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">23</span><div>(<span style="color:#d6336c">'Utilities'</span>),</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">24</span><div>(<span style="color:#d6336c">'Technology'</span>),</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">25</span><div>(<span style="color:#d6336c">'Consumer Cyclicals'</span>),</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">26</span><div>(<span style="color:#d6336c">'Basic Materials'</span>),</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">27</span><div>(<span style="color:#d6336c">'Real Estate'</span>),</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">28</span><div>(<span style="color:#d6336c">'Healthcare'</span>),</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">29</span><div>(<span style="color:#d6336c">'Industrials'</span>),</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">30</span><div>(<span style="color:#d6336c">'Academic &amp; Educational Services'</span>);</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">31</span><div>&nbsp;</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">32</span><div>&nbsp;</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#3a3d42;font-weight:600">33</span><div><span style="background:#ececea"><span style="color:#3577d4">SELECT</span> * <span style="color:#3577d4">FROM</span> emiten;</span><span style="display:inline-block;width:2px;height:15px;background:#3577d4;vertical-align:-2px;margin-left:1px"></span></div></div>
+      </div>
+      <!-- editor status -->
+      <div style="height:30px;display:flex;align-items:center;gap:8px;padding:0 12px;border-top:1px solid rgba(0,0,0,.07);border-bottom:1px solid rgba(0,0,0,.07)">
+        <span style="color:#8a8e95">≔</span>
+        <span style="font:10.5px 'IBM Plex Mono',monospace;color:#8a8e95">line 33, column 22, location 725</span>
+        <div style="flex:1"></div>
+        <div style="display:flex;align-items:center;gap:6px;height:22px;padding:0 11px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11px system-ui;color:#3a3d42">No limit <span style="color:#8a8e95;font-size:8px">▾</span></div>
+        <div style="display:flex;align-items:center;gap:6px;height:22px;padding:0 11px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11px system-ui;color:#3a3d42">Beautify ⌘I <span style="color:#8a8e95;font-size:8px">▾</span></div>
+        <div style="display:flex;align-items:center;gap:6px;height:22px;padding:0 11px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:600 11px system-ui;color:#3a3d42" style-hover="border-color:#3577d4">Run Current <span style="color:#8a8e95;font-size:8px">▾</span></div>
+      </div>
+      <!-- results header -->
+      <div style="display:grid;grid-template-columns:36px 240px 70px minmax(200px,1fr) 76px 80px 44px 64px 240px 180px 56px;background:#f3f3f1;border-bottom:1px solid rgba(0,0,0,.12)">
+        <div style="line-height:26px;border-right:1px solid rgba(0,0,0,.07)"></div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">id</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">code</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">name</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">short_name</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">country</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">ccy</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">exch</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">id_sector</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">created_at</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42">upd…</div>
+      </div>
+      <div style="flex:1;overflow:hidden">
+        <sc-for list="{{ emitenQ }}" as="r" hint-placeholder-count="16">
+          <div style="display:grid;grid-template-columns:36px 240px 70px minmax(200px,1fr) 76px 80px 44px 64px 240px 180px 56px;border-bottom:1px solid rgba(0,0,0,.045)" style-hover="background:#f2f6fd">
+            <div style="padding:0 6px;line-height:24px;font:10.5px 'IBM Plex Mono',monospace;color:#a0a4ab;text-align:right;border-right:1px solid rgba(0,0,0,.045)">{{ r.num }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.id }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045)">{{ r.code }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045)">{{ r.short }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);text-align:center">indonesia</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);text-align:center">IDR</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);text-align:center">Jakarta</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.sector }} <span style="color:#b0b4bb">→</span></div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#3f434a;border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.created }}</div>
+            <div style="padding:0 8px;line-height:24px;font:italic 11px 'IBM Plex Mono',monospace;color:#b3b7bd">NULL</div>
+          </div>
+        </sc-for>
+      </div>
+      <!-- bottom bar -->
+      <div style="height:34px;display:flex;align-items:center;gap:6px;padding:0 10px;background:#ececea;border-top:1px solid rgba(0,0,0,.1)">
+        <div style="display:flex;align-items:center;height:24px;padding:0 13px;background:#3577d4;border-radius:12px;font:600 11.5px system-ui;color:#fff">Data</div>
+        <div style="display:flex;align-items:center;height:24px;padding:0 11px;border-radius:12px;font:11.5px system-ui;color:#4b4f55" style-hover="background:rgba(0,0,0,.06)">Message</div>
+        <div style="display:flex;align-items:center;height:24px;padding:0 11px;border-radius:12px;font:11.5px system-ui;color:#4b4f55" style-hover="background:rgba(0,0,0,.06)">Chart</div>
+        <span style="font:11px system-ui;color:#8a8e95">245 ms</span>
+        <div style="flex:1;text-align:center;font:11.5px system-ui;color:#6b6f76">986 rows</div>
+        <span style="color:#8a8e95;padding:0 4px">⚑</span>
+        <span style="color:#8a8e95;padding:0 4px">⌕</span>
+        <div style="display:flex;align-items:center;height:24px;padding:0 13px;background:#fff;border-radius:12px;font:11.5px system-ui;color:#3a3d42;box-shadow:0 1px 2px rgba(0,0,0,.07)" style-hover="background:#f6f9ff">Export…</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+<!-- ============ 3b : FUNCTION VIEW ============ -->
+<div class="dv-opt" id="3b">
+<div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Function view — definisi uuid_generate_v3</div>
+<div class="dv-card" style="width:1240px">
+<div style="width:1240px;height:680px;display:flex;flex-direction:column;background:#fff;font-family:system-ui,-apple-system,sans-serif;color:#1f2124">
+  <div style="height:44px;display:flex;align-items:center;gap:7px;padding:0 14px;background:#ececea;border-bottom:1px solid rgba(0,0,0,.1)">
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">◧</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⌁</span>
+    </div>
+    <div style="display:flex;gap:2px;padding:3px">
+      <span style="width:26px;height:23px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">⊘</span>
+      <span style="width:26px;height:23px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">◎</span>
+      <span style="width:26px;height:23px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">☰</span>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">▤</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⛁</span>
+      <span style="width:30px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font:700 9px system-ui" style-hover="background:rgba(0,0,0,.06)">SQL</span>
+    </div>
+    <div style="flex:1;display:flex;justify-content:center;min-width:0">
+      <div style="max-width:620px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;height:28px;line-height:28px;padding:0 16px;background:#fff;border-radius:8px;font:11px 'IBM Plex Mono',monospace;color:#4b4f55;box-shadow:0 1px 2px rgba(0,0,0,.07)">LOCAL | PostgreSQL 16.14 : bot ai tele : ai_bot_fintech : public.uuid_generate_v3</div>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">∿</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⟳</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⌘</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⊞</span>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">▭</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">◨</span>
+    </div>
+  </div>
+  <div style="flex:1;display:flex;min-height:0">
+    <div style="width:230px;display:flex;flex-direction:column;background:#f0f0ee;border-right:1px solid rgba(0,0,0,.09)">
+      <div style="display:flex;justify-content:center;gap:2px;padding:8px 10px 4px">
+        <div style="padding:3px 12px;background:#dcdcda;border-radius:6px;font:600 11.5px system-ui;color:#2c2e33">Items</div>
+        <div style="padding:3px 12px;border-radius:6px;font:11.5px system-ui;color:#6b6f76" style-hover="background:rgba(0,0,0,.05)">Queries</div>
+        <div style="padding:3px 12px;border-radius:6px;font:11.5px system-ui;color:#6b6f76" style-hover="background:rgba(0,0,0,.05)">History</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin:4px 10px 6px;height:26px;padding:0 9px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:13px;font:11.5px system-ui;color:#a0a4ab">⌕ Search for item…<span style="margin-left:auto;color:#8a8e95">≔</span></div>
+      <div style="flex:1;overflow:hidden;padding:2px 8px">
+        <div style="display:flex;align-items:center;gap:5px;height:22px;font:600 11.5px 'IBM Plex Mono',monospace;color:#3a3d42">▾ Functions</div>
+        <sc-for list="{{ fnsA }}" as="f" hint-placeholder-count="2">
+          <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:16px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="width:12px;height:12px;border-radius:3px;background:#e8a33d;color:#fff;font:600 8px 'IBM Plex Mono',monospace;display:grid;place-items:center;flex:none">f</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.n }}</span></div>
+        </sc-for>
+        <div style="display:flex;align-items:center;gap:6px;height:22px;padding-left:16px;font:600 11.5px 'IBM Plex Mono',monospace;background:#3577d4;border-radius:5px;color:#fff"><span style="width:12px;height:12px;border-radius:3px;background:rgba(255,255,255,.25);color:#fff;font:600 8px 'IBM Plex Mono',monospace;display:grid;place-items:center;flex:none">f</span>uuid_generate_v3</div>
+        <sc-for list="{{ fnsB }}" as="f" hint-placeholder-count="7">
+          <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:16px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="width:12px;height:12px;border-radius:3px;background:#e8a33d;color:#fff;font:600 8px 'IBM Plex Mono',monospace;display:grid;place-items:center;flex:none">f</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.n }}</span></div>
+        </sc-for>
+        <div style="display:flex;align-items:center;gap:5px;height:22px;font:600 11.5px 'IBM Plex Mono',monospace;color:#3a3d42;margin-top:2px">▾ Tables</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>emiten</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>referral_sources</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>sectors</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>transactions</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>users</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-top:1px solid rgba(0,0,0,.09)">
+        <span style="color:#6b6f76">＋</span><span style="color:#6b6f76;font-size:9px">▾</span>
+        <div style="flex:1;display:flex;align-items:center;justify-content:space-between;height:24px;padding:0 9px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:6px;font:11.5px system-ui;color:#2c2e33">public <span style="color:#8a8e95;font-size:9px">⇅</span></div>
+      </div>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+      <div style="height:28px;display:flex;border-bottom:1px solid rgba(0,0,0,.08)">
+        <div style="flex:1;display:flex;align-items:center;gap:8px;padding:0 10px;background:#e7e7e5"><span style="color:#8a8e95">‹</span><span style="color:#c4c7cc">›</span><div style="flex:1;text-align:center;font:12px system-ui;color:#6b6f76">emiten</div></div>
+        <div style="flex:1;display:flex;align-items:center;background:#e7e7e5;border-left:1px solid rgba(0,0,0,.08)"><div style="flex:1;text-align:center;font:12px system-ui;color:#6b6f76">SQL Query</div></div>
+        <div style="flex:1;display:flex;align-items:center;background:#fff;border-left:1px solid rgba(0,0,0,.08)"><div style="flex:1;text-align:center;font:italic 600 12px system-ui;color:#2c2e33">uuid_generate_v3</div><span style="padding-right:10px;color:#8a8e95;font-size:12px">◫</span></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;height:36px;padding:0 14px;border-bottom:1px solid rgba(0,0,0,.07)">
+        <span style="font:12px system-ui;color:#6b6f76">Name</span>
+        <div style="width:280px;height:24px;display:flex;align-items:center;padding:0 9px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11.5px 'IBM Plex Mono',monospace;color:#2c2e33">uuid_generate_v3</div>
+      </div>
+      <div style="flex:1;padding:10px 0;font:13px/23px 'IBM Plex Mono',monospace;color:#24282e">
+        <div style="display:flex"><span style="width:42px;flex:none;text-align:right;padding-right:14px;color:#3a3d42;font-weight:600">1</span><div><span style="color:#3577d4">CREATE OR REPLACE FUNCTION</span> public.uuid_generate_v3(namespace uuid, <span style="color:#3577d4">name text</span>)</div></div>
+        <div style="display:flex"><span style="width:42px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">2</span><div>&nbsp;<span style="color:#3577d4">RETURNS</span> uuid</div></div>
+        <div style="display:flex"><span style="width:42px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">3</span><div>&nbsp;<span style="color:#3577d4">LANGUAGE</span> c</div></div>
+        <div style="display:flex"><span style="width:42px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">4</span><div>&nbsp;<span style="color:#3577d4">IMMUTABLE</span> PARALLEL SAFE STRICT</div></div>
+        <div style="display:flex"><span style="width:42px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">5</span><div><span style="color:#3577d4">AS</span> <span style="color:#d6336c">'$libdir/uuid-ossp'</span>, <span style="color:#d6336c">$function$</span>uuid_generate_v3<span style="color:#d6336c">$function$</span></div></div>
+        <div style="display:flex"><span style="width:42px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">6</span><div>&nbsp;</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+<!-- ============ 3c : OPEN DATABASE MODAL ============ -->
+<div class="dv-opt" id="3c">
+<div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>Modal Open database — ⌘⇧O</div>
+<div class="dv-card" style="width:1440px">
+<div style="position:relative;width:1440px;height:810px;display:flex;flex-direction:column;background:#fff;font-family:system-ui,-apple-system,sans-serif;color:#1f2124;overflow:hidden">
+  <div style="height:44px;display:flex;align-items:center;gap:7px;padding:0 14px;background:#ececea;border-bottom:1px solid rgba(0,0,0,.1)">
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">◧</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">⌁</span>
+    </div>
+    <div style="display:flex;gap:2px;padding:3px">
+      <span style="width:26px;height:23px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">⊘</span>
+      <span style="width:26px;height:23px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">◎</span>
+      <span style="width:26px;height:23px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">☰</span>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">▤</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">⛁</span>
+      <span style="width:30px;height:23px;display:grid;place-items:center;color:#4b4f55;font:700 9px system-ui">SQL</span>
+    </div>
+    <div style="flex:1;display:flex;justify-content:center;min-width:0">
+      <div style="max-width:620px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;height:28px;line-height:28px;padding:0 16px;background:#fff;border-radius:8px;font:11px 'IBM Plex Mono',monospace;color:#4b4f55;box-shadow:0 1px 2px rgba(0,0,0,.07)">LOCAL | PostgreSQL 16.14 : bot ai tele : ai_bot_fintech : SQL Query</div>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">∿</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">⟳</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">⌘</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">⊞</span>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">▭</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">◨</span>
+    </div>
+  </div>
+  <div style="flex:1;display:flex;min-height:0">
+    <div style="width:230px;display:flex;flex-direction:column;background:#f0f0ee;border-right:1px solid rgba(0,0,0,.09)">
+      <div style="display:flex;justify-content:center;gap:2px;padding:8px 10px 4px">
+        <div style="padding:3px 12px;background:#dcdcda;border-radius:6px;font:600 11.5px system-ui;color:#2c2e33">Items</div>
+        <div style="padding:3px 12px;border-radius:6px;font:11.5px system-ui;color:#6b6f76">Queries</div>
+        <div style="padding:3px 12px;border-radius:6px;font:11.5px system-ui;color:#6b6f76">History</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin:4px 10px 6px;height:26px;padding:0 9px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:13px;font:11.5px system-ui;color:#a0a4ab">⌕ Search for item…<span style="margin-left:auto;color:#8a8e95">≔</span></div>
+      <div style="flex:1;overflow:hidden;padding:2px 8px">
+        <div style="display:flex;align-items:center;gap:5px;height:22px;font:600 11.5px 'IBM Plex Mono',monospace;color:#3a3d42">▾ Functions</div>
+        <sc-for list="{{ fns }}" as="f" hint-placeholder-count="10">
+          <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:16px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="width:12px;height:12px;border-radius:3px;background:#e8a33d;color:#fff;font:600 8px 'IBM Plex Mono',monospace;display:grid;place-items:center;flex:none">f</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.n }}</span></div>
+        </sc-for>
+        <div style="display:flex;align-items:center;gap:5px;height:22px;font:600 11.5px 'IBM Plex Mono',monospace;color:#3a3d42;margin-top:2px">▾ Tables</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>emiten</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>referral_sources</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>sectors</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>transactions</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>users</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-top:1px solid rgba(0,0,0,.09)">
+        <span style="color:#6b6f76">＋</span><span style="color:#6b6f76;font-size:9px">▾</span>
+        <div style="flex:1;display:flex;align-items:center;justify-content:space-between;height:24px;padding:0 9px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:6px;font:11.5px system-ui;color:#2c2e33">public <span style="color:#8a8e95;font-size:9px">⇅</span></div>
+      </div>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+      <div style="height:28px;display:flex;border-bottom:1px solid rgba(0,0,0,.08)">
+        <div style="flex:1;display:flex;align-items:center;gap:8px;padding:0 10px;background:#e7e7e5"><span style="color:#8a8e95">‹</span><span style="color:#c4c7cc">›</span><div style="flex:1;text-align:center;font:12px system-ui;color:#6b6f76">emiten</div></div>
+        <div style="flex:1;display:flex;align-items:center;background:#fff;border-left:1px solid rgba(0,0,0,.08)"><div style="flex:1;text-align:center;font:600 12px system-ui;color:#2c2e33">SQL Query</div><span style="padding-right:10px;color:#8a8e95;font-size:12px">◫</span></div>
+      </div>
+      <div style="padding:8px 0;font:13px/22px 'IBM Plex Mono',monospace;color:#24282e">
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">28</span><div>(<span style="color:#d6336c">'Healthcare'</span>),</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">29</span><div>(<span style="color:#d6336c">'Industrials'</span>),</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">30</span><div>(<span style="color:#d6336c">'Academic &amp; Educational Services'</span>);</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">31</span><div>&nbsp;</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">32</span><div>&nbsp;</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#3a3d42;font-weight:600">33</span><div><span style="background:#ececea"><span style="color:#3577d4">SELECT</span> * <span style="color:#3577d4">FROM</span> emiten;</span></div></div>
+      </div>
+      <div style="height:30px;display:flex;align-items:center;gap:8px;padding:0 12px;border-top:1px solid rgba(0,0,0,.07);border-bottom:1px solid rgba(0,0,0,.07)">
+        <span style="color:#8a8e95">≔</span>
+        <span style="font:10.5px 'IBM Plex Mono',monospace;color:#8a8e95">line 33, column 22, location 725</span>
+        <div style="flex:1"></div>
+        <div style="display:flex;align-items:center;gap:6px;height:22px;padding:0 11px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11px system-ui;color:#3a3d42">No limit <span style="color:#8a8e95;font-size:8px">▾</span></div>
+        <div style="display:flex;align-items:center;gap:6px;height:22px;padding:0 11px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11px system-ui;color:#3a3d42">Beautify ⌘I <span style="color:#8a8e95;font-size:8px">▾</span></div>
+        <div style="display:flex;align-items:center;gap:6px;height:22px;padding:0 11px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:600 11px system-ui;color:#3a3d42">Run Current <span style="color:#8a8e95;font-size:8px">▾</span></div>
+      </div>
+      <div style="flex:1;overflow:hidden">
+        <sc-for list="{{ emitenQ }}" as="r" hint-placeholder-count="14">
+          <div style="display:grid;grid-template-columns:36px 240px 70px minmax(200px,1fr) 76px 80px 44px 64px 240px 180px 56px;border-bottom:1px solid rgba(0,0,0,.045)">
+            <div style="padding:0 6px;line-height:24px;font:10.5px 'IBM Plex Mono',monospace;color:#a0a4ab;text-align:right;border-right:1px solid rgba(0,0,0,.045)">{{ r.num }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.id }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045)">{{ r.code }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045)">{{ r.short }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);text-align:center">indonesia</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);text-align:center">IDR</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);text-align:center">Jakarta</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.sector }} <span style="color:#b0b4bb">→</span></div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#3f434a;border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.created }}</div>
+            <div style="padding:0 8px;line-height:24px;font:italic 11px 'IBM Plex Mono',monospace;color:#b3b7bd">NULL</div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="height:34px;display:flex;align-items:center;gap:6px;padding:0 10px;background:#ececea;border-top:1px solid rgba(0,0,0,.1)">
+        <div style="display:flex;align-items:center;height:24px;padding:0 13px;background:#3577d4;border-radius:12px;font:600 11.5px system-ui;color:#fff">Data</div>
+        <div style="display:flex;align-items:center;height:24px;padding:0 11px;border-radius:12px;font:11.5px system-ui;color:#4b4f55">Message</div>
+        <div style="display:flex;align-items:center;height:24px;padding:0 11px;border-radius:12px;font:11.5px system-ui;color:#4b4f55">Chart</div>
+        <span style="font:11px system-ui;color:#8a8e95">245 ms</span>
+        <div style="flex:1;text-align:center;font:11.5px system-ui;color:#6b6f76">986 rows</div>
+        <span style="color:#8a8e95;padding:0 4px">⚑</span>
+        <span style="color:#8a8e95;padding:0 4px">⌕</span>
+        <div style="display:flex;align-items:center;height:24px;padding:0 13px;background:#fff;border-radius:12px;font:11.5px system-ui;color:#3a3d42;box-shadow:0 1px 2px rgba(0,0,0,.07)">Export…</div>
+      </div>
+    </div>
+  </div>
+  <!-- dim + modal -->
+  <div style="position:absolute;inset:0;background:rgba(250,250,249,.55);display:flex;align-items:flex-start;justify-content:center;padding-top:150px">
+    <div style="width:400px;background:#fff;border-radius:12px;box-shadow:0 24px 70px rgba(0,0,0,.32);overflow:hidden">
+      <div style="text-align:center;font:600 13px system-ui;color:#2c2e33;padding:14px 0 2px">Open database</div>
+      <div style="margin:9px 12px;display:flex;align-items:center;gap:7px;height:30px;padding:0 10px;border:2px solid #7ab0f5;border-radius:8px;font:12px system-ui;color:#a0a4ab">⌕ Search for database…</div>
+      <div style="padding:0 6px">
+        <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 10px;background:#ececec;border-radius:5px;font:12px system-ui;color:#2c2e33"><span style="width:13px;height:13px;border-radius:4px;background:#5a9ae6;flex:none"></span>ai_bot_fintech</div>
+        <sc-for list="{{ dbList }}" as="d" hint-placeholder-count="13">
+          <div style="display:flex;align-items:center;gap:9px;height:26px;padding:0 10px;border-radius:5px;font:12px system-ui;color:#2c2e33" style-hover="background:#f2f6fd"><span style="width:13px;height:13px;border-radius:4px;background:#5a9ae6;flex:none"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ d.n }}</span></div>
+        </sc-for>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:12px 14px">
+        <div style="display:flex;align-items:center;height:26px;padding:0 16px;background:#f1f1ef;border:1px solid rgba(0,0,0,.1);border-radius:6px;font:12px system-ui;color:#3a3d42">Cancel</div>
+        <div style="flex:1"></div>
+        <div style="display:flex;align-items:center;height:26px;padding:0 16px;background:#f1f1ef;border:1px solid rgba(0,0,0,.1);border-radius:6px;font:12px system-ui;color:#3a3d42">New…</div>
+        <div style="display:flex;align-items:center;height:26px;padding:0 18px;background:#3577d4;border-radius:6px;font:600 12px system-ui;color:#fff">Open</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+<!-- ============ 3d : OPEN CONNECTION MODAL ============ -->
+<div class="dv-opt" id="3d">
+<div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a>Modal Open Connection — grup + koneksi</div>
+<div class="dv-card" style="width:1440px">
+<div style="position:relative;width:1440px;height:810px;display:flex;flex-direction:column;background:#fff;font-family:system-ui,-apple-system,sans-serif;color:#1f2124;overflow:hidden">
+  <div style="height:44px;display:flex;align-items:center;gap:7px;padding:0 14px;background:#ececea;border-bottom:1px solid rgba(0,0,0,.1)">
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">◧</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">⌁</span>
+    </div>
+    <div style="display:flex;gap:2px;padding:3px">
+      <span style="width:26px;height:23px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">⊘</span>
+      <span style="width:26px;height:23px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">◎</span>
+      <span style="width:26px;height:23px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">☰</span>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">▤</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">⛁</span>
+      <span style="width:30px;height:23px;display:grid;place-items:center;color:#4b4f55;font:700 9px system-ui">SQL</span>
+    </div>
+    <div style="flex:1;display:flex;justify-content:center;min-width:0">
+      <div style="max-width:620px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;height:28px;line-height:28px;padding:0 16px;background:#fff;border-radius:8px;font:11px 'IBM Plex Mono',monospace;color:#4b4f55;box-shadow:0 1px 2px rgba(0,0,0,.07)">LOCAL | PostgreSQL 16.14 : bot ai tele : ai_bot_fintech : SQL Query</div>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">∿</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">⟳</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">⌘</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">⊞</span>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">▭</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;color:#4b4f55;font-size:13px">◨</span>
+    </div>
+  </div>
+  <div style="flex:1;display:flex;min-height:0">
+    <div style="width:230px;display:flex;flex-direction:column;background:#f0f0ee;border-right:1px solid rgba(0,0,0,.09)">
+      <div style="display:flex;justify-content:center;gap:2px;padding:8px 10px 4px">
+        <div style="padding:3px 12px;background:#dcdcda;border-radius:6px;font:600 11.5px system-ui;color:#2c2e33">Items</div>
+        <div style="padding:3px 12px;border-radius:6px;font:11.5px system-ui;color:#6b6f76">Queries</div>
+        <div style="padding:3px 12px;border-radius:6px;font:11.5px system-ui;color:#6b6f76">History</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin:4px 10px 6px;height:26px;padding:0 9px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:13px;font:11.5px system-ui;color:#a0a4ab">⌕ Search for item…<span style="margin-left:auto;color:#8a8e95">≔</span></div>
+      <div style="flex:1;overflow:hidden;padding:2px 8px">
+        <div style="display:flex;align-items:center;gap:5px;height:22px;font:600 11.5px 'IBM Plex Mono',monospace;color:#3a3d42">▾ Functions</div>
+        <sc-for list="{{ fns }}" as="f" hint-placeholder-count="10">
+          <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:16px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="width:12px;height:12px;border-radius:3px;background:#e8a33d;color:#fff;font:600 8px 'IBM Plex Mono',monospace;display:grid;place-items:center;flex:none">f</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.n }}</span></div>
+        </sc-for>
+        <div style="display:flex;align-items:center;gap:5px;height:22px;font:600 11.5px 'IBM Plex Mono',monospace;color:#3a3d42;margin-top:2px">▾ Tables</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>emiten</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>referral_sources</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>sectors</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>transactions</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>users</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-top:1px solid rgba(0,0,0,.09)">
+        <span style="color:#6b6f76">＋</span><span style="color:#6b6f76;font-size:9px">▾</span>
+        <div style="flex:1;display:flex;align-items:center;justify-content:space-between;height:24px;padding:0 9px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:6px;font:11.5px system-ui;color:#2c2e33">public <span style="color:#8a8e95;font-size:9px">⇅</span></div>
+      </div>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+      <div style="height:28px;display:flex;border-bottom:1px solid rgba(0,0,0,.08)">
+        <div style="flex:1;display:flex;align-items:center;gap:8px;padding:0 10px;background:#e7e7e5"><span style="color:#8a8e95">‹</span><span style="color:#c4c7cc">›</span><div style="flex:1;text-align:center;font:12px system-ui;color:#6b6f76">emiten</div></div>
+        <div style="flex:1;display:flex;align-items:center;background:#fff;border-left:1px solid rgba(0,0,0,.08)"><div style="flex:1;text-align:center;font:600 12px system-ui;color:#2c2e33">SQL Query</div><span style="padding-right:10px;color:#8a8e95;font-size:12px">◫</span></div>
+      </div>
+      <div style="padding:8px 0;font:13px/22px 'IBM Plex Mono',monospace;color:#24282e">
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">28</span><div>(<span style="color:#d6336c">'Healthcare'</span>),</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">29</span><div>(<span style="color:#d6336c">'Industrials'</span>),</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">30</span><div>(<span style="color:#d6336c">'Academic &amp; Educational Services'</span>);</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">31</span><div>&nbsp;</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#b3b7bd">32</span><div>&nbsp;</div></div>
+        <div style="display:flex"><span style="width:46px;flex:none;text-align:right;padding-right:14px;color:#3a3d42;font-weight:600">33</span><div><span style="background:#ececea"><span style="color:#3577d4">SELECT</span> * <span style="color:#3577d4">FROM</span> emiten;</span></div></div>
+      </div>
+      <div style="height:30px;display:flex;align-items:center;gap:8px;padding:0 12px;border-top:1px solid rgba(0,0,0,.07);border-bottom:1px solid rgba(0,0,0,.07)">
+        <span style="color:#8a8e95">≔</span>
+        <span style="font:10.5px 'IBM Plex Mono',monospace;color:#8a8e95">line 33, column 22, location 725</span>
+        <div style="flex:1"></div>
+        <div style="display:flex;align-items:center;gap:6px;height:22px;padding:0 11px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11px system-ui;color:#3a3d42">No limit <span style="color:#8a8e95;font-size:8px">▾</span></div>
+        <div style="display:flex;align-items:center;gap:6px;height:22px;padding:0 11px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11px system-ui;color:#3a3d42">Beautify ⌘I <span style="color:#8a8e95;font-size:8px">▾</span></div>
+        <div style="display:flex;align-items:center;gap:6px;height:22px;padding:0 11px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:600 11px system-ui;color:#3a3d42">Run Current <span style="color:#8a8e95;font-size:8px">▾</span></div>
+      </div>
+      <div style="flex:1;overflow:hidden">
+        <sc-for list="{{ emitenQ }}" as="r" hint-placeholder-count="14">
+          <div style="display:grid;grid-template-columns:36px 240px 70px minmax(200px,1fr) 76px 80px 44px 64px 240px 180px 56px;border-bottom:1px solid rgba(0,0,0,.045)">
+            <div style="padding:0 6px;line-height:24px;font:10.5px 'IBM Plex Mono',monospace;color:#a0a4ab;text-align:right;border-right:1px solid rgba(0,0,0,.045)">{{ r.num }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.id }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045)">{{ r.code }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045)">{{ r.short }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);text-align:center">indonesia</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);text-align:center">IDR</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);text-align:center">Jakarta</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.sector }} <span style="color:#b0b4bb">→</span></div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#3f434a;border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.created }}</div>
+            <div style="padding:0 8px;line-height:24px;font:italic 11px 'IBM Plex Mono',monospace;color:#b3b7bd">NULL</div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="height:34px;display:flex;align-items:center;gap:6px;padding:0 10px;background:#ececea;border-top:1px solid rgba(0,0,0,.1)">
+        <div style="display:flex;align-items:center;height:24px;padding:0 13px;background:#3577d4;border-radius:12px;font:600 11.5px system-ui;color:#fff">Data</div>
+        <div style="display:flex;align-items:center;height:24px;padding:0 11px;border-radius:12px;font:11.5px system-ui;color:#4b4f55">Message</div>
+        <div style="display:flex;align-items:center;height:24px;padding:0 11px;border-radius:12px;font:11.5px system-ui;color:#4b4f55">Chart</div>
+        <span style="font:11px system-ui;color:#8a8e95">245 ms</span>
+        <div style="flex:1;text-align:center;font:11.5px system-ui;color:#6b6f76">986 rows</div>
+        <span style="color:#8a8e95;padding:0 4px">⚑</span>
+        <span style="color:#8a8e95;padding:0 4px">⌕</span>
+        <div style="display:flex;align-items:center;height:24px;padding:0 13px;background:#fff;border-radius:12px;font:11.5px system-ui;color:#3a3d42;box-shadow:0 1px 2px rgba(0,0,0,.07)">Export…</div>
+      </div>
+    </div>
+  </div>
+  <!-- dim + modal -->
+  <div style="position:absolute;inset:0;background:rgba(250,250,249,.55);display:flex;align-items:flex-start;justify-content:center;padding-top:150px">
+    <div style="width:400px;background:#fff;border-radius:12px;box-shadow:0 24px 70px rgba(0,0,0,.32);overflow:hidden">
+      <div style="text-align:center;font:600 13px system-ui;color:#2c2e33;padding:14px 0 2px">Open Connection</div>
+      <div style="margin:9px 12px;display:flex;align-items:center;gap:7px;height:30px;padding:0 10px;border:2px solid #7ab0f5;border-radius:8px;font:12px system-ui;color:#a0a4ab">⌕ Search for connection…</div>
+      <div style="padding:0 6px">
+        <div style="display:flex;align-items:center;gap:9px;height:32px;padding:0 8px;background:#ececec;border-radius:5px;font:600 12.5px system-ui;color:#2c2e33"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:22px;height:22px;border-radius:50%;background:#fff;border:2px solid #e8963c;display:grid;place-items:center;color:#e8963c;font-size:10px">⌁</span>OSS</div>
+        <div style="display:flex;align-items:center;gap:9px;height:32px;padding:0 8px;border-radius:5px;font:600 12.5px system-ui;color:#2c2e33"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:22px;height:22px;border-radius:50%;background:#fff;border:2px solid #e8963c;display:grid;place-items:center;color:#e8963c;font-size:10px">⌁</span>local</div>
+        <div style="display:flex;align-items:center;gap:9px;height:32px;padding:0 8px;border-radius:5px;font:600 12.5px system-ui;color:#2c2e33"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:22px;height:22px;border-radius:50%;background:#fff;border:2px solid #e8963c;display:grid;place-items:center;color:#e8963c;font-size:10px">⌁</span>opl</div>
+        <div style="display:flex;align-items:center;gap:9px;height:32px;padding:0 8px;border-radius:5px;font:600 12.5px system-ui;color:#2c2e33"><span style="color:#9aa0a8;font-size:9px">▾</span><span style="width:22px;height:22px;border-radius:50%;background:#fff;border:2px solid #e8963c;display:grid;place-items:center;color:#e8963c;font-size:10px">⌁</span>profin</div>
+        <sc-for list="{{ profinConns }}" as="c" hint-placeholder-count="5">
+          <div style="display:flex;align-items:center;gap:10px;height:38px;padding:0 8px 0 30px;border-radius:5px" style-hover="background:#f2f6fd">
+            <span style="width:22px;height:22px;border-radius:50%;background:{{ c.bc }};display:grid;place-items:center;color:#fff;font:600 9px system-ui;flex:none">{{ c.b }}</span>
+            <div style="display:flex;flex-direction:column;gap:1px;min-width:0">
+              <div style="font:600 12px system-ui;color:#2c2e33">{{ c.name }} <span style="color:#27a35a;font-weight:400">(local)</span></div>
+              <div style="font:10px system-ui;color:#8a8e95;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ c.host }}</div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:12px 14px">
+        <div style="display:flex;align-items:center;height:26px;padding:0 16px;background:#f1f1ef;border:1px solid rgba(0,0,0,.1);border-radius:6px;font:12px system-ui;color:#3a3d42">Cancel</div>
+        <div style="flex:1"></div>
+        <div style="display:flex;align-items:center;height:26px;padding:0 16px;background:#f1f1ef;border:1px solid rgba(0,0,0,.1);border-radius:6px;font:12px system-ui;color:#3a3d42">New…</div>
+        <div style="display:flex;align-items:center;height:26px;padding:0 18px;background:#f1f1ef;border:1px solid rgba(0,0,0,.1);border-radius:6px;font:12px system-ui;color:#b3b7bd">Open</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+</div>
+<p class="dv-next">Coba selanjutnya: "buat Structure view &amp; Index view tabel emiten" · "buat layar Message dan Chart dari <a class="dv-oid" href="#3a">3a</a>" · "versi dark seluruh set"</p>
+</section>
+
+<section class="dv-turn" id="t2">
+<div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Tabula light — mengikuti struktur referensi (welcome, workspace, data grid, filter), dirapikan dengan identitas sendiri</span></div>
+<div class="dv-opts">
+
+<!-- ============ 2a : WELCOME / CONNECTIONS ============ -->
+<div class="dv-opt" id="2a">
+<div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Welcome — daftar koneksi bergrup, backup/restore</div>
+<div class="dv-card" style="width:1160px">
+<div style="width:1160px;height:820px;display:flex;background:#fff;font-family:system-ui,-apple-system,sans-serif;color:#1f2124">
+  <!-- left brand panel -->
+  <div style="width:252px;display:flex;flex-direction:column;background:#ebebe9;border-right:1px solid rgba(0,0,0,.08)">
+    <div style="display:flex;gap:8px;padding:14px 0 0 14px">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840"></span>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:14px;padding-top:64px">
+      <div style="width:88px;height:88px;border-radius:22px;background:#3577d4;display:grid;place-items:center;color:#fff;font:600 44px 'IBM Plex Mono',monospace;box-shadow:0 8px 20px rgba(53,119,212,.3)">T</div>
+      <div style="font:700 26px system-ui;color:#1f2124">Tabula</div>
+      <div style="font:11.5px system-ui;color:#8a8e95;margin-top:-8px">Version 1.2.0 · open source</div>
+    </div>
+    <div style="flex:1"></div>
+    <div style="display:flex;flex-direction:column;gap:8px;padding:0 16px 18px">
+      <div style="display:flex;align-items:center;gap:9px;height:34px;padding:0 14px;background:#fff;border-radius:17px;font:12.5px system-ui;color:#3a3d42;box-shadow:0 1px 2px rgba(0,0,0,.08)" style-hover="background:#f6f9ff">⬆ Backup Database</div>
+      <div style="display:flex;align-items:center;gap:9px;height:34px;padding:0 14px;background:#fff;border-radius:17px;font:12.5px system-ui;color:#3a3d42;box-shadow:0 1px 2px rgba(0,0,0,.08)" style-hover="background:#f6f9ff">⬇ Restore Database</div>
+      <div style="display:flex;align-items:center;gap:9px;height:34px;padding:0 14px;background:#fff;border-radius:17px;font:12.5px system-ui;color:#3a3d42;box-shadow:0 1px 2px rgba(0,0,0,.08)" style-hover="background:#f6f9ff">⊕ Create Connection</div>
+    </div>
+  </div>
+  <!-- connection list -->
+  <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+    <div style="display:flex;align-items:center;gap:10px;padding:14px 18px 8px">
+      <span style="color:#8a8e95;font-size:15px" style-hover="color:#3577d4">＋</span>
+      <div style="flex:1;display:flex;align-items:center;gap:8px;height:32px;padding:0 13px;background:#f1f1ef;border-radius:16px;font:12.5px system-ui;color:#a0a4ab">⌕ Search for connection…</div>
+    </div>
+    <div style="flex:1;overflow:hidden;padding:4px 18px 14px">
+      <div style="display:flex;align-items:center;gap:9px;height:34px;font:600 13px system-ui;color:#2c2e33"><span style="color:#9aa0a8;font-size:10px">▸</span><span style="width:24px;height:24px;border-radius:50%;background:#fff;border:2px solid #e8963c;display:grid;place-items:center;color:#e8963c;font-size:11px">⌁</span>OSS</div>
+      <div style="display:flex;align-items:center;gap:9px;height:34px;font:600 13px system-ui;color:#2c2e33"><span style="color:#9aa0a8;font-size:10px">▸</span><span style="width:24px;height:24px;border-radius:50%;background:#fff;border:2px solid #e8963c;display:grid;place-items:center;color:#e8963c;font-size:11px">⌁</span>local</div>
+      <div style="display:flex;align-items:center;gap:9px;height:34px;font:600 13px system-ui;color:#2c2e33"><span style="color:#9aa0a8;font-size:10px">▸</span><span style="width:24px;height:24px;border-radius:50%;background:#fff;border:2px solid #e8963c;display:grid;place-items:center;color:#e8963c;font-size:11px">⌁</span>opl</div>
+      <div style="display:flex;align-items:center;gap:9px;height:34px;font:600 13px system-ui;color:#2c2e33"><span style="color:#9aa0a8;font-size:10px">▾</span><span style="width:24px;height:24px;border-radius:50%;background:#fff;border:2px solid #e8963c;display:grid;place-items:center;color:#e8963c;font-size:11px">⌁</span>profin</div>
+      <sc-for list="{{ profinConns }}" as="c" hint-placeholder-count="5">
+        <div style="display:flex;align-items:center;gap:10px;height:38px;padding:0 8px 0 34px;border-radius:8px" style-hover="background:#f2f6fd">
+          <span style="width:23px;height:23px;border-radius:50%;background:{{ c.bc }};display:grid;place-items:center;color:#fff;font:600 9px system-ui;flex:none">{{ c.b }}</span>
+          <div style="display:flex;flex-direction:column;gap:1px;min-width:0">
+            <div style="font:600 12.5px system-ui;color:#2c2e33">{{ c.name }} <span style="color:#27a35a;font-weight:400">(local)</span></div>
+            <div style="font:10.5px system-ui;color:#8a8e95;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ c.host }}</div>
+          </div>
+        </div>
+      </sc-for>
+      <div style="display:flex;align-items:center;gap:9px;height:34px;font:600 13px system-ui;color:#2c2e33"><span style="color:#9aa0a8;font-size:10px">▸</span><span style="width:24px;height:24px;border-radius:50%;background:#fff;border:2px solid #e8963c;display:grid;place-items:center;color:#e8963c;font-size:11px">⌁</span>spmb</div>
+      <sc-for list="{{ flatConns }}" as="c" hint-placeholder-count="9">
+        <div style="display:flex;align-items:center;gap:10px;height:38px;padding:0 8px 0 12px;border-radius:8px" style-hover="background:#f2f6fd">
+          <span style="width:23px;height:23px;border-radius:50%;background:{{ c.bc }};display:grid;place-items:center;color:#fff;font:600 9px system-ui;flex:none">{{ c.b }}</span>
+          <div style="display:flex;flex-direction:column;gap:1px;min-width:0">
+            <div style="font:600 12.5px system-ui;color:#2c2e33">{{ c.name }} <span style="color:#27a35a;font-weight:400">(local)</span></div>
+            <div style="font:10.5px system-ui;color:#8a8e95;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ c.host }}</div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+<!-- ============ 2b : WORKSPACE EMPTY STATE ============ -->
+<div class="dv-opt" id="2b">
+<div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Workspace — sidebar Items/Queries/History, belum ada tabel dibuka</div>
+<div class="dv-card" style="width:1240px">
+<div style="width:1240px;height:780px;display:flex;flex-direction:column;background:#fff;font-family:system-ui,-apple-system,sans-serif;color:#1f2124">
+  <!-- toolbar -->
+  <div style="height:46px;display:flex;align-items:center;gap:7px;padding:0 14px;background:#ececea;border-bottom:1px solid rgba(0,0,0,.1)">
+    <div style="display:flex;gap:8px;margin-right:6px">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840"></span>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:24px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">◧</span>
+      <span style="width:28px;height:24px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⌁</span>
+    </div>
+    <div style="display:flex;gap:2px;padding:3px">
+      <span style="width:26px;height:24px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">⊘</span>
+      <span style="width:26px;height:24px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">◎</span>
+      <span style="width:26px;height:24px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">☰</span>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:24px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">▤</span>
+      <span style="width:28px;height:24px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⛁</span>
+      <span style="width:30px;height:24px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font:700 9px system-ui" style-hover="background:rgba(0,0,0,.06)">SQL</span>
+    </div>
+    <div style="flex:1;display:flex;justify-content:center;min-width:0">
+      <div style="max-width:440px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;height:28px;line-height:28px;padding:0 16px;background:#fff;border-radius:8px;font:11px 'IBM Plex Mono',monospace;color:#4b4f55;box-shadow:0 1px 2px rgba(0,0,0,.07)">LOCAL | PostgreSQL 16.14 : bot ai tele : ai_bot_fintech</div>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:24px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">∿</span>
+      <span style="width:28px;height:24px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⟳</span>
+      <span style="width:28px;height:24px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⌘</span>
+      <span style="width:28px;height:24px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⊞</span>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:24px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">▭</span>
+      <span style="width:28px;height:24px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">◨</span>
+    </div>
+  </div>
+  <div style="flex:1;display:flex;min-height:0">
+    <!-- sidebar -->
+    <div style="width:230px;display:flex;flex-direction:column;background:#f0f0ee;border-right:1px solid rgba(0,0,0,.09)">
+      <div style="display:flex;justify-content:center;gap:2px;padding:8px 10px 4px">
+        <div style="padding:3px 12px;background:#dcdcda;border-radius:6px;font:600 11.5px system-ui;color:#2c2e33">Items</div>
+        <div style="padding:3px 12px;border-radius:6px;font:11.5px system-ui;color:#6b6f76" style-hover="background:rgba(0,0,0,.05)">Queries</div>
+        <div style="padding:3px 12px;border-radius:6px;font:11.5px system-ui;color:#6b6f76" style-hover="background:rgba(0,0,0,.05)">History</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin:4px 10px 6px;height:26px;padding:0 9px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:13px;font:11.5px system-ui;color:#a0a4ab">⌕ Search for item…<span style="margin-left:auto;color:#8a8e95">≔</span></div>
+      <div style="flex:1;overflow:hidden;padding:2px 8px">
+        <div style="display:flex;align-items:center;gap:5px;height:22px;font:600 11.5px 'IBM Plex Mono',monospace;color:#3a3d42">▾ Functions</div>
+        <sc-for list="{{ fns }}" as="f" hint-placeholder-count="10">
+          <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:16px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="width:12px;height:12px;border-radius:3px;background:#e8a33d;color:#fff;font:600 8px 'IBM Plex Mono',monospace;display:grid;place-items:center;flex:none">f</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.n }}</span></div>
+        </sc-for>
+        <div style="display:flex;align-items:center;gap:5px;height:22px;font:600 11.5px 'IBM Plex Mono',monospace;color:#3a3d42;margin-top:2px">▾ Tables</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>emiten</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>referral_sources</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>sectors</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>transactions</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>users</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-top:1px solid rgba(0,0,0,.09)">
+        <span style="color:#6b6f76">＋</span><span style="color:#6b6f76;font-size:9px">▾</span>
+        <div style="flex:1;display:flex;align-items:center;justify-content:space-between;height:24px;padding:0 9px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:6px;font:11.5px system-ui;color:#2c2e33">public <span style="color:#8a8e95;font-size:9px">⇅</span></div>
+      </div>
+    </div>
+    <!-- empty main -->
+    <div style="flex:1;display:grid;place-items:center;background:#fff">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:16px">
+        <div style="width:270px;height:180px;border-radius:14px;border:1.5px dashed #b9cfe8;background:repeating-linear-gradient(45deg,#f2f7fd 0 12px,#eaf2fb 12px 24px);display:grid;place-items:center"><span style="font:11px 'IBM Plex Mono',monospace;color:#7d9bd6">empty-state illustration</span></div>
+        <div style="font:13px system-ui;color:#6b6f76">Open a table from the sidebar, or press <span style="font:600 11px 'IBM Plex Mono',monospace;padding:2px 6px;background:#f1f1ef;border-radius:4px;color:#3a3d42">⌘P</span> to jump anywhere</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+<!-- ============ 2c : DATA GRID ============ -->
+<div class="dv-opt" id="2c">
+<div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Data grid — emiten, 986 rows, Data/Structure/Index</div>
+<div class="dv-card" style="width:1440px">
+<div style="width:1440px;height:760px;display:flex;flex-direction:column;background:#fff;font-family:system-ui,-apple-system,sans-serif;color:#1f2124">
+  <!-- toolbar (fullscreen style) -->
+  <div style="height:44px;display:flex;align-items:center;gap:7px;padding:0 14px;background:#ececea;border-bottom:1px solid rgba(0,0,0,.1)">
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">◧</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⌁</span>
+    </div>
+    <div style="display:flex;gap:2px;padding:3px">
+      <span style="width:26px;height:23px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">⊘</span>
+      <span style="width:26px;height:23px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">◎</span>
+      <span style="width:26px;height:23px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">☰</span>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">▤</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⛁</span>
+      <span style="width:30px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font:700 9px system-ui" style-hover="background:rgba(0,0,0,.06)">SQL</span>
+    </div>
+    <div style="flex:1;display:flex;justify-content:center;min-width:0">
+      <div style="max-width:620px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;height:28px;line-height:28px;padding:0 16px;background:#fff;border-radius:8px;font:11px 'IBM Plex Mono',monospace;color:#4b4f55;box-shadow:0 1px 2px rgba(0,0,0,.07)">LOCAL | PostgreSQL 16.14 : bot ai tele : ai_bot_fintech : public.emiten</div>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">∿</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⟳</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⌘</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⊞</span>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">▭</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">◨</span>
+    </div>
+  </div>
+  <div style="flex:1;display:flex;min-height:0">
+    <!-- sidebar -->
+    <div style="width:230px;display:flex;flex-direction:column;background:#f0f0ee;border-right:1px solid rgba(0,0,0,.09)">
+      <div style="display:flex;justify-content:center;gap:2px;padding:8px 10px 4px">
+        <div style="padding:3px 12px;background:#dcdcda;border-radius:6px;font:600 11.5px system-ui;color:#2c2e33">Items</div>
+        <div style="padding:3px 12px;border-radius:6px;font:11.5px system-ui;color:#6b6f76" style-hover="background:rgba(0,0,0,.05)">Queries</div>
+        <div style="padding:3px 12px;border-radius:6px;font:11.5px system-ui;color:#6b6f76" style-hover="background:rgba(0,0,0,.05)">History</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin:4px 10px 6px;height:26px;padding:0 9px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:13px;font:11.5px system-ui;color:#a0a4ab">⌕ Search for item…<span style="margin-left:auto;color:#8a8e95">≔</span></div>
+      <div style="flex:1;overflow:hidden;padding:2px 8px">
+        <div style="display:flex;align-items:center;gap:5px;height:22px;font:600 11.5px 'IBM Plex Mono',monospace;color:#3a3d42">▾ Functions</div>
+        <sc-for list="{{ fns }}" as="f" hint-placeholder-count="10">
+          <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:16px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="width:12px;height:12px;border-radius:3px;background:#e8a33d;color:#fff;font:600 8px 'IBM Plex Mono',monospace;display:grid;place-items:center;flex:none">f</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.n }}</span></div>
+        </sc-for>
+        <div style="display:flex;align-items:center;gap:5px;height:22px;font:600 11.5px 'IBM Plex Mono',monospace;color:#3a3d42;margin-top:2px">▾ Tables</div>
+        <div style="display:flex;align-items:center;gap:6px;height:22px;padding-left:8px;font:600 11.5px 'IBM Plex Mono',monospace;background:#3577d4;border-radius:5px;color:#fff"><span style="font-size:9px;opacity:.8">▸</span><span style="width:12px;height:12px;border-radius:3px;background:rgba(255,255,255,.25);display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>emiten</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>referral_sources</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>sectors</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>transactions</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>users</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-top:1px solid rgba(0,0,0,.09)">
+        <span style="color:#6b6f76">＋</span><span style="color:#6b6f76;font-size:9px">▾</span>
+        <div style="flex:1;display:flex;align-items:center;justify-content:space-between;height:24px;padding:0 9px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:6px;font:11.5px system-ui;color:#2c2e33">public <span style="color:#8a8e95;font-size:9px">⇅</span></div>
+      </div>
+    </div>
+    <!-- main -->
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+      <div style="height:30px;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid rgba(0,0,0,.08)">
+        <span style="color:#8a8e95">‹</span><span style="color:#c4c7cc">›</span>
+        <div style="flex:1;text-align:center;font:600 12px system-ui;color:#2c2e33">emiten</div>
+        <span style="color:#8a8e95;font-size:12px">◫</span>
+      </div>
+      <!-- grid header -->
+      <div style="display:grid;grid-template-columns:250px 78px minmax(220px,1fr) 70px 78px 46px 66px 250px 190px 82px;background:#f3f3f1;border-bottom:1px solid rgba(0,0,0,.12)">
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">id</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">code</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">name</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">short_name</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">country</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">ccy</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">exch</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">id_sector</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">created_at</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42">updated_at</div>
+      </div>
+      <!-- rows -->
+      <div style="flex:1;overflow:hidden">
+        <sc-for list="{{ emiten }}" as="r" hint-placeholder-count="20">
+          <div style="display:grid;grid-template-columns:250px 78px minmax(220px,1fr) 70px 78px 46px 66px 250px 190px 82px;border-bottom:1px solid rgba(0,0,0,.045)" style-hover="background:#f2f6fd">
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.id }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045)">{{ r.code }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045)">{{ r.short }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);text-align:center">indonesia</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);text-align:center">IDR</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);text-align:center">Jakarta</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.sector }} <span style="color:#b0b4bb">→</span></div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:#3f434a;border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.created }}</div>
+            <div style="padding:0 8px;line-height:24px;font:italic 11px 'IBM Plex Mono',monospace;color:#b3b7bd">NULL</div>
+          </div>
+        </sc-for>
+      </div>
+      <!-- bottom bar -->
+      <div style="height:34px;display:flex;align-items:center;gap:6px;padding:0 10px;background:#ececea;border-top:1px solid rgba(0,0,0,.1)">
+        <div style="display:flex;align-items:center;height:24px;padding:0 13px;background:#3577d4;border-radius:12px;font:600 11.5px system-ui;color:#fff">Data</div>
+        <div style="display:flex;align-items:center;height:24px;padding:0 11px;border-radius:12px;font:11.5px system-ui;color:#4b4f55" style-hover="background:rgba(0,0,0,.06)">Structure</div>
+        <div style="display:flex;align-items:center;height:24px;padding:0 11px;border-radius:12px;font:11.5px system-ui;color:#4b4f55" style-hover="background:rgba(0,0,0,.06)">Index</div>
+        <div style="display:flex;align-items:center;gap:5px;height:24px;padding:0 12px;background:#fff;border-radius:12px;font:11.5px system-ui;color:#3a3d42;box-shadow:0 1px 2px rgba(0,0,0,.07)" style-hover="background:#f6f9ff">＋ Row</div>
+        <div style="flex:1;text-align:center;font:11.5px system-ui;color:#6b6f76">1 – 300 of 986 rows</div>
+        <div style="display:flex;align-items:center;height:24px;padding:0 13px;background:#fff;border-radius:12px;font:11.5px system-ui;color:#3a3d42;box-shadow:0 1px 2px rgba(0,0,0,.07)" style-hover="background:#f6f9ff">Filters</div>
+        <div style="display:flex;align-items:center;height:24px;padding:0 13px;background:#fff;border-radius:12px;font:11.5px system-ui;color:#3a3d42;box-shadow:0 1px 2px rgba(0,0,0,.07)" style-hover="background:#f6f9ff">Columns</div>
+        <span style="color:#8a8e95;padding:0 4px">≣</span>
+        <span style="color:#c4c7cc">‹</span><span style="color:#8a8e95">›</span>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+<!-- ============ 2d : DATA GRID + FILTER PANEL ============ -->
+<div class="dv-opt" id="2d">
+<div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>Filter panel terbuka — baris terseleksi + cell teredit (kotak merah)</div>
+<div class="dv-card" style="width:1440px">
+<div style="width:1440px;height:880px;display:flex;flex-direction:column;background:#fff;font-family:system-ui,-apple-system,sans-serif;color:#1f2124">
+  <!-- toolbar -->
+  <div style="height:44px;display:flex;align-items:center;gap:7px;padding:0 14px;background:#ececea;border-bottom:1px solid rgba(0,0,0,.1)">
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">◧</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⌁</span>
+    </div>
+    <div style="display:flex;gap:2px;padding:3px">
+      <span style="width:26px;height:23px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">⊘</span>
+      <span style="width:26px;height:23px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">◎</span>
+      <span style="width:26px;height:23px;display:grid;place-items:center;color:#c4c7cc;font-size:13px">☰</span>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">▤</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⛁</span>
+      <span style="width:30px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font:700 9px system-ui" style-hover="background:rgba(0,0,0,.06)">SQL</span>
+    </div>
+    <div style="flex:1;display:flex;justify-content:center;min-width:0">
+      <div style="max-width:620px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;height:28px;line-height:28px;padding:0 16px;background:#fff;border-radius:8px;font:11px 'IBM Plex Mono',monospace;color:#4b4f55;box-shadow:0 1px 2px rgba(0,0,0,.07)">LOCAL | PostgreSQL 16.14 : bot ai tele : ai_bot_fintech : public.emiten</div>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">∿</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⟳</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⌘</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">⊞</span>
+    </div>
+    <div style="display:flex;gap:2px;background:#fff;border-radius:8px;padding:3px;box-shadow:0 1px 2px rgba(0,0,0,.07)">
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">▭</span>
+      <span style="width:28px;height:23px;display:grid;place-items:center;border-radius:5px;color:#4b4f55;font-size:13px" style-hover="background:rgba(0,0,0,.06)">◨</span>
+    </div>
+  </div>
+  <div style="flex:1;display:flex;min-height:0">
+    <!-- sidebar -->
+    <div style="width:230px;display:flex;flex-direction:column;background:#f0f0ee;border-right:1px solid rgba(0,0,0,.09)">
+      <div style="display:flex;justify-content:center;gap:2px;padding:8px 10px 4px">
+        <div style="padding:3px 12px;background:#dcdcda;border-radius:6px;font:600 11.5px system-ui;color:#2c2e33">Items</div>
+        <div style="padding:3px 12px;border-radius:6px;font:11.5px system-ui;color:#6b6f76" style-hover="background:rgba(0,0,0,.05)">Queries</div>
+        <div style="padding:3px 12px;border-radius:6px;font:11.5px system-ui;color:#6b6f76" style-hover="background:rgba(0,0,0,.05)">History</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin:4px 10px 6px;height:26px;padding:0 9px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:13px;font:11.5px system-ui;color:#a0a4ab">⌕ Search for item…<span style="margin-left:auto;color:#8a8e95">≔</span></div>
+      <div style="flex:1;overflow:hidden;padding:2px 8px">
+        <div style="display:flex;align-items:center;gap:5px;height:22px;font:600 11.5px 'IBM Plex Mono',monospace;color:#3a3d42">▾ Functions</div>
+        <sc-for list="{{ fns }}" as="f" hint-placeholder-count="10">
+          <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:16px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="width:12px;height:12px;border-radius:3px;background:#e8a33d;color:#fff;font:600 8px 'IBM Plex Mono',monospace;display:grid;place-items:center;flex:none">f</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.n }}</span></div>
+        </sc-for>
+        <div style="display:flex;align-items:center;gap:5px;height:22px;font:600 11.5px 'IBM Plex Mono',monospace;color:#3a3d42;margin-top:2px">▾ Tables</div>
+        <div style="display:flex;align-items:center;gap:6px;height:22px;padding-left:8px;font:600 11.5px 'IBM Plex Mono',monospace;background:#3577d4;border-radius:5px;color:#fff"><span style="font-size:9px;opacity:.8">▸</span><span style="width:12px;height:12px;border-radius:3px;background:rgba(255,255,255,.25);display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>emiten</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>referral_sources</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>sectors</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>transactions</div>
+        <div style="display:flex;align-items:center;gap:6px;height:21px;padding-left:8px;font:11.5px 'IBM Plex Mono',monospace;color:#3f434a"><span style="color:#9aa0a8;font-size:9px">▸</span><span style="width:12px;height:12px;border-radius:3px;background:#4a90e2;display:grid;place-items:center;color:#fff;font-size:7px;flex:none">▦</span>users</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-top:1px solid rgba(0,0,0,.09)">
+        <span style="color:#6b6f76">＋</span><span style="color:#6b6f76;font-size:9px">▾</span>
+        <div style="flex:1;display:flex;align-items:center;justify-content:space-between;height:24px;padding:0 9px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:6px;font:11.5px system-ui;color:#2c2e33">public <span style="color:#8a8e95;font-size:9px">⇅</span></div>
+      </div>
+    </div>
+    <!-- main -->
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+      <div style="height:30px;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid rgba(0,0,0,.08)">
+        <span style="color:#8a8e95">‹</span><span style="color:#c4c7cc">›</span>
+        <div style="flex:1;text-align:center;font:600 12px system-ui;color:#2c2e33">emiten</div>
+        <span style="color:#8a8e95;font-size:12px">◫</span>
+      </div>
+      <!-- filter panel -->
+      <div style="border-bottom:1px solid rgba(0,0,0,.09);padding:4px 0">
+        <div style="display:flex;align-items:center;gap:8px;height:30px;padding:0 10px">
+          <span style="width:13px;height:13px;border:1px solid #b6bac0;border-radius:3px;background:#fff;flex:none"></span>
+          <div style="display:flex;align-items:center;justify-content:space-between;width:110px;height:22px;padding:0 8px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11px 'IBM Plex Mono',monospace;color:#2c2e33">id <span style="color:#8a8e95;font-size:8px">⇅</span></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;width:96px;height:22px;padding:0 8px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11px 'IBM Plex Mono',monospace;color:#2c2e33">ILIKE <span style="color:#8a8e95;font-size:8px">⇅</span></div>
+          <div style="flex:1;display:flex;align-items:center;height:22px;padding:0 8px;font:11px 'IBM Plex Mono',monospace;color:#b3b7bd">EMPTY</div>
+          <div style="display:flex;align-items:center;height:22px;padding:0 12px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11.5px system-ui;color:#3a3d42" style-hover="border-color:#3577d4">Apply</div>
+          <span style="color:#8a8e95;padding:0 3px">−</span><span style="color:#8a8e95;padding:0 3px">＋</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;height:30px;padding:0 10px">
+          <span style="width:13px;height:13px;border:1px solid #b6bac0;border-radius:3px;background:#fff;flex:none"></span>
+          <div style="display:flex;align-items:center;justify-content:space-between;width:110px;height:22px;padding:0 8px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11px 'IBM Plex Mono',monospace;color:#2c2e33">name <span style="color:#8a8e95;font-size:8px">⇅</span></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;width:96px;height:22px;padding:0 8px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11px 'IBM Plex Mono',monospace;color:#2c2e33">ILIKE <span style="color:#8a8e95;font-size:8px">⇅</span></div>
+          <div style="flex:1;display:flex;align-items:center;height:22px;padding:0 8px;background:#fff;border:2px solid #3577d4;border-radius:5px;font:11px 'IBM Plex Mono',monospace;color:#b3b7bd">EMPTY<span style="width:1px;height:13px;background:#3577d4;margin-left:1px"></span></div>
+          <div style="display:flex;align-items:center;height:22px;padding:0 12px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11.5px system-ui;color:#3a3d42" style-hover="border-color:#3577d4">Apply</div>
+          <span style="color:#8a8e95;padding:0 3px">−</span><span style="color:#8a8e95;padding:0 3px">＋</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;height:30px;padding:0 10px">
+          <span style="width:13px;height:13px;border:1px solid #b6bac0;border-radius:3px;background:#fff;flex:none"></span>
+          <div style="display:flex;align-items:center;justify-content:space-between;width:110px;height:22px;padding:0 8px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11px 'IBM Plex Mono',monospace;color:#2c2e33">code <span style="color:#8a8e95;font-size:8px">⇅</span></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;width:96px;height:22px;padding:0 8px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11px 'IBM Plex Mono',monospace;color:#2c2e33">ILIKE <span style="color:#8a8e95;font-size:8px">⇅</span></div>
+          <div style="flex:1;display:flex;align-items:center;height:22px;padding:0 8px;font:11px 'IBM Plex Mono',monospace;color:#b3b7bd">EMPTY</div>
+          <div style="display:flex;align-items:center;height:22px;padding:0 12px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11.5px system-ui;color:#3a3d42" style-hover="border-color:#3577d4">Apply</div>
+          <span style="color:#8a8e95;padding:0 3px">−</span><span style="color:#8a8e95;padding:0 3px">＋</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;height:28px;padding:0 10px">
+          <span style="color:#8a8e95">≔</span>
+          <div style="display:flex;align-items:center;height:21px;padding:0 11px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11px system-ui;color:#3a3d42">Export</div>
+          <div style="display:flex;align-items:center;height:21px;padding:0 11px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11px system-ui;color:#3a3d42">SQL</div>
+          <div style="flex:1;text-align:center;font:10.5px system-ui;color:#a0a4ab">Show: ⌘F&nbsp;&nbsp;Insert: ⌘I&nbsp;&nbsp;Remove: ⌘⇧I&nbsp;&nbsp;Apply All: ⌘Return&nbsp;&nbsp;Up: ⌘↑&nbsp;&nbsp;Down: ⌘↓&nbsp;&nbsp;On/Off: ⌘B&nbsp;&nbsp;Exit: Esc</div>
+          <div style="display:flex;align-items:center;height:21px;padding:0 11px;font:11px system-ui;color:#6b6f76" style-hover="color:#3577d4">Clear</div>
+          <div style="display:flex;align-items:center;gap:6px;height:21px;padding:0 11px;background:#fff;border:1px solid rgba(0,0,0,.15);border-radius:5px;font:11px system-ui;color:#3a3d42">Apply All <span style="color:#8a8e95;font-size:8px">▾</span></div>
+        </div>
+      </div>
+      <!-- grid header -->
+      <div style="display:grid;grid-template-columns:250px 78px minmax(220px,1fr) 70px 78px 46px 66px 250px 190px 82px;background:#f3f3f1;border-bottom:1px solid rgba(0,0,0,.12)">
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">id</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">code</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">name</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">short_name</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">country</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">ccy</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">exch</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">id_sector</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.07)">created_at</div>
+        <div style="text-align:center;line-height:26px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42">updated_at</div>
+      </div>
+      <!-- rows -->
+      <div style="flex:1;overflow:hidden">
+        <sc-for list="{{ emitenD }}" as="r" hint-placeholder-count="20">
+          <div style="display:grid;grid-template-columns:250px 78px minmax(220px,1fr) 70px 78px 46px 66px 250px 190px 82px;border-bottom:1px solid rgba(0,0,0,.045);background:{{ r.bg }}" style-hover="background:#f2f6fd">
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:{{ r.fg }};border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.id }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:{{ r.fg }};border-right:1px solid rgba(0,0,0,.045);box-shadow:{{ r.codeShadow }}">{{ r.code }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:{{ r.fg }};border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:{{ r.fg }};border-right:1px solid rgba(0,0,0,.045)">{{ r.short }}</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:{{ r.fg }};border-right:1px solid rgba(0,0,0,.045);text-align:center">indonesia</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:{{ r.fg }};border-right:1px solid rgba(0,0,0,.045);text-align:center">IDR</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:{{ r.fg }};border-right:1px solid rgba(0,0,0,.045);text-align:center">Jakarta</div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:{{ r.fg }};border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.sector }} <span style="color:#b0b4bb">→</span></div>
+            <div style="padding:0 8px;line-height:24px;font:11px 'IBM Plex Mono',monospace;color:{{ r.dim }};border-right:1px solid rgba(0,0,0,.045);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.created }}</div>
+            <div style="padding:0 8px;line-height:24px;font:italic 11px 'IBM Plex Mono',monospace;color:#b3b7bd">NULL</div>
+          </div>
+        </sc-for>
+      </div>
+      <!-- bottom bar -->
+      <div style="height:34px;display:flex;align-items:center;gap:6px;padding:0 10px;background:#ececea;border-top:1px solid rgba(0,0,0,.1)">
+        <div style="display:flex;align-items:center;height:24px;padding:0 13px;background:#3577d4;border-radius:12px;font:600 11.5px system-ui;color:#fff">Data</div>
+        <div style="display:flex;align-items:center;height:24px;padding:0 11px;border-radius:12px;font:11.5px system-ui;color:#4b4f55" style-hover="background:rgba(0,0,0,.06)">Structure</div>
+        <div style="display:flex;align-items:center;height:24px;padding:0 11px;border-radius:12px;font:11.5px system-ui;color:#4b4f55" style-hover="background:rgba(0,0,0,.06)">Index</div>
+        <div style="display:flex;align-items:center;gap:5px;height:24px;padding:0 12px;background:#fff;border-radius:12px;font:11.5px system-ui;color:#3a3d42;box-shadow:0 1px 2px rgba(0,0,0,.07)" style-hover="background:#f6f9ff">＋ Row</div>
+        <div style="flex:1;text-align:center;font:11.5px system-ui;color:#6b6f76">1 of 986 rows selected</div>
+        <div style="display:flex;align-items:center;height:24px;padding:0 13px;background:#3577d4;border-radius:12px;font:600 11.5px system-ui;color:#fff">Filters</div>
+        <div style="display:flex;align-items:center;height:24px;padding:0 13px;background:#fff;border-radius:12px;font:11.5px system-ui;color:#3a3d42;box-shadow:0 1px 2px rgba(0,0,0,.07)" style-hover="background:#f6f9ff">Columns</div>
+        <span style="color:#8a8e95;padding:0 4px">≣</span>
+        <span style="color:#c4c7cc">‹</span><span style="color:#8a8e95">›</span>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+</div>
+<p class="dv-next">Coba selanjutnya: "lanjutkan gaya <a class="dv-oid" href="#2c">2c</a> ke SQL editor &amp; Structure view" · "buat versi dark dari <a class="dv-oid" href="#2c">2c</a>" · "ganti aksen biru <a class="dv-oid" href="#2a">2a</a> jadi hijau"</p>
+</section>
+
+<section class="dv-turn" id="t1">
+<div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Tabula — workspace utama, 3 arah visual (data grid view). Layar lain (welcome, SQL editor, schema) menyusul setelah pilih arah.</span></div>
+<div class="dv-opts">
+
+<!-- ============ 1a : PAPER LIGHT / BLUE ============ -->
+<div class="dv-opt" id="1a">
+<div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Paper — light, aksen biru, tiga panel klasik, toolbar penuh</div>
+<div class="dv-card" style="width:1280px">
+<div style="width:1280px;height:800px;display:flex;flex-direction:column;background:#f6f6f4;font-family:system-ui,-apple-system,sans-serif;color:#1f2124">
+  <!-- titlebar -->
+  <div style="height:40px;display:flex;align-items:center;gap:12px;padding:0 12px;background:#ececea;border-bottom:1px solid rgba(0,0,0,.09)">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="width:18px;height:18px;border-radius:5px;background:#2f6fe4;display:grid;place-items:center;color:#fff;font:600 11px 'IBM Plex Mono',monospace">T</div>
+      <span style="font:600 12.5px system-ui;color:#3a3d42">Tabula</span>
+    </div>
+    <div style="flex:1;display:flex;justify-content:center">
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 14px;background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:6px;font:12px system-ui;color:#4b4f55">
+        <span style="width:7px;height:7px;border-radius:50%;background:#27a35a;display:inline-block"></span>
+        production &nbsp;·&nbsp; PostgreSQL 16.3
+        <span style="color:#a0a4ab;font-size:10px">▾</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:2px;color:#7a7e85;font:13px system-ui">
+      <div style="width:28px;height:26px;display:grid;place-items:center;border-radius:5px" style-hover="background:rgba(0,0,0,.06)">–</div>
+      <div style="width:28px;height:26px;display:grid;place-items:center;border-radius:5px;font-size:10px" style-hover="background:rgba(0,0,0,.06)">▢</div>
+      <div style="width:28px;height:26px;display:grid;place-items:center;border-radius:5px" style-hover="background:#e05a4e;color:#fff">✕</div>
+    </div>
+  </div>
+  <!-- toolbar -->
+  <div style="height:44px;display:flex;align-items:center;gap:6px;padding:0 12px;background:#f6f6f4;border-bottom:1px solid rgba(0,0,0,.08)">
+    <div style="display:flex;gap:2px;margin-right:6px">
+      <div style="width:26px;height:26px;display:grid;place-items:center;border-radius:5px;color:#6b6f76" style-hover="background:rgba(0,0,0,.06)">‹</div>
+      <div style="width:26px;height:26px;display:grid;place-items:center;border-radius:5px;color:#c0c3c8">›</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:5px;height:28px;padding:0 10px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:6px;font:12px system-ui;color:#3a3d42" style-hover="border-color:#2f6fe4">＋ Row</div>
+    <div style="display:flex;align-items:center;gap:5px;height:28px;padding:0 10px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:6px;font:12px system-ui;color:#3a3d42" style-hover="border-color:#2f6fe4">Filter</div>
+    <div style="display:flex;align-items:center;gap:5px;height:28px;padding:0 10px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:6px;font:12px system-ui;color:#3a3d42" style-hover="border-color:#2f6fe4">Columns</div>
+    <div style="display:flex;align-items:center;gap:5px;height:28px;padding:0 10px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:6px;font:12px system-ui;color:#3a3d42" style-hover="border-color:#2f6fe4">⟳ Refresh</div>
+    <div style="flex:1"></div>
+    <div style="display:flex;align-items:center;gap:7px;height:28px;padding:0 10px;width:200px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:6px;font:12px system-ui;color:#a0a4ab">⌕ Search rows…</div>
+    <div style="display:flex;align-items:center;gap:6px;height:28px;padding:0 14px;background:#2f6fe4;border-radius:6px;font:600 12px system-ui;color:#fff" style-hover="background:#2861c9">Commit 2 changes</div>
+  </div>
+  <!-- body -->
+  <div style="flex:1;display:flex;min-height:0">
+    <!-- sidebar -->
+    <div style="width:236px;display:flex;flex-direction:column;background:#f1f1ee;border-right:1px solid rgba(0,0,0,.08)">
+      <div style="padding:10px 10px 6px">
+        <div style="display:flex;align-items:center;gap:7px;height:28px;padding:0 9px;background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:6px;font:12px system-ui;color:#a0a4ab">⌕ Filter tables…</div>
+      </div>
+      <div style="padding:8px 12px 4px;font:600 10.5px system-ui;letter-spacing:.08em;color:#8a8e95">TABLES · 8</div>
+      <div style="flex:1;overflow:hidden;padding:0 6px">
+        <sc-for list="{{ tablesA }}" as="t" hint-placeholder-count="7">
+          <div style="display:flex;align-items:center;gap:8px;height:26px;padding:0 8px;border-radius:5px;font:12px system-ui;color:#3a3d42" style-hover="background:rgba(0,0,0,.05)">
+            <span style="width:14px;text-align:center;color:#9aa0a8;font-size:11px">▦</span>
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ t.name }}</span>
+            <span style="font:10.5px 'IBM Plex Mono',monospace;color:#a0a4ab">{{ t.rows }}</span>
+          </div>
+        </sc-for>
+        <div style="display:flex;align-items:center;gap:8px;height:26px;padding:0 8px;border-radius:5px;font:600 12px system-ui;background:#2f6fe4;color:#fff">
+          <span style="width:14px;text-align:center;font-size:11px;opacity:.85">▦</span>
+          <span style="flex:1">users</span>
+          <span style="font:10.5px 'IBM Plex Mono',monospace;opacity:.75">1,248</span>
+        </div>
+      </div>
+      <div style="padding:8px 12px 4px;font:600 10.5px system-ui;letter-spacing:.08em;color:#8a8e95">VIEWS · 2</div>
+      <div style="padding:0 6px 6px">
+        <div style="display:flex;align-items:center;gap:8px;height:26px;padding:0 8px;border-radius:5px;font:12px system-ui;color:#3a3d42" style-hover="background:rgba(0,0,0,.05)"><span style="width:14px;text-align:center;color:#9aa0a8;font-size:11px">◫</span>active_users_v</div>
+        <div style="display:flex;align-items:center;gap:8px;height:26px;padding:0 8px;border-radius:5px;font:12px system-ui;color:#3a3d42" style-hover="background:rgba(0,0,0,.05)"><span style="width:14px;text-align:center;color:#9aa0a8;font-size:11px">◫</span>monthly_revenue_v</div>
+      </div>
+      <div style="border-top:1px solid rgba(0,0,0,.08);padding:8px 10px;display:flex;align-items:center;gap:7px;font:12px system-ui;color:#6b6f76" style-hover="color:#2f6fe4">＋ New table</div>
+    </div>
+    <!-- main -->
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0;background:#fff">
+      <!-- tabs -->
+      <div style="height:34px;display:flex;align-items:flex-end;gap:2px;padding:0 8px;background:#f6f6f4;border-bottom:1px solid rgba(0,0,0,.08)">
+        <div style="display:flex;align-items:center;gap:8px;height:29px;padding:0 12px;background:#fff;border:1px solid rgba(0,0,0,.08);border-bottom:none;border-radius:6px 6px 0 0;font:12px system-ui;color:#1f2124;font-weight:600">▦ users <span style="color:#a0a4ab;font-weight:400">✕</span></div>
+        <div style="display:flex;align-items:center;gap:8px;height:29px;padding:0 12px;font:12px system-ui;color:#6b6f76;border-radius:6px 6px 0 0" style-hover="background:rgba(0,0,0,.04)">▦ orders</div>
+        <div style="display:flex;align-items:center;gap:8px;height:29px;padding:0 12px;font:12px system-ui;color:#6b6f76;border-radius:6px 6px 0 0" style-hover="background:rgba(0,0,0,.04)">⌘ query #1</div>
+        <div style="width:26px;height:26px;display:grid;place-items:center;color:#8a8e95;font-size:13px;border-radius:5px;margin-bottom:2px" style-hover="background:rgba(0,0,0,.05)">＋</div>
+      </div>
+      <!-- filter chips -->
+      <div style="height:34px;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid rgba(0,0,0,.07)">
+        <div style="display:flex;align-items:center;gap:6px;height:22px;padding:0 9px;background:#eaf1fd;border:1px solid #c4d7f7;border-radius:11px;font:11px 'IBM Plex Mono',monospace;color:#2551a3">created_at &gt;= '2025-11-01' <span style="color:#7d9bd6">✕</span></div>
+        <div style="font:11.5px system-ui;color:#a0a4ab" style-hover="color:#2f6fe4">＋ Add filter</div>
+        <div style="flex:1"></div>
+        <div style="font:11px 'IBM Plex Mono',monospace;color:#8a8e95">sort: id ↑</div>
+      </div>
+      <!-- grid header -->
+      <div style="display:grid;grid-template-columns:56px minmax(210px,1.3fr) 1fr 92px 168px 72px 168px;background:#f6f6f4;border-bottom:1px solid rgba(0,0,0,.1)">
+        <div style="padding:0 10px;line-height:30px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.06)">id <span style="color:#a0a4ab;font-weight:400">int8</span></div>
+        <div style="padding:0 10px;line-height:30px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.06)">email <span style="color:#a0a4ab;font-weight:400">varchar</span></div>
+        <div style="padding:0 10px;line-height:30px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.06)">full_name <span style="color:#a0a4ab;font-weight:400">varchar</span></div>
+        <div style="padding:0 10px;line-height:30px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.06)">role <span style="color:#a0a4ab;font-weight:400">varchar</span></div>
+        <div style="padding:0 10px;line-height:30px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.06)">created_at <span style="color:#a0a4ab;font-weight:400">timestamptz</span></div>
+        <div style="padding:0 10px;line-height:30px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42;border-right:1px solid rgba(0,0,0,.06)">is_active <span style="color:#a0a4ab;font-weight:400">bool</span></div>
+        <div style="padding:0 10px;line-height:30px;font:600 11px 'IBM Plex Mono',monospace;color:#3a3d42">last_login <span style="color:#a0a4ab;font-weight:400">timestamptz</span></div>
+      </div>
+      <!-- rows -->
+      <div style="flex:1;overflow:hidden">
+        <sc-for list="{{ uLightA }}" as="r" hint-placeholder-count="3">
+          <div style="display:grid;grid-template-columns:56px minmax(210px,1.3fr) 1fr 92px 168px 72px 168px;border-bottom:1px solid rgba(0,0,0,.05)" style-hover="background:#f7faff">
+            <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:#8a8e95;border-right:1px solid rgba(0,0,0,.04)">{{ r.id }}</div>
+            <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.04);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.email }}</div>
+            <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.04);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</div>
+            <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.04)">{{ r.role }}</div>
+            <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:#5c626b;border-right:1px solid rgba(0,0,0,.04)">{{ r.created }}</div>
+            <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:{{ r.activeColor }};border-right:1px solid rgba(0,0,0,.04)">{{ r.activeLabel }}</div>
+            <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:{{ r.lastColor }};font-style:{{ r.lastStyle }}">{{ r.lastDisplay }}</div>
+          </div>
+        </sc-for>
+        <!-- selected row -->
+        <div style="display:grid;grid-template-columns:56px minmax(210px,1.3fr) 1fr 92px 168px 72px 168px;background:#e9f1fe;border-bottom:1px solid #c9dbf8">
+          <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:#5c7bb4;border-right:1px solid rgba(47,111,228,.12)">1045</div>
+          <div style="padding:0 9px;line-height:25px;font:11.5px 'IBM Plex Mono',monospace;color:#24282e;border:2px solid #2f6fe4;background:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">j.becker@hollandal.nl</div>
+          <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(47,111,228,.12)">Jonas Becker</div>
+          <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(47,111,228,.12)">editor</div>
+          <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:#5c626b;border-right:1px solid rgba(47,111,228,.12)">2025-11-15 17:48:20</div>
+          <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:#17803d;border-right:1px solid rgba(47,111,228,.12)">true</div>
+          <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:#5c626b">2026-07-02 06:03:17</div>
+        </div>
+        <sc-for list="{{ uLightB }}" as="r" hint-placeholder-count="6">
+          <div style="display:grid;grid-template-columns:56px minmax(210px,1.3fr) 1fr 92px 168px 72px 168px;border-bottom:1px solid rgba(0,0,0,.05)" style-hover="background:#f7faff">
+            <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:#8a8e95;border-right:1px solid rgba(0,0,0,.04)">{{ r.id }}</div>
+            <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.04);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.email }}</div>
+            <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.04);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</div>
+            <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:#24282e;border-right:1px solid rgba(0,0,0,.04)">{{ r.role }}</div>
+            <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:#5c626b;border-right:1px solid rgba(0,0,0,.04)">{{ r.created }}</div>
+            <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:{{ r.activeColor }};border-right:1px solid rgba(0,0,0,.04)">{{ r.activeLabel }}</div>
+            <div style="padding:0 10px;line-height:27px;font:11.5px 'IBM Plex Mono',monospace;color:{{ r.lastColor }};font-style:{{ r.lastStyle }}">{{ r.lastDisplay }}</div>
+          </div>
+        </sc-for>
+      </div>
+      <!-- status -->
+      <div style="height:30px;display:flex;align-items:center;gap:14px;padding:0 12px;background:#f6f6f4;border-top:1px solid rgba(0,0,0,.08);font:11px 'IBM Plex Mono',monospace;color:#6b6f76">
+        <span style="color:#3a3d42;font-weight:600">50 of 1,248 rows</span>
+        <span>‹ Page 1 / 25 ›</span>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#a0a4ab">SELECT * FROM users WHERE created_at &gt;= '2025-11-01' ORDER BY id LIMIT 50</span>
+        <span style="color:#27a35a">● 12 ms</span>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+</div>
+<p class="dv-next">Opsi gelap 1b &amp; 1c telah dihapus — arah light <a class="dv-oid" href="#1a">1a</a> dilanjutkan di turn 2 dan 3.</p>
+</section>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const tablesA = [
+      { name: 'audit_log', rows: '88,214' },
+      { name: 'categories', rows: '28' },
+      { name: 'invoices', rows: '4,102' },
+      { name: 'orders', rows: '8,532' },
+      { name: 'payments', rows: '6,771' },
+      { name: 'products', rows: '342' },
+      { name: 'sessions', rows: '19,203' },
+    ];
+
+    const users = [
+      { id: '1042', email: 'sarah.lim@northline.io', name: 'Sarah Lim', role: 'admin', created: '2025-11-02 09:14:07', active: true, last: '2026-07-01 22:41:03' },
+      { id: '1043', email: 'd.okafor@ptmedia.co.id', name: 'Daniel Okafor', role: 'editor', created: '2025-11-04 13:22:51', active: true, last: '2026-06-30 08:12:44' },
+      { id: '1044', email: 'mira.santoso@gmail.com', name: 'Mira Santoso', role: 'viewer', created: '2025-11-09 10:05:33', active: false, last: null },
+      { id: '1045', email: 'j.becker@hollandal.nl', name: 'Jonas Becker', role: 'editor', created: '2025-11-15 17:48:20', active: true, last: '2026-07-02 06:03:17' },
+      { id: '1046', email: 'aisha.rahman@umail.edu', name: 'Aisha Rahman', role: 'viewer', created: '2025-12-01 08:30:02', active: true, last: '2026-06-28 19:55:09' },
+      { id: '1047', email: 't.nguyen@coastal.dev', name: 'Thanh Nguyen', role: 'admin', created: '2025-12-06 11:12:40', active: true, last: '2026-07-01 15:27:36' },
+      { id: '1048', email: 'lucia.moretti@fmail.it', name: 'Lucia Moretti', role: 'viewer', created: '2025-12-19 21:03:11', active: false, last: '2026-02-14 10:44:58' },
+      { id: '1049', email: 'p.van.dijk@kanaal.tv', name: 'Pieter van Dijk', role: 'editor', created: '2026-01-08 07:59:26', active: true, last: '2026-06-25 12:31:50' },
+      { id: '1050', email: 'nkem.eze@lagosworks.ng', name: 'Nkem Eze', role: 'viewer', created: '2026-01-22 14:36:05', active: true, last: null },
+      { id: '1051', email: 'h.tanaka@fujisoft.jp', name: 'Hana Tanaka', role: 'editor', created: '2026-02-03 09:21:47', active: true, last: '2026-07-02 01:18:22' },
+    ];
+
+    const decorate = (list, theme) => list.map((r, i) => ({
+      ...r,
+      activeLabel: r.active ? 'true' : 'false',
+      activeColor: r.active ? theme.t : theme.f,
+      lastDisplay: r.last === null ? 'NULL' : r.last,
+      lastColor: r.last === null ? theme.n : theme.dim,
+      lastStyle: r.last === null ? 'italic' : 'normal',
+      zebra: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,.022)',
+    }));
+
+    const light = decorate(users, { t: '#17803d', f: '#c23d3d', n: '#b3b7bd', dim: '#5c626b' });
+    const dark = decorate(users, { t: '#58c07f', f: '#d16a6a', n: '#4d545e', dim: '#878d96' });
+
+    const stat = {
+      paid:      { statusBg: 'rgba(158,194,122,.16)', statusColor: '#9ec27a' },
+      pending:   { statusBg: 'rgba(232,163,61,.16)',  statusColor: '#e8a33d' },
+      refunded:  { statusBg: 'rgba(107,164,232,.16)', statusColor: '#6ba4e8' },
+      failed:    { statusBg: 'rgba(224,108,95,.16)',  statusColor: '#e06c5f' },
+    };
+    const ordersWarm = [
+      { oid: '88412', customer: 'Sarah Lim', total: '1.240.000', status: 'paid', items: '3', placed: '2026-07-01 21:14:09' },
+      { oid: '88411', customer: 'Pieter van Dijk', total: '386.500', status: 'pending', items: '1', placed: '2026-07-01 20:52:31' },
+      { oid: '88410', customer: 'Hana Tanaka', total: '2.815.000', status: 'paid', items: '6', placed: '2026-07-01 19:40:12' },
+      { oid: '88409', customer: 'Mira Santoso', total: '154.000', status: 'failed', items: '1', placed: '2026-07-01 18:03:55' },
+      { oid: '88408', customer: 'Daniel Okafor', total: '920.750', status: 'paid', items: '2', placed: '2026-07-01 16:47:20' },
+      { oid: '88407', customer: 'Aisha Rahman', total: '512.000', status: 'refunded', items: '2', placed: '2026-07-01 15:12:48' },
+      { oid: '88406', customer: 'Nkem Eze', total: '1.078.300', status: 'paid', items: '4', placed: '2026-07-01 13:58:02' },
+      { oid: '88405', customer: 'Thanh Nguyen', total: '245.900', status: 'pending', items: '1', placed: '2026-07-01 12:31:17' },
+    ].map(o => ({ ...o, ...stat[o.status] }));
+
+    // ---- turn 2 data (referensi screenshot) ----
+    let seed = 42;
+    const rnd = () => {
+      seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const hx = (n) => Array.from({ length: n }, () => '0123456789abcdef'[Math.floor(rnd() * 16)]).join('');
+    const uuid = () => hx(8) + '-' + hx(4) + '-' + hx(4) + '-' + hx(4) + '-' + hx(12);
+
+    const co = [
+      ['93317', 'Bank Artha Graha', 'INPC'], ['21561164', 'Kedoya Adyaraya Tbk PT', 'RSGK'],
+      ['93498', 'Mitra Investindo', 'MITI'], ['93826', 'Capri Nusa Satu Properti', 'CPRI'],
+      ['93532', 'Pelat Timah Nusantara', 'NIKL'], ['93306', 'Asia Pacific Fibers', 'POLY'],
+      ['60275922', 'Atlantis Subsea Indonesia Tbk PT', 'ATLA'], ['12595224', 'Bhakti Multi Artha', 'BHAT'],
+      ['47588533', 'Mitra Pack', 'PTMP'], ['15313498', 'Diagnos Laboratorium Utama PT Tbk', 'DGNS'],
+      ['93344', 'Bayan Resources', 'BYAN'], ['28806303', 'Adaro Minerals Indonesia Tbk PT', 'ADMR'],
+      ['121965', 'Diamond Citra', 'DADA'], ['93309', 'Astra Graphia', 'ASGR'],
+      ['93722', 'Industri Dan Perdagangan', 'CARS'], ['41289108', 'Black Diamond Resources Tbk PT', 'COAL'],
+      ['93615', 'Wahana Ottomitra', 'WOMF'], ['93854', 'Optima Prima', 'OPMS'],
+      ['93715', 'Prodia Widyahusada', 'PRDA'], ['93527', 'Paninvest', 'PNIN'],
+      ['93248', 'Maskapai Reasuransi', 'MREI'], ['93824', 'PT Wahana Interfood', 'COCO'],
+      ['60275923', 'Multi Hanna Kreasindo Tbk PT', 'MHKI'], ['93423', 'DFI Retail Nusantara Tbk Pt', 'HERO'],
+      ['93392', 'Elnusa', 'ELSA'], ['93645', 'Golden Plantation', 'GOLL'],
+    ];
+    const emiten = co.map(([code, name, short]) => ({
+      id: uuid(), code, name, short, sector: uuid(),
+      created: '2025-09-27 15:0' + (6 + Math.floor(rnd() * 3)) + ':' + (10 + Math.floor(rnd() * 49)) + '.' + (100000 + Math.floor(rnd() * 899999)) + '+00',
+    })).sort((a, b) => a.id < b.id ? -1 : 1);
+
+    const emitenD = emiten.map(r => r.short === 'ATLA'
+      ? { ...r, bg: '#e2e4e8', fg: '#989ea8', dim: '#aab0b8', codeShadow: 'inset 0 0 0 2px #e0574a' }
+      : { ...r, bg: 'transparent', fg: '#24282e', dim: '#5c626b', codeShadow: 'none' });
+
+    const fns = ['uuid_generate_v1', 'uuid_generate_v1mc', 'uuid_generate_v3', 'uuid_generate_v4', 'uuid_generate_v5', 'uuid_nil', 'uuid_ns_dns', 'uuid_ns_oid', 'uuid_ns_url', 'uuid_ns_x500'].map(n => ({ n }));
+
+    const PG = { b: 'Pg', bc: '#3577d4' }, MS = { b: 'Ms', bc: '#e08a3c' }, RE = { b: 'Re', bc: '#b93c2e' }, SL = { b: 'Sl', bc: '#8e44ad' };
+    const profinConns = [
+      { ...PG, name: 'portfolio', host: '128.199.74.52 : portfolio' },
+      { ...PG, name: 'bot ai tele', host: '128.199.74.52 : ai_bot_fintech' },
+      { ...PG, name: 'profin', host: '128.199.74.52 : profin' },
+      { ...PG, name: 'POS', host: '128.199.74.52 : pos' },
+      { ...RE, name: 'redis portfolio', host: '128.199.74.52' },
+    ];
+    const flatConns = [
+      { ...PG, name: 'lawyerindo', host: 'staging-lawyerindo-do-user-7340833-0.b.db.ondigitalocean.com : medarbid' },
+      { ...PG, name: 'baledamai dan medarbid', host: '143.198.213.50 : ksp' },
+      { ...SL, name: 'owncast', host: '/Users/badrusshoolehk/Documents/volume/owncast/owncast.db' },
+      { ...PG, name: 'master', host: 'localhost : development_database' },
+      { ...PG, name: 'slave', host: 'localhost : development_database' },
+      { ...MS, name: 'budidjajacorp', host: '128.199.103.3 : wordpress' },
+      { ...MS, name: 'budidjajacorp wordpress', host: '152.42.203.175' },
+      { ...PG, name: 'x-decisions', host: '148.230.122.88 : ai_agent' },
+      { ...RE, name: 'x-decisions', host: '148.230.122.88' },
+    ];
+
+    // ---- turn 4 data ----
+    const sectorsAggBase = [
+      { sector: 'Financials', total: '214', bar: '100%' },
+      { sector: 'Consumer Cyclicals', total: '162', bar: '76%' },
+      { sector: 'Basic Materials', total: '141', bar: '66%' },
+      { sector: 'Industrials', total: '118', bar: '55%' },
+      { sector: 'Energy', total: '97', bar: '45%' },
+      { sector: 'Infrastructures', total: '86', bar: '40%' },
+      { sector: 'Consumer Non-Cyclicals', total: '74', bar: '35%' },
+      { sector: 'Properties & Real Estate', total: '41', bar: '19%' },
+      { sector: 'Healthcare', total: '33', bar: '15%' },
+      { sector: 'Technology', total: '20', bar: '9%' },
+    ];
+    const sectorsAgg = sectorsAggBase.map((s, i) => ({ ...s, num: i + 1 }));
+
+    // ---- turn 3 data ----
+    const emitenQ = emiten.map((r, i) => ({ ...r, num: i + 1 }));
+    const fnsA = ['uuid_generate_v1', 'uuid_generate_v1mc'].map(n => ({ n }));
+    const fnsB = ['uuid_generate_v4', 'uuid_generate_v5', 'uuid_nil', 'uuid_ns_dns', 'uuid_ns_oid', 'uuid_ns_url', 'uuid_ns_x500'].map(n => ({ n }));
+    const dbList = ['jdih_bkpm_2025', 'oss_rba_master', 'portfolio', 'pos', 'postgres', 'primbon', 'profin', 'rtmanagement', 'suitest', 'suitest_m1d_9fabae77c4a44d51aedc4ffebf39eb71', 'suitest_test', 'template0', 'template1'].map(n => ({ n }));
+
+    return {
+      emiten, emitenD, emitenQ, fns, fnsA, fnsB, dbList, profinConns, flatConns, sectorsAgg,
+      tablesA,
+      uLightA: light.slice(0, 3),
+      uLightB: light.slice(4),
+      uDark: dark,
+      ordersWarm,
+    };
+  }
+}
+</script>
+</body>
+</html>

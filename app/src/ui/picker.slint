@@ -1,125 +1,363 @@
-import { Theme } from "theme.slint";
-import { ConnItem } from "structs.slint";
-import { ScrollView, LineEdit, Button } from "std-widgets.slint";
+// Connections screen: grouped connection list (left, sidebar surface) +
+// selected-connection detail panel (right, canvas surface).
+// Reference: design/1-connections.png.
+import { Tokens } from "tokens.slint";
+import {
+    DbBadge, OutlineChip, PrimaryButton, SecondaryButton, TextButton,
+    TagChip, FilterField
+} from "components.slint";
+import { ConnItem, KvRow } from "structs.slint";
+import { ScrollView } from "std-widgets.slint";
 
-// Full-window connection picker (TablePlus-style): search + grouped connection
-// list + Create button. Shown while not connected; replaced by the workspace
-// once a connection succeeds.
 export component ConnPicker inherits Rectangle {
     in property <[ConnItem]> connections;
     in property <int> selected-conn: -1;
     in property <string> error;
+
+    // Detail panel (filled by Rust when a row is selected).
+    in property <string> sel-name;
+    in property <string> sel-engine;
+    in property <string> sel-sub;      // "PostgreSQL · grup profin"
+    in property <bool> sel-local;
+    in property <[KvRow]> sel-rows;
+    in property <[string]> sel-tags;
+    in property <string> sel-footer;   // "Terakhir terhubung · 2 menit lalu · …"
+
+    callback select-conn(int);
     callback connect-clicked(int);
+    callback test-clicked(int);
     callback add-clicked();
     callback edit-clicked(int);
+    callback import-clicked();
+    callback backup-clicked();
     callback toggle-group(string);
     callback filter(string);
 
-    background: Theme.bg;
+    background: Tokens.canvas;
 
-    VerticalLayout {
-        padding: Theme.sp6;
-        spacing: Theme.sp3;
+    HorizontalLayout {
+        spacing: 0;
 
-        // ----- header: title + Create -----
-        HorizontalLayout {
-            spacing: Theme.sp2;
-            Text {
-                vertical-alignment: center;
-                text: "Connections";
-                color: Theme.text;
-                font-size: 18px;
-            }
-            Rectangle {} // spacer
-            Button {
-                text: "+ Create Connection";
-                clicked => { root.add-clicked(); }
-            }
-        }
+        // ================= left: grouped list =================
+        Rectangle {
+            width: 352px;
+            background: Tokens.sidebar;
 
-        // ----- search -----
-        LineEdit {
-            placeholder-text: "Search for connection…";
-            edited(t) => { root.filter(t); }
-        }
-
-        // ----- error toast (connect failure) -----
-        if root.error != "": Rectangle {
-            height: Theme.row-height;
-            border-radius: Theme.radius-control;
-            background: #ef444422;
-            HorizontalLayout {
-                padding-left: Theme.sp2;
-                Text {
-                    vertical-alignment: center;
-                    text: root.error;
-                    color: #f87171;
-                    font-size: Theme.font-label;
-                }
-            }
-        }
-
-        // ----- list -----
-        ScrollView {
             VerticalLayout {
-                spacing: Theme.sp1;
-                for conn[i] in root.connections: Rectangle {
-                    height: Theme.row-height + Theme.sp2;
-                    // group header
-                    if conn.is-header: Rectangle {
-                        TouchArea { clicked => { root.toggle-group(conn.group); } }
-                        HorizontalLayout {
-                            padding-left: Theme.sp1;
-                            spacing: Theme.sp1;
-                            Text {
-                                vertical-alignment: center;
-                                text: conn.expanded ? "▾" : "▸";
-                                color: Theme.text-dim;
-                                font-size: Theme.font-label;
+                spacing: 0;
+
+                // ----- filter row -----
+                HorizontalLayout {
+                    padding: Tokens.sp3;
+                    padding-top: Tokens.sp4;
+                    padding-bottom: Tokens.sp3;
+                    spacing: Tokens.sp3;
+                    FilterField {
+                        height: 30px;
+                        horizontal-stretch: 1;
+                        placeholder: "Filter connections...";
+                        edited(t) => { root.filter(t); }
+                    }
+                    Rectangle {
+                        width: 30px;
+                        height: 30px;
+                        border-radius: Tokens.radius;
+                        border-width: 1px;
+                        border-color: Tokens.border;
+                        background: Tokens.card;
+                        Text {
+                            text: "+";
+                            color: add-ta.has-hover ? Tokens.text : Tokens.text-dim;
+                            font-size: 17px;
+                        }
+                        add-ta := TouchArea { clicked => { root.add-clicked(); } }
+                    }
+                }
+
+                // ----- grouped rows -----
+                ScrollView {
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        padding-left: Tokens.sp3;
+                        padding-right: Tokens.sp3;
+                        spacing: 2px;
+                        alignment: start;
+
+                        for item[i] in root.connections: Rectangle {
+                            height: item.is-header ? 28px : 40px;
+
+                            // --- group header row ---
+                            if item.is-header: Rectangle {
+                                hdr-ta := TouchArea {
+                                    clicked => { root.toggle-group(item.name); }
+                                }
+                                HorizontalLayout {
+                                    spacing: Tokens.sp2;
+                                    alignment: start;
+                                    Text {
+                                        text: item.expanded ? "▾" : "▸";
+                                        color: Tokens.text-faint;
+                                        font-size: 9px;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: item.name;
+                                        color: Tokens.text-dim;
+                                        font-size: Tokens.font-xs;
+                                        font-weight: 700;
+                                        letter-spacing: 0.8px;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: item.count;
+                                        color: Tokens.text-faint;
+                                        font-size: Tokens.font-sm;
+                                        vertical-alignment: center;
+                                    }
+                                }
                             }
-                            Text {
-                                vertical-alignment: center;
-                                text: conn.name;
-                                color: Theme.text-dim;
-                                font-size: Theme.font-label;
+
+                            // --- connection row --- (selected-conn = store index)
+                            if !item.is-header: Rectangle {
+                                border-radius: Tokens.radius-lg;
+                                background: item.index == root.selected-conn ? Tokens.accent-tint
+                                    : row-ta.has-hover ? Tokens.border : transparent;
+                                border-width: item.index == root.selected-conn ? 1px : 0;
+                                border-color: Tokens.accent.with-alpha(0.35);
+                                animate background { duration: Tokens.fade; }
+
+                                // selection = 2px accent left bar (never a pill)
+                                if item.index == root.selected-conn: Rectangle {
+                                    x: 0;
+                                    width: Tokens.selection-bar-w;
+                                    height: parent.height;
+                                    background: Tokens.accent;
+                                    border-radius: 1px;
+                                }
+
+                                row-ta := TouchArea {
+                                    clicked => { root.select-conn(item.index); }
+                                    double-clicked => { root.connect-clicked(item.index); }
+                                }
+
+                                HorizontalLayout {
+                                    padding-left: Tokens.sp3;
+                                    padding-right: Tokens.sp3;
+                                    spacing: Tokens.sp3;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        DbBadge { engine: item.engine; size: 24px; }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 1px;
+                                        horizontal-stretch: 1;
+                                        Text {
+                                            text: item.name;
+                                            color: Tokens.text;
+                                            font-size: Tokens.font-md;
+                                            font-weight: Tokens.weight-emphasis;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            text: item.subline;
+                                            color: Tokens.text-dim;
+                                            font-size: Tokens.font-xs;
+                                            font-family: Tokens.mono;
+                                            overflow: elide;
+                                        }
+                                    }
+                                    if item.local: VerticalLayout {
+                                        alignment: center;
+                                        OutlineChip { text: "LOCAL"; }
+                                    }
+                                }
                             }
-                            Rectangle {}
                         }
                     }
-                    // connection row
-                    if !conn.is-header: Rectangle {
-                        border-radius: Theme.radius-control;
-                        background: ta.has-hover ? Theme.surface : transparent;
-                        ta := TouchArea { clicked => { root.connect-clicked(conn.index); } }
-                        HorizontalLayout {
-                            padding-left: Theme.sp3;
-                            padding-right: Theme.sp2;
-                            spacing: Theme.sp2;
-                            Rectangle {
-                                width: 8px;
-                                height: 8px;
-                                border-radius: 4px;
-                                y: (parent.height - self.height) / 2;
-                                background: conn.color;
+                }
+
+                // ----- footer actions -----
+                Rectangle { height: 1px; background: Tokens.border; }
+                Rectangle {
+                    height: 52px;
+                    HorizontalLayout {
+                        padding-left: Tokens.sp6;
+                        padding-right: Tokens.sp6;
+                        spacing: Tokens.sp4;
+                        Rectangle {
+                            width: new-row.preferred-width;
+                            new-row := HorizontalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: "+";
+                                    color: Tokens.text;
+                                    font-size: 15px;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: "New Connection";
+                                    color: Tokens.text;
+                                    font-size: Tokens.font-md;
+                                    font-weight: 500;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            new-ta := TouchArea { clicked => { root.add-clicked(); } }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        VerticalLayout {
+                            alignment: center;
+                            HorizontalLayout {
+                                spacing: Tokens.sp4;
+                                TextButton { text: "Import"; clicked => { root.import-clicked(); } }
+                                TextButton { text: "Backup"; clicked => { root.backup-clicked(); } }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // right hairline separating list from detail
+            Rectangle {
+                x: parent.width - 1px;
+                width: 1px;
+                height: parent.height;
+                background: Tokens.border;
+            }
+        }
+
+        // ================= right: detail panel =================
+        Rectangle {
+            background: Tokens.canvas;
+            horizontal-stretch: 1;
+
+            if root.selected-conn < 0: Text {
+                text: root.error == "" ? "Select a connection" : root.error;
+                color: root.error == "" ? Tokens.text-faint : Tokens.error;
+                font-size: Tokens.font-md;
+            }
+
+            if root.selected-conn >= 0: VerticalLayout {
+                spacing: 0;
+
+                VerticalLayout {
+                    padding: 34px;
+                    padding-top: 32px;
+                    spacing: Tokens.sp6;
+                    alignment: start;
+                    vertical-stretch: 1;
+
+                    // ----- header row -----
+                    HorizontalLayout {
+                        spacing: Tokens.sp4;
+                        DbBadge { engine: root.sel-engine; size: 44px; }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 3px;
+                            HorizontalLayout {
+                                spacing: Tokens.sp3;
+                                alignment: start;
+                                Text {
+                                    text: root.sel-name;
+                                    color: Tokens.text;
+                                    font-size: 18px;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                }
+                                if root.sel-local: VerticalLayout {
+                                    alignment: center;
+                                    OutlineChip { text: "LOCAL"; }
+                                }
                             }
                             Text {
-                                vertical-alignment: center;
-                                text: conn.name;
-                                color: Theme.text;
-                                font-size: Theme.font-body;
+                                text: root.sel-sub;
+                                color: Tokens.text-dim;
+                                font-size: Tokens.font-md;
                             }
-                            Rectangle {} // spacer
-                            Rectangle {
-                                width: 18px;
-                                TouchArea { clicked => { root.edit-clicked(conn.index); } }
-                                Text { text: "✎"; horizontal-alignment: center; color: Theme.text-dim; font-size: Theme.font-label; }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        VerticalLayout {
+                            alignment: center;
+                            HorizontalLayout {
+                                spacing: Tokens.sp2;
+                                PrimaryButton {
+                                    text: "Connect";
+                                    height: 30px;
+                                    clicked => { root.connect-clicked(root.selected-conn); }
+                                }
+                                SecondaryButton {
+                                    text: "Test";
+                                    height: 30px;
+                                    clicked => { root.test-clicked(root.selected-conn); }
+                                }
+                                SecondaryButton {
+                                    text: "Edit";
+                                    height: 30px;
+                                    clicked => { root.edit-clicked(root.selected-conn); }
+                                }
                             }
-                            Text {
-                                vertical-alignment: center;
-                                text: conn.engine;
-                                color: Theme.text-dim;
-                                font-size: Theme.font-label;
+                        }
+                    }
+
+                    // ----- key/value card -----
+                    Rectangle {
+                        border-radius: Tokens.radius-lg;
+                        border-width: 1px;
+                        border-color: Tokens.border;
+                        background: Tokens.card;
+                        height: kv-col.preferred-height;
+                        clip: true;
+                        kv-col := VerticalLayout {
+                            for row[ri] in root.sel-rows: Rectangle {
+                                height: 33px;
+                                if ri > 0: Rectangle {
+                                    y: 0;
+                                    height: 1px;
+                                    width: parent.width;
+                                    background: Tokens.border;
+                                }
+                                HorizontalLayout {
+                                    padding-left: 20px;
+                                    padding-right: 20px;
+                                    Text {
+                                        width: 105px;
+                                        text: row.k;
+                                        color: Tokens.text-dim;
+                                        font-size: Tokens.font-md;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: row.v;
+                                        color: Tokens.text;
+                                        font-size: Tokens.font-md;
+                                        font-family: Tokens.mono;
+                                        vertical-alignment: center;
+                                    }
+                                }
                             }
+                        }
+                    }
+
+                    // ----- tag chips -----
+                    HorizontalLayout {
+                        spacing: Tokens.sp2;
+                        alignment: start;
+                        for t in root.sel-tags: TagChip { text: t; }
+                    }
+                }
+
+                // ----- footer status -----
+                Rectangle { height: 1px; background: Tokens.border; }
+                Rectangle {
+                    height: 46px;
+                    HorizontalLayout {
+                        padding-left: 34px;
+                        Text {
+                            text: root.sel-footer;
+                            color: Tokens.text-faint;
+                            font-size: Tokens.font-sm;
+                            vertical-alignment: center;
                         }
                     }
                 }
