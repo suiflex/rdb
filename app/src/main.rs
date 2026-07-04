@@ -344,6 +344,18 @@ struct BrowseState {
 
 /// 1-based display bounds of the current page window plus prev/next
 /// availability. `shown` is how many rows the page actually returned.
+/// Record an executed query at the head of the live history (dedupe, cap 50).
+fn record_recent(list: &RefCell<Vec<String>>, text: &str) {
+    let t = text.trim();
+    if t.is_empty() {
+        return;
+    }
+    let mut v = list.borrow_mut();
+    v.retain(|s| s != t);
+    v.insert(0, t.to_string());
+    v.truncate(50);
+}
+
 fn page_bounds(page: u64, limit: u64, total: Option<u64>, shown: u64) -> (u64, u64, bool, bool) {
     let start = if shown == 0 { 0 } else { page * limit + 1 };
     let end = page * limit + shown;
@@ -842,11 +854,17 @@ fn main() -> Result<(), slint::PlatformError> {
             "SELECT date_trunc('day', created_at) AS day, sum(amount)\nFROM transactions\nGROUP BY 1\nORDER BY 1 DESC;",
         ),
     ]);
-    let recent_queries: Rc<Vec<&str>> = Rc::new(vec![
-        "SELECT * FROM emiten LIMIT 100;",
-        "INSERT INTO sectors (name) VALUES ('Technology');",
-        "UPDATE emiten SET updated_at = now() WHERE code = '93344';",
-    ]);
+    // Live history: filled as queries run; mock mode seeds a few for the
+    // screenshot harness.
+    let recent_queries: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(if mock::mock_mode() {
+        vec![
+            "SELECT * FROM emiten LIMIT 100;".into(),
+            "INSERT INTO sectors (name) VALUES ('Technology');".into(),
+            "UPDATE emiten SET updated_at = now() WHERE code = '93344';".into(),
+        ]
+    } else {
+        Vec::new()
+    }));
     let rebuild_query_tree = {
         let weak = window.as_weak();
         let saved = saved_queries.clone();
@@ -855,27 +873,33 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            // Mode 2 (History) shows only the live history; mode 1 (Queries)
+            // shows Saved + Recent.
+            let history_only = w.get_sidebar_mode() == 2;
             let mut rows: Vec<TreeNode> = Vec::new();
-            rows.push(TreeNode {
-                label: "Saved".into(),
-                depth: 0,
-                kind: "qcat".into(),
-                expanded: true,
-                db: SharedString::default(),
-                count: saved.len() as i32,
-            });
-            for (i, (name, _)) in saved.iter().enumerate() {
+            if !history_only {
                 rows.push(TreeNode {
-                    label: (*name).into(),
-                    depth: 1,
-                    kind: "query".into(),
-                    expanded: *name == active,
+                    label: "Saved".into(),
+                    depth: 0,
+                    kind: "qcat".into(),
+                    expanded: true,
                     db: SharedString::default(),
-                    count: i as i32,
+                    count: saved.len() as i32,
                 });
+                for (i, (name, _)) in saved.iter().enumerate() {
+                    rows.push(TreeNode {
+                        label: (*name).into(),
+                        depth: 1,
+                        kind: "query".into(),
+                        expanded: *name == active,
+                        db: SharedString::default(),
+                        count: i as i32,
+                    });
+                }
             }
+            let recent = recent.borrow();
             rows.push(TreeNode {
-                label: "Recent".into(),
+                label: if history_only { "History" } else { "Recent" }.into(),
                 depth: 0,
                 kind: "qcat".into(),
                 expanded: true,
@@ -886,7 +910,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let label: String = if q.chars().count() > 24 {
                     format!("{}…", q.chars().take(23).collect::<String>())
                 } else {
-                    (*q).to_string()
+                    q.clone()
                 };
                 rows.push(TreeNode {
                     label: label.into(),
@@ -914,8 +938,8 @@ fn main() -> Result<(), slint::PlatformError> {
             let (title, text, is_saved) =
                 if let Some((name, sql)) = saved.iter().find(|(n, _)| *n == label.as_str()) {
                     ((*name).to_string(), (*sql).to_string(), true)
-                } else if let Some(sql) = recent.get(idx.max(0) as usize) {
-                    ("Query".to_string(), (*sql).to_string(), false)
+                } else if let Some(sql) = recent.borrow().get(idx.max(0) as usize) {
+                    ("Query".to_string(), sql.clone(), false)
                 } else {
                     return;
                 };
@@ -1751,10 +1775,25 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let run_sql = run_sql.clone();
+        let recent_queries = recent_queries.clone();
+        let rebuild_query_tree = rebuild_query_tree.clone();
         window.on_run_query(move || {
             if let Some(w) = weak.upgrade() {
-                run_sql(w.get_query_text().to_string());
+                let text = w.get_query_text().to_string();
+                record_recent(&recent_queries, &text);
+                run_sql(text);
+                if w.get_sidebar_mode() != 0 {
+                    rebuild_query_tree("");
+                }
             }
+        });
+    }
+
+    // ----- sidebar Items / Queries / History tabs -----
+    {
+        let rebuild_query_tree = rebuild_query_tree.clone();
+        window.on_sidebar_mode_changed(move |_mode| {
+            rebuild_query_tree("");
         });
     }
 
