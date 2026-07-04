@@ -562,6 +562,33 @@ fn filter_grid(g: &model::GridModel, needle: &str) -> model::GridModel {
     }
 }
 
+/// Return a copy of `g` without the hidden column indices.
+fn hide_cols(g: &model::GridModel, hidden: &HashSet<usize>) -> model::GridModel {
+    if hidden.is_empty() {
+        return g.clone();
+    }
+    model::GridModel {
+        columns: g
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !hidden.contains(i))
+            .map(|(_, c)| c.clone())
+            .collect(),
+        rows: g
+            .rows
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .enumerate()
+                    .filter(|(i, _)| !hidden.contains(i))
+                    .map(|(_, c)| c.clone())
+                    .collect()
+            })
+            .collect(),
+    }
+}
+
 /// Push a `ResultView` into the window, selecting the per-kind result region
 /// via `result-kind` (0 Table, 1 Documents, 3 Affected).
 fn apply_result(w: &MainWindow, view: model::ResultView) {
@@ -714,6 +741,9 @@ fn main() -> Result<(), slint::PlatformError> {
     // indices refer to THIS grid, and its cells carry the pre-edit pk values.
     let displayed_grid: Arc<std::sync::Mutex<Option<model::GridModel>>> =
         Arc::new(std::sync::Mutex::new(None));
+    // Column indices (into the last result) hidden via the Columns popup.
+    let hidden_cols: Arc<std::sync::Mutex<HashSet<usize>>> =
+        Arc::new(std::sync::Mutex::new(HashSet::new()));
     // Engine of the live connection, kept on the UI thread so table clicks can
     // build an engine-appropriate "browse this table" query synchronously.
     let cur_engine: Rc<RefCell<Option<rdbs_connstore::Engine>>> = Rc::new(RefCell::new(None));
@@ -1447,11 +1477,13 @@ fn main() -> Result<(), slint::PlatformError> {
         let last_view = last_view.clone();
         let edit_buf = edit_buf.clone();
         let displayed_grid = displayed_grid.clone();
+        let hidden_cols = hidden_cols.clone();
         window.on_apply_filter(move || {
             let Some(w) = weak.upgrade() else {
                 return;
             };
             let needle = w.get_grid_filter().to_string().to_lowercase();
+            let hidden = hidden_cols.lock().unwrap().clone();
             let guard = last_view.lock().unwrap();
             let Some(v) = guard.as_ref() else {
                 return;
@@ -1467,15 +1499,81 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_editing_col(-1);
             // Filter the row-bearing views; Affected has nothing to filter.
             let filtered = match v {
-                model::ResultView::Table(g) => model::ResultView::Table(filter_grid(g, &needle)),
+                model::ResultView::Table(g) => {
+                    model::ResultView::Table(hide_cols(&filter_grid(g, &needle), &hidden))
+                }
                 model::ResultView::Documents(d) => model::ResultView::Documents(model::DocModel {
                     json: d.json.clone(),
-                    grid: filter_grid(&d.grid, &needle),
+                    grid: hide_cols(&filter_grid(&d.grid, &needle), &hidden),
                 }),
                 model::ResultView::Affected(_) => return,
             };
             *displayed_grid.lock().unwrap() = view_grid(&filtered);
             apply_result(&w, filtered);
+        });
+    }
+
+    // ----- Columns popup: toggle a column's visibility -----
+    {
+        let weak = window.as_weak();
+        let last_view = last_view.clone();
+        let edit_buf = edit_buf.clone();
+        let displayed_grid = displayed_grid.clone();
+        let hidden_cols = hidden_cols.clone();
+        window.on_toggle_column(move |i| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let idx = i.max(0) as usize;
+            let hidden = {
+                let mut h = hidden_cols.lock().unwrap();
+                if !h.insert(idx) {
+                    h.remove(&idx);
+                }
+                h.clone()
+            };
+            let n = w.get_all_columns().row_count();
+            let flags: Vec<bool> = (0..n).map(|c| hidden.contains(&c)).collect();
+            w.set_col_hidden(ModelRc::from(Rc::new(VecModel::from(flags))));
+            let needle = w.get_grid_filter().to_string().to_lowercase();
+            let guard = last_view.lock().unwrap();
+            let Some(v) = guard.as_ref() else {
+                return;
+            };
+            // Hiding renumbers columns: cell edits would write through the
+            // wrong column index, so drop pending edits and lock editing
+            // until the next refresh restores the full column set.
+            // ponytail: remap edit indices instead if editing-with-hidden-
+            // columns ever matters.
+            {
+                edit_buf.lock().unwrap().clear();
+            }
+            w.set_pending_count(0);
+            w.set_editing_row(-1);
+            w.set_editing_col(-1);
+            if !hidden.is_empty() {
+                w.set_grid_read_only(true);
+            }
+            let transformed = match v {
+                model::ResultView::Table(g) => {
+                    model::ResultView::Table(hide_cols(&filter_grid(g, &needle), &hidden))
+                }
+                model::ResultView::Documents(d) => model::ResultView::Documents(model::DocModel {
+                    json: d.json.clone(),
+                    grid: hide_cols(&filter_grid(&d.grid, &needle), &hidden),
+                }),
+                model::ResultView::Affected(_) => return,
+            };
+            if let Some(g) = view_grid(&transformed) {
+                let widths: Vec<f32> = g
+                    .columns
+                    .iter()
+                    .map(|c| default_col_width(&c.name, &c.type_name))
+                    .collect();
+                w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(widths))));
+            }
+            *displayed_grid.lock().unwrap() = view_grid(&transformed);
+            apply_result(&w, transformed);
         });
     }
 
@@ -1692,6 +1790,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let browse = browse.clone();
         let edit_buf = edit_buf.clone();
         let displayed_grid = displayed_grid.clone();
+        let hidden_cols = hidden_cols.clone();
         Rc::new(move |sql: String| {
             let weak2 = weak.clone();
             let current = current.clone();
@@ -1699,6 +1798,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let browse = browse.clone();
             let edit_buf = edit_buf.clone();
             let displayed_grid = displayed_grid.clone();
+            let hidden_cols = hidden_cols.clone();
             rt.spawn(async move {
                 let guard = current.lock().await;
                 let t0 = std::time::Instant::now();
@@ -1735,6 +1835,28 @@ fn main() -> Result<(), slint::PlatformError> {
                                 } as u64;
                                 *last_view.lock().unwrap() = Some(v.clone());
                                 w.set_grid_filter(SharedString::default());
+                                // Fresh result: all columns visible again.
+                                hidden_cols.lock().unwrap().clear();
+                                let colnames: Vec<SharedString> = match &v {
+                                    model::ResultView::Table(g) => g
+                                        .columns
+                                        .iter()
+                                        .map(|c| SharedString::from(c.name.clone()))
+                                        .collect(),
+                                    model::ResultView::Documents(d) => d
+                                        .grid
+                                        .columns
+                                        .iter()
+                                        .map(|c| SharedString::from(c.name.clone()))
+                                        .collect(),
+                                    _ => Vec::new(),
+                                };
+                                w.set_col_hidden(ModelRc::from(Rc::new(VecModel::from(
+                                    vec![false; colnames.len()],
+                                ))));
+                                w.set_all_columns(ModelRc::from(Rc::new(VecModel::from(
+                                    colnames,
+                                ))));
                                 // Fresh result: pending edits refer to rows that
                                 // no longer exist — drop them and re-anchor the
                                 // buffer to the (possibly new) browse target.

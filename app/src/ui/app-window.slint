@@ -114,6 +114,9 @@ export component MainWindow inherits Window {
     callback copy-results();
     callback export-csv();
     in property <[ChartBar]> chart-bars;
+    in property <[string]> all-columns;
+    in property <[bool]> col-hidden;
+    callback toggle-column(int);
     callback apply-filter();
     callback resize-grid-col(int, length);
 
@@ -663,6 +666,11 @@ export component MainWindow inherits Window {
                         fn-name: root.fn-name;
                         fn-lines: root.fn-lines;
                         chart-bars: root.chart-bars;
+                        all-columns: root.all-columns;
+                        col-hidden: root.col-hidden;
+                        toggle-column(i) => {
+                            root.toggle-column(i);
+                        }
                         editor-key(t, cmd, shift) => { root.editor-key(t, cmd, shift) }
                         editor-click-line(l) => { root.editor-click-line(l); }
                         selected-row: root.selected-row;

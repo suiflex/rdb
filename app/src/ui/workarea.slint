@@ -76,6 +76,12 @@ export component WorkArea inherits Rectangle {
     // SQL result footer segments: 0 Data · 1 Message · 2 Chart.
     in-out property <int> sql-view-mode: 0;
     in property <[ChartBar]> chart-bars;
+
+    // column-visibility popup (Columns footer button)
+    in property <[string]> all-columns;
+    in property <[bool]> col-hidden;
+    callback toggle-column(int);
+    property <bool> columns-open: false;
     callback apply-filter();
     callback toggle-sql();
     callback resize-col(int, length);
@@ -705,7 +711,7 @@ export component WorkArea inherits Rectangle {
                     }
                     VerticalLayout {
                         alignment: center;
-                        SecondaryButton { text: "Columns"; height: 24px; }
+                        SecondaryButton { text: "Columns"; height: 24px; clicked => { root.columns-open = !root.columns-open; } }
                     }
                     VerticalLayout {
                         alignment: center;
@@ -738,6 +744,53 @@ export component WorkArea inherits Rectangle {
                         font-family: Tokens.mono;
                         vertical-alignment: center;
                     }
+                }
+            }
+        }
+    }
+
+    // ----- column-visibility popup (anchored above the footer) -----
+    if root.columns-open: Rectangle {
+        x: parent.width - self.width - Tokens.sp3;
+        y: parent.height - self.height - Tokens.status-bar-h - Tokens.sp2;
+        width: 240px;
+        height: min(320px, cols-list.preferred-height + 2 * Tokens.sp2);
+        border-radius: Tokens.radius-lg;
+        border-width: 1px;
+        border-color: Tokens.border-strong;
+        background: Tokens.card;
+        drop-shadow-blur: 16px;
+        drop-shadow-color: Tokens.text.with-alpha(0.25);
+        ScrollView {
+            width: 100%;
+            height: 100%;
+            cols-list := VerticalLayout {
+                padding: Tokens.sp2;
+                spacing: 0;
+                for name[i] in root.all-columns: Rectangle {
+                    height: 24px;
+                    border-radius: Tokens.radius;
+                    background: col-ta.has-hover ? Tokens.chrome : transparent;
+                    HorizontalLayout {
+                        padding-left: Tokens.sp2;
+                        padding-right: Tokens.sp2;
+                        spacing: Tokens.sp2;
+                        Text {
+                            text: root.col-hidden[i] ? "○" : "●";
+                            color: root.col-hidden[i] ? Tokens.text-faint : Tokens.accent;
+                            font-size: Tokens.font-sm;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: name;
+                            color: Tokens.text;
+                            font-size: Tokens.font-sm;
+                            font-family: Tokens.mono;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                    col-ta := TouchArea { clicked => { root.toggle-column(i); } }
                 }
             }
         }
