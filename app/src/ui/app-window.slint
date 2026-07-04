@@ -135,6 +135,11 @@ export component MainWindow inherits Window {
     callback open-db-modal();
     callback open-conn-modal();
 
+    // ----- schema switcher modal -----
+    in-out property <bool> schema-modal-open: false;
+    in property <[PaletteItem]> schema-items;
+    callback schema-choose(int);
+
     // ----- pagination + edit footer -----
     in property <int> page-start;
     in property <int> page-end;
@@ -747,6 +752,22 @@ export component MainWindow inherits Window {
         new-item => {
             root.open-add-form();
         }
+    }
+
+    // ----- Switch schema (sidebar selector) -----
+    ListModal {
+        title: "Switch schema";
+        placeholder: "Search for schema...";
+        confirm-label: "Switch";
+        open: root.schema-modal-open;
+        items: root.schema-items;
+        choose(i) => {
+            root.schema-choose(i);
+        }
+        dismiss => {
+            root.schema-modal-open = false;
+        }
+        new-item => { }
     }
 
     // ----- Open Connection (⌘O) -----

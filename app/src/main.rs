@@ -1040,6 +1040,45 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_db_modal_open(false);
         });
     }
+    // ----- schema switcher: sidebar "schema: …" selector -----
+    {
+        let weak = window.as_weak();
+        window.on_select_schema(move |_current| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let items: Vec<PaletteItem> = w
+                .get_schema_list()
+                .iter()
+                .map(|s| PaletteItem {
+                    label: s,
+                    kind: "database".into(),
+                    sub: SharedString::default(),
+                    local: false,
+                })
+                .collect();
+            if items.is_empty() {
+                return;
+            }
+            w.set_schema_items(ModelRc::from(Rc::new(VecModel::from(items))));
+            w.set_schema_modal_open(true);
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_schema_choose(move |idx| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if let Some(it) = w.get_schema_items().row_data(idx.max(0) as usize) {
+                w.set_schema_name(it.label.clone());
+                w.set_bc_schema(it.label);
+                // Anything browsed belonged to the old schema; force a fresh pick.
+                w.set_active_table(SharedString::default());
+            }
+            w.set_schema_modal_open(false);
+        });
+    }
     {
         let weak = window.as_weak();
         let store = store.clone();
@@ -1458,6 +1497,28 @@ fn main() -> Result<(), slint::PlatformError> {
 
                 match result {
                     Ok((driver, schema)) => {
+                        // Postgres: list real namespaces so the sidebar schema
+                        // switcher offers more than "public".
+                        let mut pg_schemas: Vec<SharedString> = Vec::new();
+                        if matches!(engine, rdbs_connstore::Engine::Postgres) {
+                            let q = rdbs_core::query::Query::Sql(
+                                "SELECT schema_name FROM information_schema.schemata \
+                                 WHERE schema_name NOT LIKE 'pg_%' \
+                                 AND schema_name <> 'information_schema' ORDER BY 1"
+                                    .into(),
+                            );
+                            if let Ok(rdbs_core::result::ResultSet::Tabular { rows, .. }) =
+                                driver.query(&q).await
+                            {
+                                for r in rows {
+                                    if let Some(rdbs_core::result::Cell::Text(s)) =
+                                        r.into_iter().next()
+                                    {
+                                        pg_schemas.push(SharedString::from(s));
+                                    }
+                                }
+                            }
+                        }
                         *store_driver.lock().await = Some((engine, driver));
                         let nodes = model::to_tree_model(&schema);
                         let fields = model::to_structure_model(&schema);
@@ -1476,7 +1537,11 @@ fn main() -> Result<(), slint::PlatformError> {
                         // `"dbname"."table"` query would fail).
                         let mut schema_names: Vec<SharedString> =
                             if matches!(engine, rdbs_connstore::Engine::Postgres) {
-                                vec![SharedString::from("public")]
+                                if pg_schemas.is_empty() {
+                                    vec![SharedString::from("public")]
+                                } else {
+                                    pg_schemas
+                                }
                             } else {
                                 schema
                                     .databases
@@ -1487,7 +1552,12 @@ fn main() -> Result<(), slint::PlatformError> {
                         if schema_names.is_empty() {
                             schema_names.push(SharedString::from("public"));
                         }
-                        let schema_current = schema_names[0].clone();
+                        // Default to "public" when present, else the first name.
+                        let schema_current = schema_names
+                            .iter()
+                            .find(|s| s.as_str() == "public")
+                            .unwrap_or(&schema_names[0])
+                            .clone();
                         // SQL editor only makes sense for the SQL engines.
                         let sql_capable = matches!(
                             engine,
