@@ -367,7 +367,17 @@ export component WorkArea inherits Rectangle {
                     }
                     VerticalLayout {
                         alignment: center;
-                        SecondaryButton { text: "Limit 500  ⇅"; height: 28px; }
+                        SecondaryButton {
+                            text: "Limit " + root.limit-text + "  ⇅";
+                            height: 28px;
+                            clicked => {
+                                // cycle presets: 100 → 300 → 500 → 1000 → 100
+                                root.limit-text = root.limit-text == "100" ? "300"
+                                    : root.limit-text == "300" ? "500"
+                                    : root.limit-text == "500" ? "1000" : "100";
+                                root.set-limit(root.limit-text);
+                            }
+                        }
                     }
                 }
                 CodeEditor {
