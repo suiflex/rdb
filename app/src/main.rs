@@ -344,6 +344,29 @@ struct BrowseState {
 
 /// 1-based display bounds of the current page window plus prev/next
 /// availability. `shown` is how many rows the page actually returned.
+/// Connect + ping, bounded to 8s so "Testing connection…" always resolves.
+/// Returns the elapsed milliseconds on success.
+// ponytail: timeout-bounded, no hard abort; add CancellationToken if a true
+// cancel button is ever needed.
+async fn try_connect(
+    engine: rdbs_connstore::Engine,
+    cfg: rdbs_core::conn::ConnConfig,
+) -> Result<u64, rdbs_core::error::RdbsError> {
+    let t0 = std::time::Instant::now();
+    let attempt = async {
+        let driver = AnyDriver::connect(engine, &cfg).await?;
+        driver.ping().await?;
+        Ok::<_, rdbs_core::error::RdbsError>(())
+    };
+    match tokio::time::timeout(std::time::Duration::from_secs(8), attempt).await {
+        Ok(Ok(())) => Ok(t0.elapsed().as_millis().max(1) as u64),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err(rdbs_core::error::RdbsError::Connection(
+            "connection timed out".into(),
+        )),
+    }
+}
+
 /// Record an executed query at the head of the live history (dedupe, cap 50).
 fn record_recent(list: &RefCell<Vec<String>>, text: &str) {
     let t = text.trim();
@@ -2740,6 +2763,44 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         });
     }
+    // quick test from the picker detail pane: saved config, result in the
+    // detail footer line.
+    {
+        let weak = window.as_weak();
+        let rt = rt.clone();
+        let store = store.clone();
+        window.on_test_conn_quick(move |idx| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let (engine, cfg) = {
+                let st = store.borrow();
+                let Some(sc) = st.list().get(idx.max(0) as usize) else {
+                    return;
+                };
+                match st.conn_config_for(&sc.id) {
+                    Ok(c) => (sc.engine, c),
+                    Err(e) => {
+                        w.set_sel_footer(SharedString::from(format!("connection failed: {e}")));
+                        return;
+                    }
+                }
+            };
+            w.set_sel_footer(SharedString::from("Testing connection…"));
+            let weak2 = weak.clone();
+            rt.spawn(async move {
+                let result = try_connect(engine, cfg).await;
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak2.upgrade() {
+                        w.set_sel_footer(SharedString::from(match result {
+                            Ok(ms) => format!("connection ok · {ms}ms"),
+                            Err(e) => format!("connection failed: {e}"),
+                        }));
+                    }
+                });
+            });
+        });
+    }
     // test connection: build a config straight from the form fields (not the
     // store) so unsaved edits are exercised, open a real connection, then drop
     // it. Result reported in the form's test-result line.
@@ -2802,26 +2863,12 @@ fn main() -> Result<(), slint::PlatformError> {
 
             let weak2 = weak.clone();
             rt.spawn(async move {
-                let attempt = async {
-                    let driver = AnyDriver::connect(engine, &cfg).await?;
-                    driver.ping().await?;
-                    Ok::<_, rdbs_core::error::RdbsError>(())
-                };
-                // ponytail: timeout-bounded, no hard abort; add CancellationToken
-                // if a true cancel button is ever needed. Bounds a hung connect so
-                // "Testing connection…" always resolves.
-                let result =
-                    match tokio::time::timeout(std::time::Duration::from_secs(8), attempt).await {
-                        Ok(r) => r,
-                        Err(_) => Err(rdbs_core::error::RdbsError::Connection(
-                            "connection timed out".into(),
-                        )),
-                    };
+                let result = try_connect(engine, cfg).await;
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
                         w.set_test_busy(false);
                         match result {
-                            Ok(()) => {
+                            Ok(_) => {
                                 w.set_test_ok(true);
                                 w.set_test_result(SharedString::from("connection ok"));
                             }
