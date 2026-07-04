@@ -76,13 +76,13 @@ export component SecondaryButton inherits Rectangle {
     width: label.preferred-width + 2 * Tokens.sp4;
     border-radius: Tokens.radius;
     border-width: 1px;
-    border-color: Tokens.border-strong;
-    background: !enabled ? Tokens.chrome
+    border-color: enabled ? Tokens.border-strong : Tokens.border;
+    background: !enabled ? transparent
         : ta.has-hover ? Tokens.chrome : Tokens.card;
     animate background { duration: Tokens.fade; }
     label := Text {
         text: root.text;
-        color: enabled ? Tokens.text : Tokens.text-faint;
+        color: enabled ? Tokens.text : Tokens.text-ghost;
         font-size: Tokens.font-sm;
         font-weight: 500;
     }
