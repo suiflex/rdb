@@ -4,9 +4,7 @@
 import { Tokens } from "tokens.slint";
 
 export global Theme {
-    // dark mode is not part of the Tabula design yet; the flag remains for
-    // the toggle callback but resolves to the light palette.
-    in-out property <bool> dark: false;
+    in-out property <bool> dark <=> Tokens.dark;
 
     out property <color> bg: Tokens.canvas;
     out property <color> surface: Tokens.card;
