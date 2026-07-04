@@ -68,6 +68,7 @@ export component WorkArea inherits Rectangle {
 
     callback run();
     callback format-sql();
+    callback explain-query();
     callback apply-filter();
     callback toggle-sql();
     callback resize-col(int, length);
@@ -349,7 +350,12 @@ export component WorkArea inherits Rectangle {
                     }
                     VerticalLayout {
                         alignment: center;
-                        SecondaryButton { text: "Explain"; height: 28px; }
+                        SecondaryButton {
+                            text: "Explain";
+                            height: 28px;
+                            enabled: root.sql-capable;
+                            clicked => { root.explain-query(); }
+                        }
                     }
                     Rectangle { horizontal-stretch: 1; }
                     Text {

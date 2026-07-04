@@ -1814,6 +1814,30 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ----- Explain button: run EXPLAIN for the editor SQL -----
+    {
+        let weak = window.as_weak();
+        let run_sql = run_sql.clone();
+        window.on_explain_query(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if !w.get_sql_capable() {
+                return;
+            }
+            let text = w.get_query_text().to_string();
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                return;
+            }
+            if trimmed.to_uppercase().starts_with("EXPLAIN") {
+                run_sql(trimmed.to_string());
+            } else {
+                run_sql(format!("EXPLAIN {trimmed}"));
+            }
+        });
+    }
+
     // ----- Format button: tidy the editor SQL in place -----
     {
         let weak = window.as_weak();
