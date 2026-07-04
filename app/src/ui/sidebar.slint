@@ -131,11 +131,11 @@ export component Sidebar inherits Rectangle {
                     HorizontalLayout {
                         padding-left: is-category ? Tokens.sp2 : Tokens.sp2 + (node.depth - 1) * Tokens.sp3;
                         padding-right: Tokens.sp2;
-                        spacing: 7px;
+                        spacing: Tokens.sp2;
 
                         // category: "FUNCTIONS · 10"
                         if is-category: HorizontalLayout {
-                            spacing: 5px;
+                            spacing: Tokens.sp2;
                             alignment: start;
                             Text {
                                 text: node.label.to-uppercase();

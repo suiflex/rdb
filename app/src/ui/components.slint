@@ -215,7 +215,7 @@ export component BreadcrumbChip inherits Rectangle {
     animate background { duration: Tokens.fade; }
     content := HorizontalLayout {
         alignment: center;
-        spacing: 6px;
+        spacing: Tokens.sp2;
         if root.show-dot: VerticalLayout {
             alignment: center;
             Rectangle {
@@ -325,7 +325,7 @@ export component FilterField inherits Rectangle {
     HorizontalLayout {
         padding-left: Tokens.sp2;
         padding-right: 6px;
-        spacing: 6px;
+        spacing: Tokens.sp2;
         Text {
             text: "⌕";
             color: Tokens.text-faint;

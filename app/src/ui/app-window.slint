@@ -412,7 +412,7 @@ export component MainWindow inherits Window {
                 if root.connected: VerticalLayout {
                     alignment: center;
                     HorizontalLayout {
-                        spacing: 2px;
+                        spacing: Tokens.sp1;
                         // history: jump the sidebar to the History tab
                         GlyphButton {
                             glyph: "◷";
@@ -553,7 +553,7 @@ export component MainWindow inherits Window {
                         HorizontalLayout {
                             padding-left: Tokens.sp2;
                             padding-top: Tokens.doc-tab-row-h - Tokens.doc-tab-h;
-                            spacing: 2px;
+                            spacing: Tokens.sp1;
                             for tab[i] in root.tabs: Rectangle {
                                 width: min(170px, tab-content.preferred-width + 2 * Tokens.sp3);
                                 height: Tokens.doc-tab-h;
@@ -577,7 +577,7 @@ export component MainWindow inherits Window {
                                 tab-content := HorizontalLayout {
                                     padding-left: Tokens.sp3;
                                     padding-right: Tokens.sp1;
-                                    spacing: 6px;
+                                    spacing: Tokens.sp2;
                                     if tab.kind == "table": VerticalLayout {
                                         alignment: center;
                                         Rectangle {
