@@ -2512,7 +2512,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_database(SharedString::default());
             w.set_f_password(SharedString::default());
             w.set_f_sslmode(SharedString::from("Prefer"));
-            w.set_f_color(SharedString::from("#3b82f6"));
+            w.set_f_color(SharedString::from("#2c5fd8"));
             w.set_f_import_url(SharedString::default());
             w.set_form_error(SharedString::default());
             w.set_test_result(SharedString::default());
@@ -2549,7 +2549,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 rdbs_core::conn::SslMode::Require => "Require",
             }));
             w.set_f_color(SharedString::from(
-                sc.color.unwrap_or_else(|| "#3b82f6".into()),
+                sc.color.unwrap_or_else(|| "#2c5fd8".into()),
             ));
             w.set_f_import_url(SharedString::default());
             w.set_form_error(SharedString::default());
