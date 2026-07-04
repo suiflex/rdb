@@ -92,6 +92,11 @@ fn is_ident(c: char) -> bool {
 
 /// Lex one line into colored spans. Whitespace stays attached to plain spans
 /// so concatenating span texts reproduces the line exactly.
+/// True when `word` (already uppercased) is a SQL keyword.
+pub fn is_keyword(word: &str) -> bool {
+    KEYWORDS.contains(&word)
+}
+
 pub fn lex_line(line: &str) -> Vec<Span> {
     let mut spans: Vec<Span> = Vec::new();
     let push = |spans: &mut Vec<Span>, text: &str, kind: i32| {

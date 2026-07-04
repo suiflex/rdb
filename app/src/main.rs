@@ -19,6 +19,7 @@ mod mock;
 mod model;
 mod query_parse;
 mod shot;
+mod sql_format;
 mod theme;
 
 use std::cell::RefCell;
@@ -1808,6 +1809,20 @@ fn main() -> Result<(), slint::PlatformError> {
                 run_sql(text);
                 if w.get_sidebar_mode() != 0 {
                     rebuild_query_tree("");
+                }
+            }
+        });
+    }
+
+    // ----- Format button: tidy the editor SQL in place -----
+    {
+        let weak = window.as_weak();
+        let load_editor_text = load_editor_text.clone();
+        window.on_format_sql(move || {
+            if let Some(w) = weak.upgrade() {
+                let text = w.get_query_text().to_string();
+                if !text.trim().is_empty() {
+                    load_editor_text(&sql_format::format(&text));
                 }
             }
         });
