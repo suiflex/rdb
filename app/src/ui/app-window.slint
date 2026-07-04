@@ -20,6 +20,7 @@ import {
     TabItem,
     StructField,
     Span,
+    ChartBar,
 } from "structs.slint";
 
 export component MainWindow inherits Window {
@@ -112,6 +113,7 @@ export component MainWindow inherits Window {
     callback explain-query();
     callback copy-results();
     callback export-csv();
+    in property <[ChartBar]> chart-bars;
     callback apply-filter();
     callback resize-grid-col(int, length);
 
@@ -660,6 +662,7 @@ export component MainWindow inherits Window {
                         fn-mode: root.fn-mode;
                         fn-name: root.fn-name;
                         fn-lines: root.fn-lines;
+                        chart-bars: root.chart-bars;
                         editor-key(t, cmd, shift) => { root.editor-key(t, cmd, shift) }
                         editor-click-line(l) => { root.editor-click-line(l); }
                         selected-row: root.selected-row;

@@ -154,6 +154,49 @@ fn flatten_documents(docs: &[serde_json::Value]) -> (Vec<VmColumn>, Vec<Vec<VmCe
     (columns, rows)
 }
 
+/// (label, value-text, frac) triples for the results bar chart: first
+/// non-numeric column is the label, first numeric column the value, capped
+/// at 30 rows and normalized by the largest absolute value. Empty when the
+/// grid has no numeric column.
+pub fn chart_data(g: &GridModel) -> Vec<(String, String, f32)> {
+    let ncols = g.columns.len();
+    if ncols == 0 || g.rows.is_empty() {
+        return Vec::new();
+    }
+    let is_numeric = |c: usize| {
+        let mut any = false;
+        for row in &g.rows {
+            match row.get(c) {
+                Some(cell) if cell.is_null || cell.text.is_empty() => {}
+                Some(cell) if cell.text.parse::<f64>().is_ok() => any = true,
+                _ => return false,
+            }
+        }
+        any
+    };
+    let Some(value_col) = (0..ncols).find(|&c| is_numeric(c)) else {
+        return Vec::new();
+    };
+    let label_col = (0..ncols).find(|&c| !is_numeric(c));
+    let mut out: Vec<(String, String, f64)> = Vec::new();
+    for (i, row) in g.rows.iter().take(30).enumerate() {
+        let raw = row.get(value_col).map(|c| c.text.clone()).unwrap_or_default();
+        let value: f64 = raw.parse().unwrap_or(0.0);
+        let label = label_col
+            .and_then(|lc| row.get(lc))
+            .map(|c| c.text.clone())
+            .unwrap_or_else(|| format!("row {}", i + 1));
+        out.push((label, raw, value));
+    }
+    let max = out.iter().fold(0.0_f64, |m, (_, _, v)| m.max(v.abs()));
+    if max <= 0.0 {
+        return Vec::new();
+    }
+    out.into_iter()
+        .map(|(l, s, v)| (l, s, (v.abs() / max) as f32))
+        .collect()
+}
+
 /// Convert any ResultSet into its presentation-ready view. Each variant keeps
 /// its own shape instead of collapsing to a single grid.
 pub fn to_result_view(rs: &ResultSet) -> ResultView {
@@ -257,6 +300,39 @@ mod tests {
     use super::*;
     use rdbs_core::result::{Cell, Column, RedisValue, ResultSet};
     use rdbs_core::schema::{Container, ContainerKind, Database, Field, Schema};
+
+    #[test]
+    fn chart_data_picks_label_and_numeric_columns() {
+        let g = GridModel {
+            columns: vec![
+                VmColumn { name: "sector".into(), type_name: "text".into() },
+                VmColumn { name: "total".into(), type_name: "int".into() },
+            ],
+            rows: vec![
+                vec![
+                    VmCell { text: "energy".into(), is_null: false },
+                    VmCell { text: "10".into(), is_null: false },
+                ],
+                vec![
+                    VmCell { text: "tech".into(), is_null: false },
+                    VmCell { text: "5".into(), is_null: false },
+                ],
+            ],
+        };
+        let bars = chart_data(&g);
+        assert_eq!(bars.len(), 2);
+        assert_eq!(bars[0], ("energy".into(), "10".into(), 1.0));
+        assert_eq!(bars[1].2, 0.5);
+    }
+
+    #[test]
+    fn chart_data_empty_without_numeric_column() {
+        let g = GridModel {
+            columns: vec![VmColumn { name: "name".into(), type_name: "text".into() }],
+            rows: vec![vec![VmCell { text: "a".into(), is_null: false }]],
+        };
+        assert!(chart_data(&g).is_empty());
+    }
 
     fn expect_table(rs: &ResultSet) -> GridModel {
         match to_result_view(rs) {

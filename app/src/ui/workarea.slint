@@ -2,7 +2,7 @@
 // editor + results split. References: design/2-workspace.png,
 // design/3-sql-editor.png, design/11-filter-edit-t2.png.
 import { Tokens } from "tokens.slint";
-import { GridColumn, GridCell, StructField, Span } from "structs.slint";
+import { GridColumn, GridCell, StructField, Span, ChartBar } from "structs.slint";
 import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import {
@@ -72,6 +72,10 @@ export component WorkArea inherits Rectangle {
     callback explain-query();
     callback copy-results();
     callback export-csv();
+
+    // SQL result footer segments: 0 Data · 1 Message · 2 Chart.
+    in-out property <int> sql-view-mode: 0;
+    in property <[ChartBar]> chart-bars;
     callback apply-filter();
     callback toggle-sql();
     callback resize-col(int, length);
@@ -414,7 +418,7 @@ export component WorkArea inherits Rectangle {
                     Rectangle { horizontal-stretch: 1; }
                     TextButton { text: "Copy"; clicked => { root.copy-results(); } }
                     TextButton { text: "Export CSV"; clicked => { root.export-csv(); } }
-                    TextButton { text: "Chart"; }
+                    TextButton { text: "Chart"; clicked => { root.sql-view-mode = 2; } }
                 }
             }
         }
@@ -425,7 +429,7 @@ export component WorkArea inherits Rectangle {
             background: Tokens.canvas;
 
             // Data grid
-            if root.view-mode == 0 && (root.result-kind == 0 || root.result-kind == 2): TabularGrid {
+            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0) && (root.result-kind == 0 || root.result-kind == 2): TabularGrid {
                 width: 100%;
                 height: 100%;
                 columns: root.columns;
@@ -444,7 +448,7 @@ export component WorkArea inherits Rectangle {
             }
 
             // Documents (Mongo)
-            if root.view-mode == 0 && root.result-kind == 1: ScrollView {
+            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0) && root.result-kind == 1: ScrollView {
                 width: 100%;
                 height: 100%;
                 VerticalLayout {
@@ -460,7 +464,7 @@ export component WorkArea inherits Rectangle {
             }
 
             // Affected-rows toast
-            if root.view-mode == 0 && root.result-kind == 3: Text {
+            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0) && root.result-kind == 3: Text {
                 text: root.result-status;
                 color: root.status-error ? Tokens.error : Tokens.text-dim;
                 font-size: Tokens.font-md;
@@ -496,6 +500,67 @@ export component WorkArea inherits Rectangle {
                 text: "No indexes to show";
                 color: Tokens.text-faint;
                 font-size: Tokens.font-md;
+            }
+
+            // Message view (SQL footer segment)
+            if !root.browse-mode && root.view-mode == 0 && root.sql-view-mode == 1: VerticalLayout {
+                padding: Tokens.sp3;
+                alignment: start;
+                Text {
+                    text: root.result-status == "" ? "No messages" : root.result-status;
+                    color: root.status-error ? Tokens.error : Tokens.text-dim;
+                    font-size: Tokens.font-md;
+                }
+            }
+
+            // Chart view: horizontal bars, first text column vs first numeric column
+            if !root.browse-mode && root.view-mode == 0 && root.sql-view-mode == 2: ScrollView {
+                width: 100%;
+                height: 100%;
+                VerticalLayout {
+                    width: parent.visible-width;
+                    padding: Tokens.sp3;
+                    spacing: Tokens.sp1;
+                    alignment: start;
+                    if root.chart-bars.length == 0: Text {
+                        text: "Nothing to chart — the result needs a numeric column";
+                        color: Tokens.text-faint;
+                        font-size: Tokens.font-md;
+                    }
+                    for bar in root.chart-bars: HorizontalLayout {
+                        height: 20px;
+                        spacing: Tokens.sp2;
+                        Text {
+                            width: 160px;
+                            text: bar.label;
+                            color: Tokens.text-dim;
+                            font-size: Tokens.font-sm;
+                            font-family: Tokens.mono;
+                            overflow: elide;
+                            vertical-alignment: center;
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            Rectangle {
+                                x: 0;
+                                width: parent.width * bar.frac;
+                                height: 14px;
+                                y: (parent.height - self.height) / 2;
+                                border-radius: 3px;
+                                background: Tokens.accent;
+                            }
+                        }
+                        Text {
+                            width: 100px;
+                            text: bar.value;
+                            color: Tokens.text;
+                            font-size: Tokens.font-sm;
+                            font-family: Tokens.mono;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
             }
         }
 
@@ -556,9 +621,21 @@ export component WorkArea inherits Rectangle {
                 if !root.browse-mode: HorizontalLayout {
                     spacing: Tokens.sp4;
                     alignment: start;
-                    UnderlineSegment { text: "Data"; active: true; }
-                    UnderlineSegment { text: "Message"; }
-                    UnderlineSegment { text: "Chart"; }
+                    UnderlineSegment {
+                        text: "Data";
+                        active: root.sql-view-mode == 0;
+                        clicked => { root.sql-view-mode = 0; }
+                    }
+                    UnderlineSegment {
+                        text: "Message";
+                        active: root.sql-view-mode == 1;
+                        clicked => { root.sql-view-mode = 1; }
+                    }
+                    UnderlineSegment {
+                        text: "Chart";
+                        active: root.sql-view-mode == 2;
+                        clicked => { root.sql-view-mode = 2; }
+                    }
                 }
 
                 Rectangle { horizontal-stretch: 1; }

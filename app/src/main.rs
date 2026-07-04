@@ -1768,6 +1768,19 @@ fn main() -> Result<(), slint::PlatformError> {
                                 w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(
                                     widths,
                                 ))));
+                                // Chart segment data (SQL results only).
+                                let bars: Vec<ChartBar> = match &v {
+                                    model::ResultView::Table(g) => model::chart_data(g)
+                                        .into_iter()
+                                        .map(|(label, value, frac)| ChartBar {
+                                            label: label.into(),
+                                            value: value.into(),
+                                            frac,
+                                        })
+                                        .collect(),
+                                    _ => Vec::new(),
+                                };
+                                w.set_chart_bars(ModelRc::from(Rc::new(VecModel::from(bars))));
                                 apply_result(&w, v);
                                 // Browse mode: refresh the pagination footer.
                                 let st = browse.lock().unwrap().clone();
