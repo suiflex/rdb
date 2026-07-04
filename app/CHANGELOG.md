@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.5.0](https://github.com/suiflex/rdb/compare/v0.4.0...v0.5.0) (2026-07-04)
+
+
+### Features
+
+* **app:** chart view for tabular results ([efa50a7](https://github.com/suiflex/rdb/commit/efa50a7ceeac87987627f8c5642dbdef37137266))
+* **app:** column visibility popup ([c662818](https://github.com/suiflex/rdb/commit/c6628185c51f832a180d463cba3fb9565f3516a9))
+* **app:** copy results to clipboard and CSV export ([bd01126](https://github.com/suiflex/rdb/commit/bd0112673ea31d29111d7e35ce07ac1265126757))
+* **app:** Explain button runs EXPLAIN on the editor SQL ([892ab9a](https://github.com/suiflex/rdb/commit/892ab9ab9bc9aca7644c1f3dff04dd09eb7256ba))
+* **app:** filter panel uses real columns and operators ([8857f45](https://github.com/suiflex/rdb/commit/8857f458fe992701159fd4dd768e0a30d3472bee))
+* **app:** implement dark palette behind Theme.dark ([337c3ab](https://github.com/suiflex/rdb/commit/337c3abb10b01e39f2851b0704be0e79d3d3a6c4))
+* **app:** indexes view populated from engine catalogs ([c836956](https://github.com/suiflex/rdb/commit/c8369561ccbc6d4ee3ad64ccfa49ffca68d6376a))
+* **app:** live query history and sidebar mode content ([40e0fe6](https://github.com/suiflex/rdb/commit/40e0fe66f7c8ad7411145bc7bad7cf2a119ac96a))
+* **app:** picker import and backup actions ([4ed0d4b](https://github.com/suiflex/rdb/commit/4ed0d4b216cac5ad5f16e17533baf3095ec2d7e8))
+* **app:** quick-test connection from picker detail pane ([216ed1b](https://github.com/suiflex/rdb/commit/216ed1ba7baa2890b9b0dd0739a3b9c4b657d388))
+* **app:** Run Selection executes the statement under the cursor ([debe716](https://github.com/suiflex/rdb/commit/debe716ffff1d0c51cb0cadbde71f1829cc7487c))
+* **app:** schema switcher modal ([d9944e5](https://github.com/suiflex/rdb/commit/d9944e5d185957b67bcbad7ce106fe37582e28a8))
+* **app:** SQL Format button ([3c197aa](https://github.com/suiflex/rdb/commit/3c197aa53c4167ddbd4e43565f890e1b9265dad4))
+
+
+### Bug Fixes
+
+* **app:** limit control drives set-limit and shows the real value ([0114c8a](https://github.com/suiflex/rdb/commit/0114c8a63b22705f1ad08c49e3323b60f4d382ba))
+* frontend audit — wire dead controls, implement missing features ([16f131d](https://github.com/suiflex/rdb/commit/16f131d68fabb5e2a3d53ebe1d2ca7c6f728c294))
+* **ui:** distinct disabled state for SecondaryButton ([7d0016d](https://github.com/suiflex/rdb/commit/7d0016d98be797d43fbecc9d077387291e6949d1))
+* **ui:** sidebar plus button opens a new query tab ([1035b79](https://github.com/suiflex/rdb/commit/1035b79cda9df95e42a2a73df9edb4661bf3c4a3))
+* **ui:** titlebar aux buttons do what they say ([fd54fa2](https://github.com/suiflex/rdb/commit/fd54fa20efd5fdddab937b8deff0b956b3ed5cae))
+
 ## [0.4.0](https://github.com/suiflex/rdb/compare/v0.3.0...v0.4.0) (2026-07-03)
 
 
