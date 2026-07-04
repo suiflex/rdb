@@ -21,6 +21,7 @@ import {
     StructField,
     Span,
     ChartBar,
+    IndexRow,
 } from "structs.slint";
 
 export component MainWindow inherits Window {
@@ -120,6 +121,7 @@ export component MainWindow inherits Window {
     in property <[string]> filter-columns;
     in-out property <string> filter-col: "any column";
     in-out property <string> filter-op: "contains";
+    in property <[IndexRow]> index-rows;
     callback apply-filter();
     callback resize-grid-col(int, length);
 
@@ -677,6 +679,7 @@ export component MainWindow inherits Window {
                         filter-columns: root.filter-columns;
                         filter-col <=> root.filter-col;
                         filter-op <=> root.filter-op;
+                        index-rows: root.index-rows;
                         editor-key(t, cmd, shift) => { root.editor-key(t, cmd, shift) }
                         editor-click-line(l) => { root.editor-click-line(l); }
                         selected-row: root.selected-row;

@@ -562,6 +562,43 @@ fn filter_grid(g: &model::GridModel, needle: &str) -> model::GridModel {
     }
 }
 
+/// List a table's indexes as (name, definition) via the engine catalog.
+/// Empty for engines without one (Redis, Mongo) and on any query error.
+async fn fetch_indexes(
+    engine: rdbs_connstore::Engine,
+    driver: &AnyDriver,
+    table: &rdbs_core::write::TableRef,
+) -> Vec<(String, String)> {
+    let esc = |s: &str| s.replace('\'', "''");
+    let sql = match engine {
+        rdbs_connstore::Engine::Postgres => format!(
+            "SELECT indexname, indexdef FROM pg_indexes \
+             WHERE tablename = '{}' AND schemaname = '{}' ORDER BY 1",
+            esc(&table.name),
+            esc(table.schema.as_deref().unwrap_or("public")),
+        ),
+        rdbs_connstore::Engine::MySql => format!(
+            "SELECT index_name, GROUP_CONCAT(column_name ORDER BY seq_in_index \
+             SEPARATOR ', ') FROM information_schema.statistics \
+             WHERE table_name = '{}' AND table_schema = \
+             COALESCE(NULLIF('{}', ''), DATABASE()) GROUP BY index_name ORDER BY 1",
+            esc(&table.name),
+            esc(table.database.as_deref().unwrap_or("")),
+        ),
+        _ => return Vec::new(),
+    };
+    match driver.query(&rdbs_core::query::Query::Sql(sql)).await {
+        Ok(rdbs_core::result::ResultSet::Tabular { rows, .. }) => rows
+            .into_iter()
+            .filter_map(|r| {
+                let mut it = r.into_iter();
+                Some((it.next()?.render(), it.next()?.render()))
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// Row filter with an optional column + operator condition (`needle` already
 /// lowercased). `col: None` falls back to the all-cell contains filter.
 fn filter_grid_cond(
@@ -2194,6 +2231,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_show_structure(false);
             w.set_total_rows(-1);
             w.set_grid_read_only(true);
+            w.set_index_rows(ModelRc::from(Rc::new(VecModel::<IndexRow>::default())));
             run_browse();
 
             // Fetch total + primary key off-thread; footer updates when done.
@@ -2203,11 +2241,12 @@ fn main() -> Result<(), slint::PlatformError> {
             let edit_buf = edit_buf.clone();
             rt.spawn(async move {
                 let guard = current.lock().await;
-                let Some((_, driver)) = guard.as_ref() else {
+                let Some((engine, driver)) = guard.as_ref() else {
                     return;
                 };
                 let total = driver.count(&table).await.ok();
                 let pk = driver.primary_key(&table).await.unwrap_or_default();
+                let indexes = fetch_indexes(*engine, driver, &table).await;
                 let (page, limit) = {
                     let mut st = browse.lock().unwrap();
                     // Ignore a late reply if the user already opened another table.
@@ -2227,6 +2266,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
+                        let rows: Vec<IndexRow> = indexes
+                            .into_iter()
+                            .map(|(name, definition)| IndexRow {
+                                name: name.into(),
+                                definition: definition.into(),
+                            })
+                            .collect();
+                        w.set_index_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
                         w.set_total_rows(total.map(|t| t as i32).unwrap_or(-1));
                         w.set_grid_read_only(pk.is_empty());
                         w.set_sort_text(if pk.is_empty() {

@@ -40,3 +40,5 @@ export struct TabItem { title: string, kind: string }
 export struct Span { text: string, kind: int }
 // One horizontal bar of the results chart; `frac` is value/max in [0,1].
 export struct ChartBar { label: string, value: string, frac: float }
+// One row of the Indexes view: index name + definition/columns.
+export struct IndexRow { name: string, definition: string }
