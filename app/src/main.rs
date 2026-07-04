@@ -562,6 +562,57 @@ fn filter_grid(g: &model::GridModel, needle: &str) -> model::GridModel {
     }
 }
 
+/// Row filter with an optional column + operator condition (`needle` already
+/// lowercased). `col: None` falls back to the all-cell contains filter.
+fn filter_grid_cond(
+    g: &model::GridModel,
+    needle: &str,
+    col: Option<usize>,
+    op: &str,
+) -> model::GridModel {
+    let Some(c) = col else {
+        return filter_grid(g, needle);
+    };
+    // null checks ignore the value box; other operators with an empty value
+    // keep every row (matches the plain filter's behavior)
+    if needle.is_empty() && op != "is null" && op != "not null" {
+        return g.clone();
+    }
+    let keep = |row: &[model::VmCell]| -> bool {
+        let Some(cell) = row.get(c) else {
+            return false;
+        };
+        match op {
+            "is null" => cell.is_null,
+            "not null" => !cell.is_null,
+            "=" => cell.text.to_lowercase() == needle,
+            "≠" => cell.text.to_lowercase() != needle,
+            ">" | "<" => match (cell.text.parse::<f64>(), needle.parse::<f64>()) {
+                (Ok(a), Ok(b)) => {
+                    if op == ">" {
+                        a > b
+                    } else {
+                        a < b
+                    }
+                }
+                _ => {
+                    let t = cell.text.to_lowercase();
+                    if op == ">" {
+                        t.as_str() > needle
+                    } else {
+                        t.as_str() < needle
+                    }
+                }
+            },
+            _ => cell.text.to_lowercase().contains(needle),
+        }
+    };
+    model::GridModel {
+        columns: g.columns.clone(),
+        rows: g.rows.iter().filter(|r| keep(r)).cloned().collect(),
+    }
+}
+
 /// Return a copy of `g` without the hidden column indices.
 fn hide_cols(g: &model::GridModel, hidden: &HashSet<usize>) -> model::GridModel {
     if hidden.is_empty() {
@@ -1483,6 +1534,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let needle = w.get_grid_filter().to_string().to_lowercase();
+            let fcol = w.get_filter_col().to_string();
+            let fop = w.get_filter_op().to_string();
             let hidden = hidden_cols.lock().unwrap().clone();
             let guard = last_view.lock().unwrap();
             let Some(v) = guard.as_ref() else {
@@ -1498,13 +1551,24 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_editing_row(-1);
             w.set_editing_col(-1);
             // Filter the row-bearing views; Affected has nothing to filter.
-            let filtered = match v {
-                model::ResultView::Table(g) => {
-                    model::ResultView::Table(hide_cols(&filter_grid(g, &needle), &hidden))
+            let col_of = |g: &model::GridModel| {
+                if fcol == "any column" {
+                    None
+                } else {
+                    g.columns.iter().position(|c| c.name == fcol)
                 }
+            };
+            let filtered = match v {
+                model::ResultView::Table(g) => model::ResultView::Table(hide_cols(
+                    &filter_grid_cond(g, &needle, col_of(g), &fop),
+                    &hidden,
+                )),
                 model::ResultView::Documents(d) => model::ResultView::Documents(model::DocModel {
                     json: d.json.clone(),
-                    grid: hide_cols(&filter_grid(&d.grid, &needle), &hidden),
+                    grid: hide_cols(
+                        &filter_grid_cond(&d.grid, &needle, col_of(&d.grid), &fop),
+                        &hidden,
+                    ),
                 }),
                 model::ResultView::Affected(_) => return,
             };
@@ -1853,6 +1917,12 @@ fn main() -> Result<(), slint::PlatformError> {
                                 };
                                 w.set_col_hidden(ModelRc::from(Rc::new(VecModel::from(
                                     vec![false; colnames.len()],
+                                ))));
+                                let mut fcols: Vec<SharedString> =
+                                    vec![SharedString::from("any column")];
+                                fcols.extend(colnames.iter().cloned());
+                                w.set_filter_columns(ModelRc::from(Rc::new(VecModel::from(
+                                    fcols,
                                 ))));
                                 w.set_all_columns(ModelRc::from(Rc::new(VecModel::from(
                                     colnames,

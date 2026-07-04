@@ -117,6 +117,9 @@ export component MainWindow inherits Window {
     in property <[string]> all-columns;
     in property <[bool]> col-hidden;
     callback toggle-column(int);
+    in property <[string]> filter-columns;
+    in-out property <string> filter-col: "any column";
+    in-out property <string> filter-op: "contains";
     callback apply-filter();
     callback resize-grid-col(int, length);
 
@@ -671,6 +674,9 @@ export component MainWindow inherits Window {
                         toggle-column(i) => {
                             root.toggle-column(i);
                         }
+                        filter-columns: root.filter-columns;
+                        filter-col <=> root.filter-col;
+                        filter-op <=> root.filter-op;
                         editor-key(t, cmd, shift) => { root.editor-key(t, cmd, shift) }
                         editor-click-line(l) => { root.editor-click-line(l); }
                         selected-row: root.selected-row;

@@ -62,9 +62,11 @@ export component WorkArea inherits Rectangle {
     property <bool> browse-mode: root.active-table != "";
     // Footer view segments: 0 Data · 1 Structure · 2 Indexes
     property <int> view-mode: root.show-structure ? 1 : 0;
-    // Expandable filter panel (up to 3 condition rows).
+    // Expandable filter panel: one real condition row.
     in-out property <bool> filter-open: false;
-    in-out property <int> filter-rows: 1;
+    in property <[string]> filter-columns;   // "any column" + real columns
+    in-out property <string> filter-col: "any column";
+    in-out property <string> filter-op: "contains";
 
     callback run();
     callback run-selection();
@@ -186,23 +188,25 @@ export component WorkArea inherits Rectangle {
 
         // ================= expandable filter panel =================
         if root.browse-mode && root.filter-open: Rectangle {
-            height: root.filter-rows * 34px + 40px;
+            height: 74px;
             background: Tokens.chrome.with-alpha(0.5);
             VerticalLayout {
                 padding: Tokens.sp2;
                 padding-left: Tokens.sp3;
                 padding-right: Tokens.sp3;
                 spacing: 4px;
-                for fr in root.filter-rows: HorizontalLayout {
+                HorizontalLayout {
                     height: 30px;
                     spacing: Tokens.sp2;
                     ComboBox {
                         width: 150px;
-                        model: ["id", "code", "name", "short_name", "country", "ccy", "exch", "id_sector", "created_at", "updated_at"];
+                        model: root.filter-columns;
+                        current-value <=> root.filter-col;
                     }
                     ComboBox {
                         width: 110px;
                         model: ["contains", "=", "≠", ">", "<", "is null", "not null"];
+                        current-value <=> root.filter-op;
                     }
                     FilterField {
                         horizontal-stretch: 1;
@@ -215,18 +219,13 @@ export component WorkArea inherits Rectangle {
                 HorizontalLayout {
                     height: 28px;
                     spacing: Tokens.sp2;
-                    TextButton {
-                        text: "+ Add condition";
-                        clicked => {
-                            if (root.filter-rows < 3) { root.filter-rows += 1; }
-                        }
-                    }
                     Rectangle { horizontal-stretch: 1; }
                     SecondaryButton {
                         text: "Clear";
                         clicked => {
                             root.grid-filter = "";
-                            root.filter-rows = 1;
+                            root.filter-col = "any column";
+                            root.filter-op = "contains";
                             root.apply-filter();
                         }
                     }
