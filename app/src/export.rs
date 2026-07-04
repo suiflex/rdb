@@ -104,12 +104,24 @@ mod tests {
         use crate::model::{VmCell, VmColumn};
         GridModel {
             columns: vec![
-                VmColumn { name: "id".into(), type_name: "int".into() },
-                VmColumn { name: "name".into(), type_name: "text".into() },
+                VmColumn {
+                    name: "id".into(),
+                    type_name: "int".into(),
+                },
+                VmColumn {
+                    name: "name".into(),
+                    type_name: "text".into(),
+                },
             ],
             rows: vec![vec![
-                VmCell { text: "1".into(), is_null: false },
-                VmCell { text: "a,\"b\"\n".into(), is_null: false },
+                VmCell {
+                    text: "1".into(),
+                    is_null: false,
+                },
+                VmCell {
+                    text: "a,\"b\"\n".into(),
+                    is_null: false,
+                },
             ]],
         }
     }

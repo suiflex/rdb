@@ -1958,12 +1958,8 @@ fn main() -> Result<(), slint::PlatformError> {
                                 let mut fcols: Vec<SharedString> =
                                     vec![SharedString::from("any column")];
                                 fcols.extend(colnames.iter().cloned());
-                                w.set_filter_columns(ModelRc::from(Rc::new(VecModel::from(
-                                    fcols,
-                                ))));
-                                w.set_all_columns(ModelRc::from(Rc::new(VecModel::from(
-                                    colnames,
-                                ))));
+                                w.set_filter_columns(ModelRc::from(Rc::new(VecModel::from(fcols))));
+                                w.set_all_columns(ModelRc::from(Rc::new(VecModel::from(colnames))));
                                 // Fresh result: pending edits refer to rows that
                                 // no longer exist — drop them and re-anchor the
                                 // buffer to the (possibly new) browse target.

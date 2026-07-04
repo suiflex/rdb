@@ -180,7 +180,10 @@ pub fn chart_data(g: &GridModel) -> Vec<(String, String, f32)> {
     let label_col = (0..ncols).find(|&c| !is_numeric(c));
     let mut out: Vec<(String, String, f64)> = Vec::new();
     for (i, row) in g.rows.iter().take(30).enumerate() {
-        let raw = row.get(value_col).map(|c| c.text.clone()).unwrap_or_default();
+        let raw = row
+            .get(value_col)
+            .map(|c| c.text.clone())
+            .unwrap_or_default();
         let value: f64 = raw.parse().unwrap_or(0.0);
         let label = label_col
             .and_then(|lc| row.get(lc))
@@ -305,17 +308,35 @@ mod tests {
     fn chart_data_picks_label_and_numeric_columns() {
         let g = GridModel {
             columns: vec![
-                VmColumn { name: "sector".into(), type_name: "text".into() },
-                VmColumn { name: "total".into(), type_name: "int".into() },
+                VmColumn {
+                    name: "sector".into(),
+                    type_name: "text".into(),
+                },
+                VmColumn {
+                    name: "total".into(),
+                    type_name: "int".into(),
+                },
             ],
             rows: vec![
                 vec![
-                    VmCell { text: "energy".into(), is_null: false },
-                    VmCell { text: "10".into(), is_null: false },
+                    VmCell {
+                        text: "energy".into(),
+                        is_null: false,
+                    },
+                    VmCell {
+                        text: "10".into(),
+                        is_null: false,
+                    },
                 ],
                 vec![
-                    VmCell { text: "tech".into(), is_null: false },
-                    VmCell { text: "5".into(), is_null: false },
+                    VmCell {
+                        text: "tech".into(),
+                        is_null: false,
+                    },
+                    VmCell {
+                        text: "5".into(),
+                        is_null: false,
+                    },
                 ],
             ],
         };
@@ -328,8 +349,14 @@ mod tests {
     #[test]
     fn chart_data_empty_without_numeric_column() {
         let g = GridModel {
-            columns: vec![VmColumn { name: "name".into(), type_name: "text".into() }],
-            rows: vec![vec![VmCell { text: "a".into(), is_null: false }]],
+            columns: vec![VmColumn {
+                name: "name".into(),
+                type_name: "text".into(),
+            }],
+            rows: vec![vec![VmCell {
+                text: "a".into(),
+                is_null: false,
+            }]],
         };
         assert!(chart_data(&g).is_empty());
     }
