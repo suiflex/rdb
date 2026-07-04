@@ -20,6 +20,8 @@ import {
     TabItem,
     StructField,
     Span,
+    ChartBar,
+    IndexRow,
 } from "structs.slint";
 
 export component MainWindow inherits Window {
@@ -107,6 +109,19 @@ export component MainWindow inherits Window {
     in-out property <string> grid-filter;
     in property <[length]> grid-col-widths;
     callback run-query();
+    callback run-selection();
+    callback format-sql();
+    callback explain-query();
+    callback copy-results();
+    callback export-csv();
+    in property <[ChartBar]> chart-bars;
+    in property <[string]> all-columns;
+    in property <[bool]> col-hidden;
+    callback toggle-column(int);
+    in property <[string]> filter-columns;
+    in-out property <string> filter-col: "any column";
+    in-out property <string> filter-op: "contains";
+    in property <[IndexRow]> index-rows;
     callback apply-filter();
     callback resize-grid-col(int, length);
 
@@ -134,6 +149,11 @@ export component MainWindow inherits Window {
     callback conn-choose(int);
     callback open-db-modal();
     callback open-conn-modal();
+
+    // ----- schema switcher modal -----
+    in-out property <bool> schema-modal-open: false;
+    in property <[PaletteItem]> schema-items;
+    callback schema-choose(int);
 
     // ----- pagination + edit footer -----
     in property <int> page-start;
@@ -187,6 +207,7 @@ export component MainWindow inherits Window {
     in property <bool> test-busy;
     callback open-add-form();
     callback open-edit-form(int);
+    callback backup-conns();
     callback form-engine-changed(string);
     callback form-import-url();
     callback form-test-conn();
@@ -391,10 +412,25 @@ export component MainWindow inherits Window {
                 if root.connected: VerticalLayout {
                     alignment: center;
                     HorizontalLayout {
-                        spacing: 2px;
-                        GlyphButton { glyph: "◷"; clicked => { root.select-tab(root.active-tab); } }
+                        spacing: Tokens.sp1;
+                        // history: jump the sidebar to the History tab
+                        GlyphButton {
+                            glyph: "◷";
+                            clicked => {
+                                root.sidebar-mode = 2;
+                                root.sidebar-mode-changed(2);
+                            }
+                        }
                         GlyphButton { glyph: "▭"; glyph-size: 11px; clicked => { root.toggle-theme(); } }
-                        GlyphButton { glyph: "⚙"; clicked => { root.open-add-form(); } }
+                        // settings of the current connection (edit form)
+                        GlyphButton {
+                            glyph: "⚙";
+                            clicked => {
+                                if (root.selected-conn >= 0) {
+                                    root.open-edit-form(root.selected-conn);
+                                }
+                            }
+                        }
                     }
                 }
                 VerticalLayout {
@@ -436,6 +472,10 @@ export component MainWindow inherits Window {
             edit-clicked(i) => { root.open-edit-form(i); }
             toggle-group(g) => { root.toggle-group(g); }
             filter(t) => { root.conn-filter(t); }
+            // URL import lives in the add form; file-based import would need
+            // a native dialog dependency.
+            import-clicked() => { root.open-add-form(); }
+            backup-clicked() => { root.backup-conns(); }
         }
 
         // ===== workspace (shown once connected) =====
@@ -485,6 +525,9 @@ export component MainWindow inherits Window {
                     filter-tree(t) => {
                         root.filter-tree(t);
                     }
+                    add-item() => {
+                        root.new-tab();
+                    }
                 }
 
                 // draggable vertical splitter (sidebar width)
@@ -510,7 +553,7 @@ export component MainWindow inherits Window {
                         HorizontalLayout {
                             padding-left: Tokens.sp2;
                             padding-top: Tokens.doc-tab-row-h - Tokens.doc-tab-h;
-                            spacing: 2px;
+                            spacing: Tokens.sp1;
                             for tab[i] in root.tabs: Rectangle {
                                 width: min(170px, tab-content.preferred-width + 2 * Tokens.sp3);
                                 height: Tokens.doc-tab-h;
@@ -534,7 +577,7 @@ export component MainWindow inherits Window {
                                 tab-content := HorizontalLayout {
                                     padding-left: Tokens.sp3;
                                     padding-right: Tokens.sp1;
-                                    spacing: 6px;
+                                    spacing: Tokens.sp2;
                                     if tab.kind == "table": VerticalLayout {
                                         alignment: center;
                                         Rectangle {
@@ -642,6 +685,16 @@ export component MainWindow inherits Window {
                         fn-mode: root.fn-mode;
                         fn-name: root.fn-name;
                         fn-lines: root.fn-lines;
+                        chart-bars: root.chart-bars;
+                        all-columns: root.all-columns;
+                        col-hidden: root.col-hidden;
+                        toggle-column(i) => {
+                            root.toggle-column(i);
+                        }
+                        filter-columns: root.filter-columns;
+                        filter-col <=> root.filter-col;
+                        filter-op <=> root.filter-op;
+                        index-rows: root.index-rows;
                         editor-key(t, cmd, shift) => { root.editor-key(t, cmd, shift) }
                         editor-click-line(l) => { root.editor-click-line(l); }
                         selected-row: root.selected-row;
@@ -662,6 +715,21 @@ export component MainWindow inherits Window {
                         limit-text <=> root.limit-text;
                         run => {
                             root.run-query();
+                        }
+                        run-selection() => {
+                            root.run-selection();
+                        }
+                        format-sql() => {
+                            root.format-sql();
+                        }
+                        explain-query() => {
+                            root.explain-query();
+                        }
+                        copy-results() => {
+                            root.copy-results();
+                        }
+                        export-csv() => {
+                            root.export-csv();
                         }
                         apply-filter() => {
                             root.apply-filter();
@@ -747,6 +815,22 @@ export component MainWindow inherits Window {
         new-item => {
             root.open-add-form();
         }
+    }
+
+    // ----- Switch schema (sidebar selector) -----
+    ListModal {
+        title: "Switch schema";
+        placeholder: "Search for schema...";
+        confirm-label: "Switch";
+        open: root.schema-modal-open;
+        items: root.schema-items;
+        choose(i) => {
+            root.schema-choose(i);
+        }
+        dismiss => {
+            root.schema-modal-open = false;
+        }
+        new-item => { }
     }
 
     // ----- Open Connection (⌘O) -----

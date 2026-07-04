@@ -80,7 +80,7 @@ export component ConnPicker inherits Rectangle {
                     VerticalLayout {
                         padding-left: Tokens.sp3;
                         padding-right: Tokens.sp3;
-                        spacing: 2px;
+                        spacing: Tokens.sp1;
                         alignment: start;
 
                         for item[i] in root.connections: Rectangle {
@@ -188,7 +188,7 @@ export component ConnPicker inherits Rectangle {
                         Rectangle {
                             width: new-row.preferred-width;
                             new-row := HorizontalLayout {
-                                spacing: 6px;
+                                spacing: Tokens.sp2;
                                 Text {
                                     text: "+";
                                     color: Tokens.text;
@@ -254,7 +254,7 @@ export component ConnPicker inherits Rectangle {
                         DbBadge { engine: root.sel-engine; size: 44px; }
                         VerticalLayout {
                             alignment: center;
-                            spacing: 3px;
+                            spacing: Tokens.sp1;
                             HorizontalLayout {
                                 spacing: Tokens.sp3;
                                 alignment: start;

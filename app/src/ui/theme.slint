@@ -1,57 +1,10 @@
-// Legacy alias layer: older components (conn-form, icons) still read the
-// `Theme` global. Every value resolves to a `Tokens` entry — no color or
-// metric may be defined here.
+// Rust-facing state global. All design values live in `Tokens`; this only
+// carries the two properties main.rs drives at runtime.
 import { Tokens } from "tokens.slint";
 
 export global Theme {
-    // dark mode is not part of the Tabula design yet; the flag remains for
-    // the toggle callback but resolves to the light palette.
-    in-out property <bool> dark: false;
-
-    out property <color> bg: Tokens.canvas;
-    out property <color> surface: Tokens.card;
-    out property <color> surface-2: Tokens.chrome;
-    out property <color> hairline: Tokens.border;
-    out property <color> hairline-strong: Tokens.border-strong;
-    out property <color> text: Tokens.text;
-    out property <color> text-dim: Tokens.text-dim;
-    out property <color> text-faint: Tokens.text-faint;
+    in-out property <bool> dark <=> Tokens.dark;
 
     // per-connection accent, fed from Rust at connect time
     in-out property <color> accent: Tokens.accent;
-    out property <color> accent-soft: Tokens.accent-tint;
-    out property <color> accent-softer: Tokens.accent-tint.with-alpha(0.6);
-
-    out property <length> sp1: Tokens.sp1;
-    out property <length> sp2: Tokens.sp2;
-    out property <length> sp3: Tokens.sp3;
-    out property <length> sp4: Tokens.sp4;
-    out property <length> sp6: Tokens.sp6;
-
-    out property <length> row-height: 28px;
-    out property <length> tree-row-height: 32px;
-    out property <length> gutter-width: 44px;
-    out property <length> radius-panel: Tokens.radius-lg;
-    out property <length> radius-control: Tokens.radius;
-    out property <length> radius-pill: 999px;
-
-    out property <length> icon-sm: Tokens.icon-sm;
-    out property <length> icon-md: Tokens.icon-md;
-    out property <length> icon-lg: 18px;
-
-    out property <length> font-h: 14px;
-    out property <length> font-body: Tokens.font-md;
-    out property <length> font-label: Tokens.font-sm;
-    out property <length> font-caption: Tokens.font-xs;
-    out property <length> font-mono: Tokens.font-md;
-    out property <string> mono-family: Tokens.mono;
-
-    out property <color> edit-pending: Tokens.warn;
-    out property <color> edit-delete: Tokens.error;
-    out property <color> edit-insert: Tokens.ok;
-    out property <color> edit-pending-soft: Tokens.warn-tint;
-    out property <color> edit-delete-soft: Tokens.error-tint;
-    out property <color> edit-insert-soft: Tokens.ok-tint;
-
-    out property <duration> fade: Tokens.fade;
 }

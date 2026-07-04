@@ -14,10 +14,12 @@ slint::include_modules!();
 
 mod dispatch;
 mod editor;
+mod export;
 mod mock;
 mod model;
 mod query_parse;
 mod shot;
+mod sql_format;
 mod theme;
 
 use std::cell::RefCell;
@@ -344,6 +346,41 @@ struct BrowseState {
 
 /// 1-based display bounds of the current page window plus prev/next
 /// availability. `shown` is how many rows the page actually returned.
+/// Connect + ping, bounded to 8s so "Testing connection…" always resolves.
+/// Returns the elapsed milliseconds on success.
+// ponytail: timeout-bounded, no hard abort; add CancellationToken if a true
+// cancel button is ever needed.
+async fn try_connect(
+    engine: rdbs_connstore::Engine,
+    cfg: rdbs_core::conn::ConnConfig,
+) -> Result<u64, rdbs_core::error::RdbsError> {
+    let t0 = std::time::Instant::now();
+    let attempt = async {
+        let driver = AnyDriver::connect(engine, &cfg).await?;
+        driver.ping().await?;
+        Ok::<_, rdbs_core::error::RdbsError>(())
+    };
+    match tokio::time::timeout(std::time::Duration::from_secs(8), attempt).await {
+        Ok(Ok(())) => Ok(t0.elapsed().as_millis().max(1) as u64),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err(rdbs_core::error::RdbsError::Connection(
+            "connection timed out".into(),
+        )),
+    }
+}
+
+/// Record an executed query at the head of the live history (dedupe, cap 50).
+fn record_recent(list: &RefCell<Vec<String>>, text: &str) {
+    let t = text.trim();
+    if t.is_empty() {
+        return;
+    }
+    let mut v = list.borrow_mut();
+    v.retain(|s| s != t);
+    v.insert(0, t.to_string());
+    v.truncate(50);
+}
+
 fn page_bounds(page: u64, limit: u64, total: Option<u64>, shown: u64) -> (u64, u64, bool, bool) {
     let start = if shown == 0 { 0 } else { page * limit + 1 };
     let end = page * limit + shown;
@@ -525,6 +562,121 @@ fn filter_grid(g: &model::GridModel, needle: &str) -> model::GridModel {
     }
 }
 
+/// List a table's indexes as (name, definition) via the engine catalog.
+/// Empty for engines without one (Redis, Mongo) and on any query error.
+async fn fetch_indexes(
+    engine: rdbs_connstore::Engine,
+    driver: &AnyDriver,
+    table: &rdbs_core::write::TableRef,
+) -> Vec<(String, String)> {
+    let esc = |s: &str| s.replace('\'', "''");
+    let sql = match engine {
+        rdbs_connstore::Engine::Postgres => format!(
+            "SELECT indexname, indexdef FROM pg_indexes \
+             WHERE tablename = '{}' AND schemaname = '{}' ORDER BY 1",
+            esc(&table.name),
+            esc(table.schema.as_deref().unwrap_or("public")),
+        ),
+        rdbs_connstore::Engine::MySql => format!(
+            "SELECT index_name, GROUP_CONCAT(column_name ORDER BY seq_in_index \
+             SEPARATOR ', ') FROM information_schema.statistics \
+             WHERE table_name = '{}' AND table_schema = \
+             COALESCE(NULLIF('{}', ''), DATABASE()) GROUP BY index_name ORDER BY 1",
+            esc(&table.name),
+            esc(table.database.as_deref().unwrap_or("")),
+        ),
+        _ => return Vec::new(),
+    };
+    match driver.query(&rdbs_core::query::Query::Sql(sql)).await {
+        Ok(rdbs_core::result::ResultSet::Tabular { rows, .. }) => rows
+            .into_iter()
+            .filter_map(|r| {
+                let mut it = r.into_iter();
+                Some((it.next()?.render(), it.next()?.render()))
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Row filter with an optional column + operator condition (`needle` already
+/// lowercased). `col: None` falls back to the all-cell contains filter.
+fn filter_grid_cond(
+    g: &model::GridModel,
+    needle: &str,
+    col: Option<usize>,
+    op: &str,
+) -> model::GridModel {
+    let Some(c) = col else {
+        return filter_grid(g, needle);
+    };
+    // null checks ignore the value box; other operators with an empty value
+    // keep every row (matches the plain filter's behavior)
+    if needle.is_empty() && op != "is null" && op != "not null" {
+        return g.clone();
+    }
+    let keep = |row: &[model::VmCell]| -> bool {
+        let Some(cell) = row.get(c) else {
+            return false;
+        };
+        match op {
+            "is null" => cell.is_null,
+            "not null" => !cell.is_null,
+            "=" => cell.text.to_lowercase() == needle,
+            "≠" => cell.text.to_lowercase() != needle,
+            ">" | "<" => match (cell.text.parse::<f64>(), needle.parse::<f64>()) {
+                (Ok(a), Ok(b)) => {
+                    if op == ">" {
+                        a > b
+                    } else {
+                        a < b
+                    }
+                }
+                _ => {
+                    let t = cell.text.to_lowercase();
+                    if op == ">" {
+                        t.as_str() > needle
+                    } else {
+                        t.as_str() < needle
+                    }
+                }
+            },
+            _ => cell.text.to_lowercase().contains(needle),
+        }
+    };
+    model::GridModel {
+        columns: g.columns.clone(),
+        rows: g.rows.iter().filter(|r| keep(r)).cloned().collect(),
+    }
+}
+
+/// Return a copy of `g` without the hidden column indices.
+fn hide_cols(g: &model::GridModel, hidden: &HashSet<usize>) -> model::GridModel {
+    if hidden.is_empty() {
+        return g.clone();
+    }
+    model::GridModel {
+        columns: g
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !hidden.contains(i))
+            .map(|(_, c)| c.clone())
+            .collect(),
+        rows: g
+            .rows
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .enumerate()
+                    .filter(|(i, _)| !hidden.contains(i))
+                    .map(|(_, c)| c.clone())
+                    .collect()
+            })
+            .collect(),
+    }
+}
+
 /// Push a `ResultView` into the window, selecting the per-kind result region
 /// via `result-kind` (0 Table, 1 Documents, 3 Affected).
 fn apply_result(w: &MainWindow, view: model::ResultView) {
@@ -677,6 +829,9 @@ fn main() -> Result<(), slint::PlatformError> {
     // indices refer to THIS grid, and its cells carry the pre-edit pk values.
     let displayed_grid: Arc<std::sync::Mutex<Option<model::GridModel>>> =
         Arc::new(std::sync::Mutex::new(None));
+    // Column indices (into the last result) hidden via the Columns popup.
+    let hidden_cols: Arc<std::sync::Mutex<HashSet<usize>>> =
+        Arc::new(std::sync::Mutex::new(HashSet::new()));
     // Engine of the live connection, kept on the UI thread so table clicks can
     // build an engine-appropriate "browse this table" query synchronously.
     let cur_engine: Rc<RefCell<Option<rdbs_connstore::Engine>>> = Rc::new(RefCell::new(None));
@@ -842,11 +997,17 @@ fn main() -> Result<(), slint::PlatformError> {
             "SELECT date_trunc('day', created_at) AS day, sum(amount)\nFROM transactions\nGROUP BY 1\nORDER BY 1 DESC;",
         ),
     ]);
-    let recent_queries: Rc<Vec<&str>> = Rc::new(vec![
-        "SELECT * FROM emiten LIMIT 100;",
-        "INSERT INTO sectors (name) VALUES ('Technology');",
-        "UPDATE emiten SET updated_at = now() WHERE code = '93344';",
-    ]);
+    // Live history: filled as queries run; mock mode seeds a few for the
+    // screenshot harness.
+    let recent_queries: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(if mock::mock_mode() {
+        vec![
+            "SELECT * FROM emiten LIMIT 100;".into(),
+            "INSERT INTO sectors (name) VALUES ('Technology');".into(),
+            "UPDATE emiten SET updated_at = now() WHERE code = '93344';".into(),
+        ]
+    } else {
+        Vec::new()
+    }));
     let rebuild_query_tree = {
         let weak = window.as_weak();
         let saved = saved_queries.clone();
@@ -855,27 +1016,33 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            // Mode 2 (History) shows only the live history; mode 1 (Queries)
+            // shows Saved + Recent.
+            let history_only = w.get_sidebar_mode() == 2;
             let mut rows: Vec<TreeNode> = Vec::new();
-            rows.push(TreeNode {
-                label: "Saved".into(),
-                depth: 0,
-                kind: "qcat".into(),
-                expanded: true,
-                db: SharedString::default(),
-                count: saved.len() as i32,
-            });
-            for (i, (name, _)) in saved.iter().enumerate() {
+            if !history_only {
                 rows.push(TreeNode {
-                    label: (*name).into(),
-                    depth: 1,
-                    kind: "query".into(),
-                    expanded: *name == active,
+                    label: "Saved".into(),
+                    depth: 0,
+                    kind: "qcat".into(),
+                    expanded: true,
                     db: SharedString::default(),
-                    count: i as i32,
+                    count: saved.len() as i32,
                 });
+                for (i, (name, _)) in saved.iter().enumerate() {
+                    rows.push(TreeNode {
+                        label: (*name).into(),
+                        depth: 1,
+                        kind: "query".into(),
+                        expanded: *name == active,
+                        db: SharedString::default(),
+                        count: i as i32,
+                    });
+                }
             }
+            let recent = recent.borrow();
             rows.push(TreeNode {
-                label: "Recent".into(),
+                label: if history_only { "History" } else { "Recent" }.into(),
                 depth: 0,
                 kind: "qcat".into(),
                 expanded: true,
@@ -886,7 +1053,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let label: String = if q.chars().count() > 24 {
                     format!("{}…", q.chars().take(23).collect::<String>())
                 } else {
-                    (*q).to_string()
+                    q.clone()
                 };
                 rows.push(TreeNode {
                     label: label.into(),
@@ -914,8 +1081,8 @@ fn main() -> Result<(), slint::PlatformError> {
             let (title, text, is_saved) =
                 if let Some((name, sql)) = saved.iter().find(|(n, _)| *n == label.as_str()) {
                     ((*name).to_string(), (*sql).to_string(), true)
-                } else if let Some(sql) = recent.get(idx.max(0) as usize) {
-                    ("Query".to_string(), (*sql).to_string(), false)
+                } else if let Some(sql) = recent.borrow().get(idx.max(0) as usize) {
+                    ("Query".to_string(), sql.clone(), false)
                 } else {
                     return;
                 };
@@ -1038,6 +1205,45 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_bc_db(it.label);
             }
             w.set_db_modal_open(false);
+        });
+    }
+    // ----- schema switcher: sidebar "schema: …" selector -----
+    {
+        let weak = window.as_weak();
+        window.on_select_schema(move |_current| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let items: Vec<PaletteItem> = w
+                .get_schema_list()
+                .iter()
+                .map(|s| PaletteItem {
+                    label: s,
+                    kind: "database".into(),
+                    sub: SharedString::default(),
+                    local: false,
+                })
+                .collect();
+            if items.is_empty() {
+                return;
+            }
+            w.set_schema_items(ModelRc::from(Rc::new(VecModel::from(items))));
+            w.set_schema_modal_open(true);
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_schema_choose(move |idx| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if let Some(it) = w.get_schema_items().row_data(idx.max(0) as usize) {
+                w.set_schema_name(it.label.clone());
+                w.set_bc_schema(it.label);
+                // Anything browsed belonged to the old schema; force a fresh pick.
+                w.set_active_table(SharedString::default());
+            }
+            w.set_schema_modal_open(false);
         });
     }
     {
@@ -1359,11 +1565,15 @@ fn main() -> Result<(), slint::PlatformError> {
         let last_view = last_view.clone();
         let edit_buf = edit_buf.clone();
         let displayed_grid = displayed_grid.clone();
+        let hidden_cols = hidden_cols.clone();
         window.on_apply_filter(move || {
             let Some(w) = weak.upgrade() else {
                 return;
             };
             let needle = w.get_grid_filter().to_string().to_lowercase();
+            let fcol = w.get_filter_col().to_string();
+            let fop = w.get_filter_op().to_string();
+            let hidden = hidden_cols.lock().unwrap().clone();
             let guard = last_view.lock().unwrap();
             let Some(v) = guard.as_ref() else {
                 return;
@@ -1378,16 +1588,93 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_editing_row(-1);
             w.set_editing_col(-1);
             // Filter the row-bearing views; Affected has nothing to filter.
+            let col_of = |g: &model::GridModel| {
+                if fcol == "any column" {
+                    None
+                } else {
+                    g.columns.iter().position(|c| c.name == fcol)
+                }
+            };
             let filtered = match v {
-                model::ResultView::Table(g) => model::ResultView::Table(filter_grid(g, &needle)),
+                model::ResultView::Table(g) => model::ResultView::Table(hide_cols(
+                    &filter_grid_cond(g, &needle, col_of(g), &fop),
+                    &hidden,
+                )),
                 model::ResultView::Documents(d) => model::ResultView::Documents(model::DocModel {
                     json: d.json.clone(),
-                    grid: filter_grid(&d.grid, &needle),
+                    grid: hide_cols(
+                        &filter_grid_cond(&d.grid, &needle, col_of(&d.grid), &fop),
+                        &hidden,
+                    ),
                 }),
                 model::ResultView::Affected(_) => return,
             };
             *displayed_grid.lock().unwrap() = view_grid(&filtered);
             apply_result(&w, filtered);
+        });
+    }
+
+    // ----- Columns popup: toggle a column's visibility -----
+    {
+        let weak = window.as_weak();
+        let last_view = last_view.clone();
+        let edit_buf = edit_buf.clone();
+        let displayed_grid = displayed_grid.clone();
+        let hidden_cols = hidden_cols.clone();
+        window.on_toggle_column(move |i| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let idx = i.max(0) as usize;
+            let hidden = {
+                let mut h = hidden_cols.lock().unwrap();
+                if !h.insert(idx) {
+                    h.remove(&idx);
+                }
+                h.clone()
+            };
+            let n = w.get_all_columns().row_count();
+            let flags: Vec<bool> = (0..n).map(|c| hidden.contains(&c)).collect();
+            w.set_col_hidden(ModelRc::from(Rc::new(VecModel::from(flags))));
+            let needle = w.get_grid_filter().to_string().to_lowercase();
+            let guard = last_view.lock().unwrap();
+            let Some(v) = guard.as_ref() else {
+                return;
+            };
+            // Hiding renumbers columns: cell edits would write through the
+            // wrong column index, so drop pending edits and lock editing
+            // until the next refresh restores the full column set.
+            // ponytail: remap edit indices instead if editing-with-hidden-
+            // columns ever matters.
+            {
+                edit_buf.lock().unwrap().clear();
+            }
+            w.set_pending_count(0);
+            w.set_editing_row(-1);
+            w.set_editing_col(-1);
+            if !hidden.is_empty() {
+                w.set_grid_read_only(true);
+            }
+            let transformed = match v {
+                model::ResultView::Table(g) => {
+                    model::ResultView::Table(hide_cols(&filter_grid(g, &needle), &hidden))
+                }
+                model::ResultView::Documents(d) => model::ResultView::Documents(model::DocModel {
+                    json: d.json.clone(),
+                    grid: hide_cols(&filter_grid(&d.grid, &needle), &hidden),
+                }),
+                model::ResultView::Affected(_) => return,
+            };
+            if let Some(g) = view_grid(&transformed) {
+                let widths: Vec<f32> = g
+                    .columns
+                    .iter()
+                    .map(|c| default_col_width(&c.name, &c.type_name))
+                    .collect();
+                w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(widths))));
+            }
+            *displayed_grid.lock().unwrap() = view_grid(&transformed);
+            apply_result(&w, transformed);
         });
     }
 
@@ -1458,6 +1745,28 @@ fn main() -> Result<(), slint::PlatformError> {
 
                 match result {
                     Ok((driver, schema)) => {
+                        // Postgres: list real namespaces so the sidebar schema
+                        // switcher offers more than "public".
+                        let mut pg_schemas: Vec<SharedString> = Vec::new();
+                        if matches!(engine, rdbs_connstore::Engine::Postgres) {
+                            let q = rdbs_core::query::Query::Sql(
+                                "SELECT schema_name FROM information_schema.schemata \
+                                 WHERE schema_name NOT LIKE 'pg_%' \
+                                 AND schema_name <> 'information_schema' ORDER BY 1"
+                                    .into(),
+                            );
+                            if let Ok(rdbs_core::result::ResultSet::Tabular { rows, .. }) =
+                                driver.query(&q).await
+                            {
+                                for r in rows {
+                                    if let Some(rdbs_core::result::Cell::Text(s)) =
+                                        r.into_iter().next()
+                                    {
+                                        pg_schemas.push(SharedString::from(s));
+                                    }
+                                }
+                            }
+                        }
                         *store_driver.lock().await = Some((engine, driver));
                         let nodes = model::to_tree_model(&schema);
                         let fields = model::to_structure_model(&schema);
@@ -1476,7 +1785,11 @@ fn main() -> Result<(), slint::PlatformError> {
                         // `"dbname"."table"` query would fail).
                         let mut schema_names: Vec<SharedString> =
                             if matches!(engine, rdbs_connstore::Engine::Postgres) {
-                                vec![SharedString::from("public")]
+                                if pg_schemas.is_empty() {
+                                    vec![SharedString::from("public")]
+                                } else {
+                                    pg_schemas
+                                }
                             } else {
                                 schema
                                     .databases
@@ -1487,7 +1800,12 @@ fn main() -> Result<(), slint::PlatformError> {
                         if schema_names.is_empty() {
                             schema_names.push(SharedString::from("public"));
                         }
-                        let schema_current = schema_names[0].clone();
+                        // Default to "public" when present, else the first name.
+                        let schema_current = schema_names
+                            .iter()
+                            .find(|s| s.as_str() == "public")
+                            .unwrap_or(&schema_names[0])
+                            .clone();
                         // SQL editor only makes sense for the SQL engines.
                         let sql_capable = matches!(
                             engine,
@@ -1573,6 +1891,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let browse = browse.clone();
         let edit_buf = edit_buf.clone();
         let displayed_grid = displayed_grid.clone();
+        let hidden_cols = hidden_cols.clone();
         Rc::new(move |sql: String| {
             let weak2 = weak.clone();
             let current = current.clone();
@@ -1580,6 +1899,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let browse = browse.clone();
             let edit_buf = edit_buf.clone();
             let displayed_grid = displayed_grid.clone();
+            let hidden_cols = hidden_cols.clone();
             rt.spawn(async move {
                 let guard = current.lock().await;
                 let t0 = std::time::Instant::now();
@@ -1616,6 +1936,30 @@ fn main() -> Result<(), slint::PlatformError> {
                                 } as u64;
                                 *last_view.lock().unwrap() = Some(v.clone());
                                 w.set_grid_filter(SharedString::default());
+                                // Fresh result: all columns visible again.
+                                hidden_cols.lock().unwrap().clear();
+                                let colnames: Vec<SharedString> = match &v {
+                                    model::ResultView::Table(g) => g
+                                        .columns
+                                        .iter()
+                                        .map(|c| SharedString::from(c.name.clone()))
+                                        .collect(),
+                                    model::ResultView::Documents(d) => d
+                                        .grid
+                                        .columns
+                                        .iter()
+                                        .map(|c| SharedString::from(c.name.clone()))
+                                        .collect(),
+                                    _ => Vec::new(),
+                                };
+                                w.set_col_hidden(ModelRc::from(Rc::new(VecModel::from(
+                                    vec![false; colnames.len()],
+                                ))));
+                                let mut fcols: Vec<SharedString> =
+                                    vec![SharedString::from("any column")];
+                                fcols.extend(colnames.iter().cloned());
+                                w.set_filter_columns(ModelRc::from(Rc::new(VecModel::from(fcols))));
+                                w.set_all_columns(ModelRc::from(Rc::new(VecModel::from(colnames))));
                                 // Fresh result: pending edits refer to rows that
                                 // no longer exist — drop them and re-anchor the
                                 // buffer to the (possibly new) browse target.
@@ -1649,6 +1993,19 @@ fn main() -> Result<(), slint::PlatformError> {
                                 w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(
                                     widths,
                                 ))));
+                                // Chart segment data (SQL results only).
+                                let bars: Vec<ChartBar> = match &v {
+                                    model::ResultView::Table(g) => model::chart_data(g)
+                                        .into_iter()
+                                        .map(|(label, value, frac)| ChartBar {
+                                            label: label.into(),
+                                            value: value.into(),
+                                            frac,
+                                        })
+                                        .collect(),
+                                    _ => Vec::new(),
+                                };
+                                w.set_chart_bars(ModelRc::from(Rc::new(VecModel::from(bars))));
                                 apply_result(&w, v);
                                 // Browse mode: refresh the pagination footer.
                                 let st = browse.lock().unwrap().clone();
@@ -1681,10 +2038,117 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let run_sql = run_sql.clone();
+        let recent_queries = recent_queries.clone();
+        let rebuild_query_tree = rebuild_query_tree.clone();
         window.on_run_query(move || {
             if let Some(w) = weak.upgrade() {
-                run_sql(w.get_query_text().to_string());
+                let text = w.get_query_text().to_string();
+                record_recent(&recent_queries, &text);
+                run_sql(text);
+                if w.get_sidebar_mode() != 0 {
+                    rebuild_query_tree("");
+                }
             }
+        });
+    }
+
+    // ----- Copy results (TSV → clipboard) / Export CSV (~/Downloads) -----
+    {
+        let weak = window.as_weak();
+        let displayed_grid = displayed_grid.clone();
+        window.on_copy_results(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some(grid) = displayed_grid.lock().unwrap().clone() else {
+                return;
+            };
+            use copypasta::ClipboardProvider;
+            let msg = match copypasta::ClipboardContext::new()
+                .and_then(|mut cb| cb.set_contents(export::to_tsv(&grid)))
+            {
+                Ok(()) => format!("copied {} rows", grid.rows.len()),
+                Err(e) => format!("copy failed: {e}"),
+            };
+            w.set_results_meta(SharedString::from(msg));
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let displayed_grid = displayed_grid.clone();
+        window.on_export_csv(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some(grid) = displayed_grid.lock().unwrap().clone() else {
+                return;
+            };
+            let path = export::export_path("rdbs-export", "csv");
+            let msg = match std::fs::write(&path, export::to_csv(&grid)) {
+                Ok(()) => format!("exported → {}", path.display()),
+                Err(e) => format!("export failed: {e}"),
+            };
+            w.set_results_meta(SharedString::from(msg));
+        });
+    }
+
+    // ----- Run Selection: run the statement under the cursor -----
+    {
+        let run_sql = run_sql.clone();
+        let ed_state = ed_state.clone();
+        let recent_queries = recent_queries.clone();
+        window.on_run_selection(move || {
+            let stmt = ed_state.borrow().current_statement();
+            if !stmt.is_empty() {
+                record_recent(&recent_queries, &stmt);
+                run_sql(stmt);
+            }
+        });
+    }
+
+    // ----- Explain button: run EXPLAIN for the editor SQL -----
+    {
+        let weak = window.as_weak();
+        let run_sql = run_sql.clone();
+        window.on_explain_query(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if !w.get_sql_capable() {
+                return;
+            }
+            let text = w.get_query_text().to_string();
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                return;
+            }
+            if trimmed.to_uppercase().starts_with("EXPLAIN") {
+                run_sql(trimmed.to_string());
+            } else {
+                run_sql(format!("EXPLAIN {trimmed}"));
+            }
+        });
+    }
+
+    // ----- Format button: tidy the editor SQL in place -----
+    {
+        let weak = window.as_weak();
+        let load_editor_text = load_editor_text.clone();
+        window.on_format_sql(move || {
+            if let Some(w) = weak.upgrade() {
+                let text = w.get_query_text().to_string();
+                if !text.trim().is_empty() {
+                    load_editor_text(&sql_format::format(&text));
+                }
+            }
+        });
+    }
+
+    // ----- sidebar Items / Queries / History tabs -----
+    {
+        let rebuild_query_tree = rebuild_query_tree.clone();
+        window.on_sidebar_mode_changed(move |_mode| {
+            rebuild_query_tree("");
         });
     }
 
@@ -1763,6 +2227,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_show_structure(false);
             w.set_total_rows(-1);
             w.set_grid_read_only(true);
+            w.set_index_rows(ModelRc::from(Rc::new(VecModel::<IndexRow>::default())));
             run_browse();
 
             // Fetch total + primary key off-thread; footer updates when done.
@@ -1772,11 +2237,12 @@ fn main() -> Result<(), slint::PlatformError> {
             let edit_buf = edit_buf.clone();
             rt.spawn(async move {
                 let guard = current.lock().await;
-                let Some((_, driver)) = guard.as_ref() else {
+                let Some((engine, driver)) = guard.as_ref() else {
                     return;
                 };
                 let total = driver.count(&table).await.ok();
                 let pk = driver.primary_key(&table).await.unwrap_or_default();
+                let indexes = fetch_indexes(*engine, driver, &table).await;
                 let (page, limit) = {
                     let mut st = browse.lock().unwrap();
                     // Ignore a late reply if the user already opened another table.
@@ -1796,6 +2262,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
+                        let rows: Vec<IndexRow> = indexes
+                            .into_iter()
+                            .map(|(name, definition)| IndexRow {
+                                name: name.into(),
+                                definition: definition.into(),
+                            })
+                            .collect();
+                        w.set_index_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
                         w.set_total_rows(total.map(|t| t as i32).unwrap_or(-1));
                         w.set_grid_read_only(pk.is_empty());
                         w.set_sort_text(if pk.is_empty() {
@@ -2512,7 +2986,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_database(SharedString::default());
             w.set_f_password(SharedString::default());
             w.set_f_sslmode(SharedString::from("Prefer"));
-            w.set_f_color(SharedString::from("#3b82f6"));
+            w.set_f_color(SharedString::from("#2c5fd8"));
             w.set_f_import_url(SharedString::default());
             w.set_form_error(SharedString::default());
             w.set_test_result(SharedString::default());
@@ -2549,7 +3023,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 rdbs_core::conn::SslMode::Require => "Require",
             }));
             w.set_f_color(SharedString::from(
-                sc.color.unwrap_or_else(|| "#3b82f6".into()),
+                sc.color.unwrap_or_else(|| "#2c5fd8".into()),
             ));
             w.set_f_import_url(SharedString::default());
             w.set_form_error(SharedString::default());
@@ -2631,6 +3105,68 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         });
     }
+    // backup saved connections to a JSON file. Passwords are not in the
+    // list — they live in the keychain — so the dump is safe to write.
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        window.on_backup_conns(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let st = store.borrow();
+            let json = match serde_json::to_string_pretty(st.list()) {
+                Ok(j) => j,
+                Err(e) => {
+                    w.set_sel_footer(SharedString::from(format!("backup failed: {e}")));
+                    return;
+                }
+            };
+            let path = export::export_path("rdbs-connections", "json");
+            w.set_sel_footer(SharedString::from(match std::fs::write(&path, json) {
+                Ok(()) => format!("backup → {}", path.display()),
+                Err(e) => format!("backup failed: {e}"),
+            }));
+        });
+    }
+    // quick test from the picker detail pane: saved config, result in the
+    // detail footer line.
+    {
+        let weak = window.as_weak();
+        let rt = rt.clone();
+        let store = store.clone();
+        window.on_test_conn_quick(move |idx| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let (engine, cfg) = {
+                let st = store.borrow();
+                let Some(sc) = st.list().get(idx.max(0) as usize) else {
+                    return;
+                };
+                match st.conn_config_for(&sc.id) {
+                    Ok(c) => (sc.engine, c),
+                    Err(e) => {
+                        w.set_sel_footer(SharedString::from(format!("connection failed: {e}")));
+                        return;
+                    }
+                }
+            };
+            w.set_sel_footer(SharedString::from("Testing connection…"));
+            let weak2 = weak.clone();
+            rt.spawn(async move {
+                let result = try_connect(engine, cfg).await;
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak2.upgrade() {
+                        w.set_sel_footer(SharedString::from(match result {
+                            Ok(ms) => format!("connection ok · {ms}ms"),
+                            Err(e) => format!("connection failed: {e}"),
+                        }));
+                    }
+                });
+            });
+        });
+    }
     // test connection: build a config straight from the form fields (not the
     // store) so unsaved edits are exercised, open a real connection, then drop
     // it. Result reported in the form's test-result line.
@@ -2693,26 +3229,12 @@ fn main() -> Result<(), slint::PlatformError> {
 
             let weak2 = weak.clone();
             rt.spawn(async move {
-                let attempt = async {
-                    let driver = AnyDriver::connect(engine, &cfg).await?;
-                    driver.ping().await?;
-                    Ok::<_, rdbs_core::error::RdbsError>(())
-                };
-                // ponytail: timeout-bounded, no hard abort; add CancellationToken
-                // if a true cancel button is ever needed. Bounds a hung connect so
-                // "Testing connection…" always resolves.
-                let result =
-                    match tokio::time::timeout(std::time::Duration::from_secs(8), attempt).await {
-                        Ok(r) => r,
-                        Err(_) => Err(rdbs_core::error::RdbsError::Connection(
-                            "connection timed out".into(),
-                        )),
-                    };
+                let result = try_connect(engine, cfg).await;
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
                         w.set_test_busy(false);
                         match result {
-                            Ok(()) => {
+                            Ok(_) => {
                                 w.set_test_ok(true);
                                 w.set_test_result(SharedString::from("connection ok"));
                             }

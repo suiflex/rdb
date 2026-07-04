@@ -92,6 +92,11 @@ fn is_ident(c: char) -> bool {
 
 /// Lex one line into colored spans. Whitespace stays attached to plain spans
 /// so concatenating span texts reproduces the line exactly.
+/// True when `word` (already uppercased) is a SQL keyword.
+pub fn is_keyword(word: &str) -> bool {
+    KEYWORDS.contains(&word)
+}
+
 pub fn lex_line(line: &str) -> Vec<Span> {
     let mut spans: Vec<Span> = Vec::new();
     let push = |spans: &mut Vec<Span>, text: &str, kind: i32| {
@@ -287,9 +292,54 @@ impl EditorState {
     }
 
     /// Current line text — the "Run Selection" fallback unit.
-    #[allow(dead_code)] // wired up when Run Selection gains a real selection
     pub fn current_line(&self) -> &str {
         &self.lines[self.line]
+    }
+
+    /// Statement under the cursor: the `;`-delimited segment containing the
+    /// cursor, ignoring semicolons inside single-quoted literals. Falls back
+    /// to the current line when the segment is empty.
+    pub fn current_statement(&self) -> String {
+        let text = self.text();
+        let chars: Vec<char> = text.chars().collect();
+        // cursor position as a char offset into the joined text
+        let mut offset = 0;
+        for (i, l) in self.lines.iter().enumerate() {
+            if i == self.line {
+                offset += self.col.min(l.chars().count());
+                break;
+            }
+            offset += l.chars().count() + 1; // +1 for the newline
+        }
+        // split into statements on top-level semicolons
+        let mut segments: Vec<(usize, usize)> = Vec::new();
+        let mut seg_start = 0;
+        let mut in_str = false;
+        for (i, &c) in chars.iter().enumerate() {
+            if c == '\'' {
+                in_str = !in_str;
+            }
+            if c == ';' && !in_str {
+                segments.push((seg_start, i + 1));
+                seg_start = i + 1;
+            }
+        }
+        if seg_start < chars.len() {
+            segments.push((seg_start, chars.len()));
+        }
+        let (s, e) = segments
+            .iter()
+            .copied()
+            .find(|&(s, e)| offset >= s && offset < e)
+            .or_else(|| segments.last().copied())
+            .unwrap_or((0, chars.len()));
+        let stmt: String = chars[s..e].iter().collect();
+        let stmt = stmt.trim();
+        if stmt.is_empty() {
+            self.current_line().trim().to_string()
+        } else {
+            stmt.to_string()
+        }
     }
 }
 
@@ -349,5 +399,30 @@ mod tests {
         assert_eq!((ed.line, ed.col), (1, 0));
         ed.move_cursor(0, -1); // wraps back to previous line end
         assert_eq!((ed.line, ed.col), (0, 2));
+    }
+
+    #[test]
+    fn statement_under_cursor() {
+        let mut ed = EditorState::from_text("SELECT 1;\nSELECT 2;\nSELECT 3");
+        ed.line = 1;
+        ed.col = 3;
+        assert_eq!(ed.current_statement(), "SELECT 2;");
+        ed.line = 2;
+        ed.col = 0;
+        assert_eq!(ed.current_statement(), "SELECT 3");
+    }
+
+    #[test]
+    fn statement_ignores_semicolon_in_literal() {
+        let mut ed = EditorState::from_text("SELECT 'a;b' FROM t; SELECT 2;");
+        ed.line = 0;
+        ed.col = 4;
+        assert_eq!(ed.current_statement(), "SELECT 'a;b' FROM t;");
+    }
+
+    #[test]
+    fn statement_without_semicolons_is_whole_text() {
+        let ed = EditorState::from_text("SELECT *\nFROM t");
+        assert_eq!(ed.current_statement(), "SELECT *\nFROM t");
     }
 }

@@ -76,13 +76,13 @@ export component SecondaryButton inherits Rectangle {
     width: label.preferred-width + 2 * Tokens.sp4;
     border-radius: Tokens.radius;
     border-width: 1px;
-    border-color: Tokens.border-strong;
-    background: !enabled ? Tokens.chrome
+    border-color: enabled ? Tokens.border-strong : Tokens.border;
+    background: !enabled ? transparent
         : ta.has-hover ? Tokens.chrome : Tokens.card;
     animate background { duration: Tokens.fade; }
     label := Text {
         text: root.text;
-        color: enabled ? Tokens.text : Tokens.text-faint;
+        color: enabled ? Tokens.text : Tokens.text-ghost;
         font-size: Tokens.font-sm;
         font-weight: 500;
     }
@@ -109,6 +109,42 @@ export component TextButton inherits Rectangle {
         font-weight: 500;
     }
     ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+// Form text input (conn form): Tokens-styled card box, optional password mode.
+export component FormField inherits Rectangle {
+    in property <string> placeholder;
+    in-out property <string> text <=> input.text;
+    in property <InputType> input-type: InputType.text;
+    callback accepted;
+    height: 30px;
+    border-radius: Tokens.radius;
+    border-width: 1px;
+    border-color: input.has-focus ? Tokens.accent : Tokens.border;
+    background: Tokens.card;
+    HorizontalLayout {
+        padding-left: Tokens.sp2;
+        padding-right: Tokens.sp2;
+        input := TextInput {
+            font-size: Tokens.font-sm;
+            color: Tokens.text;
+            vertical-alignment: center;
+            single-line: true;
+            input-type: root.input-type;
+            horizontal-stretch: 1;
+            accepted => { root.accepted(); }
+        }
+    }
+    if input.text == "": Text {
+        x: Tokens.sp2;
+        width: parent.width - 2 * Tokens.sp2;
+        text: root.placeholder;
+        color: Tokens.text-faint;
+        font-size: Tokens.font-sm;
+        vertical-alignment: center;
+        overflow: elide;
+        height: 100%;
+    }
 }
 
 // Small bordered key cap (⌘K, ⌘P, ⌘↵).
@@ -179,7 +215,7 @@ export component BreadcrumbChip inherits Rectangle {
     animate background { duration: Tokens.fade; }
     content := HorizontalLayout {
         alignment: center;
-        spacing: 6px;
+        spacing: Tokens.sp2;
         if root.show-dot: VerticalLayout {
             alignment: center;
             Rectangle {
@@ -289,7 +325,7 @@ export component FilterField inherits Rectangle {
     HorizontalLayout {
         padding-left: Tokens.sp2;
         padding-right: 6px;
-        spacing: 6px;
+        spacing: Tokens.sp2;
         Text {
             text: "⌕";
             color: Tokens.text-faint;

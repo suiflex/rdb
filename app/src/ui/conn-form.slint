@@ -1,15 +1,17 @@
-import { Theme } from "theme.slint";
-import { LineEdit, ComboBox, Button } from "std-widgets.slint";
+import { Tokens } from "tokens.slint";
+import { PrimaryButton, SecondaryButton, FormField } from "components.slint";
+import { ComboBox } from "std-widgets.slint";
 
 // 8 preset accent swatches — colors for UI rendering, hex strings for the Rust-side color field.
+// First entry is the app accent (Tokens.accent) so the default matches the design system.
 export global Swatches {
     out property <[color]> colors: [
-        #3b82f6, #ef4444, #22c55e, #f59e0b,
+        #2c5fd8, #e05a4e, #239d5c, #d9962f,
         #a855f7, #ec4899, #14b8a6, #64748b,
     ];
     // Matching hex strings passed to Rust (same order as `colors`).
     out property <[string]> hexes: [
-        "#3b82f6", "#ef4444", "#22c55e", "#f59e0b",
+        "#2c5fd8", "#e05a4e", "#239d5c", "#d9962f",
         "#a855f7", "#ec4899", "#14b8a6", "#64748b",
     ];
 }
@@ -40,7 +42,7 @@ export component ConnForm inherits Rectangle {
     callback cancel();
 
     visible: root.open;
-    background: #00000066;
+    background: Tokens.veil;
 
     if root.open: Rectangle {
         width: 460px;
@@ -52,38 +54,38 @@ export component ConnForm inherits Rectangle {
         height: vbox.preferred-height;
         x: (parent.width - self.width) / 2;
         y: 60px;
-        border-radius: Theme.radius-panel;
-        background: Theme.surface;
+        border-radius: Tokens.radius-lg;
+        background: Tokens.card;
         border-width: 1px;
-        border-color: Theme.hairline;
+        border-color: Tokens.border;
         drop-shadow-blur: 24px;
-        drop-shadow-color: #00000088;
+        drop-shadow-color: Tokens.text.with-alpha(0.35);
 
         vbox := VerticalLayout {
-            padding: Theme.sp4;
-            spacing: Theme.sp2;
+            padding: Tokens.sp4;
+            spacing: Tokens.sp2;
 
             Text {
                 text: root.edit-mode ? "Edit Connection" : "New Connection";
-                color: Theme.text;
-                font-size: Theme.font-body;
+                color: Tokens.text;
+                font-size: Tokens.font-md;
             }
 
-            Text { text: "Import URL"; color: Theme.text-dim; font-size: Theme.font-label; }
+            Text { text: "Import URL"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
             HorizontalLayout {
-                spacing: Theme.sp2;
-                LineEdit {
+                spacing: Tokens.sp2;
+                FormField {
                     text <=> root.f-import-url;
-                    placeholder-text: "postgresql://user:pass@host:5432/db?sslmode=require";
+                    placeholder: "postgresql://user:pass@host:5432/db?sslmode=require";
                     accepted => { root.import-url(); }
                 }
-                Button { text: "Import"; clicked => { root.import-url(); } }
+                SecondaryButton { text: "Import"; height: 30px; clicked => { root.import-url(); } }
             }
 
-            Text { text: "Name"; color: Theme.text-dim; font-size: Theme.font-label; }
-            LineEdit { text <=> root.f-name; }
+            Text { text: "Name"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
+            FormField { text <=> root.f-name; }
 
-            Text { text: "Engine"; color: Theme.text-dim; font-size: Theme.font-label; }
+            Text { text: "Engine"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
             ComboBox {
                 model: ["PostgreSQL", "MySQL", "Redis", "MongoDB"];
                 current-value <=> root.f-engine;
@@ -91,80 +93,81 @@ export component ConnForm inherits Rectangle {
             }
 
             HorizontalLayout {
-                spacing: Theme.sp2;
+                spacing: Tokens.sp2;
                 VerticalLayout {
-                    Text { text: "Host"; color: Theme.text-dim; font-size: Theme.font-label; }
-                    LineEdit { text <=> root.f-host; }
+                    Text { text: "Host"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
+                    FormField { text <=> root.f-host; }
                 }
                 VerticalLayout {
                     width: 110px;
-                    Text { text: "Port"; color: Theme.text-dim; font-size: Theme.font-label; }
-                    LineEdit { text <=> root.f-port; }
+                    Text { text: "Port"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
+                    FormField { text <=> root.f-port; }
                 }
             }
 
             // Redis has no user/database concept — hide those for it.
             if root.f-engine != "Redis": HorizontalLayout {
-                spacing: Theme.sp2;
+                spacing: Tokens.sp2;
                 VerticalLayout {
-                    Text { text: "User"; color: Theme.text-dim; font-size: Theme.font-label; }
-                    LineEdit { text <=> root.f-user; }
+                    Text { text: "User"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
+                    FormField { text <=> root.f-user; }
                 }
                 VerticalLayout {
-                    Text { text: "Database"; color: Theme.text-dim; font-size: Theme.font-label; }
-                    LineEdit { text <=> root.f-database; }
+                    Text { text: "Database"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
+                    FormField { text <=> root.f-database; }
                 }
             }
 
-            Text { text: "Password"; color: Theme.text-dim; font-size: Theme.font-label; }
-            LineEdit { text <=> root.f-password; input-type: password; }
+            Text { text: "Password"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
+            FormField { text <=> root.f-password; input-type: InputType.password; }
 
             // SSL mode only applies to the SQL engines.
             if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL": Text {
-                text: "SSL"; color: Theme.text-dim; font-size: Theme.font-label;
+                text: "SSL"; color: Tokens.text-dim; font-size: Tokens.font-sm;
             }
             if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL": ComboBox {
                 model: ["Disable", "Prefer", "Require"];
                 current-value <=> root.f-sslmode;
             }
 
-            Text { text: "Color"; color: Theme.text-dim; font-size: Theme.font-label; }
+            Text { text: "Color"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
             HorizontalLayout {
-                spacing: Theme.sp2;
+                spacing: Tokens.sp2;
                 for col[i] in Swatches.colors: Rectangle {
                     width: 22px;
                     height: 22px;
                     border-radius: 11px;
                     background: col;
                     border-width: Swatches.hexes[i] == root.f-color ? 2px : 0px;
-                    border-color: Theme.text;
+                    border-color: Tokens.text;
                     TouchArea { clicked => { root.f-color = Swatches.hexes[i]; } }
                 }
             }
 
             Text {
                 text: root.form-error;
-                color: #ef4444;
-                font-size: Theme.font-label;
+                color: Tokens.error;
+                font-size: Tokens.font-sm;
             }
 
             Text {
                 text: root.test-busy ? "Testing connection…" : root.test-result;
-                color: root.test-ok ? #22c55e : Theme.text-dim;
-                font-size: Theme.font-label;
+                color: root.test-ok ? Tokens.ok : Tokens.text-dim;
+                font-size: Tokens.font-sm;
             }
 
             HorizontalLayout {
-                spacing: Theme.sp2;
-                Button {
+                spacing: Tokens.sp2;
+                SecondaryButton {
                     text: "Test Connection";
+                    height: 30px;
                     enabled: !root.test-busy;
                     clicked => { root.test-conn(); }
                 }
-                Button { text: "Save"; clicked => { root.save(); } }
-                Button { text: "Cancel"; clicked => { root.cancel(); } }
+                PrimaryButton { text: "Save"; height: 30px; clicked => { root.save(); } }
+                SecondaryButton { text: "Cancel"; height: 30px; clicked => { root.cancel(); } }
                 Rectangle {}
-                if root.edit-mode: Button { text: "Delete"; clicked => { root.delete-conn(); } }
+                if root.edit-mode: SecondaryButton { text: "Delete"; height: 30px; clicked => { root.delete-conn(); } }
             }
         }
     }

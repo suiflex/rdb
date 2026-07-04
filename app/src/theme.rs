@@ -16,9 +16,9 @@ pub fn parse_hex(s: &str) -> Option<Color> {
     Some(Color::from_rgb_u8(r, g, b))
 }
 
-/// Parse with a fallback to the spec's default accent (#3b82f6).
+/// Parse with a fallback to the design-system accent (Tokens.accent, #2c5fd8).
 pub fn accent_or_default(s: &str) -> Color {
-    parse_hex(s).unwrap_or_else(|| Color::from_rgb_u8(0x3b, 0x82, 0xf6))
+    parse_hex(s).unwrap_or_else(|| Color::from_rgb_u8(0x2c, 0x5f, 0xd8))
 }
 
 #[cfg(test)]
