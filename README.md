@@ -25,41 +25,7 @@ A native, lightweight, cross-platform database manager built with Rust and Slint
 | Redis | `redis` crate | Key-value / raw |
 | MongoDB | `mongodb` crate | Documents (JSON) |
 
-## Architecture
-
-Cargo workspace (monorepo):
-
-```
-rdbs/
-├── Cargo.toml                  # workspace root
-├── app/                        # binary: Slint UI + event handlers
-│   ├── build.rs                # slint-build codegen
-│   └── src/
-│       ├── main.rs             # Slint event loop + Tokio async bridge
-│       ├── dispatch.rs         # AnyDriver enum (erases concrete driver types)
-│       ├── model.rs            # ResultSet / Schema → Slint view-models
-│       ├── query_parse.rs      # text → Query enum per engine
-│       ├── theme.rs            # color / accent helpers
-│       └── ui/                 # .slint markup files
-│           ├── app-window.slint
-│           ├── conn-form.slint
-│           ├── picker.slint
-│           ├── workarea.slint
-│           ├── sidebar.slint
-│           ├── palette.slint
-│           ├── structs.slint
-│           ├── theme.slint
-│           └── icons.slint
-├── crates/
-│   ├── core/                   # Driver trait + ResultSet + Schema + Error
-│   ├── connstore/              # saved connections (JSON) + secret backend
-│   ├── driver-postgres/
-│   ├── driver-mysql/
-│   ├── driver-redis/
-│   └── driver-mongo/
-└── docs/
-    └── superpowers/            # design specs + implementation plans
-```
+## Design
 
 ### Core design rule
 
