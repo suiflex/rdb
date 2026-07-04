@@ -107,6 +107,7 @@ export component MainWindow inherits Window {
     in-out property <string> grid-filter;
     in property <[length]> grid-col-widths;
     callback run-query();
+    callback run-selection();
     callback format-sql();
     callback explain-query();
     callback apply-filter();
@@ -677,6 +678,9 @@ export component MainWindow inherits Window {
                         limit-text <=> root.limit-text;
                         run => {
                             root.run-query();
+                        }
+                        run-selection() => {
+                            root.run-selection();
                         }
                         format-sql() => {
                             root.format-sql();

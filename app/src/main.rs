@@ -1814,6 +1814,20 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ----- Run Selection: run the statement under the cursor -----
+    {
+        let run_sql = run_sql.clone();
+        let ed_state = ed_state.clone();
+        let recent_queries = recent_queries.clone();
+        window.on_run_selection(move || {
+            let stmt = ed_state.borrow().current_statement();
+            if !stmt.is_empty() {
+                record_recent(&recent_queries, &stmt);
+                run_sql(stmt);
+            }
+        });
+    }
+
     // ----- Explain button: run EXPLAIN for the editor SQL -----
     {
         let weak = window.as_weak();

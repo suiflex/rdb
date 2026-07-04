@@ -67,6 +67,7 @@ export component WorkArea inherits Rectangle {
     in-out property <int> filter-rows: 1;
 
     callback run();
+    callback run-selection();
     callback format-sql();
     callback explain-query();
     callback apply-filter();
@@ -342,7 +343,7 @@ export component WorkArea inherits Rectangle {
                     }
                     VerticalLayout {
                         alignment: center;
-                        SecondaryButton { text: "Run Selection"; height: 28px; clicked => { root.run(); } }
+                        SecondaryButton { text: "Run Selection"; height: 28px; clicked => { root.run-selection(); } }
                     }
                     VerticalLayout {
                         alignment: center;
