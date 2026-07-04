@@ -14,6 +14,7 @@ slint::include_modules!();
 
 mod dispatch;
 mod editor;
+mod export;
 mod mock;
 mod model;
 mod query_parse;
@@ -2761,6 +2762,30 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_test_result(SharedString::default());
                 w.set_form_open(false);
             }
+        });
+    }
+    // backup saved connections to a JSON file. Passwords are not in the
+    // list — they live in the keychain — so the dump is safe to write.
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        window.on_backup_conns(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let st = store.borrow();
+            let json = match serde_json::to_string_pretty(st.list()) {
+                Ok(j) => j,
+                Err(e) => {
+                    w.set_sel_footer(SharedString::from(format!("backup failed: {e}")));
+                    return;
+                }
+            };
+            let path = export::export_path("rdbs-connections", "json");
+            w.set_sel_footer(SharedString::from(match std::fs::write(&path, json) {
+                Ok(()) => format!("backup → {}", path.display()),
+                Err(e) => format!("backup failed: {e}"),
+            }));
         });
     }
     // quick test from the picker detail pane: saved config, result in the
