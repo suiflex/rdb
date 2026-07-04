@@ -70,6 +70,8 @@ export component WorkArea inherits Rectangle {
     callback run-selection();
     callback format-sql();
     callback explain-query();
+    callback copy-results();
+    callback export-csv();
     callback apply-filter();
     callback toggle-sql();
     callback resize-col(int, length);
@@ -410,8 +412,8 @@ export component WorkArea inherits Rectangle {
                         vertical-alignment: center;
                     }
                     Rectangle { horizontal-stretch: 1; }
-                    TextButton { text: "Copy"; }
-                    TextButton { text: "Export CSV"; }
+                    TextButton { text: "Copy"; clicked => { root.copy-results(); } }
+                    TextButton { text: "Export CSV"; clicked => { root.export-csv(); } }
                     TextButton { text: "Chart"; }
                 }
             }
@@ -630,7 +632,7 @@ export component WorkArea inherits Rectangle {
                     }
                     VerticalLayout {
                         alignment: center;
-                        SecondaryButton { text: "Export"; height: 24px; }
+                        SecondaryButton { text: "Export"; height: 24px; clicked => { root.export-csv(); } }
                     }
                 }
                 if !root.browse-mode: HorizontalLayout {
@@ -638,7 +640,7 @@ export component WorkArea inherits Rectangle {
                     alignment: end;
                     VerticalLayout {
                         alignment: center;
-                        SecondaryButton { text: "Export"; height: 24px; }
+                        SecondaryButton { text: "Export"; height: 24px; clicked => { root.export-csv(); } }
                     }
                 }
                 // ● 12 ms

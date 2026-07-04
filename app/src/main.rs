@@ -1814,6 +1814,46 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ----- Copy results (TSV → clipboard) / Export CSV (~/Downloads) -----
+    {
+        let weak = window.as_weak();
+        let displayed_grid = displayed_grid.clone();
+        window.on_copy_results(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some(grid) = displayed_grid.lock().unwrap().clone() else {
+                return;
+            };
+            use copypasta::ClipboardProvider;
+            let msg = match copypasta::ClipboardContext::new()
+                .and_then(|mut cb| cb.set_contents(export::to_tsv(&grid)))
+            {
+                Ok(()) => format!("copied {} rows", grid.rows.len()),
+                Err(e) => format!("copy failed: {e}"),
+            };
+            w.set_results_meta(SharedString::from(msg));
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let displayed_grid = displayed_grid.clone();
+        window.on_export_csv(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some(grid) = displayed_grid.lock().unwrap().clone() else {
+                return;
+            };
+            let path = export::export_path("rdbs-export", "csv");
+            let msg = match std::fs::write(&path, export::to_csv(&grid)) {
+                Ok(()) => format!("exported → {}", path.display()),
+                Err(e) => format!("export failed: {e}"),
+            };
+            w.set_results_meta(SharedString::from(msg));
+        });
+    }
+
     // ----- Run Selection: run the statement under the cursor -----
     {
         let run_sql = run_sql.clone();

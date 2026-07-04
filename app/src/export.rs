@@ -3,6 +3,48 @@
 
 use std::path::PathBuf;
 
+use crate::model::GridModel;
+
+/// RFC-4180-style CSV: fields quoted when they contain a comma, quote or
+/// newline; quotes doubled.
+pub fn to_csv(g: &GridModel) -> String {
+    fn esc(s: &str) -> String {
+        if s.contains([',', '"', '\n', '\r']) {
+            format!("\"{}\"", s.replace('"', "\"\""))
+        } else {
+            s.to_string()
+        }
+    }
+    let mut out = String::new();
+    let header: Vec<String> = g.columns.iter().map(|c| esc(&c.name)).collect();
+    out.push_str(&header.join(","));
+    out.push('\n');
+    for row in &g.rows {
+        let cells: Vec<String> = row.iter().map(|c| esc(&c.text)).collect();
+        out.push_str(&cells.join(","));
+        out.push('\n');
+    }
+    out
+}
+
+/// TSV for the clipboard (pastes into spreadsheets); tabs/newlines inside
+/// cells become spaces.
+pub fn to_tsv(g: &GridModel) -> String {
+    fn clean(s: &str) -> String {
+        s.replace(['\t', '\n', '\r'], " ")
+    }
+    let mut out = String::new();
+    let header: Vec<String> = g.columns.iter().map(|c| clean(&c.name)).collect();
+    out.push_str(&header.join("\t"));
+    out.push('\n');
+    for row in &g.rows {
+        let cells: Vec<String> = row.iter().map(|c| clean(&c.text)).collect();
+        out.push_str(&cells.join("\t"));
+        out.push('\n');
+    }
+    out
+}
+
 /// `~/Downloads/<prefix>-YYYYMMDD-HHMMSS.<ext>`; temp dir when $HOME is unset
 /// or Downloads does not exist.
 pub fn export_path(prefix: &str, ext: &str) -> PathBuf {
@@ -56,6 +98,30 @@ mod tests {
         assert_eq!(civil_from_days(0), (1970, 1, 1));
         // 2024-02-29 is day 19782
         assert_eq!(civil_from_days(19_782), (2024, 2, 29));
+    }
+
+    fn grid() -> GridModel {
+        use crate::model::{VmCell, VmColumn};
+        GridModel {
+            columns: vec![
+                VmColumn { name: "id".into(), type_name: "int".into() },
+                VmColumn { name: "name".into(), type_name: "text".into() },
+            ],
+            rows: vec![vec![
+                VmCell { text: "1".into(), is_null: false },
+                VmCell { text: "a,\"b\"\n".into(), is_null: false },
+            ]],
+        }
+    }
+
+    #[test]
+    fn csv_quotes_special_chars() {
+        assert_eq!(to_csv(&grid()), "id,name\n1,\"a,\"\"b\"\"\n\"\n");
+    }
+
+    #[test]
+    fn tsv_strips_control_chars() {
+        assert_eq!(to_tsv(&grid()), "id\tname\n1\ta,\"b\" \n");
     }
 
     #[test]

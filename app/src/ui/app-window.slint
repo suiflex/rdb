@@ -110,6 +110,8 @@ export component MainWindow inherits Window {
     callback run-selection();
     callback format-sql();
     callback explain-query();
+    callback copy-results();
+    callback export-csv();
     callback apply-filter();
     callback resize-grid-col(int, length);
 
@@ -687,6 +689,12 @@ export component MainWindow inherits Window {
                         }
                         explain-query() => {
                             root.explain-query();
+                        }
+                        copy-results() => {
+                            root.copy-results();
+                        }
+                        export-csv() => {
+                            root.export-csv();
                         }
                         apply-filter() => {
                             root.apply-filter();
