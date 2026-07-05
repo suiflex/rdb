@@ -37,7 +37,8 @@ export struct StructField { name: string, type-name: string, nullable: bool }
 export struct TabItem { title: string, kind: string }
 // One lexed editor token; `kind`: 0 plain · 1 keyword · 2 string ·
 // 3 function · 4 comment · 5 number (mirrors app/src/editor.rs).
-export struct Span { text: string, kind: int }
+// `sel` = inside the selection (background highlight).
+export struct Span { text: string, kind: int, sel: bool }
 // One horizontal bar of the results chart; `frac` is value/max in [0,1].
 export struct ChartBar { label: string, value: string, frac: float }
 // One row of the Indexes view: index name + definition/columns.

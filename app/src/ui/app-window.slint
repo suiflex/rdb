@@ -26,6 +26,7 @@ import {
 
 export component MainWindow inherits Window {
     title: "Tabula";
+    icon: @image-url("../../assets/icon.png");
     preferred-width: 1102px;
     preferred-height: 702px;
     min-width: 400px;
@@ -133,7 +134,18 @@ export component MainWindow inherits Window {
     in property <string> results-meta;
     in-out property <int> sidebar-mode: 0;
     callback editor-key(string, bool, bool) -> bool;
-    callback editor-click-line(int);
+    callback editor-press(int, int);
+    callback editor-drag(int, int);
+    callback editor-select-word(int, int);
+    // find-in-editor (⌘F)
+    in property <bool> find-open;
+    in-out property <string> find-text;
+    in property <string> find-status;
+    callback toggle-find();
+    callback find-changed(string);
+    callback find-next();
+    callback find-prev();
+    callback find-close();
 
     // ----- function view -----
     in property <bool> fn-mode: false;
@@ -164,15 +176,20 @@ export component MainWindow inherits Window {
     in property <int> pending-count;
     in property <bool> grid-read-only: true;
     in property <bool> status-error;
+    in property <bool> query-running;
     in-out property <string> limit-text: "300";
     callback prev-page();
     callback next-page();
     callback refresh-page();
+    // ⌘R: table tab refetches the page, sql tab re-runs the query.
+    callback refresh-result();
     callback set-limit(string);
     callback add-row();
     callback mark-delete();
     callback commit-edits();
     callback discard-edits();
+    // Tab / Shift+Tab while editing: store the cell, edit the neighbour.
+    callback cell-advance(int, int, string, bool);
 
     // ----- tabs + palette -----
     in property <[TabItem]> tabs;
@@ -255,6 +272,14 @@ export component MainWindow inherits Window {
                     root.commit-edits();
                     return accept;
                 }
+                if (e.text == "r") {
+                    root.refresh-result();
+                    return accept;
+                }
+                if (e.text == "f") {
+                    root.toggle-find();
+                    return accept;
+                }
                 if (e.text == "t") {
                     root.new-tab();
                     return accept;
@@ -306,6 +331,12 @@ export component MainWindow inherits Window {
             }
             if (e.text == "k") {
                 root.move-row(-1);
+                return accept;
+            }
+            // Delete/Backspace toggles the delete mark on the selected row
+            // (Rust side no-ops when the grid is read-only).
+            if (e.text == Key.Backspace || e.text == Key.Delete) {
+                root.mark-delete();
                 return accept;
             }
             return reject;
@@ -696,7 +727,16 @@ export component MainWindow inherits Window {
                         filter-op <=> root.filter-op;
                         index-rows: root.index-rows;
                         editor-key(t, cmd, shift) => { root.editor-key(t, cmd, shift) }
-                        editor-click-line(l) => { root.editor-click-line(l); }
+                        editor-press(l, c) => { root.editor-press(l, c); }
+                        editor-drag(l, c) => { root.editor-drag(l, c); }
+                        editor-select-word(l, c) => { root.editor-select-word(l, c); }
+                        find-open: root.find-open;
+                        find-text <=> root.find-text;
+                        find-status: root.find-status;
+                        find-changed(t) => { root.find-changed(t); }
+                        find-next() => { root.find-next(); }
+                        find-prev() => { root.find-prev(); }
+                        find-close() => { root.find-close(); }
                         selected-row: root.selected-row;
                         selected-col: root.selected-col;
                         editing-row: root.editing-row;
@@ -712,6 +752,7 @@ export component MainWindow inherits Window {
                         can-next: root.can-next;
                         pending-count: root.pending-count;
                         read-only: root.grid-read-only;
+                        query-running: root.query-running;
                         limit-text <=> root.limit-text;
                         run => {
                             root.run-query();
@@ -748,6 +789,9 @@ export component MainWindow inherits Window {
                         }
                         cell-edited(r, c, t) => {
                             root.cell-edited(r, c, t);
+                        }
+                        cell-advance(r, c, t, fwd) => {
+                            root.cell-advance(r, c, t, fwd);
                         }
                         edit-cancelled() => {
                             root.edit-cancelled();

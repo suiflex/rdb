@@ -11,7 +11,11 @@ export component CodeEditor inherits Rectangle {
     in property <int> cursor-col: 0;
     // (key text, meta/ctrl, shift) -> true when the editor consumed the key.
     callback edit-key(string, bool, bool) -> bool;
-    callback clicked-line(int);
+    // Mouse: press places the caret, drag extends the selection, double-click
+    // selects the word. All carry (line, col) hit-tested from the pointer.
+    callback press-pos(int, int);
+    callback drag-pos(int, int);
+    callback select-word(int, int);
 
     property <length> line-h: 21px;
     property <length> gutter-w: 40px;
@@ -48,10 +52,28 @@ export component CodeEditor inherits Rectangle {
                     height: root.line-h;
                     background: li == root.cursor-line ? Tokens.editor-line : transparent;
 
+                    // Char column under the pointer, hit-tested from the mono
+                    // advance width. Rows below the text area (drag) add a line
+                    // delta so a drag can cross lines while still grabbed here.
+                    property <int> hit-col:
+                        max(0, round((line-ta.mouse-x - root.gutter-w - Tokens.sp3) / root.charw));
+                    property <int> hit-line:
+                        clamp(li + floor(line-ta.mouse-y / root.line-h), 0, root.lines.length - 1);
+
                     line-ta := TouchArea {
-                        clicked => {
-                            root.clicked-line(li);
-                            focus-scope.focus();
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down) {
+                                focus-scope.focus();
+                                root.press-pos(parent.hit-line, parent.hit-col);
+                            }
+                        }
+                        moved => {
+                            if (self.pressed) {
+                                root.drag-pos(parent.hit-line, parent.hit-col);
+                            }
+                        }
+                        double-clicked => {
+                            root.select-word(parent.hit-line, parent.hit-col);
                         }
                     }
 
@@ -72,22 +94,25 @@ export component CodeEditor inherits Rectangle {
                             }
                         }
                         Rectangle { width: Tokens.sp3; }
-                        // colored spans
+                        // colored spans (selected ones get a tinted background)
                         HorizontalLayout {
                             spacing: 0;
                             alignment: start;
-                            for span in line: Text {
-                                vertical-alignment: center;
-                                text: span.text;
-                                font-family: Tokens.mono;
-                                font-size: Tokens.font-md;
-                                color: span.kind == 1 ? Tokens.syn-keyword
-                                    : span.kind == 2 ? Tokens.syn-string
-                                    : span.kind == 3 ? Tokens.syn-function
-                                    : span.kind == 4 ? Tokens.syn-comment
-                                    : Tokens.text;
-                                font-weight: span.kind == 1 ? Tokens.weight-emphasis : 400;
-                                font-italic: span.kind == 4;
+                            for span in line: Rectangle {
+                                background: span.sel ? Tokens.accent.with-alpha(0.18) : transparent;
+                                Text {
+                                    vertical-alignment: center;
+                                    text: span.text;
+                                    font-family: Tokens.mono;
+                                    font-size: Tokens.font-md;
+                                    color: span.kind == 1 ? Tokens.syn-keyword
+                                        : span.kind == 2 ? Tokens.syn-string
+                                        : span.kind == 3 ? Tokens.syn-function
+                                        : span.kind == 4 ? Tokens.syn-comment
+                                        : Tokens.text;
+                                    font-weight: span.kind == 1 ? Tokens.weight-emphasis : 400;
+                                    font-italic: span.kind == 4;
+                                }
                             }
                         }
                         Rectangle { horizontal-stretch: 1; }
