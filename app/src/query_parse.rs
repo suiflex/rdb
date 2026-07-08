@@ -10,7 +10,7 @@ use rdbs_core::query::{MongoKind, MongoOp, Query};
 /// result-status line; no driver call is made).
 pub fn parse_query(engine: Engine, text: &str) -> Result<Query, String> {
     match engine {
-        Engine::Postgres | Engine::MySql => Ok(Query::Sql(text.to_string())),
+        Engine::Postgres | Engine::MySql | Engine::Sqlite => Ok(Query::Sql(text.to_string())),
         Engine::Redis => {
             let tokens: Vec<String> = text.split_whitespace().map(|s| s.to_string()).collect();
             if tokens.is_empty() {
@@ -25,7 +25,7 @@ pub fn parse_query(engine: Engine, text: &str) -> Result<Query, String> {
 /// Editor placeholder/hint per engine (shown in the UI).
 pub fn editor_hint(engine: Engine) -> &'static str {
     match engine {
-        Engine::Postgres | Engine::MySql => "SQL — e.g. SELECT * FROM table",
+        Engine::Postgres | Engine::MySql | Engine::Sqlite => "SQL — e.g. SELECT * FROM table",
         Engine::Redis => "Redis command — e.g. SET key value",
         Engine::Mongo => r#"Mongo JSON — {"collection":"c","op":"find","body":{}}"#,
     }

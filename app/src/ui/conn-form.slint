@@ -87,12 +87,21 @@ export component ConnForm inherits Rectangle {
 
             Text { text: "Engine"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
             ComboBox {
-                model: ["PostgreSQL", "MySQL", "Redis", "MongoDB"];
+                model: ["PostgreSQL", "MySQL", "Redis", "MongoDB", "SQLite"];
                 current-value <=> root.f-engine;
                 selected(v) => { root.engine-changed(v); }
             }
 
-            HorizontalLayout {
+            // SQLite is a local file: one path field, no host/port/user/ssl.
+            if root.f-engine == "SQLite": Text {
+                text: "File"; color: Tokens.text-dim; font-size: Tokens.font-sm;
+            }
+            if root.f-engine == "SQLite": FormField {
+                text <=> root.f-database;
+                placeholder: "/path/to/database.db";
+            }
+
+            if root.f-engine != "SQLite": HorizontalLayout {
                 spacing: Tokens.sp2;
                 VerticalLayout {
                     Text { text: "Host"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
@@ -105,8 +114,8 @@ export component ConnForm inherits Rectangle {
                 }
             }
 
-            // Redis has no user/database concept — hide those for it.
-            if root.f-engine != "Redis": HorizontalLayout {
+            // Redis has no user/database concept — hide those for it (and SQLite).
+            if root.f-engine != "Redis" && root.f-engine != "SQLite": HorizontalLayout {
                 spacing: Tokens.sp2;
                 VerticalLayout {
                     Text { text: "User"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
@@ -118,8 +127,12 @@ export component ConnForm inherits Rectangle {
                 }
             }
 
-            Text { text: "Password"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
-            FormField { text <=> root.f-password; input-type: InputType.password; }
+            if root.f-engine != "SQLite": Text {
+                text: "Password"; color: Tokens.text-dim; font-size: Tokens.font-sm;
+            }
+            if root.f-engine != "SQLite": FormField {
+                text <=> root.f-password; input-type: InputType.password;
+            }
 
             // SSL mode only applies to the SQL engines.
             if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL": Text {

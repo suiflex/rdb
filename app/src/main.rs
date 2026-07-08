@@ -468,6 +468,12 @@ fn browse_text(
                 table.name.replace('`', "``")
             )
         }
+        rdbs_connstore::Engine::Sqlite => {
+            format!(
+                "SELECT * FROM \"{}\" LIMIT {limit} OFFSET {offset}",
+                table.name.replace('"', "\"\"")
+            )
+        }
         rdbs_connstore::Engine::Mongo => {
             let db = table
                 .database
@@ -2121,7 +2127,9 @@ fn main() -> Result<(), slint::PlatformError> {
                         // SQL editor only makes sense for the SQL engines.
                         let sql_capable = matches!(
                             engine,
-                            rdbs_connstore::Engine::Postgres | rdbs_connstore::Engine::MySql
+                            rdbs_connstore::Engine::Postgres
+                                | rdbs_connstore::Engine::MySql
+                                | rdbs_connstore::Engine::Sqlite
                         );
                         *raw_nodes.lock().unwrap() = nodes;
                         {
@@ -2226,7 +2234,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     Some((engine, driver)) => {
                         let stmts = if matches!(
                             engine,
-                            rdbs_connstore::Engine::Postgres | rdbs_connstore::Engine::MySql
+                            rdbs_connstore::Engine::Postgres
+                                | rdbs_connstore::Engine::MySql
+                                | rdbs_connstore::Engine::Sqlite
                         ) {
                             editor::split_statements(&sql)
                         } else {
@@ -3463,6 +3473,7 @@ fn main() -> Result<(), slint::PlatformError> {
             "MySQL" => "3306",
             "Redis" => "6379",
             "MongoDB" => "27017",
+            "SQLite" => "0", // file-based: port unused
             _ => "5432",
         }
     }
@@ -3471,6 +3482,7 @@ fn main() -> Result<(), slint::PlatformError> {
             "MySQL" => rdbs_connstore::Engine::MySql,
             "Redis" => rdbs_connstore::Engine::Redis,
             "MongoDB" => rdbs_connstore::Engine::Mongo,
+            "SQLite" => rdbs_connstore::Engine::Sqlite,
             _ => rdbs_connstore::Engine::Postgres,
         }
     }
