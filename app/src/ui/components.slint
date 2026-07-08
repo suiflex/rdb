@@ -1,5 +1,6 @@
 // Shared Tabula components. All colors/metrics come from Tokens.
 import { Tokens } from "tokens.slint";
+import { AppIcon } from "icons.slint";
 
 // Dropdown select: shows the current value + a ▾ caret so it reads as a
 // picker even when closed, then a click opens a themed option list. Replaces
@@ -28,11 +29,9 @@ export component SelectBox inherits Rectangle {
             horizontal-stretch: 1;
             overflow: elide;
         }
-        Text {
-            text: "⌄";
-            color: Tokens.text-faint;
-            font-size: Tokens.font-md;
-            vertical-alignment: center;
+        VerticalLayout {
+            alignment: center;
+            AppIcon { name: "caret"; size: 14px; color: Tokens.text-faint; }
         }
     }
     popup := PopupWindow {
@@ -370,6 +369,25 @@ export component GlyphButton inherits Rectangle {
         text: root.glyph;
         color: ta.has-hover && root.danger-hover ? white : Tokens.text-dim;
         font-size: root.glyph-size;
+    }
+    ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+// Like GlyphButton but draws a crisp SVG (AppIcon) instead of a font glyph —
+// used for header actions whose symbols aren't in the mono font.
+export component IconButton inherits Rectangle {
+    in property <string> icon;
+    in property <length> icon-size: Tokens.icon-sm;
+    callback clicked;
+    width: 28px;
+    height: 28px;
+    border-radius: Tokens.radius;
+    background: ta.has-hover ? Tokens.border : transparent;
+    animate background { duration: Tokens.fade; }
+    AppIcon {
+        name: root.icon;
+        size: root.icon-size;
+        color: Tokens.text-dim;
     }
     ta := TouchArea { clicked => { root.clicked(); } }
 }
