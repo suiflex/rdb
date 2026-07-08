@@ -79,6 +79,7 @@ export component MainWindow inherits Window {
     // ----- view state: false = connection picker, true = workspace -----
     in property <bool> connected: false;
     in property <string> picker-error;
+    in property <bool> connecting;
     callback disconnect();
     callback conn-filter(string);
 
@@ -469,6 +470,7 @@ export component MainWindow inherits Window {
             connections: root.connections;
             selected-conn: root.selected-conn;
             error: root.picker-error;
+            connecting: root.connecting;
             sel-name: root.sel-name;
             sel-engine: root.sel-engine;
             sel-sub: root.sel-sub;

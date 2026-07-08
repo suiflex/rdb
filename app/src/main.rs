@@ -2079,6 +2079,9 @@ fn main() -> Result<(), slint::PlatformError> {
             // Reflect selection + accent immediately.
             if let Some(w) = weak.upgrade() {
                 w.set_selected_conn(idx);
+                // Show progress + clear any prior failure immediately.
+                w.set_connecting(true);
+                w.set_picker_error(SharedString::default());
                 w.global::<Theme>()
                     .set_accent(theme::accent_or_default(sc.color.as_deref().unwrap_or("")));
                 w.set_status_conn(SharedString::from(sc.name.clone()));
@@ -2230,6 +2233,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 ))));
                                 w.set_status_latency(SharedString::from("connected"));
                                 w.set_picker_error(SharedString::default());
+                                w.set_connecting(false);
                                 // Swap the picker for the workspace.
                                 w.set_connected(true);
                             }
@@ -2241,6 +2245,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             if let Some(w) = weak2.upgrade() {
                                 // Stay on the picker; surface the failure there.
                                 w.set_connected(false);
+                                w.set_connecting(false);
                                 w.set_picker_error(SharedString::from(format!(
                                     "connection failed: {e}"
                                 )));
