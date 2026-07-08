@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.6.0](https://github.com/suiflex/rdb/compare/v0.5.0...v0.6.0) (2026-07-08)
+
+
+### Features
+
+* **app:** add Cassandra (CQL) driver and wire into UI ([c12237c](https://github.com/suiflex/rdb/commit/c12237c413376c72962f07856170c8ef0e51f962))
+* **app:** add Cassandra engine badge and color ([25cef18](https://github.com/suiflex/rdb/commit/25cef1879b3d9a5fd0447035525cc95ebc84045d))
+* **app:** add Cassandra option to the connection form ([5611a6e](https://github.com/suiflex/rdb/commit/5611a6ea98d4d8d65e0c28e7fca715bd78644120))
+* **app:** add IconButton and SVG icons for caret/clock ([7c986a2](https://github.com/suiflex/rdb/commit/7c986a268bf75be284b11d837eede79f11c37f5f))
+* **app:** add SQLite driver and wire into UI ([48cbcc9](https://github.com/suiflex/rdb/commit/48cbcc93abc6a5f51e38eccef3ecae4ce46f7b66))
+* **app:** add SQLite driver and wire into UI ([800da02](https://github.com/suiflex/rdb/commit/800da02b65b496d622dea86380ac38aeb9e4caec))
+* **app:** dispatch Cassandra driver via AnyDriver ([1a147db](https://github.com/suiflex/rdb/commit/1a147db9dab79ef98317b727a5a453f8d0f0db7b))
+* **app:** macOS word and line motions in the query editor ([c68aedc](https://github.com/suiflex/rdb/commit/c68aedcc6af209073d4c65a7e566e1217f228059))
+* **app:** native macOS window frame and rename to RDB ([4e13262](https://github.com/suiflex/rdb/commit/4e1326299a297e5e14494cb787cb95440c1a9ccf))
+* **app:** parse Cassandra queries as CQL text ([7d73252](https://github.com/suiflex/rdb/commit/7d73252d0da54f58725dad9a964b4c5525e70eac))
+* **app:** show connecting progress and errors on Connect ([d251207](https://github.com/suiflex/rdb/commit/d251207a32552beab87ef0295bb5a28cef8dccb7))
+* **app:** TablePlus-grade query editor + inline CRUD ([9c1ec75](https://github.com/suiflex/rdb/commit/9c1ec75706e260c725eed9944631f56eec91f851))
+* **app:** TablePlus-grade query editor + inline CRUD ([84c5f1c](https://github.com/suiflex/rdb/commit/84c5f1c40c4600d34ccc6bed042d509f8abe2cb7))
+* **app:** use native OS window frame and rename to RDB ([6dc65b4](https://github.com/suiflex/rdb/commit/6dc65b4d3e39b0589d91a2b4e61ed38f50226bba))
+* **app:** wire Cassandra into ports, browsing, editor and tree ([838e380](https://github.com/suiflex/rdb/commit/838e3805f60d5e5198a2bf838f30dcb74b629d8c))
+
+
+### Bug Fixes
+
+* **app:** compile Slint on a large-stack thread for Windows ([9ff8dc5](https://github.com/suiflex/rdb/commit/9ff8dc57955d2ac0700502ada463c8f627a649e3))
+* **app:** connection-form + editor UX (dropdowns, connect feedback, motions, icons) ([b3b36ac](https://github.com/suiflex/rdb/commit/b3b36ac4d1ff2b14c8569161fb057c3a6c1b10f2))
+* **app:** replace blank ComboBox with a custom SelectBox ([5c8a40f](https://github.com/suiflex/rdb/commit/5c8a40f6989cd1d2e55bcead97997bfbbb6d9b3e))
+* **app:** use SVG icons for header history and theme toggle ([1bbd0d8](https://github.com/suiflex/rdb/commit/1bbd0d86d0b0e2b533ce850f821652b686458566))
+
 ## [0.5.0](https://github.com/suiflex/rdb/compare/v0.4.0...v0.5.0) (2026-07-04)
 
 
