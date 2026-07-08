@@ -3,7 +3,7 @@ export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
-    SearchCommandPill, BreadcrumbChip, GlyphButton
+    SearchCommandPill, BreadcrumbChip, GlyphButton, IconButton
 } from "components.slint";
 import { Sidebar } from "sidebar.slint";
 import { ConnPicker } from "picker.slint";
@@ -434,14 +434,18 @@ export component MainWindow inherits Window {
                     HorizontalLayout {
                         spacing: Tokens.sp1;
                         // history: jump the sidebar to the History tab
-                        GlyphButton {
-                            glyph: "◷";
+                        IconButton {
+                            icon: "clock";
                             clicked => {
                                 root.sidebar-mode = 2;
                                 root.sidebar-mode-changed(2);
                             }
                         }
-                        GlyphButton { glyph: "▭"; glyph-size: 11px; clicked => { root.toggle-theme(); } }
+                        // theme toggle: sun in dark mode, moon in light
+                        IconButton {
+                            icon: Tokens.dark ? "sun" : "moon";
+                            clicked => { root.toggle-theme(); }
+                        }
                         // settings of the current connection (edit form)
                         GlyphButton {
                             glyph: "⚙";
