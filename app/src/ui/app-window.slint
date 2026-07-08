@@ -3,7 +3,7 @@ export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
-    SearchCommandPill, BreadcrumbChip, GlyphButton
+    SearchCommandPill, BreadcrumbChip, GlyphButton, IconButton
 } from "components.slint";
 import { Sidebar } from "sidebar.slint";
 import { ConnPicker } from "picker.slint";
@@ -79,6 +79,7 @@ export component MainWindow inherits Window {
     // ----- view state: false = connection picker, true = workspace -----
     in property <bool> connected: false;
     in property <string> picker-error;
+    in property <bool> connecting;
     callback disconnect();
     callback conn-filter(string);
 
@@ -128,7 +129,7 @@ export component MainWindow inherits Window {
     in property <string> query-label;
     in property <string> results-meta;
     in-out property <int> sidebar-mode: 0;
-    callback editor-key(string, bool, bool) -> bool;
+    callback editor-key(string, bool, bool, bool) -> bool;
     callback editor-press(int, int);
     callback editor-drag(int, int);
     callback editor-select-word(int, int);
@@ -433,14 +434,18 @@ export component MainWindow inherits Window {
                     HorizontalLayout {
                         spacing: Tokens.sp1;
                         // history: jump the sidebar to the History tab
-                        GlyphButton {
-                            glyph: "◷";
+                        IconButton {
+                            icon: "clock";
                             clicked => {
                                 root.sidebar-mode = 2;
                                 root.sidebar-mode-changed(2);
                             }
                         }
-                        GlyphButton { glyph: "▭"; glyph-size: 11px; clicked => { root.toggle-theme(); } }
+                        // theme toggle: sun in dark mode, moon in light
+                        IconButton {
+                            icon: Tokens.dark ? "sun" : "moon";
+                            clicked => { root.toggle-theme(); }
+                        }
                         // settings of the current connection (edit form)
                         GlyphButton {
                             glyph: "⚙";
@@ -469,6 +474,7 @@ export component MainWindow inherits Window {
             connections: root.connections;
             selected-conn: root.selected-conn;
             error: root.picker-error;
+            connecting: root.connecting;
             sel-name: root.sel-name;
             sel-engine: root.sel-engine;
             sel-sub: root.sel-sub;
@@ -706,7 +712,7 @@ export component MainWindow inherits Window {
                         filter-col <=> root.filter-col;
                         filter-op <=> root.filter-op;
                         index-rows: root.index-rows;
-                        editor-key(t, cmd, shift) => { root.editor-key(t, cmd, shift) }
+                        editor-key(t, cmd, alt, shift) => { root.editor-key(t, cmd, alt, shift) }
                         editor-press(l, c) => { root.editor-press(l, c); }
                         editor-drag(l, c) => { root.editor-drag(l, c); }
                         editor-select-word(l, c) => { root.editor-select-word(l, c); }

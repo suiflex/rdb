@@ -1,5 +1,77 @@
 // Shared Tabula components. All colors/metrics come from Tokens.
 import { Tokens } from "tokens.slint";
+import { AppIcon } from "icons.slint";
+
+// Dropdown select: shows the current value + a ▾ caret so it reads as a
+// picker even when closed, then a click opens a themed option list. Replaces
+// std-widgets ComboBox, which rendered as a blank borderless box in this theme.
+export component SelectBox inherits Rectangle {
+    in property <[string]> model;
+    in-out property <string> current-value;
+    callback selected(string);
+    height: 30px;
+    border-radius: Tokens.radius;
+    border-width: 1px;
+    border-color: ta.has-hover ? Tokens.border-strong : Tokens.border;
+    background: Tokens.card;
+    ta := TouchArea {
+        clicked => { popup.show(); }
+    }
+    HorizontalLayout {
+        padding-left: Tokens.sp2;
+        padding-right: Tokens.sp2;
+        spacing: Tokens.sp2;
+        Text {
+            text: root.current-value;
+            color: Tokens.text;
+            font-size: Tokens.font-sm;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+        VerticalLayout {
+            alignment: center;
+            AppIcon { name: "caret"; size: 14px; color: Tokens.text-faint; }
+        }
+    }
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + 4px;
+        width: root.width;
+        Rectangle {
+            background: Tokens.card;
+            border-radius: Tokens.radius;
+            border-width: 1px;
+            border-color: Tokens.border-strong;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: #00000022;
+            VerticalLayout {
+                padding: 4px;
+                for opt in root.model: Rectangle {
+                    height: 28px;
+                    border-radius: 6px;
+                    background: opt-ta.has-hover ? Tokens.accent-tint : transparent;
+                    opt-ta := TouchArea {
+                        clicked => {
+                            root.current-value = opt;
+                            root.selected(opt);
+                            popup.close();
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: Tokens.sp2;
+                        Text {
+                            text: opt;
+                            color: Tokens.text;
+                            font-size: Tokens.font-sm;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 // Engine badge: rounded square with 2-letter code, engine color fill.
 export component DbBadge inherits Rectangle {
@@ -297,6 +369,25 @@ export component GlyphButton inherits Rectangle {
         text: root.glyph;
         color: ta.has-hover && root.danger-hover ? white : Tokens.text-dim;
         font-size: root.glyph-size;
+    }
+    ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+// Like GlyphButton but draws a crisp SVG (AppIcon) instead of a font glyph —
+// used for header actions whose symbols aren't in the mono font.
+export component IconButton inherits Rectangle {
+    in property <string> icon;
+    in property <length> icon-size: Tokens.icon-sm;
+    callback clicked;
+    width: 28px;
+    height: 28px;
+    border-radius: Tokens.radius;
+    background: ta.has-hover ? Tokens.border : transparent;
+    animate background { duration: Tokens.fade; }
+    AppIcon {
+        name: root.icon;
+        size: root.icon-size;
+        color: Tokens.text-dim;
     }
     ta := TouchArea { clicked => { root.clicked(); } }
 }

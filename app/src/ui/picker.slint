@@ -13,6 +13,8 @@ export component ConnPicker inherits Rectangle {
     in property <[ConnItem]> connections;
     in property <int> selected-conn: -1;
     in property <string> error;
+    // True while a connect attempt is in flight (button shows a spinner label).
+    in property <bool> connecting;
 
     // Detail panel (filled by Rust when a row is selected).
     in property <string> sel-name;
@@ -282,7 +284,8 @@ export component ConnPicker inherits Rectangle {
                             HorizontalLayout {
                                 spacing: Tokens.sp2;
                                 PrimaryButton {
-                                    text: "Connect";
+                                    text: root.connecting ? "Connecting…" : "Connect";
+                                    enabled: !root.connecting;
                                     height: 30px;
                                     clicked => { root.connect-clicked(root.selected-conn); }
                                 }
@@ -298,6 +301,14 @@ export component ConnPicker inherits Rectangle {
                                 }
                             }
                         }
+                    }
+
+                    // Connection error surfaced next to the Connect button.
+                    if root.error != "": Text {
+                        text: root.error;
+                        color: Tokens.error;
+                        font-size: Tokens.font-sm;
+                        wrap: word-wrap;
                     }
 
                     // ----- key/value card -----
