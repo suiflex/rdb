@@ -1,6 +1,5 @@
 import { Tokens } from "tokens.slint";
-import { PrimaryButton, SecondaryButton, FormField } from "components.slint";
-import { ComboBox } from "std-widgets.slint";
+import { PrimaryButton, SecondaryButton, FormField, SelectBox } from "components.slint";
 
 // 8 preset accent swatches — colors for UI rendering, hex strings for the Rust-side color field.
 // First entry is the app accent (Tokens.accent) so the default matches the design system.
@@ -86,7 +85,7 @@ export component ConnForm inherits Rectangle {
             FormField { text <=> root.f-name; }
 
             Text { text: "Engine"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
-            ComboBox {
+            SelectBox {
                 model: ["PostgreSQL", "MySQL", "Redis", "MongoDB", "SQLite", "Cassandra"];
                 current-value <=> root.f-engine;
                 selected(v) => { root.engine-changed(v); }
@@ -138,7 +137,7 @@ export component ConnForm inherits Rectangle {
             if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL": Text {
                 text: "SSL"; color: Tokens.text-dim; font-size: Tokens.font-sm;
             }
-            if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL": ComboBox {
+            if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL": SelectBox {
                 model: ["Disable", "Prefer", "Require"];
                 current-value <=> root.f-sslmode;
             }
