@@ -5537,6 +5537,7 @@ dependencies = [
  "copypasta",
  "rdbs-connstore",
  "rdbs-core",
+ "rdbs-driver-cassandra",
  "rdbs-driver-mongo",
  "rdbs-driver-mysql",
  "rdbs-driver-postgres",
