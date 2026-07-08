@@ -3,7 +3,7 @@ export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
-    SearchCommandPill, WindowControls, BreadcrumbChip, GlyphButton
+    SearchCommandPill, BreadcrumbChip, GlyphButton
 } from "components.slint";
 import { Sidebar } from "sidebar.slint";
 import { ConnPicker } from "picker.slint";
@@ -25,13 +25,12 @@ import {
 } from "structs.slint";
 
 export component MainWindow inherits Window {
-    title: "Tabula";
+    title: "RDB";
     icon: @image-url("../../assets/icon.png");
     preferred-width: 1102px;
     preferred-height: 702px;
     min-width: 400px;
     min-height: 320px;
-    no-frame: true;
     background: Tokens.chrome;
     default-font-size: 13px;
 
@@ -45,10 +44,6 @@ export component MainWindow inherits Window {
     in property <string> bc-conn;
     in property <string> bc-db;
     in property <string> bc-schema;
-    callback win-minimize();
-    callback win-maximize();
-    callback win-close();
-    callback win-drag(length, length); // (dx, dy) while titlebar is dragged
 
     // ----- sidebar models -----
     in property <[ConnItem]> connections;
@@ -346,17 +341,10 @@ export component MainWindow inherits Window {
     VerticalLayout {
         spacing: 0px;
 
-        // ================= titlebar (44px, frameless chrome) =================
+        // ================= toolbar row (44px, under native titlebar) =================
         Rectangle {
             height: Tokens.titlebar-h;
             background: Tokens.chrome;
-
-            // whole-bar drag surface (buttons/chips sit above it)
-            drag-ta := TouchArea {
-                moved => {
-                    root.win-drag(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
-                }
-            }
 
             HorizontalLayout {
                 padding-left: Tokens.sp4;
@@ -375,7 +363,7 @@ export component MainWindow inherits Window {
                             border-radius: Tokens.radius;
                             background: Tokens.accent;
                             Text {
-                                text: "T";
+                                text: "R";
                                 color: white;
                                 font-size: 14px;
                                 font-weight: 700;
@@ -383,7 +371,7 @@ export component MainWindow inherits Window {
                         }
                     }
                     Text {
-                        text: "Tabula";
+                        text: "RDB";
                         color: Tokens.text;
                         font-size: 15px;
                         font-weight: 700;
@@ -462,14 +450,6 @@ export component MainWindow inherits Window {
                                 }
                             }
                         }
-                    }
-                }
-                VerticalLayout {
-                    alignment: center;
-                    WindowControls {
-                        minimize => { root.win-minimize(); }
-                        maximize => { root.win-maximize(); }
-                        close-window => { root.win-close(); }
                     }
                 }
             }

@@ -300,16 +300,6 @@ export component GlyphButton inherits Rectangle {
 }
 
 // macOS-style window controls (– □ ×), right-aligned in the design.
-export component WindowControls inherits HorizontalLayout {
-    callback minimize;
-    callback maximize;
-    callback close-window;
-    spacing: Tokens.sp1;
-    GlyphButton { glyph: "–"; clicked => { root.minimize(); } }
-    GlyphButton { glyph: "□"; glyph-size: 12px; clicked => { root.maximize(); } }
-    GlyphButton { glyph: "×"; danger-hover: true; clicked => { root.close-window(); } }
-}
-
 // Filter/search input used in sidebars (white rounded box + magnifier).
 export component FilterField inherits Rectangle {
     in property <string> placeholder;

@@ -767,42 +767,6 @@ fn main() -> Result<(), slint::PlatformError> {
         },
     ));
 
-    // ----- frameless-window chrome: drag + minimize/maximize/close -----
-    {
-        let weak = window.as_weak();
-        window.on_win_drag(move |dx, dy| {
-            if let Some(w) = weak.upgrade() {
-                let win = w.window();
-                let pos = win.position();
-                let sf = win.scale_factor();
-                win.set_position(slint::PhysicalPosition::new(
-                    pos.x + (dx * sf) as i32,
-                    pos.y + (dy * sf) as i32,
-                ));
-            }
-        });
-    }
-    {
-        let weak = window.as_weak();
-        window.on_win_minimize(move || {
-            if let Some(w) = weak.upgrade() {
-                w.window().set_minimized(true);
-            }
-        });
-    }
-    {
-        let weak = window.as_weak();
-        window.on_win_maximize(move || {
-            if let Some(w) = weak.upgrade() {
-                let m = w.window().is_maximized();
-                w.window().set_maximized(!m);
-            }
-        });
-    }
-    window.on_win_close(|| {
-        let _ = slint::quit_event_loop();
-    });
-
     // Fixed window size for the screenshot loop: RDBS_WIN=WxH (logical px).
     if let Ok(spec) = std::env::var("RDBS_WIN") {
         if let Some((w, h)) = spec.split_once('x') {
@@ -1596,9 +1560,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let tags: Vec<SharedString> = s.tags.iter().map(|t| t.as_str().into()).collect();
             w.set_sel_tags(ModelRc::from(Rc::new(VecModel::from(tags))));
             let footer = if mock::mock_mode() {
-                "Terakhir terhubung · 2 menit lalu · Tabula 1.2.0 open source".to_string()
+                "Terakhir terhubung · 2 menit lalu · RDB 1.2.0 open source".to_string()
             } else {
-                format!("Tabula {} open source", env!("CARGO_PKG_VERSION"))
+                format!("RDB {} open source", env!("CARGO_PKG_VERSION"))
             };
             w.set_sel_footer(footer.into());
         }
