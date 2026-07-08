@@ -9,6 +9,8 @@ pub enum Engine {
     MySql,
     Redis,
     Mongo,
+    /// Local file-based engine: no host/port/user; `database` holds the path.
+    Sqlite,
 }
 
 /// A persisted connection. Only non-secret fields are stored. The password is

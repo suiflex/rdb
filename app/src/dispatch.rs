@@ -16,12 +16,14 @@ use rdbs_driver_mongo::MongoDriver;
 use rdbs_driver_mysql::MysqlDriver;
 use rdbs_driver_postgres::PostgresDriver;
 use rdbs_driver_redis::RedisDriver;
+use rdbs_driver_sqlite::SqliteDriver;
 
 pub enum AnyDriver {
     Postgres(PostgresDriver),
     Mysql(MysqlDriver),
     Redis(RedisDriver),
     Mongo(MongoDriver),
+    Sqlite(SqliteDriver),
     /// In-process demo driver (RDBS_MOCK=1); no network, seeded data.
     Mock(crate::mock::MockDriver),
 }
@@ -34,6 +36,7 @@ impl AnyDriver {
             Engine::MySql => "MySQL",
             Engine::Redis => "Redis",
             Engine::Mongo => "MongoDB",
+            Engine::Sqlite => "SQLite",
         }
     }
 
@@ -44,6 +47,7 @@ impl AnyDriver {
             Engine::MySql => "mysql",
             Engine::Redis => "redis",
             Engine::Mongo => "mongo",
+            Engine::Sqlite => "sqlite",
         }
     }
 
@@ -59,6 +63,7 @@ impl AnyDriver {
             Engine::MySql => AnyDriver::Mysql(MysqlDriver::connect(cfg).await?),
             Engine::Redis => AnyDriver::Redis(RedisDriver::connect(cfg).await?),
             Engine::Mongo => AnyDriver::Mongo(MongoDriver::connect(cfg).await?),
+            Engine::Sqlite => AnyDriver::Sqlite(SqliteDriver::connect(cfg).await?),
         })
     }
 
@@ -70,6 +75,7 @@ impl AnyDriver {
             AnyDriver::Mysql(d) => d.ping().await,
             AnyDriver::Redis(d) => d.ping().await,
             AnyDriver::Mongo(d) => d.ping().await,
+            AnyDriver::Sqlite(d) => d.ping().await,
             AnyDriver::Mock(d) => d.ping().await,
         }
     }
@@ -80,6 +86,7 @@ impl AnyDriver {
             AnyDriver::Mysql(d) => d.schema().await,
             AnyDriver::Redis(d) => d.schema().await,
             AnyDriver::Mongo(d) => d.schema().await,
+            AnyDriver::Sqlite(d) => d.schema().await,
             AnyDriver::Mock(d) => d.schema().await,
         }
     }
@@ -90,6 +97,7 @@ impl AnyDriver {
             AnyDriver::Mysql(d) => d.containers(database).await,
             AnyDriver::Redis(d) => d.containers(database).await,
             AnyDriver::Mongo(d) => d.containers(database).await,
+            AnyDriver::Sqlite(d) => d.containers(database).await,
             AnyDriver::Mock(d) => d.containers(database).await,
         }
     }
@@ -100,6 +108,7 @@ impl AnyDriver {
             AnyDriver::Mysql(d) => d.query(q).await,
             AnyDriver::Redis(d) => d.query(q).await,
             AnyDriver::Mongo(d) => d.query(q).await,
+            AnyDriver::Sqlite(d) => d.query(q).await,
             AnyDriver::Mock(d) => d.query(q).await,
         }
     }
@@ -110,6 +119,7 @@ impl AnyDriver {
             AnyDriver::Mysql(d) => d.primary_key(table).await,
             AnyDriver::Redis(d) => d.primary_key(table).await,
             AnyDriver::Mongo(d) => d.primary_key(table).await,
+            AnyDriver::Sqlite(d) => d.primary_key(table).await,
             AnyDriver::Mock(d) => d.primary_key(table).await,
         }
     }
@@ -120,6 +130,7 @@ impl AnyDriver {
             AnyDriver::Mysql(d) => d.count(table).await,
             AnyDriver::Redis(d) => d.count(table).await,
             AnyDriver::Mongo(d) => d.count(table).await,
+            AnyDriver::Sqlite(d) => d.count(table).await,
             AnyDriver::Mock(d) => d.count(table).await,
         }
     }
@@ -130,6 +141,7 @@ impl AnyDriver {
             AnyDriver::Mysql(d) => d.commit(ops).await,
             AnyDriver::Redis(d) => d.commit(ops).await,
             AnyDriver::Mongo(d) => d.commit(ops).await,
+            AnyDriver::Sqlite(d) => d.commit(ops).await,
             AnyDriver::Mock(d) => d.commit(ops).await,
         }
     }

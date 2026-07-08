@@ -49,6 +49,7 @@ fn scheme_to_engine(scheme: &str) -> Option<Engine> {
         "mysql" | "mariadb" => Some(Engine::MySql),
         "redis" | "rediss" => Some(Engine::Redis),
         "mongodb" | "mongodb+srv" => Some(Engine::Mongo),
+        "sqlite" | "file" => Some(Engine::Sqlite),
         _ => None,
     }
 }
