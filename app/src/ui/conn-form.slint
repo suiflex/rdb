@@ -87,7 +87,7 @@ export component ConnForm inherits Rectangle {
 
             Text { text: "Engine"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
             ComboBox {
-                model: ["PostgreSQL", "MySQL", "Redis", "MongoDB", "SQLite"];
+                model: ["PostgreSQL", "MySQL", "Redis", "MongoDB", "SQLite", "Cassandra"];
                 current-value <=> root.f-engine;
                 selected(v) => { root.engine-changed(v); }
             }
