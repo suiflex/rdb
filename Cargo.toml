@@ -8,6 +8,7 @@ members = [
     "crates/driver-redis",
     "crates/driver-mongo",
     "crates/driver-sqlite",
+    "crates/driver-cassandra",
     "app",
 ]
 
