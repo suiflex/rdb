@@ -11,6 +11,8 @@ pub enum Engine {
     Mongo,
     /// Local file-based engine: no host/port/user; `database` holds the path.
     Sqlite,
+    /// CQL engine (Cassandra / ScyllaDB); `database` holds the default keyspace.
+    Cassandra,
 }
 
 /// A persisted connection. Only non-secret fields are stored. The password is

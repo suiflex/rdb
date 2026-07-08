@@ -12,6 +12,7 @@ use rdbs_core::query::Query;
 use rdbs_core::result::ResultSet;
 use rdbs_core::schema::{Container, Schema};
 use rdbs_core::write::{TableRef, WriteOp};
+use rdbs_driver_cassandra::CassandraDriver;
 use rdbs_driver_mongo::MongoDriver;
 use rdbs_driver_mysql::MysqlDriver;
 use rdbs_driver_postgres::PostgresDriver;
@@ -24,6 +25,9 @@ pub enum AnyDriver {
     Redis(RedisDriver),
     Mongo(MongoDriver),
     Sqlite(SqliteDriver),
+    // Boxed: a scylla Session is far larger than the other drivers, so keep it
+    // off the enum's inline footprint (clippy::large_enum_variant).
+    Cassandra(Box<CassandraDriver>),
     /// In-process demo driver (RDBS_MOCK=1); no network, seeded data.
     Mock(crate::mock::MockDriver),
 }
@@ -37,6 +41,7 @@ impl AnyDriver {
             Engine::Redis => "Redis",
             Engine::Mongo => "MongoDB",
             Engine::Sqlite => "SQLite",
+            Engine::Cassandra => "Cassandra",
         }
     }
 
@@ -48,6 +53,7 @@ impl AnyDriver {
             Engine::Redis => "redis",
             Engine::Mongo => "mongo",
             Engine::Sqlite => "sqlite",
+            Engine::Cassandra => "cassandra",
         }
     }
 
@@ -64,6 +70,9 @@ impl AnyDriver {
             Engine::Redis => AnyDriver::Redis(RedisDriver::connect(cfg).await?),
             Engine::Mongo => AnyDriver::Mongo(MongoDriver::connect(cfg).await?),
             Engine::Sqlite => AnyDriver::Sqlite(SqliteDriver::connect(cfg).await?),
+            Engine::Cassandra => {
+                AnyDriver::Cassandra(Box::new(CassandraDriver::connect(cfg).await?))
+            }
         })
     }
 
@@ -76,6 +85,7 @@ impl AnyDriver {
             AnyDriver::Redis(d) => d.ping().await,
             AnyDriver::Mongo(d) => d.ping().await,
             AnyDriver::Sqlite(d) => d.ping().await,
+            AnyDriver::Cassandra(d) => d.ping().await,
             AnyDriver::Mock(d) => d.ping().await,
         }
     }
@@ -87,6 +97,7 @@ impl AnyDriver {
             AnyDriver::Redis(d) => d.schema().await,
             AnyDriver::Mongo(d) => d.schema().await,
             AnyDriver::Sqlite(d) => d.schema().await,
+            AnyDriver::Cassandra(d) => d.schema().await,
             AnyDriver::Mock(d) => d.schema().await,
         }
     }
@@ -98,6 +109,7 @@ impl AnyDriver {
             AnyDriver::Redis(d) => d.containers(database).await,
             AnyDriver::Mongo(d) => d.containers(database).await,
             AnyDriver::Sqlite(d) => d.containers(database).await,
+            AnyDriver::Cassandra(d) => d.containers(database).await,
             AnyDriver::Mock(d) => d.containers(database).await,
         }
     }
@@ -109,6 +121,7 @@ impl AnyDriver {
             AnyDriver::Redis(d) => d.query(q).await,
             AnyDriver::Mongo(d) => d.query(q).await,
             AnyDriver::Sqlite(d) => d.query(q).await,
+            AnyDriver::Cassandra(d) => d.query(q).await,
             AnyDriver::Mock(d) => d.query(q).await,
         }
     }
@@ -120,6 +133,7 @@ impl AnyDriver {
             AnyDriver::Redis(d) => d.primary_key(table).await,
             AnyDriver::Mongo(d) => d.primary_key(table).await,
             AnyDriver::Sqlite(d) => d.primary_key(table).await,
+            AnyDriver::Cassandra(d) => d.primary_key(table).await,
             AnyDriver::Mock(d) => d.primary_key(table).await,
         }
     }
@@ -131,6 +145,7 @@ impl AnyDriver {
             AnyDriver::Redis(d) => d.count(table).await,
             AnyDriver::Mongo(d) => d.count(table).await,
             AnyDriver::Sqlite(d) => d.count(table).await,
+            AnyDriver::Cassandra(d) => d.count(table).await,
             AnyDriver::Mock(d) => d.count(table).await,
         }
     }
@@ -142,6 +157,7 @@ impl AnyDriver {
             AnyDriver::Redis(d) => d.commit(ops).await,
             AnyDriver::Mongo(d) => d.commit(ops).await,
             AnyDriver::Sqlite(d) => d.commit(ops).await,
+            AnyDriver::Cassandra(d) => d.commit(ops).await,
             AnyDriver::Mock(d) => d.commit(ops).await,
         }
     }

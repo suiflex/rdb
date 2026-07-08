@@ -153,6 +153,10 @@ fn schema_display_rows(
         Some(rdbs_connstore::Engine::Redis) => {
             return nested_display_rows(nodes, expanded_tables, loaded_dbs, "key", filter);
         }
+        // Cassandra nests keyspace→table like Mongo nests database→collection.
+        Some(rdbs_connstore::Engine::Cassandra) => {
+            return nested_display_rows(nodes, expanded_tables, loaded_dbs, "table", filter);
+        }
         _ => {}
     }
 
@@ -473,6 +477,19 @@ fn browse_text(
                 "SELECT * FROM \"{}\" LIMIT {limit} OFFSET {offset}",
                 table.name.replace('"', "\"\"")
             )
+        }
+        rdbs_connstore::Engine::Cassandra => {
+            // ponytail: CQL is LIMIT-only (no OFFSET); real paging state is a
+            // follow-up. Keyspace travels in `database`.
+            let q = |s: &str| s.replace('"', "\"\"");
+            match table.database.as_deref() {
+                Some(ks) if !ks.is_empty() => format!(
+                    "SELECT * FROM \"{}\".\"{}\" LIMIT {limit}",
+                    q(ks),
+                    q(&table.name)
+                ),
+                _ => format!("SELECT * FROM \"{}\" LIMIT {limit}", q(&table.name)),
+            }
         }
         rdbs_connstore::Engine::Mongo => {
             let db = table
@@ -2130,6 +2147,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             rdbs_connstore::Engine::Postgres
                                 | rdbs_connstore::Engine::MySql
                                 | rdbs_connstore::Engine::Sqlite
+                                | rdbs_connstore::Engine::Cassandra
                         );
                         *raw_nodes.lock().unwrap() = nodes;
                         {
@@ -2237,6 +2255,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             rdbs_connstore::Engine::Postgres
                                 | rdbs_connstore::Engine::MySql
                                 | rdbs_connstore::Engine::Sqlite
+                                | rdbs_connstore::Engine::Cassandra
                         ) {
                             editor::split_statements(&sql)
                         } else {
@@ -2811,16 +2830,19 @@ fn main() -> Result<(), slint::PlatformError> {
             let engine = *cur_engine.borrow();
             let label = label.to_string();
 
-            // Mongo/Redis: database headers open an opt-in set (default closed)
-            // and load their leaves (collections / keys) lazily on first expand.
+            // Mongo/Redis/Cassandra: database (or keyspace) headers open an
+            // opt-in set (default closed) and load their leaves (collections /
+            // keys / tables) lazily on first expand.
             if matches!(
                 engine,
-                Some(rdbs_connstore::Engine::Mongo) | Some(rdbs_connstore::Engine::Redis)
+                Some(rdbs_connstore::Engine::Mongo)
+                    | Some(rdbs_connstore::Engine::Redis)
+                    | Some(rdbs_connstore::Engine::Cassandra)
             ) {
-                let leaf_kind = if engine == Some(rdbs_connstore::Engine::Redis) {
-                    "key"
-                } else {
-                    "collection"
+                let leaf_kind = match engine {
+                    Some(rdbs_connstore::Engine::Redis) => "key",
+                    Some(rdbs_connstore::Engine::Cassandra) => "table",
+                    _ => "collection",
                 };
                 let now_open = {
                     let mut e = expanded_tables.lock().unwrap();
@@ -3474,6 +3496,7 @@ fn main() -> Result<(), slint::PlatformError> {
             "Redis" => "6379",
             "MongoDB" => "27017",
             "SQLite" => "0", // file-based: port unused
+            "Cassandra" => "9042",
             _ => "5432",
         }
     }
@@ -3483,6 +3506,7 @@ fn main() -> Result<(), slint::PlatformError> {
             "Redis" => rdbs_connstore::Engine::Redis,
             "MongoDB" => rdbs_connstore::Engine::Mongo,
             "SQLite" => rdbs_connstore::Engine::Sqlite,
+            "Cassandra" => rdbs_connstore::Engine::Cassandra,
             _ => rdbs_connstore::Engine::Postgres,
         }
     }

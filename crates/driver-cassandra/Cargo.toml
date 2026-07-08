@@ -1,0 +1,13 @@
+[package]
+name = "rdbs-driver-cassandra"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rdbs-core = { path = "../core" }
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+scylla = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "macros", "rt-multi-thread"] }
