@@ -130,7 +130,7 @@ export component ListModal inherits Rectangle {
                                         font-size: 10px;
                                         font-family: Tokens.mono;
                                     }
-                                    if it.kind == "postgres" || it.kind == "mysql" || it.kind == "redis" || it.kind == "mongo" || it.kind == "sqlite": DbBadge {
+                                    if it.kind == "postgres" || it.kind == "mysql" || it.kind == "redis" || it.kind == "mongo" || it.kind == "sqlite" || it.kind == "cassandra": DbBadge {
                                         engine: it.kind;
                                         size: 24px;
                                     }
