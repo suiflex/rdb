@@ -552,6 +552,59 @@ impl EditorState {
         self.col = self.lines[self.line].chars().count();
     }
 
+    /// Word-wise horizontal motion (macOS Option+Arrow). `dir < 0` jumps to the
+    /// start of the word on the left, `dir > 0` to the end of the word on the
+    /// right, crossing a line boundary when already at the edge. Selection is
+    /// anchored/dropped by the caller via `set_selecting`.
+    pub fn move_word(&mut self, dir: i32) {
+        let chars: Vec<char> = self.lines[self.line].chars().collect();
+        if dir < 0 {
+            if self.col == 0 {
+                if self.line > 0 {
+                    self.line -= 1;
+                    self.col = self.lines[self.line].chars().count();
+                }
+                return;
+            }
+            let mut i = self.col;
+            while i > 0 && !is_ident(chars[i - 1]) {
+                i -= 1;
+            }
+            while i > 0 && is_ident(chars[i - 1]) {
+                i -= 1;
+            }
+            self.col = i;
+        } else {
+            let n = chars.len();
+            if self.col >= n {
+                if self.line + 1 < self.lines.len() {
+                    self.line += 1;
+                    self.col = 0;
+                }
+                return;
+            }
+            let mut i = self.col;
+            while i < n && !is_ident(chars[i]) {
+                i += 1;
+            }
+            while i < n && is_ident(chars[i]) {
+                i += 1;
+            }
+            self.col = i;
+        }
+    }
+
+    /// Cursor to the very start / end of the buffer (macOS Cmd+Up / Cmd+Down).
+    pub fn move_doc_start(&mut self) {
+        self.line = 0;
+        self.col = 0;
+    }
+
+    pub fn move_doc_end(&mut self) {
+        self.line = self.lines.len() - 1;
+        self.col = self.lines[self.line].chars().count();
+    }
+
     /// Current line text — the "Run Selection" fallback unit.
     pub fn current_line(&self) -> &str {
         &self.lines[self.line]
@@ -990,5 +1043,39 @@ mod tests {
         let (l, s, e) = m[0];
         ed.set_selection((l, s), (l, e));
         assert_eq!(ed.selected_text().as_deref(), Some("FROM"));
+    }
+
+    #[test]
+    fn word_motion_jumps_over_whole_words() {
+        let mut ed = EditorState::from_text("SELECT id FROM t");
+        ed.move_doc_start();
+        assert_eq!((ed.line, ed.col), (0, 0));
+        ed.move_word(1); // over "SELECT"
+        assert_eq!(ed.col, 6);
+        ed.move_word(1); // skip space, over "id"
+        assert_eq!(ed.col, 9);
+        ed.move_word(-1); // back to start of "id"
+        assert_eq!(ed.col, 7);
+    }
+
+    #[test]
+    fn word_motion_and_doc_end_cross_lines() {
+        let mut ed = EditorState::from_text("ab\ncd");
+        ed.move_doc_start();
+        ed.move_word(1); // to end of "ab"
+        assert_eq!((ed.line, ed.col), (0, 2));
+        ed.move_word(1); // at line end -> jump to next line start
+        assert_eq!((ed.line, ed.col), (1, 0));
+        ed.move_doc_end();
+        assert_eq!((ed.line, ed.col), (1, 2));
+    }
+
+    #[test]
+    fn shift_word_motion_builds_a_selection() {
+        let mut ed = EditorState::from_text("hello world");
+        ed.move_doc_start();
+        ed.set_selecting(true);
+        ed.move_word(1);
+        assert_eq!(ed.selected_text().as_deref(), Some("hello"));
     }
 }

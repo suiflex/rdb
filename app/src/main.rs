@@ -924,8 +924,58 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let ed_state = ed_state.clone();
         let sync_editor = sync_editor.clone();
-        window.on_editor_key(move |text, cmd, shift| {
-            if cmd {
+        window.on_editor_key(move |text, meta, alt, shift| {
+            // Cursor motion first: arrows / home / end, with macOS ⌘ (line &
+            // document) and ⌥ (word) semantics. shift extends the selection.
+            if matches!(
+                text.as_str(),
+                "\u{f700}" | "\u{f701}" | "\u{f702}" | "\u{f703}" | "\u{f729}" | "\u{f72b}"
+            ) {
+                {
+                    let mut ed = ed_state.borrow_mut();
+                    ed.set_selecting(shift);
+                    match text.as_str() {
+                        "\u{f702}" => {
+                            if alt {
+                                ed.move_word(-1)
+                            } else if meta {
+                                ed.home()
+                            } else {
+                                ed.move_cursor(0, -1)
+                            }
+                        }
+                        "\u{f703}" => {
+                            if alt {
+                                ed.move_word(1)
+                            } else if meta {
+                                ed.end()
+                            } else {
+                                ed.move_cursor(0, 1)
+                            }
+                        }
+                        "\u{f700}" => {
+                            if meta {
+                                ed.move_doc_start()
+                            } else {
+                                ed.move_cursor(-1, 0)
+                            }
+                        }
+                        "\u{f701}" => {
+                            if meta {
+                                ed.move_doc_end()
+                            } else {
+                                ed.move_cursor(1, 0)
+                            }
+                        }
+                        "\u{f729}" => ed.home(),
+                        "\u{f72b}" => ed.end(),
+                        _ => {}
+                    }
+                }
+                sync_editor();
+                return true;
+            }
+            if meta {
                 // Editor-owned cmd combos; everything else bubbles up to the
                 // window shortcut scope (⌘⏎ run, ⌘S commit, ⌘R refresh, …).
                 let handled = {
@@ -1759,7 +1809,7 @@ fn main() -> Result<(), slint::PlatformError> {
             when(
                 Rc::new(|w| !w.get_query_text().trim().is_empty()),
                 Rc::new(|w| {
-                    w.invoke_editor_key("a".into(), true, false);
+                    w.invoke_editor_key("a".into(), true, false, false);
                 }),
             );
         }

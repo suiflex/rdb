@@ -9,8 +9,9 @@ export component CodeEditor inherits Rectangle {
     in property <[[Span]]> lines;
     in property <int> cursor-line: 0;
     in property <int> cursor-col: 0;
-    // (key text, meta/ctrl, shift) -> true when the editor consumed the key.
-    callback edit-key(string, bool, bool) -> bool;
+    // (key text, meta/ctrl, alt/option, shift) -> true when the editor consumed
+    // the key. meta = ⌘ line/doc motions, alt = ⌥ word motions.
+    callback edit-key(string, bool, bool, bool) -> bool;
     // Mouse: press places the caret, drag extends the selection, double-click
     // selects the word. All carry (line, col) hit-tested from the pointer.
     callback press-pos(int, int);
@@ -33,7 +34,7 @@ export component CodeEditor inherits Rectangle {
 
     focus-scope := FocusScope {
         key-pressed(e) => {
-            if (root.edit-key(e.text, e.modifiers.meta || e.modifiers.control, e.modifiers.shift)) {
+            if (root.edit-key(e.text, e.modifiers.meta || e.modifiers.control, e.modifiers.alt, e.modifiers.shift)) {
                 return accept;
             }
             return reject;

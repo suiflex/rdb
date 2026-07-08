@@ -128,7 +128,7 @@ export component MainWindow inherits Window {
     in property <string> query-label;
     in property <string> results-meta;
     in-out property <int> sidebar-mode: 0;
-    callback editor-key(string, bool, bool) -> bool;
+    callback editor-key(string, bool, bool, bool) -> bool;
     callback editor-press(int, int);
     callback editor-drag(int, int);
     callback editor-select-word(int, int);
@@ -706,7 +706,7 @@ export component MainWindow inherits Window {
                         filter-col <=> root.filter-col;
                         filter-op <=> root.filter-op;
                         index-rows: root.index-rows;
-                        editor-key(t, cmd, shift) => { root.editor-key(t, cmd, shift) }
+                        editor-key(t, cmd, alt, shift) => { root.editor-key(t, cmd, alt, shift) }
                         editor-press(l, c) => { root.editor-press(l, c); }
                         editor-drag(l, c) => { root.editor-drag(l, c); }
                         editor-select-word(l, c) => { root.editor-select-word(l, c); }

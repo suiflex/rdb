@@ -40,7 +40,7 @@ export component WorkArea inherits Rectangle {
     in property <int> cursor-col;
     in property <string> query-label;    // "emiten-per-sektor.sql · saved"
     in property <string> results-meta;   // "10 rows · 38 ms"
-    callback editor-key(string, bool, bool) -> bool;
+    callback editor-key(string, bool, bool, bool) -> bool;
     callback editor-press(int, int);
     callback editor-drag(int, int);
     callback editor-select-word(int, int);
@@ -504,7 +504,7 @@ export component WorkArea inherits Rectangle {
                     lines: root.editor-lines;
                     cursor-line: root.cursor-line;
                     cursor-col: root.cursor-col;
-                    edit-key(t, cmd, shift) => { root.editor-key(t, cmd, shift) }
+                    edit-key(t, cmd, alt, shift) => { root.editor-key(t, cmd, alt, shift) }
                     press-pos(l, c) => { root.editor-press(l, c); }
                     drag-pos(l, c) => { root.editor-drag(l, c); }
                     select-word(l, c) => { root.editor-select-word(l, c); }
