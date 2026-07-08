@@ -12,12 +12,12 @@ use rdbs_core::query::Query;
 use rdbs_core::result::ResultSet;
 use rdbs_core::schema::{Container, Schema};
 use rdbs_core::write::{TableRef, WriteOp};
+use rdbs_driver_cassandra::CassandraDriver;
 use rdbs_driver_mongo::MongoDriver;
 use rdbs_driver_mysql::MysqlDriver;
 use rdbs_driver_postgres::PostgresDriver;
 use rdbs_driver_redis::RedisDriver;
 use rdbs_driver_sqlite::SqliteDriver;
-use rdbs_driver_cassandra::CassandraDriver;
 
 pub enum AnyDriver {
     Postgres(PostgresDriver),
@@ -25,7 +25,9 @@ pub enum AnyDriver {
     Redis(RedisDriver),
     Mongo(MongoDriver),
     Sqlite(SqliteDriver),
-    Cassandra(CassandraDriver),
+    // Boxed: a scylla Session is far larger than the other drivers, so keep it
+    // off the enum's inline footprint (clippy::large_enum_variant).
+    Cassandra(Box<CassandraDriver>),
     /// In-process demo driver (RDBS_MOCK=1); no network, seeded data.
     Mock(crate::mock::MockDriver),
 }
@@ -68,7 +70,9 @@ impl AnyDriver {
             Engine::Redis => AnyDriver::Redis(RedisDriver::connect(cfg).await?),
             Engine::Mongo => AnyDriver::Mongo(MongoDriver::connect(cfg).await?),
             Engine::Sqlite => AnyDriver::Sqlite(SqliteDriver::connect(cfg).await?),
-            Engine::Cassandra => AnyDriver::Cassandra(CassandraDriver::connect(cfg).await?),
+            Engine::Cassandra => {
+                AnyDriver::Cassandra(Box::new(CassandraDriver::connect(cfg).await?))
+            }
         })
     }
 
