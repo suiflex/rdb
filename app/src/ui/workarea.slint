@@ -22,6 +22,7 @@ export component WorkArea inherits Rectangle {
     in property <bool> sql-capable: true;
     in property <string> result-status;
     in property <bool> status-error;
+    in property <bool> query-running;
     in property <string> status-latency;
     in-out property <int> selected-row: 0;
     in-out property <int> selected-col: -1;
@@ -40,7 +41,16 @@ export component WorkArea inherits Rectangle {
     in property <string> query-label;    // "emiten-per-sektor.sql · saved"
     in property <string> results-meta;   // "10 rows · 38 ms"
     callback editor-key(string, bool, bool) -> bool;
-    callback editor-click-line(int);
+    callback editor-press(int, int);
+    callback editor-drag(int, int);
+    callback editor-select-word(int, int);
+    in property <bool> find-open;
+    in-out property <string> find-text;
+    in property <string> find-status;
+    callback find-changed(string);
+    callback find-next();
+    callback find-prev();
+    callback find-close();
     // Function view: read-only highlighted CREATE FUNCTION source.
     in property <bool> fn-mode: false;
     in property <string> fn-name;
@@ -92,6 +102,7 @@ export component WorkArea inherits Rectangle {
     callback select-cell(int, int);
     callback edit-cell(int, int);
     callback cell-edited(int, int, string);
+    callback cell-advance(int, int, string, bool);
     callback edit-cancelled();
     callback prev-page();
     callback next-page();
@@ -167,6 +178,20 @@ export component WorkArea inherits Rectangle {
                         enabled: !root.read-only;
                         clicked => { root.add-row(); }
                     }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    SecondaryButton {
+                        text: "− Row";
+                        enabled: !root.read-only;
+                        clicked => { root.mark-delete(); }
+                    }
+                }
+                if root.read-only && root.active-table != "": Text {
+                    text: "read-only";
+                    color: Tokens.text-faint;
+                    font-size: Tokens.font-sm;
+                    vertical-alignment: center;
                 }
                 VerticalLayout {
                     alignment: center;
@@ -361,8 +386,9 @@ export component WorkArea inherits Rectangle {
                     VerticalLayout {
                         alignment: center;
                         PrimaryButton {
-                            text: "▶ Run  ⌘⏎";
+                            text: root.query-running ? "Running…" : "▶ Run  ⌘⏎";
                             height: 28px;
+                            enabled: !root.query-running;
                             clicked => { root.run(); }
                         }
                     }
@@ -405,13 +431,83 @@ export component WorkArea inherits Rectangle {
                         }
                     }
                 }
+                // find bar (⌘F): input + match count + prev/next + close
+                if root.find-open: Rectangle {
+                    height: 36px;
+                    background: Tokens.chrome;
+                    // Focus the input one tick after the bar mounts. Calling
+                    // .focus() from the input's own `init` recurses through the
+                    // layout geometry solver (Slint 1.16); a deferred Timer
+                    // avoids it. `did-focus` resets on every reopen because the
+                    // conditional recreates this element.
+                    property <bool> did-focus;
+                    Timer {
+                        interval: 16ms;
+                        running: !parent.did-focus;
+                        triggered => { find-input.focus(); parent.did-focus = true; }
+                    }
+                    HorizontalLayout {
+                        padding-left: Tokens.sp3;
+                        padding-right: Tokens.sp3;
+                        spacing: Tokens.sp2;
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 240px;
+                                height: 26px;
+                                border-radius: Tokens.radius;
+                                border-width: 1px;
+                                border-color: Tokens.border-strong;
+                                background: Tokens.card;
+                                find-input := TextInput {
+                                    x: Tokens.sp2;
+                                    width: parent.width - 2 * Tokens.sp2;
+                                    vertical-alignment: center;
+                                    text: root.find-text;
+                                    color: Tokens.text;
+                                    font-family: Tokens.mono;
+                                    font-size: Tokens.font-sm;
+                                    single-line: true;
+                                    edited => { root.find-changed(self.text); }
+                                    accepted => { root.find-next(); }
+                                    key-pressed(e) => {
+                                        if (e.text == Key.Escape) { root.find-close(); return accept; }
+                                        return reject;
+                                    }
+                                }
+                            }
+                        }
+                        Text {
+                            text: root.find-status;
+                            color: Tokens.text-faint;
+                            font-size: Tokens.font-sm;
+                            font-family: Tokens.mono;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        VerticalLayout {
+                            alignment: center;
+                            SecondaryButton { text: "‹ Prev"; height: 26px; clicked => { root.find-prev(); } }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            SecondaryButton { text: "Next ›"; height: 26px; clicked => { root.find-next(); } }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            SecondaryButton { text: "✕"; height: 26px; clicked => { root.find-close(); } }
+                        }
+                    }
+                }
                 CodeEditor {
                     vertical-stretch: 1;
                     lines: root.editor-lines;
                     cursor-line: root.cursor-line;
                     cursor-col: root.cursor-col;
                     edit-key(t, cmd, shift) => { root.editor-key(t, cmd, shift) }
-                    clicked-line(l) => { root.editor-click-line(l); }
+                    press-pos(l, c) => { root.editor-press(l, c); }
+                    drag-pos(l, c) => { root.editor-drag(l, c); }
+                    select-word(l, c) => { root.editor-select-word(l, c); }
                 }
                 Rectangle { height: 1px; background: Tokens.border; }
                 // results header strip
@@ -463,7 +559,41 @@ export component WorkArea inherits Rectangle {
                 select-cell(r, c) => { root.select-cell(r, c); }
                 edit-cell(r, c) => { root.edit-cell(r, c); }
                 cell-edited(r, c, t) => { root.cell-edited(r, c, t); }
+                cell-advance(r, c, t, fwd) => { root.cell-advance(r, c, t, fwd); }
                 edit-cancelled() => { root.edit-cancelled(); }
+            }
+
+            // empty result: distinct from an error, distinct from loading
+            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0)
+                && root.result-kind == 0 && root.cells.length == 0
+                && !root.status-error && !root.query-running: VerticalLayout {
+                alignment: center;
+                spacing: Tokens.sp2;
+                Text {
+                    text: "No rows";
+                    color: Tokens.text-dim;
+                    font-size: Tokens.font-md;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: root.browse-mode && !root.read-only
+                        ? "Table is empty — “+ Row” inserts one"
+                        : "The query returned no rows";
+                    color: Tokens.text-faint;
+                    font-size: Tokens.font-sm;
+                    horizontal-alignment: center;
+                }
+            }
+
+            // in-flight query indicator
+            if root.query-running: VerticalLayout {
+                alignment: center;
+                Text {
+                    text: "Running…";
+                    color: Tokens.text-dim;
+                    font-size: Tokens.font-md;
+                    horizontal-alignment: center;
+                }
             }
 
             // Documents (Mongo)

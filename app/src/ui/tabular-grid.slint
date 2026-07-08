@@ -19,6 +19,7 @@ export component TabularGrid inherits ScrollView {
     callback select-cell(int, int);        // (row, col)
     callback edit-cell(int, int);          // double-click → open inline editor
     callback cell-edited(int, int, string); // Enter in the inline editor
+    callback cell-advance(int, int, string, bool); // Tab/Shift+Tab → commit + edit neighbour
     callback edit-cancelled();
 
     VerticalLayout {
@@ -184,6 +185,11 @@ export component TabularGrid inherits ScrollView {
                             key-pressed(e) => {
                                 if (e.text == Key.Escape) {
                                     root.edit-cancelled();
+                                    return accept;
+                                }
+                                if (e.text == Key.Tab || e.text == Key.Backtab) {
+                                    root.cell-advance(r, c, self.text,
+                                        e.text == Key.Tab && !e.modifiers.shift);
                                     return accept;
                                 }
                                 return reject;

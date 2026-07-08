@@ -369,6 +369,34 @@ async fn try_connect(
     }
 }
 
+/// Kind of the active tab ("table" | "sql" | "function"), empty when none.
+fn active_tab_kind(w: &MainWindow) -> String {
+    use slint::Model;
+    let tabs = w.get_tabs();
+    let ti = w.get_active_tab().max(0) as usize;
+    tabs.row_data(ti)
+        .map(|t| t.kind.to_string())
+        .unwrap_or_default()
+}
+
+/// Clipboard write; errors are ignored (no clipboard on some CI machines).
+fn clip_set(s: &str) {
+    use copypasta::ClipboardProvider;
+    if let Ok(mut c) = copypasta::ClipboardContext::new() {
+        let _ = c.set_contents(s.to_string());
+    }
+}
+
+/// Clipboard read; None when empty or unavailable.
+fn clip_get() -> Option<String> {
+    use copypasta::ClipboardProvider;
+    copypasta::ClipboardContext::new()
+        .ok()?
+        .get_contents()
+        .ok()
+        .filter(|s| !s.is_empty())
+}
+
 /// Record an executed query at the head of the live history (dedupe, cap 50).
 fn record_recent(list: &RefCell<Vec<String>>, text: &str) {
     let t = text.trim();
@@ -865,15 +893,27 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let ed = ed_state.borrow();
+            let sel = ed.selection();
             let lines: Vec<ModelRc<Span>> = ed
                 .lines
                 .iter()
-                .map(|l| {
-                    let spans: Vec<Span> = editor::lex_line(l)
+                .enumerate()
+                .map(|(li, l)| {
+                    let mut spans = editor::lex_line(l);
+                    // selection highlight: char-col range covered on this line
+                    if let Some(((sl, sc), (el, ec))) = sel {
+                        if li >= sl && li <= el {
+                            let a = if li == sl { sc } else { 0 };
+                            let b = if li == el { ec } else { l.chars().count() };
+                            spans = editor::overlay_selection(spans, a, b);
+                        }
+                    }
+                    let spans: Vec<Span> = spans
                         .into_iter()
                         .map(|sp| Span {
                             text: sp.text.into(),
                             kind: sp.kind,
+                            sel: sp.sel,
                         })
                         .collect();
                     ModelRc::from(Rc::new(VecModel::from(spans)))
@@ -897,12 +937,61 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let ed_state = ed_state.clone();
         let sync_editor = sync_editor.clone();
-        window.on_editor_key(move |text, cmd, _shift| {
+        window.on_editor_key(move |text, cmd, shift| {
             if cmd {
-                return false;
+                // Editor-owned cmd combos; everything else bubbles up to the
+                // window shortcut scope (⌘⏎ run, ⌘S commit, ⌘R refresh, …).
+                let handled = {
+                    let mut ed = ed_state.borrow_mut();
+                    match text.as_str() {
+                        "a" => {
+                            ed.select_all();
+                            true
+                        }
+                        "c" => {
+                            // no selection → copy the statement under the cursor
+                            let t = ed.selected_text().unwrap_or_else(|| ed.current_statement());
+                            clip_set(&t);
+                            true
+                        }
+                        "x" => {
+                            if let Some(t) = ed.selected_text() {
+                                clip_set(&t);
+                                ed.cut_selection();
+                            }
+                            true
+                        }
+                        "v" => {
+                            if let Some(t) = clip_get() {
+                                ed.insert(&t.replace("\r\n", "\n"));
+                            }
+                            true
+                        }
+                        "z" if shift => {
+                            ed.redo();
+                            true
+                        }
+                        "z" => {
+                            ed.undo();
+                            true
+                        }
+                        _ => false,
+                    }
+                };
+                if handled {
+                    sync_editor();
+                }
+                return handled;
             }
             let handled = {
                 let mut ed = ed_state.borrow_mut();
+                // movement keys: shift extends the selection, plain drops it
+                if matches!(
+                    text.as_str(),
+                    "\u{f700}" | "\u{f701}" | "\u{f702}" | "\u{f703}" | "\u{f729}" | "\u{f72b}"
+                ) {
+                    ed.set_selecting(shift);
+                }
                 let mut it = text.chars();
                 match (it.next(), it.next()) {
                     (Some(c), None) => match c {
@@ -920,6 +1009,12 @@ fn main() -> Result<(), slint::PlatformError> {
                         }
                         '\t' => {
                             ed.insert("  ");
+                            true
+                        }
+                        // Esc clears the selection; without one it bubbles
+                        // up (modal close).
+                        '\u{1b}' if ed.selection().is_some() => {
+                            ed.set_selecting(false);
                             true
                         }
                         '\u{f700}' => {
@@ -968,13 +1063,150 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let ed_state = ed_state.clone();
         let sync_editor = sync_editor.clone();
-        window.on_editor_click_line(move |line| {
-            {
-                let mut ed = ed_state.borrow_mut();
-                ed.line = (line.max(0) as usize).min(ed.lines.len() - 1);
-                ed.end();
-            }
+        window.on_editor_press(move |line, col| {
+            ed_state.borrow_mut().move_to(line, col, false);
             sync_editor();
+        });
+    }
+    {
+        let ed_state = ed_state.clone();
+        let sync_editor = sync_editor.clone();
+        window.on_editor_drag(move |line, col| {
+            ed_state.borrow_mut().move_to(line, col, true);
+            sync_editor();
+        });
+    }
+    {
+        let ed_state = ed_state.clone();
+        let sync_editor = sync_editor.clone();
+        window.on_editor_select_word(move |line, col| {
+            ed_state.borrow_mut().select_word_at(line, col);
+            sync_editor();
+        });
+    }
+
+    // ----- find-in-editor (⌘F) -----
+    let find_hits: Rc<RefCell<Vec<(usize, usize, usize)>>> = Rc::new(RefCell::new(Vec::new()));
+    // Select the find hit at `idx` and refresh the "n / total" readout.
+    #[allow(clippy::type_complexity)]
+    let show_find: Rc<dyn Fn(&MainWindow, usize)> = {
+        let ed_state = ed_state.clone();
+        let sync_editor = sync_editor.clone();
+        let find_hits = find_hits.clone();
+        Rc::new(move |w: &MainWindow, idx: usize| {
+            let hits = find_hits.borrow();
+            if let Some(&(l, s, e)) = hits.get(idx) {
+                ed_state.borrow_mut().set_selection((l, s), (l, e));
+                sync_editor();
+                w.set_find_status(SharedString::from(format!("{} / {}", idx + 1, hits.len())));
+            } else if w.get_find_text().is_empty() {
+                w.set_find_status(SharedString::default());
+            } else {
+                w.set_find_status(SharedString::from("no matches"));
+            }
+        })
+    };
+    // Recompute matches for `needle`, jump to the first at/after the cursor.
+    #[allow(clippy::type_complexity)]
+    let recompute_find: Rc<dyn Fn(&MainWindow, &str)> = {
+        let ed_state = ed_state.clone();
+        let find_hits = find_hits.clone();
+        let show_find = show_find.clone();
+        Rc::new(move |w: &MainWindow, needle: &str| {
+            let (cur, hits) = {
+                let ed = ed_state.borrow();
+                ((ed.line, ed.col), editor::find_matches(&ed.lines, needle))
+            };
+            let idx = hits
+                .iter()
+                .position(|&(l, s, _)| (l, s) >= cur)
+                .unwrap_or(0);
+            *find_hits.borrow_mut() = hits;
+            show_find(w, idx);
+        })
+    };
+    {
+        let weak = window.as_weak();
+        let ed_state = ed_state.clone();
+        let recompute_find = recompute_find.clone();
+        window.on_toggle_find(move || {
+            let Some(w) = weak.upgrade() else { return };
+            let opening = !w.get_find_open();
+            w.set_find_open(opening);
+            if opening {
+                // Seed with the current single-line selection, if any.
+                if let Some(sel) = ed_state.borrow().selected_text() {
+                    if !sel.contains('\n') && !sel.is_empty() {
+                        w.set_find_text(SharedString::from(sel));
+                    }
+                }
+                let needle = w.get_find_text().to_string();
+                recompute_find(&w, &needle);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let recompute_find = recompute_find.clone();
+        window.on_find_changed(move |text| {
+            if let Some(w) = weak.upgrade() {
+                recompute_find(&w, &text);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let find_hits = find_hits.clone();
+        let show_find = show_find.clone();
+        let step = |w: &MainWindow, find_hits: &RefCell<Vec<(usize, usize, usize)>>, dir: i32| {
+            let n = find_hits.borrow().len();
+            if n == 0 {
+                return None;
+            }
+            // Where are we now? The current caret sits at a hit's end.
+            let cur = (w.get_cursor_line() as usize, w.get_cursor_col() as usize);
+            let hits = find_hits.borrow();
+            let here = hits
+                .iter()
+                .position(|&(l, _, e)| (l, e) == cur)
+                .unwrap_or(0);
+            Some(((here as i32 + dir).rem_euclid(n as i32)) as usize)
+        };
+        let show_find2 = show_find.clone();
+        window.on_find_next(move || {
+            if let Some(w) = weak.upgrade() {
+                if let Some(i) = step(&w, &find_hits, 1) {
+                    show_find2(&w, i);
+                }
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let find_hits = find_hits.clone();
+        let show_find = show_find.clone();
+        window.on_find_prev(move || {
+            let Some(w) = weak.upgrade() else { return };
+            let n = find_hits.borrow().len();
+            if n == 0 {
+                return;
+            }
+            let cur = (w.get_cursor_line() as usize, w.get_cursor_col() as usize);
+            let here = find_hits
+                .borrow()
+                .iter()
+                .position(|&(l, _, e)| (l, e) == cur)
+                .unwrap_or(0);
+            let i = ((here as i32 - 1).rem_euclid(n as i32)) as usize;
+            show_find(&w, i);
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_find_close(move || {
+            if let Some(w) = weak.upgrade() {
+                w.set_find_open(false);
+            }
         });
     }
 
@@ -1133,6 +1365,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         .map(|sp| Span {
                             text: sp.text.into(),
                             kind: sp.kind,
+                            sel: false,
                         })
                         .collect();
                     ModelRc::from(Rc::new(VecModel::from(spans)))
@@ -1397,7 +1630,9 @@ fn main() -> Result<(), slint::PlatformError> {
             .position(|s| s.name == "bot ai tele")
             .map(|i| i as i32)
             .unwrap_or(0);
-        {
+        // "connections" IS the pre-connect screen; connecting would swap it
+        // for the workspace before the shot fires.
+        if screen != "connections" {
             let weak = window.as_weak();
             let t1 = Box::leak(Box::new(slint::Timer::default()));
             t1.start(
@@ -1469,6 +1704,109 @@ fn main() -> Result<(), slint::PlatformError> {
                         w.invoke_open_table("".into(), "emiten".into());
                     }
                 },
+            );
+        }
+
+        // E2E editing scenarios layered on the base screens above. Fixed
+        // delays race the async connect/browse pipeline, so each step fires
+        // when its precondition is observable, polling every 100ms.
+        let when = |cond: Rc<dyn Fn(&MainWindow) -> bool>, act: Rc<dyn Fn(&MainWindow)>| {
+            let weak = window.as_weak();
+            let t: &'static slint::Timer = Box::leak(Box::new(slint::Timer::default()));
+            t.start(
+                slint::TimerMode::Repeated,
+                std::time::Duration::from_millis(100),
+                move || {
+                    let Some(w) = weak.upgrade() else {
+                        t.stop();
+                        return;
+                    };
+                    if cond(&w) {
+                        t.stop();
+                        act(&w);
+                    }
+                },
+            );
+        };
+        use slint::Model as _;
+        // grid loaded with an editable page (pk fetched)
+        let grid_ready: Rc<dyn Fn(&MainWindow) -> bool> =
+            Rc::new(|w| w.get_grid_cells().row_count() > 0 && !w.get_grid_read_only());
+        let has_pending: Rc<dyn Fn(&MainWindow) -> bool> = Rc::new(|w| w.get_pending_count() > 0);
+        if matches!(
+            screen.as_str(),
+            "workspace-dirty" | "workspace-guard" | "workspace-commit" | "workspace-tabnav"
+        ) {
+            when(
+                grid_ready.clone(),
+                Rc::new(|w| w.invoke_cell_edited(0, 2, "Bayan EDITED".into())),
+            );
+        }
+        if screen == "workspace-dirty" {
+            // second pending change: a delete-marked row
+            when(
+                has_pending.clone(),
+                Rc::new(|w| {
+                    w.set_selected_row(2);
+                    w.invoke_mark_delete();
+                }),
+            );
+        }
+        if screen == "workspace-guard" {
+            // navigation with pending edits must be refused with a message
+            when(has_pending.clone(), Rc::new(|w| w.invoke_next_page()));
+        }
+        if screen == "workspace-commit" {
+            // full CRUD loop: buffer → WriteOps → mock commit → refetch
+            when(has_pending.clone(), Rc::new(|w| w.invoke_commit_edits()));
+        }
+        if screen == "workspace-tabnav" {
+            // Tab stores the edited cell and opens the neighbour's editor
+            when(
+                has_pending.clone(),
+                Rc::new(|w| w.invoke_cell_advance(0, 3, "TABBED".into(), true)),
+            );
+        }
+        if screen == "sql-select" {
+            // ⌘A select-all: the whole query gets the selection tint
+            when(
+                Rc::new(|w| !w.get_query_text().trim().is_empty()),
+                Rc::new(|w| {
+                    w.invoke_editor_key("a".into(), true, false);
+                }),
+            );
+        }
+        if screen == "sql-empty" {
+            // a query with zero rows shows the empty state, not a blank pane
+            let load = load_editor_text.clone();
+            when(
+                Rc::new(|w| !w.get_results_meta().is_empty()),
+                Rc::new(move |w| {
+                    load("SELECT * FROM emiten OFFSET 99999");
+                    w.invoke_run_query();
+                }),
+            );
+        }
+        if screen == "sql-find" {
+            // ⌘F find bar: highlights the first match of a term
+            when(
+                Rc::new(|w| !w.get_query_text().trim().is_empty()),
+                Rc::new(|w| {
+                    w.invoke_toggle_find();
+                    w.set_find_text("sector".into());
+                    w.invoke_find_changed("sector".into());
+                }),
+            );
+        }
+        if screen == "sql-multi" {
+            // multi-statement run: status reads "N statements · …"
+            let load = load_editor_text.clone();
+            when(
+                Rc::new(|w| !w.get_results_meta().is_empty()),
+                Rc::new(move |w| {
+                    load("SELECT 1;\nSELECT * FROM emiten LIMIT 5;");
+                    w.invoke_run_query();
+                }),
             );
         }
     }
@@ -1730,10 +2068,19 @@ fn main() -> Result<(), slint::PlatformError> {
             collapsed_categories.borrow_mut().clear();
             let weak2 = weak.clone();
             let store_driver = current.clone();
+            // Claim the driver slot synchronously, before any query/browse
+            // task spawned after this click can observe a stale None: those
+            // tasks await this lock and resolve once the connect lands.
+            let claimed = current.clone().try_lock_owned().ok();
             let engine = sc.engine;
             let raw_nodes = raw_nodes.clone();
             let fn_defs = fn_defs.clone();
             rt.spawn(async move {
+                let mut slot = match claimed {
+                    Some(g) => g,
+                    None => store_driver.clone().lock_owned().await,
+                };
+                *slot = None;
                 let result = async {
                     let cfg =
                         cfg.map_err(|e| rdbs_core::error::RdbsError::Connection(e.to_string()))?;
@@ -1767,7 +2114,8 @@ fn main() -> Result<(), slint::PlatformError> {
                                 }
                             }
                         }
-                        *store_driver.lock().await = Some((engine, driver));
+                        *slot = Some((engine, driver));
+                        drop(slot);
                         let nodes = model::to_tree_model(&schema);
                         let fields = model::to_structure_model(&schema);
                         // Stash raw nodes for later expand/collapse rebuilds, and
@@ -1900,25 +2248,59 @@ fn main() -> Result<(), slint::PlatformError> {
             let edit_buf = edit_buf.clone();
             let displayed_grid = displayed_grid.clone();
             let hidden_cols = hidden_cols.clone();
+            if let Some(w) = weak.upgrade() {
+                w.set_query_running(true);
+            }
             rt.spawn(async move {
                 let guard = current.lock().await;
                 let t0 = std::time::Instant::now();
-                let outcome = match guard.as_ref() {
+                // Multi-statement: SQL engines split on top-level `;` and run
+                // each in order, stopping at the first error. The last result
+                // is what the grid shows (TablePlus semantics). Redis/Mongo
+                // take the whole text as a single command.
+                let (outcome, n_stmts) = match guard.as_ref() {
                     Some((engine, driver)) => {
-                        match crate::query_parse::parse_query(*engine, &sql) {
-                            Ok(q) => driver.query(&q).await,
-                            Err(msg) => Err(rdbs_core::error::RdbsError::Query(msg)),
+                        let stmts = if matches!(
+                            engine,
+                            rdbs_connstore::Engine::Postgres | rdbs_connstore::Engine::MySql
+                        ) {
+                            editor::split_statements(&sql)
+                        } else {
+                            vec![sql.clone()]
+                        };
+                        let n = stmts.len().max(1);
+                        let mut out = Err(rdbs_core::error::RdbsError::Query("empty query".into()));
+                        for (i, s) in stmts.iter().enumerate() {
+                            out = match crate::query_parse::parse_query(*engine, s) {
+                                Ok(q) => driver.query(&q).await,
+                                Err(msg) => Err(rdbs_core::error::RdbsError::Query(msg)),
+                            };
+                            if let Err(e) = &out {
+                                // Point the user at the offending statement.
+                                if n > 1 {
+                                    out = Err(rdbs_core::error::RdbsError::Query(format!(
+                                        "statement {}/{n}: {e}",
+                                        i + 1
+                                    )));
+                                }
+                                break;
+                            }
                         }
+                        (out, n)
                     }
-                    None => Err(rdbs_core::error::RdbsError::Connection(
-                        "not connected".into(),
-                    )),
+                    None => (
+                        Err(rdbs_core::error::RdbsError::Connection(
+                            "not connected".into(),
+                        )),
+                        1,
+                    ),
                 };
                 let elapsed_ms = t0.elapsed().as_millis().max(1) as u64;
                 let view = outcome.as_ref().ok().map(model::to_result_view);
                 let err = outcome.err();
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
+                        w.set_query_running(false);
                         match (view, err) {
                             (Some(v), _) => {
                                 // Only tabular-shaped views have resizable columns.
@@ -1978,9 +2360,11 @@ fn main() -> Result<(), slint::PlatformError> {
                                 w.set_status_latency(SharedString::from(format!(
                                     "{elapsed_ms} ms"
                                 )));
-                                w.set_results_meta(SharedString::from(format!(
-                                    "{shown} rows · {elapsed_ms} ms"
-                                )));
+                                w.set_results_meta(SharedString::from(if n_stmts > 1 {
+                                    format!("{n_stmts} statements · {shown} rows · {elapsed_ms} ms")
+                                } else {
+                                    format!("{shown} rows · {elapsed_ms} ms")
+                                }));
                                 // Fresh result: type-aware default column widths.
                                 let widths: Vec<f32> = match &v {
                                     model::ResultView::Table(g) => g
@@ -2044,6 +2428,11 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(w) = weak.upgrade() {
                 let text = w.get_query_text().to_string();
                 record_recent(&recent_queries, &text);
+                // A manual query result has no row identity — never editable.
+                // (The browse path re-enables editing after its PK fetch.)
+                if active_tab_kind(&w) != "table" {
+                    w.set_grid_read_only(true);
+                }
                 run_sql(text);
                 if w.get_sidebar_mode() != 0 {
                     rebuild_query_tree("");
@@ -2092,14 +2481,26 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // ----- Run Selection: run the statement under the cursor -----
+    // ----- Run Selection: selected text, else statement under the cursor -----
     {
+        let weak = window.as_weak();
         let run_sql = run_sql.clone();
         let ed_state = ed_state.clone();
         let recent_queries = recent_queries.clone();
         window.on_run_selection(move || {
-            let stmt = ed_state.borrow().current_statement();
+            let stmt = {
+                let ed = ed_state.borrow();
+                ed.selected_text()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| ed.current_statement())
+            };
             if !stmt.is_empty() {
+                if let Some(w) = weak.upgrade() {
+                    if active_tab_kind(&w) != "table" {
+                        w.set_grid_read_only(true);
+                    }
+                }
                 record_recent(&recent_queries, &stmt);
                 run_sql(stmt);
             }
@@ -2121,6 +2522,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let trimmed = text.trim();
             if trimmed.is_empty() {
                 return;
+            }
+            if active_tab_kind(&w) != "table" {
+                w.set_grid_read_only(true);
             }
             if trimmed.to_uppercase().starts_with("EXPLAIN") {
                 run_sql(trimmed.to_string());
@@ -2156,6 +2560,23 @@ fn main() -> Result<(), slint::PlatformError> {
     // the editor, and run it (TablePlus-style click-to-view). -----
     // Shared page runner: build the browse text for the current state, mirror
     // it in the editor, and run it. Used by open-table and the footer nav.
+    // Refuse to navigate away from uncommitted edits: a fresh page would
+    // silently drop them. Returns true (and says so) when edits are pending.
+    let guard_pending: Rc<dyn Fn(&MainWindow) -> bool> = {
+        let edit_buf = edit_buf.clone();
+        Rc::new(move |w: &MainWindow| {
+            let n = edit_buf.lock().unwrap().pending_count();
+            if n == 0 {
+                return false;
+            }
+            w.set_status_error(true);
+            w.set_result_status(SharedString::from(format!(
+                "{n} pending change(s) — ⌘S to commit, or Discard"
+            )));
+            true
+        })
+    };
+
     let run_browse: Rc<dyn Fn()> = {
         let weak = window.as_weak();
         let cur_engine = cur_engine.clone();
@@ -2186,10 +2607,14 @@ fn main() -> Result<(), slint::PlatformError> {
         let rt = rt.clone();
         let run_browse = run_browse.clone();
         let edit_buf = edit_buf.clone();
+        let guard_pending = guard_pending.clone();
         window.on_open_table(move |db, label| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            if guard_pending(&w) {
+                return;
+            }
             let Some(engine) = *cur_engine.borrow() else {
                 return;
             };
@@ -2292,9 +2717,14 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // ----- pagination footer: prev / next / refresh / limit -----
     {
+        let weak = window.as_weak();
         let browse = browse.clone();
         let run_browse = run_browse.clone();
+        let guard_pending = guard_pending.clone();
         window.on_prev_page(move || {
+            if weak.upgrade().is_some_and(|w| guard_pending(&w)) {
+                return;
+            }
             {
                 let mut st = browse.lock().unwrap();
                 if st.page == 0 {
@@ -2306,9 +2736,14 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
     {
+        let weak = window.as_weak();
         let browse = browse.clone();
         let run_browse = run_browse.clone();
+        let guard_pending = guard_pending.clone();
         window.on_next_page(move || {
+            if weak.upgrade().is_some_and(|w| guard_pending(&w)) {
+                return;
+            }
             browse.lock().unwrap().page += 1;
             run_browse();
         });
@@ -2319,7 +2754,11 @@ fn main() -> Result<(), slint::PlatformError> {
         let current = current.clone();
         let rt = rt.clone();
         let run_browse = run_browse.clone();
+        let guard_pending = guard_pending.clone();
         window.on_refresh_page(move || {
+            if weak.upgrade().is_some_and(|w| guard_pending(&w)) {
+                return;
+            }
             run_browse();
             // Re-count in the background so the total tracks external writes.
             let table = browse.lock().unwrap().table.clone();
@@ -2343,9 +2782,14 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
     {
+        let weak = window.as_weak();
         let browse = browse.clone();
         let run_browse = run_browse.clone();
+        let guard_pending = guard_pending.clone();
         window.on_set_limit(move |text| {
+            if weak.upgrade().is_some_and(|w| guard_pending(&w)) {
+                return;
+            }
             let parsed = text.trim().parse::<u64>().ok();
             let Some(l) = parsed.map(|l| l.clamp(1, 10_000)) else {
                 return;
@@ -2356,6 +2800,22 @@ fn main() -> Result<(), slint::PlatformError> {
                 st.page = 0;
             }
             run_browse();
+        });
+    }
+
+    // ----- ⌘R: refresh what the user is looking at -----
+    {
+        let weak = window.as_weak();
+        window.on_refresh_result(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if active_tab_kind(&w) == "table" {
+                // guarded against pending edits inside refresh-page
+                w.invoke_refresh_page();
+            } else if !w.get_query_text().trim().is_empty() {
+                w.invoke_run_query();
+            }
         });
     }
 
@@ -2642,6 +3102,16 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             // Editable only in a tabular browse view with a known identity.
             if w.get_grid_read_only() || w.get_show_structure() || w.get_result_kind() == 3 {
+                // Tell the user why the double-click did nothing.
+                if w.get_grid_read_only() && !w.get_show_structure() && w.get_result_kind() == 0 {
+                    let msg = if active_tab_kind(&w) == "table" {
+                        "read-only — table has no primary key"
+                    } else {
+                        "read-only result — open the table from the sidebar to edit"
+                    };
+                    w.set_status_error(false);
+                    w.set_result_status(SharedString::from(msg));
+                }
                 return;
             }
             w.set_editing_row(r);
@@ -2693,6 +3163,71 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_editing_row(-1);
                 w.set_editing_col(-1);
             }
+        });
+    }
+
+    // ----- inline editing: Tab stores the cell and edits the neighbour -----
+    {
+        let weak = window.as_weak();
+        let edit_buf = edit_buf.clone();
+        let displayed_grid = displayed_grid.clone();
+        let repaint_edits = repaint_edits.clone();
+        window.on_cell_advance(move |r, c, text, forward| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let (base, ncols) = {
+                let dg = displayed_grid.lock().unwrap();
+                let Some(g) = dg.as_ref() else {
+                    return;
+                };
+                (g.rows.len(), g.columns.len())
+            };
+            if ncols == 0 {
+                return;
+            }
+            let nrows = base + edit_buf.lock().unwrap().inserts.len();
+            {
+                // same buffer write as cell-edited
+                let mut buf = edit_buf.lock().unwrap();
+                let (r, c) = (r as usize, c as usize);
+                if r >= base {
+                    let i = r - base;
+                    if let Some(row) = buf.inserts.get_mut(i) {
+                        if c < row.len() {
+                            row[c] = text.to_string();
+                        }
+                    }
+                } else {
+                    buf.changes.insert((r, c), text.to_string());
+                }
+            }
+            // neighbour cell, wrapping across row ends (TablePlus-style)
+            let (mut nr, mut nc) = (r, c);
+            if forward {
+                nc += 1;
+                if nc >= ncols as i32 {
+                    nc = 0;
+                    nr += 1;
+                }
+            } else {
+                nc -= 1;
+                if nc < 0 {
+                    nc = ncols as i32 - 1;
+                    nr -= 1;
+                }
+            }
+            repaint_edits(&w);
+            if nr < 0 || nr >= nrows as i32 {
+                // ran off the grid: close the editor, keep the stored value
+                w.set_editing_row(-1);
+                w.set_editing_col(-1);
+                return;
+            }
+            w.set_selected_row(nr);
+            w.set_selected_col(nc);
+            w.set_editing_row(nr);
+            w.set_editing_col(nc);
         });
     }
 
@@ -2791,6 +3326,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let displayed_grid = displayed_grid.clone();
         let current = current.clone();
         let rt = rt.clone();
+        let commit_buf = edit_buf.clone();
         window.on_commit_edits(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -2817,6 +3353,11 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             let weak2 = weak.clone();
             let current = current.clone();
+            let commit_buf = commit_buf.clone();
+            if let Some(w) = weak.upgrade() {
+                w.set_status_error(false);
+                w.set_result_status(SharedString::from("saving…"));
+            }
             rt.spawn(async move {
                 let outcome = {
                     let guard = current.lock().await;
@@ -2833,9 +3374,12 @@ fn main() -> Result<(), slint::PlatformError> {
                     };
                     match outcome {
                         Ok(n) => {
+                            // Written: drop the buffer BEFORE the refresh so
+                            // the pending-edits guard lets the refetch through.
+                            commit_buf.lock().unwrap().clear();
+                            w.set_pending_count(0);
                             w.set_status_error(false);
                             w.set_result_status(SharedString::from(format!("{n} rows written")));
-                            // Refetch page + count; the fresh result clears the buffer.
                             w.invoke_refresh_page();
                         }
                         Err(e) => {

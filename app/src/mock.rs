@@ -629,6 +629,19 @@ impl Driver for MockDriver {
 
         if upper.starts_with("SELECT") {
             let Some(table) = from_table(&upper, sql) else {
+                // A `FROM`-less SELECT (e.g. `SELECT 1`, `SELECT now()`): echo
+                // the projection as a single scalar row so smoke tests and
+                // multi-statement scripts behave like a real engine.
+                if !upper.contains(" FROM ") {
+                    let expr = sql[6..].trim().trim_end_matches(';').trim();
+                    return Ok(ResultSet::Tabular {
+                        cols: vec![Column {
+                            name: "?column?".into(),
+                            type_name: "text".into(),
+                        }],
+                        rows: vec![vec![Cell::Text(expr.to_string())]],
+                    });
+                }
                 return Err(RdbsError::UnsupportedQuery);
             };
             let tables = self.tables.lock().unwrap();

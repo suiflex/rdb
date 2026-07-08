@@ -4,11 +4,13 @@
 //! re-lexing incremental: only the edited line changes shape.
 
 /// Span kinds, mirrored in code-editor.slint: 0 plain · 1 keyword ·
-/// 2 string · 3 function · 4 comment · 5 number.
+/// 2 string · 3 function · 4 comment · 5 number. `sel` marks the span as
+/// inside the selection (background highlight).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Span {
     pub text: String,
     pub kind: i32,
+    pub sel: bool,
 }
 
 const KEYWORDS: &[&str] = &[
@@ -113,6 +115,7 @@ pub fn lex_line(line: &str) -> Vec<Span> {
         spans.push(Span {
             text: text.to_string(),
             kind,
+            sel: false,
         });
     };
 
@@ -177,9 +180,63 @@ pub fn lex_line(line: &str) -> Vec<Span> {
         spans.push(Span {
             text: String::new(),
             kind: 0,
+            sel: false,
         });
     }
     spans
+}
+
+/// Split `spans` at the char columns `a..b` and mark the covered slice as
+/// selected. `a >= b` returns the spans untouched.
+pub fn overlay_selection(spans: Vec<Span>, a: usize, b: usize) -> Vec<Span> {
+    if a >= b {
+        return spans;
+    }
+    let mut out: Vec<Span> = Vec::with_capacity(spans.len() + 2);
+    let mut col = 0usize;
+    for sp in spans {
+        let len = sp.text.chars().count();
+        let (s, e) = (col, col + len);
+        col = e;
+        // split points inside this span, clamped to its bounds
+        let cut_a = a.clamp(s, e) - s;
+        let cut_b = b.clamp(s, e) - s;
+        if cut_a >= cut_b {
+            out.push(sp);
+            continue;
+        }
+        let chars: Vec<char> = sp.text.chars().collect();
+        let piece = |r: std::ops::Range<usize>, sel: bool| Span {
+            text: chars[r].iter().collect(),
+            kind: sp.kind,
+            sel,
+        };
+        if cut_a > 0 {
+            out.push(piece(0..cut_a, false));
+        }
+        out.push(piece(cut_a..cut_b, true));
+        if cut_b < len {
+            out.push(piece(cut_b..len, false));
+        }
+    }
+    out.retain(|s| !s.text.is_empty());
+    if out.is_empty() {
+        out.push(Span {
+            text: String::new(),
+            kind: 0,
+            sel: false,
+        });
+    }
+    out
+}
+
+/// One undo step: the full buffer + cursor. Snapshots are cheap at editor
+/// scale (a query is a few KB) and make undo/redo trivially correct.
+#[derive(Clone)]
+struct Snap {
+    lines: Vec<String>,
+    line: usize,
+    col: usize,
 }
 
 /// Editor buffer + cursor. The text is the single source of truth; the UI
@@ -189,7 +246,15 @@ pub struct EditorState {
     pub lines: Vec<String>,
     pub line: usize, // cursor line
     pub col: usize,  // cursor column (chars)
+    /// Selection anchor; the cursor is the moving end. None = no selection.
+    sel: Option<(usize, usize)>,
+    undo_stack: Vec<Snap>,
+    redo_stack: Vec<Snap>,
+    /// Last undo push came from plain typing — coalesce the next one.
+    typing: bool,
 }
+
+const UNDO_CAP: usize = 200;
 
 impl EditorState {
     pub fn from_text(text: &str) -> Self {
@@ -199,7 +264,12 @@ impl EditorState {
         }
         let line = lines.len() - 1;
         let col = lines[line].chars().count();
-        EditorState { lines, line, col }
+        EditorState {
+            lines,
+            line,
+            col,
+            ..Default::default()
+        }
     }
 
     pub fn text(&self) -> String {
@@ -219,13 +289,149 @@ impl EditorState {
             .unwrap_or(l.len())
     }
 
+    fn byte_at(l: &str, col: usize) -> usize {
+        l.char_indices().nth(col).map(|(b, _)| b).unwrap_or(l.len())
+    }
+
+    // ----- undo / redo -----
+
+    fn snap(&self) -> Snap {
+        Snap {
+            lines: self.lines.clone(),
+            line: self.line,
+            col: self.col,
+        }
+    }
+
+    fn push_undo(&mut self, typing: bool) {
+        if !(typing && self.typing) {
+            self.undo_stack.push(self.snap());
+            if self.undo_stack.len() > UNDO_CAP {
+                self.undo_stack.remove(0);
+            }
+        }
+        self.typing = typing;
+        self.redo_stack.clear();
+    }
+
+    fn restore(&mut self, s: Snap) {
+        self.lines = s.lines;
+        self.line = s.line;
+        self.col = s.col;
+        self.sel = None;
+        self.typing = false;
+    }
+
+    pub fn undo(&mut self) {
+        if let Some(s) = self.undo_stack.pop() {
+            self.redo_stack.push(self.snap());
+            self.restore(s);
+        }
+    }
+
+    pub fn redo(&mut self) {
+        if let Some(s) = self.redo_stack.pop() {
+            self.undo_stack.push(self.snap());
+            self.restore(s);
+        }
+    }
+
+    // ----- selection -----
+
+    /// Called before every cursor move: shift extends (anchoring on first
+    /// use), a plain move drops the selection.
+    pub fn set_selecting(&mut self, shift: bool) {
+        if shift {
+            if self.sel.is_none() {
+                self.sel = Some((self.line, self.col));
+            }
+        } else {
+            self.sel = None;
+        }
+    }
+
+    /// Normalized selection range (start ≤ end), None when empty.
+    pub fn selection(&self) -> Option<((usize, usize), (usize, usize))> {
+        let a = self.sel?;
+        let b = (self.line, self.col);
+        match a.cmp(&b) {
+            std::cmp::Ordering::Less => Some((a, b)),
+            std::cmp::Ordering::Greater => Some((b, a)),
+            std::cmp::Ordering::Equal => None,
+        }
+    }
+
+    pub fn select_all(&mut self) {
+        self.sel = Some((0, 0));
+        self.line = self.lines.len() - 1;
+        self.col = self.lines[self.line].chars().count();
+    }
+
+    /// Set an explicit anchor→cursor selection (used by find-in-editor to
+    /// highlight a match). Both ends are clamped to the buffer.
+    pub fn set_selection(&mut self, anchor: (usize, usize), cursor: (usize, usize)) {
+        let clamp = |l: usize, c: usize, lines: &[String]| {
+            let l = l.min(lines.len() - 1);
+            (l, c.min(lines[l].chars().count()))
+        };
+        let a = clamp(anchor.0, anchor.1, &self.lines);
+        let cur = clamp(cursor.0, cursor.1, &self.lines);
+        self.sel = Some(a);
+        self.line = cur.0;
+        self.col = cur.1;
+    }
+
+    pub fn selected_text(&self) -> Option<String> {
+        let ((sl, sc), (el, ec)) = self.selection()?;
+        if sl == el {
+            let l = &self.lines[sl];
+            let (a, b) = (Self::byte_at(l, sc), Self::byte_at(l, ec));
+            return Some(l[a..b].to_string());
+        }
+        let mut out = self.lines[sl][Self::byte_at(&self.lines[sl], sc)..].to_string();
+        for l in &self.lines[sl + 1..el] {
+            out.push('\n');
+            out.push_str(l);
+        }
+        out.push('\n');
+        out.push_str(&self.lines[el][..Self::byte_at(&self.lines[el], ec)]);
+        Some(out)
+    }
+
+    /// Remove the selected range; cursor lands at its start. False when
+    /// there was nothing selected.
+    fn remove_selection(&mut self) -> bool {
+        let Some(((sl, sc), (el, ec))) = self.selection() else {
+            self.sel = None;
+            return false;
+        };
+        let tail = self.lines[el][Self::byte_at(&self.lines[el], ec)..].to_string();
+        let keep = Self::byte_at(&self.lines[sl], sc);
+        self.lines[sl].truncate(keep);
+        self.lines[sl].push_str(&tail);
+        self.lines.drain(sl + 1..=el);
+        self.line = sl;
+        self.col = sc;
+        self.sel = None;
+        true
+    }
+
+    // ----- mutations (all undo-recorded, all selection-aware) -----
+
     pub fn insert(&mut self, s: &str) {
+        let one_char = s.chars().count() == 1 && !s.contains('\n');
+        self.push_undo(one_char && self.sel.is_none());
+        self.remove_selection();
+        self.insert_raw(s);
+    }
+
+    fn insert_raw(&mut self, s: &str) {
         if s.contains('\n') {
             for (i, part) in s.split('\n').enumerate() {
                 if i > 0 {
-                    self.newline();
+                    self.newline_raw();
                 }
-                self.insert(part);
+                self.insert_raw(part);
             }
             return;
         }
@@ -235,6 +441,12 @@ impl EditorState {
     }
 
     pub fn newline(&mut self) {
+        self.push_undo(false);
+        self.remove_selection();
+        self.newline_raw();
+    }
+
+    fn newline_raw(&mut self) {
         let b = self.byte_col();
         let rest = self.lines[self.line].split_off(b);
         self.lines.insert(self.line + 1, rest);
@@ -243,6 +455,10 @@ impl EditorState {
     }
 
     pub fn backspace(&mut self) {
+        self.push_undo(false);
+        if self.remove_selection() {
+            return;
+        }
         if self.col > 0 {
             self.col -= 1;
             let b = self.byte_col();
@@ -256,6 +472,10 @@ impl EditorState {
     }
 
     pub fn delete(&mut self) {
+        self.push_undo(false);
+        if self.remove_selection() {
+            return;
+        }
         let len = self.lines[self.line].chars().count();
         if self.col < len {
             let b = self.byte_col();
@@ -264,6 +484,47 @@ impl EditorState {
             let next = self.lines.remove(self.line + 1);
             self.lines[self.line].push_str(&next);
         }
+    }
+
+    /// Cut helper: caller copies `selected_text()` first.
+    pub fn cut_selection(&mut self) {
+        if self.selection().is_some() {
+            self.push_undo(false);
+            self.remove_selection();
+        }
+    }
+
+    /// Place the cursor at (line, col), clamped to the buffer. `extend`
+    /// keeps/creates the selection anchor (drag or shift-click); otherwise the
+    /// selection is dropped (a plain click).
+    pub fn move_to(&mut self, line: i32, col: i32, extend: bool) {
+        self.set_selecting(extend);
+        self.line = (line.max(0) as usize).min(self.lines.len() - 1);
+        self.col = (col.max(0) as usize).min(self.lines[self.line].chars().count());
+    }
+
+    /// Select the identifier/word under (line, col) — double-click behaviour.
+    /// Falls back to placing the cursor when the spot isn't on a word char.
+    pub fn select_word_at(&mut self, line: i32, col: i32) {
+        self.move_to(line, col, false);
+        let chars: Vec<char> = self.lines[self.line].chars().collect();
+        if chars.is_empty() {
+            return;
+        }
+        let at = self.col.min(chars.len().saturating_sub(1));
+        if !is_ident(chars[at]) {
+            return;
+        }
+        let mut s = at;
+        while s > 0 && is_ident(chars[s - 1]) {
+            s -= 1;
+        }
+        let mut e = at + 1;
+        while e < chars.len() && is_ident(chars[e]) {
+            e += 1;
+        }
+        self.sel = Some((self.line, s));
+        self.col = e;
     }
 
     pub fn move_cursor(&mut self, dl: i32, dc: i32) {
@@ -341,6 +602,80 @@ impl EditorState {
             stmt.to_string()
         }
     }
+}
+
+/// Split SQL text into individual statements on top-level semicolons,
+/// ignoring semicolons inside single-quoted literals and `-- line comments`.
+/// Trailing `;` and blank/comment-only segments are dropped. Text with no
+/// real statement yields an empty vec; a single statement (no `;`) yields one.
+pub fn split_statements(text: &str) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out: Vec<String> = Vec::new();
+    let mut seg_start = 0usize;
+    let mut in_str = false;
+    let mut i = 0usize;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\'' {
+            in_str = !in_str;
+        } else if !in_str && c == '-' && chars.get(i + 1) == Some(&'-') {
+            // skip to end of line
+            while i < chars.len() && chars[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        } else if c == ';' && !in_str {
+            let seg: String = chars[seg_start..i].iter().collect();
+            if !is_blank_sql(&seg) {
+                out.push(seg.trim().to_string());
+            }
+            seg_start = i + 1;
+        }
+        i += 1;
+    }
+    if seg_start < chars.len() {
+        let seg: String = chars[seg_start..].iter().collect();
+        if !is_blank_sql(&seg) {
+            out.push(seg.trim().to_string());
+        }
+    }
+    out
+}
+
+/// Case-insensitive find of every occurrence of `needle` across `lines`.
+/// Returns `(line, start_col, end_col)` in char columns. Empty needle → none.
+/// Overlapping matches are not reported (scan advances past each hit).
+pub fn find_matches(lines: &[String], needle: &str) -> Vec<(usize, usize, usize)> {
+    let mut out = Vec::new();
+    if needle.is_empty() {
+        return out;
+    }
+    let nlow: Vec<char> = needle.to_lowercase().chars().collect();
+    let nlen = nlow.len();
+    for (li, line) in lines.iter().enumerate() {
+        let hay: Vec<char> = line.to_lowercase().chars().collect();
+        if hay.len() < nlen {
+            continue;
+        }
+        let mut i = 0;
+        while i + nlen <= hay.len() {
+            if hay[i..i + nlen] == nlow[..] {
+                out.push((li, i, i + nlen));
+                i += nlen;
+            } else {
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+/// True when a statement segment carries no executable SQL — only whitespace
+/// and `--` line comments.
+fn is_blank_sql(seg: &str) -> bool {
+    seg.lines()
+        .map(|l| l.split("--").next().unwrap_or("").trim())
+        .all(|l| l.is_empty())
 }
 
 #[cfg(test)]
@@ -424,5 +759,236 @@ mod tests {
     fn statement_without_semicolons_is_whole_text() {
         let ed = EditorState::from_text("SELECT *\nFROM t");
         assert_eq!(ed.current_statement(), "SELECT *\nFROM t");
+    }
+
+    // ----- selection -----
+
+    #[test]
+    fn shift_arrows_build_selection_plain_move_clears() {
+        let mut ed = EditorState::from_text("SELECT 1");
+        ed.line = 0;
+        ed.col = 0;
+        ed.set_selecting(true);
+        ed.move_cursor(0, 6);
+        assert_eq!(ed.selected_text().as_deref(), Some("SELECT"));
+        ed.set_selecting(false);
+        ed.move_cursor(0, 1);
+        assert_eq!(ed.selected_text(), None);
+    }
+
+    #[test]
+    fn multiline_selection_text_and_delete() {
+        let mut ed = EditorState::from_text("abc\ndef\nghi");
+        ed.line = 0;
+        ed.col = 1;
+        ed.set_selecting(true);
+        ed.line = 2;
+        ed.col = 2;
+        assert_eq!(ed.selected_text().as_deref(), Some("bc\ndef\ngh"));
+        ed.backspace(); // deletes the selection, not one char
+        assert_eq!(ed.text(), "ai");
+        assert_eq!((ed.line, ed.col), (0, 1));
+    }
+
+    #[test]
+    fn typing_replaces_selection() {
+        let mut ed = EditorState::from_text("SELECT 111");
+        ed.line = 0;
+        ed.col = 7;
+        ed.set_selecting(true);
+        ed.col = 10;
+        ed.insert("2");
+        assert_eq!(ed.text(), "SELECT 2");
+    }
+
+    #[test]
+    fn select_all_covers_everything() {
+        let mut ed = EditorState::from_text("a\nb");
+        ed.select_all();
+        assert_eq!(ed.selected_text().as_deref(), Some("a\nb"));
+    }
+
+    #[test]
+    fn backward_selection_normalizes() {
+        let mut ed = EditorState::from_text("hello");
+        ed.end();
+        ed.set_selecting(true);
+        ed.move_cursor(0, -3);
+        assert_eq!(ed.selected_text().as_deref(), Some("llo"));
+    }
+
+    // ----- undo / redo -----
+
+    #[test]
+    fn undo_redo_roundtrip() {
+        let mut ed = EditorState::from_text("SELECT 1");
+        ed.end();
+        ed.insert(";");
+        assert_eq!(ed.text(), "SELECT 1;");
+        ed.undo();
+        assert_eq!(ed.text(), "SELECT 1");
+        ed.redo();
+        assert_eq!(ed.text(), "SELECT 1;");
+    }
+
+    #[test]
+    fn typing_coalesces_into_one_undo_step() {
+        let mut ed = EditorState::from_text("");
+        for c in ["a", "b", "c"] {
+            ed.insert(c);
+        }
+        ed.undo();
+        assert_eq!(ed.text(), "");
+    }
+
+    #[test]
+    fn undo_restores_deleted_selection() {
+        let mut ed = EditorState::from_text("abc\ndef");
+        ed.select_all();
+        ed.delete();
+        assert_eq!(ed.text(), "");
+        ed.undo();
+        assert_eq!(ed.text(), "abc\ndef");
+    }
+
+    #[test]
+    fn cut_removes_and_undo_restores() {
+        let mut ed = EditorState::from_text("keep cut");
+        ed.line = 0;
+        ed.col = 4;
+        ed.set_selecting(true);
+        ed.end();
+        assert_eq!(ed.selected_text().as_deref(), Some(" cut"));
+        ed.cut_selection();
+        assert_eq!(ed.text(), "keep");
+        ed.undo();
+        assert_eq!(ed.text(), "keep cut");
+    }
+
+    #[test]
+    fn paste_multiline_via_insert() {
+        let mut ed = EditorState::from_text("");
+        ed.insert("SELECT *\nFROM t;");
+        assert_eq!(ed.text(), "SELECT *\nFROM t;");
+        assert_eq!((ed.line, ed.col), (1, 7));
+    }
+
+    // ----- selection overlay rendering -----
+
+    #[test]
+    fn overlay_selection_splits_spans() {
+        let spans = lex_line("SELECT 1");
+        let out = overlay_selection(spans, 3, 8);
+        let joined: String = out.iter().map(|s| s.text.clone()).collect();
+        assert_eq!(joined, "SELECT 1");
+        let sel: String = out
+            .iter()
+            .filter(|s| s.sel)
+            .map(|s| s.text.clone())
+            .collect();
+        assert_eq!(sel, "ECT 1");
+    }
+
+    #[test]
+    fn overlay_selection_empty_range_noop() {
+        let spans = lex_line("SELECT 1");
+        let out = overlay_selection(spans.clone(), 4, 4);
+        assert_eq!(out, spans);
+    }
+
+    // ----- statement splitting -----
+
+    #[test]
+    fn split_single_statement_no_semicolon() {
+        assert_eq!(split_statements("SELECT 1"), vec!["SELECT 1"]);
+    }
+
+    #[test]
+    fn split_multiple_and_drops_trailing_and_blank() {
+        let got = split_statements("SELECT 1; SELECT 2;\n  ;\nSELECT 3;");
+        assert_eq!(got, vec!["SELECT 1", "SELECT 2", "SELECT 3"]);
+    }
+
+    #[test]
+    fn split_ignores_semicolon_in_literal() {
+        let got = split_statements("INSERT INTO t VALUES ('a;b'); SELECT 2;");
+        assert_eq!(got, vec!["INSERT INTO t VALUES ('a;b')", "SELECT 2"]);
+    }
+
+    #[test]
+    fn split_ignores_semicolon_in_line_comment() {
+        let got = split_statements("SELECT 1 -- a; b\n; SELECT 2");
+        assert_eq!(got, vec!["SELECT 1 -- a; b", "SELECT 2"]);
+    }
+
+    #[test]
+    fn split_comment_only_segment_is_dropped() {
+        let got = split_statements("SELECT 1;\n-- just a comment\n");
+        assert_eq!(got, vec!["SELECT 1"]);
+    }
+
+    #[test]
+    fn split_empty_text_is_empty() {
+        assert!(split_statements("   \n  ").is_empty());
+        assert!(split_statements(";;;").is_empty());
+    }
+
+    // ----- mouse hit-test -----
+
+    #[test]
+    fn move_to_clamps_and_clears_selection() {
+        let mut ed = EditorState::from_text("abc\nde");
+        ed.select_all();
+        ed.move_to(0, 99, false); // past line end, no extend
+        assert_eq!((ed.line, ed.col), (0, 3));
+        assert_eq!(ed.selected_text(), None);
+    }
+
+    #[test]
+    fn move_to_extend_builds_selection() {
+        let mut ed = EditorState::from_text("hello world");
+        ed.move_to(0, 0, false);
+        ed.move_to(0, 5, true); // drag to col 5
+        assert_eq!(ed.selected_text().as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn select_word_grabs_identifier() {
+        let mut ed = EditorState::from_text("SELECT id_sector FROM t");
+        ed.select_word_at(0, 10); // inside "id_sector"
+        assert_eq!(ed.selected_text().as_deref(), Some("id_sector"));
+    }
+
+    #[test]
+    fn select_word_on_space_just_moves() {
+        let mut ed = EditorState::from_text("a  b");
+        ed.select_word_at(0, 1); // on a space
+        assert_eq!(ed.selected_text(), None);
+    }
+
+    // ----- find-in-editor -----
+
+    #[test]
+    fn find_matches_case_insensitive_multi_line() {
+        let lines = vec!["SELECT id FROM t".to_string(), "where id = ID".to_string()];
+        let m = find_matches(&lines, "id");
+        // "id" in line0 col7, line1 "id"(6) and "ID"(11)
+        assert_eq!(m, vec![(0, 7, 9), (1, 6, 8), (1, 11, 13)]);
+    }
+
+    #[test]
+    fn find_matches_empty_needle_none() {
+        let lines = vec!["abc".to_string()];
+        assert!(find_matches(&lines, "").is_empty());
+    }
+
+    #[test]
+    fn find_match_becomes_selection() {
+        let mut ed = EditorState::from_text("SELECT id FROM t");
+        let m = find_matches(&ed.lines, "from");
+        assert_eq!(m.len(), 1);
+        let (l, s, e) = m[0];
+        ed.set_selection((l, s), (l, e));
+        assert_eq!(ed.selected_text().as_deref(), Some("FROM"));
     }
 }
