@@ -650,6 +650,32 @@ async fn fetch_indexes(
     }
 }
 
+/// Does one cell satisfy `op` against `needle` (already lowercased)? Numeric
+/// comparison when both sides parse as f64, else case-insensitive text.
+/// Shared by the global filter and the per-column filter row.
+fn cell_matches(cell: &model::VmCell, op: &str, needle: &str) -> bool {
+    use std::cmp::Ordering;
+    match op {
+        "is null" => cell.is_null,
+        "not null" => !cell.is_null,
+        "=" => cell.text.to_lowercase() == needle,
+        "≠" | "!=" => cell.text.to_lowercase() != needle,
+        ">" | "<" | ">=" | "<=" => {
+            let ord = match (cell.text.parse::<f64>(), needle.parse::<f64>()) {
+                (Ok(a), Ok(b)) => a.partial_cmp(&b),
+                _ => Some(cell.text.to_lowercase().as_str().cmp(needle)),
+            };
+            match ord {
+                Some(Ordering::Greater) => op == ">" || op == ">=",
+                Some(Ordering::Less) => op == "<" || op == "<=",
+                Some(Ordering::Equal) => op == ">=" || op == "<=",
+                None => false,
+            }
+        }
+        _ => cell.text.to_lowercase().contains(needle),
+    }
+}
+
 /// Row filter with an optional column + operator condition (`needle` already
 /// lowercased). `col: None` falls back to the all-cell contains filter.
 fn filter_grid_cond(
@@ -666,38 +692,14 @@ fn filter_grid_cond(
     if needle.is_empty() && op != "is null" && op != "not null" {
         return g.clone();
     }
-    let keep = |row: &[model::VmCell]| -> bool {
-        let Some(cell) = row.get(c) else {
-            return false;
-        };
-        match op {
-            "is null" => cell.is_null,
-            "not null" => !cell.is_null,
-            "=" => cell.text.to_lowercase() == needle,
-            "≠" => cell.text.to_lowercase() != needle,
-            ">" | "<" => match (cell.text.parse::<f64>(), needle.parse::<f64>()) {
-                (Ok(a), Ok(b)) => {
-                    if op == ">" {
-                        a > b
-                    } else {
-                        a < b
-                    }
-                }
-                _ => {
-                    let t = cell.text.to_lowercase();
-                    if op == ">" {
-                        t.as_str() > needle
-                    } else {
-                        t.as_str() < needle
-                    }
-                }
-            },
-            _ => cell.text.to_lowercase().contains(needle),
-        }
-    };
     model::GridModel {
         columns: g.columns.clone(),
-        rows: g.rows.iter().filter(|r| keep(r)).cloned().collect(),
+        rows: g
+            .rows
+            .iter()
+            .filter(|r| r.get(c).is_some_and(|cell| cell_matches(cell, op, needle)))
+            .cloned()
+            .collect(),
     }
 }
 
