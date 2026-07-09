@@ -337,10 +337,11 @@ export component MainWindow inherits Window {
             }
             return reject;
         }
-    }
 
-    VerticalLayout {
-        spacing: 0px;
+        // The whole app UI lives inside this FocusScope so keys the editor and
+        // other inner FocusScopes reject bubble up here to the ⌘ shortcut table.
+        VerticalLayout {
+            spacing: 0px;
 
         // ================= toolbar row (44px, under native titlebar) =================
         Rectangle {
@@ -918,5 +919,6 @@ export component MainWindow inherits Window {
         cancel() => {
             root.form-cancel();
         }
+    }
     }
 }
