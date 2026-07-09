@@ -4,7 +4,7 @@ A native, lightweight, cross-platform database manager built with Rust and Slint
 
 ## Features
 
-- **Multi-engine** — PostgreSQL, MySQL/MariaDB, Redis, MongoDB in one app
+- **Multi-engine** — PostgreSQL, MySQL/MariaDB, Redis, MongoDB, SQLite, Cassandra in one app
 - **Native UI** — GPU-rendered via Slint (no webview, no Chromium, no Electron)
 - **Fast & light** — no GC, no runtime; aggressive release optimization (LTO, `opt-level=z`, `panic=abort`)
 - **Secure connections** — passwords stored in OS keychain (macOS Keychain, libsecret) with AES-GCM encrypted-file fallback
@@ -16,7 +16,7 @@ A native, lightweight, cross-platform database manager built with Rust and Slint
 - **Connection test** — verify creds before saving
 - **Light / dark mode** toggle
 
-## Supported Engines (MVP)
+## Supported Engines
 
 | Engine | Protocol | Result type |
 |--------|----------|-------------|
@@ -24,6 +24,8 @@ A native, lightweight, cross-platform database manager built with Rust and Slint
 | MySQL / MariaDB | `mysql_async` | Tabular |
 | Redis | `redis` crate | Key-value / raw |
 | MongoDB | `mongodb` crate | Documents (JSON) |
+| SQLite | `rusqlite` | Tabular |
+| Cassandra | `scylla` | Tabular |
 
 ## Design
 
@@ -52,7 +54,7 @@ pub trait Driver: Send + Sync {
 
 ```rust
 pub enum Query {
-    Sql(String),           // PostgreSQL, MySQL
+    Sql(String),           // PostgreSQL, MySQL, SQLite, Cassandra
     Command(Vec<String>),  // Redis: ["GET", "key"]
     Mongo(MongoOp),        // find / insert / aggregate
 }
@@ -64,8 +66,8 @@ pub enum Query {
 pub enum ResultSet {
     Tabular   { cols: Vec<Column>, rows: Vec<Row> },
     Documents(Vec<serde_json::Value>),
-    Affected  { count: u64 },
-    RedisValue(String),
+    KeyValue(Vec<(String, RedisValue)>),
+    Affected(u64),
 }
 ```
 
@@ -147,7 +149,7 @@ Type in the **Filter** box above the grid — filters rows client-side without r
 
 ## Project status
 
-Active development. MVP covers 4 engines; planned expansion to ~20 (SQLite, ClickHouse, BigQuery, Oracle, Cassandra, and more).
+Active development. Ships 6 engines (PostgreSQL, MySQL, Redis, MongoDB, SQLite, Cassandra); planned expansion to ~20 (ClickHouse, BigQuery, Oracle, and more).
 
 ## Crate overview
 
@@ -160,6 +162,8 @@ Active development. MVP covers 4 engines; planned expansion to ~20 (SQLite, Clic
 | `rdbs-driver-mysql` | MySQL/MariaDB driver via `mysql_async` |
 | `rdbs-driver-redis` | Redis driver via `redis` crate |
 | `rdbs-driver-mongo` | MongoDB driver via `mongodb` crate |
+| `rdbs-driver-sqlite` | SQLite driver via `rusqlite` |
+| `rdbs-driver-cassandra` | Cassandra driver via `scylla` |
 
 ## License
 
