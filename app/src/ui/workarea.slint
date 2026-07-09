@@ -53,6 +53,11 @@ export component WorkArea inherits Rectangle {
     callback completion-choose(int);
     in property <string> query-label;    // "emiten-per-sektor.sql · saved"
     in property <string> results-meta;   // "10 rows · 38 ms"
+    // result tabs (SQL): ⌘⏎ replaces the active one, ⌘\ appends
+    in property <[string]> result-tabs;
+    in property <int> active-result;
+    callback select-result-tab(int);
+    callback close-result-tab(int);
     callback editor-key(string, bool, bool, bool) -> bool;
     callback editor-press(int, int);
     callback editor-drag(int, int);
@@ -536,6 +541,43 @@ export component WorkArea inherits Rectangle {
                     TextButton { text: "Copy"; clicked => { root.copy-results(); } }
                     TextButton { text: "Export CSV"; clicked => { root.export-csv(); } }
                     TextButton { text: "Chart"; clicked => { root.sql-view-mode = 2; } }
+                }
+                // result tabs — appear once ⌘\ has spawned a second result
+                if root.result-tabs.length > 1: HorizontalLayout {
+                    height: 30px;
+                    padding-left: Tokens.sp3;
+                    padding-right: Tokens.sp3;
+                    spacing: Tokens.sp1;
+                    alignment: start;
+                    for name[i] in root.result-tabs: Rectangle {
+                        height: 24px;
+                        width: rl.preferred-width + 2 * Tokens.sp2 + 18px;
+                        border-radius: Tokens.radius;
+                        background: i == root.active-result ? Tokens.accent-tint
+                            : rta.has-hover ? Tokens.chrome : transparent;
+                        rta := TouchArea { clicked => { root.select-result-tab(i); } }
+                        HorizontalLayout {
+                            padding-left: Tokens.sp2;
+                            padding-right: Tokens.sp1;
+                            spacing: Tokens.sp1;
+                            rl := Text {
+                                text: name;
+                                color: i == root.active-result ? Tokens.on-tint : Tokens.text-dim;
+                                font-size: Tokens.font-sm;
+                                vertical-alignment: center;
+                            }
+                            Rectangle {
+                                width: 16px;
+                                Text {
+                                    text: "×";
+                                    color: Tokens.text-faint;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: center;
+                                }
+                                TouchArea { clicked => { root.close-result-tab(i); } }
+                            }
+                        }
+                    }
                 }
             }
         }

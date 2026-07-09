@@ -349,6 +349,15 @@ struct BrowseState {
     pk_cols: Vec<String>,
 }
 
+/// One cached SQL result, shown as a result tab. ⌘⏎ replaces the active one;
+/// ⌘\ appends a new one.
+#[derive(Clone)]
+struct StoredResult {
+    view: model::ResultView,
+    meta: String,
+    latency: String,
+}
+
 /// 1-based display bounds of the current page window plus prev/next
 /// availability. `shown` is how many rows the page actually returned.
 /// Connect + ping, bounded to 8s so "Testing connection…" always resolves.
@@ -934,6 +943,125 @@ fn apply_result(w: &MainWindow, view: model::ResultView) {
     }
 }
 
+/// Present a fresh result view: reset all client-side view state (filter, sort,
+/// hidden, order, per-column filters, pending edits), rebuild the column
+/// metadata + widths + chart, and push it to the grid. Shared by a new query
+/// run and by switching between result tabs.
+#[allow(clippy::too_many_arguments)]
+fn present_view(
+    w: &MainWindow,
+    v: model::ResultView,
+    meta: &str,
+    latency: &str,
+    last_view: &Arc<std::sync::Mutex<Option<model::ResultView>>>,
+    displayed_grid: &Arc<std::sync::Mutex<Option<model::GridModel>>>,
+    hidden_cols: &Arc<std::sync::Mutex<HashSet<usize>>>,
+    sort_state: &Arc<std::sync::Mutex<(i32, bool)>>,
+    col_order: &Arc<std::sync::Mutex<Vec<usize>>>,
+    col_filters: &Arc<std::sync::Mutex<Vec<String>>>,
+    edit_buf: &Arc<std::sync::Mutex<model::EditBuffer>>,
+    browse: &Arc<std::sync::Mutex<BrowseState>>,
+) {
+    let ncols = match &v {
+        model::ResultView::Table(g) => g.columns.len(),
+        model::ResultView::Documents(d) => d.grid.columns.len(),
+        _ => 0,
+    };
+    let shown = match &v {
+        model::ResultView::Table(g) => g.rows.len(),
+        model::ResultView::Documents(d) => d.grid.rows.len(),
+        model::ResultView::Affected(_) => 0,
+    } as u64;
+    *last_view.lock().unwrap() = Some(v.clone());
+    w.set_grid_filter(SharedString::default());
+    hidden_cols.lock().unwrap().clear();
+    *col_order.lock().unwrap() = (0..ncols).collect();
+    *sort_state.lock().unwrap() = (-1, true);
+    *col_filters.lock().unwrap() = vec![String::new(); ncols];
+    w.set_grid_sort_col(-1);
+    w.set_grid_sort_asc(true);
+    w.set_grid_col_filters(ModelRc::from(Rc::new(VecModel::from(vec![
+            SharedString::default();
+            ncols
+        ]))));
+    let colnames: Vec<SharedString> = match &v {
+        model::ResultView::Table(g) => g
+            .columns
+            .iter()
+            .map(|c| SharedString::from(c.name.clone()))
+            .collect(),
+        model::ResultView::Documents(d) => d
+            .grid
+            .columns
+            .iter()
+            .map(|c| SharedString::from(c.name.clone()))
+            .collect(),
+        _ => Vec::new(),
+    };
+    w.set_col_hidden(ModelRc::from(Rc::new(VecModel::from(vec![
+        false;
+        colnames.len()
+    ]))));
+    let mut fcols: Vec<SharedString> = vec![SharedString::from("any column")];
+    fcols.extend(colnames.iter().cloned());
+    w.set_filter_columns(ModelRc::from(Rc::new(VecModel::from(fcols))));
+    w.set_all_columns(ModelRc::from(Rc::new(VecModel::from(colnames))));
+    *displayed_grid.lock().unwrap() = view_grid(&v);
+    {
+        let st = browse.lock().unwrap();
+        let mut b = edit_buf.lock().unwrap();
+        b.clear();
+        b.table = st.table.clone();
+        b.pk_cols = st.pk_cols.clone();
+    }
+    w.set_pending_count(0);
+    w.set_editing_row(-1);
+    w.set_editing_col(-1);
+    w.set_status_error(false);
+    w.set_status_latency(SharedString::from(latency));
+    w.set_results_meta(SharedString::from(meta));
+    let widths: Vec<f32> = match &v {
+        model::ResultView::Table(g) => g
+            .columns
+            .iter()
+            .map(|c| default_col_width(&c.name, &c.type_name))
+            .collect(),
+        _ => vec![140.0; ncols],
+    };
+    w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(widths))));
+    let bars: Vec<ChartBar> = match &v {
+        model::ResultView::Table(g) => model::chart_data(g)
+            .into_iter()
+            .map(|(label, value, frac)| ChartBar {
+                label: label.into(),
+                value: value.into(),
+                frac,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    w.set_chart_bars(ModelRc::from(Rc::new(VecModel::from(bars))));
+    apply_result(w, v);
+    let st = browse.lock().unwrap().clone();
+    if st.table.is_some() {
+        let (start, end, prev, next) = page_bounds(st.page, st.limit, st.total, shown);
+        w.set_page_start(start as i32);
+        w.set_page_end(end as i32);
+        w.set_total_rows(st.total.map(|t| t as i32).unwrap_or(-1));
+        w.set_can_prev(prev);
+        w.set_can_next(next);
+    }
+}
+
+/// Set the result-tab strip labels ("Result 1", …) and active index.
+fn set_result_tabs(w: &MainWindow, count: usize, active: usize) {
+    let labels: Vec<SharedString> = (1..=count)
+        .map(|n| SharedString::from(format!("Result {n}")))
+        .collect();
+    w.set_result_tabs(ModelRc::from(Rc::new(VecModel::from(labels))));
+    w.set_active_result(active as i32);
+}
+
 /// Format a number with `.` thousands separators (e.g. 1000 → "1.000").
 fn group_thousands(n: u64) -> String {
     let s = n.to_string();
@@ -1074,6 +1202,12 @@ fn main() -> Result<(), slint::PlatformError> {
     // no filter. Reset to blanks on every fresh result.
     let col_filters: Arc<std::sync::Mutex<Vec<String>>> =
         Arc::new(std::sync::Mutex::new(Vec::new()));
+    // Result tabs for the SQL editor: cached results + the active index. ⌘\
+    // sets `result_new_tab` so the next run appends instead of replacing.
+    let results: Arc<std::sync::Mutex<Vec<StoredResult>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let active_result: Arc<std::sync::Mutex<usize>> = Arc::new(std::sync::Mutex::new(0));
+    let result_new_tab = Arc::new(std::sync::atomic::AtomicBool::new(false));
     // Engine of the live connection, kept on the UI thread so table clicks can
     // build an engine-appropriate "browse this table" query synchronously.
     let cur_engine: Rc<RefCell<Option<rdbs_connstore::Engine>>> = Rc::new(RefCell::new(None));
@@ -2836,6 +2970,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let sort_state = sort_state.clone();
         let col_order = col_order.clone();
         let col_filters = col_filters.clone();
+        let results = results.clone();
+        let active_result = active_result.clone();
+        let result_new_tab = result_new_tab.clone();
         Rc::new(move |sql: String| {
             let weak2 = weak.clone();
             let current = current.clone();
@@ -2847,6 +2984,10 @@ fn main() -> Result<(), slint::PlatformError> {
             let sort_state = sort_state.clone();
             let col_order = col_order.clone();
             let col_filters = col_filters.clone();
+            let results = results.clone();
+            let active_result = active_result.clone();
+            // ⌘\ set this; consume it so the next plain run replaces again.
+            let new_tab = result_new_tab.swap(false, std::sync::atomic::Ordering::SeqCst);
             if let Some(w) = weak.upgrade() {
                 w.set_query_running(true);
             }
@@ -2905,114 +3046,55 @@ fn main() -> Result<(), slint::PlatformError> {
                         w.set_query_running(false);
                         match (view, err) {
                             (Some(v), _) => {
-                                // Only tabular-shaped views have resizable columns.
-                                let ncols = match &v {
-                                    model::ResultView::Table(g) => g.columns.len(),
-                                    model::ResultView::Documents(d) => d.grid.columns.len(),
-                                    _ => 0,
-                                };
-                                // Cache for client-side filtering, then reset the
-                                // filter input so the full result shows first.
                                 let shown = match &v {
                                     model::ResultView::Table(g) => g.rows.len(),
                                     model::ResultView::Documents(d) => d.grid.rows.len(),
                                     model::ResultView::Affected(_) => 0,
                                 } as u64;
-                                *last_view.lock().unwrap() = Some(v.clone());
-                                w.set_grid_filter(SharedString::default());
-                                // Fresh result: all columns visible, natural
-                                // order, no client-side sort.
-                                hidden_cols.lock().unwrap().clear();
-                                *col_order.lock().unwrap() = (0..ncols).collect();
-                                *sort_state.lock().unwrap() = (-1, true);
-                                *col_filters.lock().unwrap() = vec![String::new(); ncols];
-                                w.set_grid_sort_col(-1);
-                                w.set_grid_sort_asc(true);
-                                w.set_grid_col_filters(ModelRc::from(Rc::new(VecModel::from(
-                                    vec![SharedString::default(); ncols],
-                                ))));
-                                let colnames: Vec<SharedString> = match &v {
-                                    model::ResultView::Table(g) => g
-                                        .columns
-                                        .iter()
-                                        .map(|c| SharedString::from(c.name.clone()))
-                                        .collect(),
-                                    model::ResultView::Documents(d) => d
-                                        .grid
-                                        .columns
-                                        .iter()
-                                        .map(|c| SharedString::from(c.name.clone()))
-                                        .collect(),
-                                    _ => Vec::new(),
-                                };
-                                w.set_col_hidden(ModelRc::from(Rc::new(VecModel::from(
-                                    vec![false; colnames.len()],
-                                ))));
-                                let mut fcols: Vec<SharedString> =
-                                    vec![SharedString::from("any column")];
-                                fcols.extend(colnames.iter().cloned());
-                                w.set_filter_columns(ModelRc::from(Rc::new(VecModel::from(fcols))));
-                                w.set_all_columns(ModelRc::from(Rc::new(VecModel::from(colnames))));
-                                // Fresh result: pending edits refer to rows that
-                                // no longer exist — drop them and re-anchor the
-                                // buffer to the (possibly new) browse target.
-                                *displayed_grid.lock().unwrap() = view_grid(&v);
-                                {
-                                    let st = browse.lock().unwrap();
-                                    let mut b = edit_buf.lock().unwrap();
-                                    b.clear();
-                                    b.table = st.table.clone();
-                                    b.pk_cols = st.pk_cols.clone();
-                                }
-                                w.set_pending_count(0);
-                                w.set_editing_row(-1);
-                                w.set_editing_col(-1);
-                                w.set_status_error(false);
-                                w.set_status_latency(SharedString::from(format!(
-                                    "{elapsed_ms} ms"
-                                )));
-                                w.set_results_meta(SharedString::from(if n_stmts > 1 {
+                                let meta = if n_stmts > 1 {
                                     format!("{n_stmts} statements · {shown} rows · {elapsed_ms} ms")
                                 } else {
                                     format!("{shown} rows · {elapsed_ms} ms")
-                                }));
-                                // Fresh result: type-aware default column widths.
-                                let widths: Vec<f32> = match &v {
-                                    model::ResultView::Table(g) => g
-                                        .columns
-                                        .iter()
-                                        .map(|c| default_col_width(&c.name, &c.type_name))
-                                        .collect(),
-                                    _ => vec![140.0; ncols],
                                 };
-                                w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(
-                                    widths,
-                                ))));
-                                // Chart segment data (SQL results only).
-                                let bars: Vec<ChartBar> = match &v {
-                                    model::ResultView::Table(g) => model::chart_data(g)
-                                        .into_iter()
-                                        .map(|(label, value, frac)| ChartBar {
-                                            label: label.into(),
-                                            value: value.into(),
-                                            frac,
-                                        })
-                                        .collect(),
-                                    _ => Vec::new(),
-                                };
-                                w.set_chart_bars(ModelRc::from(Rc::new(VecModel::from(bars))));
-                                apply_result(&w, v);
-                                // Browse mode: refresh the pagination footer.
-                                let st = browse.lock().unwrap().clone();
-                                if st.table.is_some() {
-                                    let (start, end, prev, next) =
-                                        page_bounds(st.page, st.limit, st.total, shown);
-                                    w.set_page_start(start as i32);
-                                    w.set_page_end(end as i32);
-                                    w.set_total_rows(st.total.map(|t| t as i32).unwrap_or(-1));
-                                    w.set_can_prev(prev);
-                                    w.set_can_next(next);
+                                let latency = format!("{elapsed_ms} ms");
+                                // Result tabs are for SQL runs; browse stays single.
+                                let is_browse = browse.lock().unwrap().table.is_some();
+                                if is_browse {
+                                    results.lock().unwrap().clear();
+                                    set_result_tabs(&w, 0, 0);
+                                } else {
+                                    let mut rv = results.lock().unwrap();
+                                    let mut ar = active_result.lock().unwrap();
+                                    let sr = StoredResult {
+                                        view: v.clone(),
+                                        meta: meta.clone(),
+                                        latency: latency.clone(),
+                                    };
+                                    if new_tab || rv.is_empty() {
+                                        rv.push(sr);
+                                        *ar = rv.len() - 1;
+                                    } else {
+                                        if *ar >= rv.len() {
+                                            *ar = 0;
+                                        }
+                                        rv[*ar] = sr;
+                                    }
+                                    set_result_tabs(&w, rv.len(), *ar);
                                 }
+                                present_view(
+                                    &w,
+                                    v,
+                                    &meta,
+                                    &latency,
+                                    &last_view,
+                                    &displayed_grid,
+                                    &hidden_cols,
+                                    &sort_state,
+                                    &col_order,
+                                    &col_filters,
+                                    &edit_buf,
+                                    &browse,
+                                );
                             }
                             (None, Some(e)) => {
                                 *last_view.lock().unwrap() = None;
@@ -3622,6 +3704,8 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let tab_texts = tab_texts.clone();
+        let results = results.clone();
+        let active_result = active_result.clone();
         window.on_new_tab(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -3638,18 +3722,21 @@ fn main() -> Result<(), slint::PlatformError> {
             set_tab_titles(&w, count);
             w.set_active_tab((count - 1) as i32);
             w.set_query_text(SharedString::default());
+            // Fresh query tab starts with no result tabs.
+            results.lock().unwrap().clear();
+            *active_result.lock().unwrap() = 0;
+            set_result_tabs(&w, 0, 0);
             clear_grid(&w);
         });
     }
 
-    // ----- ⌘\: run the current statement in a fresh tab -----
+    // ----- ⌘\: run the current statement into a NEW result tab -----
     {
         let weak = window.as_weak();
-        let tab_texts = tab_texts.clone();
         let ed_state = ed_state.clone();
         let run_sql = run_sql.clone();
-        let load_editor_text = load_editor_text.clone();
         let recent_queries = recent_queries.clone();
+        let result_new_tab = result_new_tab.clone();
         window.on_run_new_tab(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -3664,22 +3751,104 @@ fn main() -> Result<(), slint::PlatformError> {
             if stmt.is_empty() {
                 return;
             }
-            // Stash the current tab, open a fresh one holding the statement.
-            let active = w.get_active_tab() as usize;
-            {
-                let mut t = tab_texts.borrow_mut();
-                if let Some(slot) = t.get_mut(active) {
-                    *slot = w.get_query_text().to_string();
-                }
-                t.push(stmt.clone());
-            }
-            let count = tab_texts.borrow().len();
-            set_tab_titles(&w, count);
-            w.set_active_tab((count - 1) as i32);
-            load_editor_text(&stmt);
+            // Same editor; the run lands in an appended result tab.
+            result_new_tab.store(true, std::sync::atomic::Ordering::SeqCst);
             w.set_grid_read_only(true);
             record_recent(&recent_queries, &stmt);
             run_sql(stmt);
+        });
+    }
+
+    // ----- switch / close result tabs -----
+    {
+        let weak = window.as_weak();
+        let results = results.clone();
+        let active_result = active_result.clone();
+        let last_view = last_view.clone();
+        let displayed_grid = displayed_grid.clone();
+        let hidden_cols = hidden_cols.clone();
+        let sort_state = sort_state.clone();
+        let col_order = col_order.clone();
+        let col_filters = col_filters.clone();
+        let edit_buf = edit_buf.clone();
+        let browse = browse.clone();
+        window.on_select_result_tab(move |i| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let i = i.max(0) as usize;
+            let sr = results.lock().unwrap().get(i).cloned();
+            let Some(sr) = sr else {
+                return;
+            };
+            *active_result.lock().unwrap() = i;
+            w.set_active_result(i as i32);
+            present_view(
+                &w,
+                sr.view,
+                &sr.meta,
+                &sr.latency,
+                &last_view,
+                &displayed_grid,
+                &hidden_cols,
+                &sort_state,
+                &col_order,
+                &col_filters,
+                &edit_buf,
+                &browse,
+            );
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let results = results.clone();
+        let active_result = active_result.clone();
+        let last_view = last_view.clone();
+        let displayed_grid = displayed_grid.clone();
+        let hidden_cols = hidden_cols.clone();
+        let sort_state = sort_state.clone();
+        let col_order = col_order.clone();
+        let col_filters = col_filters.clone();
+        let edit_buf = edit_buf.clone();
+        let browse = browse.clone();
+        window.on_close_result_tab(move |i| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let i = i.max(0) as usize;
+            let (count, active, sr) = {
+                let mut rv = results.lock().unwrap();
+                if i >= rv.len() {
+                    return;
+                }
+                rv.remove(i);
+                let mut ar = active_result.lock().unwrap();
+                if *ar >= rv.len() {
+                    *ar = rv.len().saturating_sub(1);
+                }
+                (rv.len(), *ar, rv.get(*ar).cloned())
+            };
+            set_result_tabs(&w, count, active);
+            match sr {
+                Some(sr) => present_view(
+                    &w,
+                    sr.view,
+                    &sr.meta,
+                    &sr.latency,
+                    &last_view,
+                    &displayed_grid,
+                    &hidden_cols,
+                    &sort_state,
+                    &col_order,
+                    &col_filters,
+                    &edit_buf,
+                    &browse,
+                ),
+                None => {
+                    clear_grid(&w);
+                    *last_view.lock().unwrap() = None;
+                }
+            }
         });
     }
 

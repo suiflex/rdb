@@ -207,7 +207,11 @@ export component MainWindow inherits Window {
     in property <bool> palette-open;
     in property <[PaletteItem]> palette-items;
     callback new-tab();
-    callback run-new-tab();   // ⌘\: run current statement in a fresh tab
+    callback run-new-tab();   // ⌘\: run current statement into a new result tab
+    in property <[string]> result-tabs;   // "Result 1", "Result 2", …
+    in property <int> active-result;
+    callback select-result-tab(int);
+    callback close-result-tab(int);
     callback close-tab();
     callback select-tab(int);
     callback toggle-palette();
@@ -727,6 +731,10 @@ export component MainWindow inherits Window {
                         completion-visible: root.completion-visible;
                         completion-selected: root.completion-selected;
                         completion-choose(i) => { root.completion-choose(i); }
+                        result-tabs: root.result-tabs;
+                        active-result: root.active-result;
+                        select-result-tab(i) => { root.select-result-tab(i); }
+                        close-result-tab(i) => { root.close-result-tab(i); }
                         query-label: root.query-label;
                         results-meta: root.results-meta;
                         fn-mode: root.fn-mode;
