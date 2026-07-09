@@ -2729,11 +2729,24 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let run_sql = run_sql.clone();
+        let ed_state = ed_state.clone();
         let recent_queries = recent_queries.clone();
         let rebuild_query_tree = rebuild_query_tree.clone();
         window.on_run_query(move || {
             if let Some(w) = weak.upgrade() {
-                let text = w.get_query_text().to_string();
+                // ⌘⏎ / Run: the highlighted selection, else just the statement
+                // under the cursor — so a buffer with several statements runs
+                // only the one the user is editing (⌘A then Run for all).
+                let text = {
+                    let ed = ed_state.borrow();
+                    ed.selected_text()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| ed.current_statement())
+                };
+                if text.is_empty() {
+                    return;
+                }
                 record_recent(&recent_queries, &text);
                 // A manual query result has no row identity — never editable.
                 // (The browse path re-enables editing after its PK fetch.)
