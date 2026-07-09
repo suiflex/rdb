@@ -37,6 +37,7 @@ export component WorkArea inherits Rectangle {
     in property <int> grid-sort-col: -1; // client-side sort: display col + dir
     in property <bool> grid-sort-asc: true;
     callback sort-col(int);
+    callback reorder-col(int, length);
     in-out property <bool> sql-open: false;
     // SQL editor model (Rust lexer output) + cursor
     in property <[[Span]]> editor-lines;
@@ -560,6 +561,7 @@ export component WorkArea inherits Rectangle {
                 sorted-col: root.grid-sort-col;
                 sort-asc: root.grid-sort-asc;
                 sort-col(i) => { root.sort-col(i); }
+                reorder-col(i, x) => { root.reorder-col(i, x); }
                 selected-row <=> root.selected-row;
                 selected-col <=> root.selected-col;
                 editing-row: root.editing-row;

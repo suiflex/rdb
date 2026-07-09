@@ -55,6 +55,7 @@ export component MainWindow inherits Window {
     in property <int> grid-sort-col: -1;  // client-side result sort
     in property <bool> grid-sort-asc: true;
     callback sort-col(int);
+    callback reorder-col(int, length);
     in property <[TreeNode]> query-tree;  // sidebar Queries/History rows
     in property <[string]> schema-list;
     in-out property <string> schema-name: "public";
@@ -702,6 +703,7 @@ export component MainWindow inherits Window {
                         grid-sort-col: root.grid-sort-col;
                         grid-sort-asc: root.grid-sort-asc;
                         sort-col(i) => { root.sort-col(i); }
+                        reorder-col(i, x) => { root.reorder-col(i, x); }
                         editor-lines: root.editor-lines;
                         cursor-line: root.cursor-line;
                         cursor-col: root.cursor-col;

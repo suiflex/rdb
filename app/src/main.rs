@@ -2118,6 +2118,98 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ----- header drag: reorder result columns -----
+    {
+        let weak = window.as_weak();
+        let last_view = last_view.clone();
+        let edit_buf = edit_buf.clone();
+        let displayed_grid = displayed_grid.clone();
+        let hidden_cols = hidden_cols.clone();
+        let sort_state = sort_state.clone();
+        let col_order = col_order.clone();
+        window.on_reorder_col(move |from, local_x| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let from = from.max(0) as usize;
+            let widths: Vec<f32> = w.get_grid_col_widths().iter().collect();
+            if from >= widths.len() {
+                return;
+            }
+            // absolute drop position within the columns strip → target display col
+            let start: f32 = widths.iter().take(from).sum();
+            let drop = start + local_x;
+            let mut acc = 0.0f32;
+            let mut target = widths.len() - 1;
+            for (i, wd) in widths.iter().enumerate() {
+                if drop < acc + wd {
+                    target = i;
+                    break;
+                }
+                acc += wd;
+            }
+            if target == from {
+                return;
+            }
+            let hidden = hidden_cols.lock().unwrap().clone();
+            // move the dragged column among the visible entries of col_order
+            {
+                let mut order = col_order.lock().unwrap();
+                let visible: Vec<usize> = order
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .filter(|(_, i)| !hidden.contains(i))
+                    .map(|(pos, _)| pos)
+                    .collect();
+                if from >= visible.len() || target >= visible.len() {
+                    return;
+                }
+                let (fp, tp) = (visible[from], visible[target]);
+                let val = order.remove(fp);
+                let ins = if tp > fp { tp - 1 } else { tp };
+                order.insert(ins, val);
+            }
+            // move the width the same way so a manual resize follows the column
+            let mut widths = widths;
+            let wv = widths.remove(from);
+            let ins = if target > from { target - 1 } else { target };
+            widths.insert(ins, wv);
+            w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(widths))));
+            let order = col_order.lock().unwrap().clone();
+            let (scol, sasc) = *sort_state.lock().unwrap();
+            // keep the sort arrow on the same column after the shuffle
+            if scol >= 0 {
+                let vis: Vec<usize> = order
+                    .iter()
+                    .copied()
+                    .filter(|i| !hidden.contains(i))
+                    .collect();
+                if let Some(p) = vis.iter().position(|&i| i as i32 == scol) {
+                    w.set_grid_sort_col(p as i32);
+                }
+            }
+            let needle = w.get_grid_filter().to_string().to_lowercase();
+            let fcol = w.get_filter_col().to_string();
+            let fop = w.get_filter_op().to_string();
+            let guard = last_view.lock().unwrap();
+            let Some(v) = guard.as_ref() else {
+                return;
+            };
+            if matches!(v, model::ResultView::Affected(_)) {
+                return;
+            }
+            // Reorder renumbers columns → col-keyed pending edits would misland.
+            edit_buf.lock().unwrap().clear();
+            w.set_pending_count(0);
+            w.set_editing_row(-1);
+            w.set_editing_col(-1);
+            let transformed = compute_view(v, &needle, &fcol, &fop, &hidden, &order, scol, sasc);
+            *displayed_grid.lock().unwrap() = view_grid(&transformed);
+            apply_result(&w, transformed);
+        });
+    }
+
     // ----- Columns popup: toggle a column's visibility -----
     {
         let weak = window.as_weak();
