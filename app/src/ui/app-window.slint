@@ -133,6 +133,11 @@ export component MainWindow inherits Window {
     in property <[[Span]]> editor-lines;
     in property <int> cursor-line;
     in property <int> cursor-col;
+    // SQL autocomplete popup
+    in property <[PaletteItem]> completion-items;
+    in property <bool> completion-visible;
+    in property <int> completion-selected;
+    callback completion-choose(int);
     in property <string> query-label;
     in property <string> results-meta;
     in-out property <int> sidebar-mode: 0;
@@ -718,6 +723,10 @@ export component MainWindow inherits Window {
                         editor-lines: root.editor-lines;
                         cursor-line: root.cursor-line;
                         cursor-col: root.cursor-col;
+                        completion-items: root.completion-items;
+                        completion-visible: root.completion-visible;
+                        completion-selected: root.completion-selected;
+                        completion-choose(i) => { root.completion-choose(i); }
                         query-label: root.query-label;
                         results-meta: root.results-meta;
                         fn-mode: root.fn-mode;

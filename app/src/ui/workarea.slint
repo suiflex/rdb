@@ -5,6 +5,7 @@ import { Tokens } from "tokens.slint";
 import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow } from "structs.slint";
 import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
+import { PaletteItem } from "palette.slint";
 import {
     UnderlineSegment, SecondaryButton, PrimaryButton, TextButton, FilterField, KeyCap
 } from "components.slint";
@@ -45,6 +46,11 @@ export component WorkArea inherits Rectangle {
     in property <[[Span]]> editor-lines;
     in property <int> cursor-line;
     in property <int> cursor-col;
+    // SQL autocomplete popup (passed down to the SQL CodeEditor)
+    in property <[PaletteItem]> completion-items;
+    in property <bool> completion-visible;
+    in property <int> completion-selected;
+    callback completion-choose(int);
     in property <string> query-label;    // "emiten-per-sektor.sql · saved"
     in property <string> results-meta;   // "10 rows · 38 ms"
     callback editor-key(string, bool, bool, bool) -> bool;
@@ -495,6 +501,10 @@ export component WorkArea inherits Rectangle {
                     lines: root.editor-lines;
                     cursor-line: root.cursor-line;
                     cursor-col: root.cursor-col;
+                    completion-items: root.completion-items;
+                    completion-visible: root.completion-visible;
+                    completion-selected: root.completion-selected;
+                    completion-choose(i) => { root.completion-choose(i); }
                     edit-key(t, cmd, alt, shift) => { root.editor-key(t, cmd, alt, shift) }
                     press-pos(l, c) => { root.editor-press(l, c); }
                     drag-pos(l, c) => { root.editor-drag(l, c); }

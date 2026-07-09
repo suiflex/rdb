@@ -289,6 +289,11 @@ impl EditorState {
             .unwrap_or(l.len())
     }
 
+    /// Text on the current line up to the cursor — the autocomplete context.
+    pub fn before_cursor(&self) -> &str {
+        &self.lines[self.line][..self.byte_col()]
+    }
+
     fn byte_at(l: &str, col: usize) -> usize {
         l.char_indices().nth(col).map(|(b, _)| b).unwrap_or(l.len())
     }

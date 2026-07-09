@@ -12,6 +12,7 @@
 
 slint::include_modules!();
 
+mod completion;
 mod dispatch;
 mod editor;
 mod export;
@@ -1130,10 +1131,103 @@ fn main() -> Result<(), slint::PlatformError> {
         })
     };
     load_editor_text("");
+
+    // ----- SQL autocomplete: recompute popup, accept a choice -----
+    // completion_ctx = (word char length to replace, candidate labels).
+    let completion_ctx: Rc<RefCell<(usize, Vec<String>)>> = Rc::new(RefCell::new((0, Vec::new())));
+    let refresh_completion: Rc<dyn Fn()> = {
+        let weak = window.as_weak();
+        let ed_state = ed_state.clone();
+        let raw_nodes = raw_nodes.clone();
+        let completion_ctx = completion_ctx.clone();
+        Rc::new(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let before = ed_state.borrow().before_cursor().to_string();
+            let (word_len, cands) = completion::suggest(&before, &raw_nodes.lock().unwrap());
+            if cands.is_empty() {
+                w.set_completion_visible(false);
+                *completion_ctx.borrow_mut() = (0, Vec::new());
+                return;
+            }
+            let items: Vec<PaletteItem> = cands
+                .iter()
+                .map(|c| PaletteItem {
+                    label: c.label.clone().into(),
+                    kind: c.kind.clone().into(),
+                    sub: c.sub.clone().into(),
+                    local: false,
+                })
+                .collect();
+            *completion_ctx.borrow_mut() =
+                (word_len, cands.iter().map(|c| c.label.clone()).collect());
+            w.set_completion_items(ModelRc::from(Rc::new(VecModel::from(items))));
+            w.set_completion_selected(0);
+            w.set_completion_visible(true);
+        })
+    };
+    let accept_completion: Rc<dyn Fn(i32)> = {
+        let weak = window.as_weak();
+        let ed_state = ed_state.clone();
+        let sync_editor = sync_editor.clone();
+        let completion_ctx = completion_ctx.clone();
+        Rc::new(move |idx: i32| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let (word_len, labels) = completion_ctx.borrow().clone();
+            let Some(label) = labels.get(idx.max(0) as usize).cloned() else {
+                return;
+            };
+            {
+                let mut ed = ed_state.borrow_mut();
+                for _ in 0..word_len {
+                    ed.backspace();
+                }
+                ed.insert(&label);
+            }
+            w.set_completion_visible(false);
+            *completion_ctx.borrow_mut() = (0, Vec::new());
+            sync_editor();
+        })
+    };
+    {
+        let accept = accept_completion.clone();
+        window.on_completion_choose(move |i| accept(i));
+    }
     {
         let ed_state = ed_state.clone();
         let sync_editor = sync_editor.clone();
+        let weak = window.as_weak();
+        let refresh_completion = refresh_completion.clone();
+        let accept_completion = accept_completion.clone();
         window.on_editor_key(move |text, meta, alt, shift| {
+            // While the autocomplete popup is open it owns nav / accept / close.
+            if let Some(w) = weak.upgrade() {
+                if w.get_completion_visible() {
+                    let n = w.get_completion_items().row_count() as i32;
+                    match text.as_str() {
+                        "\u{f700}" if n > 0 => {
+                            w.set_completion_selected((w.get_completion_selected() - 1 + n) % n);
+                            return true;
+                        }
+                        "\u{f701}" if n > 0 => {
+                            w.set_completion_selected((w.get_completion_selected() + 1) % n);
+                            return true;
+                        }
+                        "\t" | "\n" | "\r" => {
+                            accept_completion(w.get_completion_selected());
+                            return true;
+                        }
+                        "\u{1b}" => {
+                            w.set_completion_visible(false);
+                            return true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
             // Cursor motion first: arrows / home / end, with macOS ⌘ (line &
             // document) and ⌥ (word) semantics. shift extends the selection.
             if matches!(
@@ -1302,6 +1396,8 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             if handled {
                 sync_editor();
+                // Typing/deleting shifts the completion context — recompute.
+                refresh_completion();
             }
             handled
         });
@@ -1309,7 +1405,11 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let ed_state = ed_state.clone();
         let sync_editor = sync_editor.clone();
+        let weak = window.as_weak();
         window.on_editor_press(move |line, col| {
+            if let Some(w) = weak.upgrade() {
+                w.set_completion_visible(false);
+            }
             ed_state.borrow_mut().move_to(line, col, false);
             sync_editor();
         });
