@@ -1353,6 +1353,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let refresh_completion = refresh_completion.clone();
         let accept_completion = accept_completion.clone();
+        let cur_engine = cur_engine.clone();
         window.on_editor_key(move |text, meta, alt, shift| {
             // While the autocomplete popup is open it owns nav / accept / close.
             if let Some(w) = weak.upgrade() {
@@ -1464,6 +1465,15 @@ fn main() -> Result<(), slint::PlatformError> {
                         }
                         "z" => {
                             ed.undo();
+                            true
+                        }
+                        "/" => {
+                            // Comment marker follows the connected engine's query
+                            // language; default to SQL when not yet connected.
+                            let engine = cur_engine
+                                .borrow()
+                                .unwrap_or(rdbs_connstore::Engine::Postgres);
+                            ed.toggle_comment(crate::query_parse::comment_prefix(engine));
                             true
                         }
                         _ => false,
