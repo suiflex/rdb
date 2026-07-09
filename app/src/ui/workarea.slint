@@ -540,7 +540,7 @@ export component WorkArea inherits Rectangle {
         }
 
         // ================= result body =================
-        if !root.fn-mode && !root.empty-mode: Rectangle {
+        if !root.fn-mode && !root.empty-mode: body := Rectangle {
             vertical-stretch: 1;
             background: Tokens.canvas;
 
@@ -567,15 +567,17 @@ export component WorkArea inherits Rectangle {
             // Selected-cell inspector: full value of the clicked cell (pretty
             // JSON when it parses). Overlays the grid's bottom edge, only while
             // a cell is selected — lets long/JSON cells stay single-line above.
-            if root.result-kind == 0 && root.selected-col >= 0 && root.selected-cell-value != "": Rectangle {
+            // Drag the top edge to resize (row-resize like the column handles).
+            if root.result-kind == 0 && root.selected-col >= 0 && root.selected-cell-value != "": panel := Rectangle {
+                property <length> panel-h: 200px;
                 y: parent.height - self.height;
-                height: min(140px, parent.height * 0.45);
+                height: clamp(self.panel-h, 60px, body.height - 60px);
                 width: 100%;
                 background: Tokens.card;
-                Rectangle { height: 1px; y: 0; background: Tokens.border-strong; }
                 ScrollView {
+                    y: 5px;
                     width: 100%;
-                    height: 100%;
+                    height: parent.height - 5px;
                     VerticalLayout {
                         padding: Tokens.sp3;
                         Text {
@@ -584,6 +586,21 @@ export component WorkArea inherits Rectangle {
                             font-family: Tokens.mono;
                             font-size: Tokens.font-sm;
                             wrap: word-wrap;
+                        }
+                    }
+                }
+                // top drag handle: 5px grab strip; dragging up grows the panel.
+                Rectangle {
+                    height: 5px;
+                    y: 0;
+                    width: 100%;
+                    background: grip.has-hover || grip.pressed ? Tokens.accent : Tokens.border-strong;
+                    grip := TouchArea {
+                        mouse-cursor: row-resize;
+                        moved => {
+                            panel.panel-h = clamp(
+                                panel.height - (self.mouse-y - self.pressed-y),
+                                60px, body.height - 60px);
                         }
                     }
                 }
