@@ -49,6 +49,13 @@ impl ConnStore {
         Ok(dirs.config_dir().join("connections.json"))
     }
 
+    /// Location of `recent_queries.json` in the same config dir as the
+    /// connection store — the on-disk cap-limited query history.
+    pub fn recent_queries_path() -> Result<PathBuf> {
+        let dirs = ProjectDirs::from("dev", "dbm", "dbm").ok_or(ConnStoreError::NoConfigDir)?;
+        Ok(dirs.config_dir().join("recent_queries.json"))
+    }
+
     /// Open the store at the platform default path with the runtime-selected
     /// secret backend (keychain, or encrypted-file fallback). Convenience
     /// wrapper over `default_path` + `secret::select_backend` + `load`.
