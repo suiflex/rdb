@@ -499,6 +499,48 @@ impl EditorState {
         }
     }
 
+    /// Toggle a line comment across the affected lines (the selection's line
+    /// span, or the current line when nothing is selected). If every non-blank
+    /// line already starts with `prefix` after its indent, uncomment them all;
+    /// otherwise comment them all with `prefix + " "` at the first non-space
+    /// column. Blank lines are left untouched. One undo entry.
+    pub fn toggle_comment(&mut self, prefix: &str) {
+        let (start, end, had_sel) = match self.selection() {
+            Some(((sl, _), (el, _))) => (sl, el, true),
+            None => (self.line, self.line, false),
+        };
+        self.push_undo(false);
+        // Leading whitespace is ASCII, so byte offset == char offset here.
+        let all_commented = (start..=end).all(|i| {
+            let t = self.lines[i].trim_start();
+            t.is_empty() || t.starts_with(prefix)
+        });
+        for i in start..=end {
+            let indent = self.lines[i].len() - self.lines[i].trim_start().len();
+            let body = self.lines[i][indent..].to_string();
+            if body.is_empty() {
+                continue;
+            }
+            let head = &self.lines[i][..indent];
+            self.lines[i] = if all_commented {
+                let rest = body.strip_prefix(prefix).unwrap_or(&body);
+                let rest = rest.strip_prefix(' ').unwrap_or(rest);
+                format!("{head}{rest}")
+            } else {
+                format!("{head}{prefix} {body}")
+            };
+        }
+        // Keep the affected lines selected so repeated Cmd+/ toggles them back.
+        if had_sel {
+            self.sel = Some((start, 0));
+            self.line = end;
+            self.col = self.lines[end].chars().count();
+        } else {
+            self.sel = None;
+        }
+        self.clamp();
+    }
+
     /// Place the cursor at (line, col), clamped to the buffer. `extend`
     /// keeps/creates the selection anchor (drag or shift-click); otherwise the
     /// selection is dropped (a plain click).
@@ -781,6 +823,25 @@ mod tests {
         ed.backspace();
         ed.backspace();
         assert_eq!(ed.text(), "SELECT 1;");
+    }
+
+    #[test]
+    fn toggle_comment_is_idempotent() {
+        let mut ed = EditorState::from_text("  SELECT 1");
+        ed.toggle_comment("--");
+        assert_eq!(ed.text(), "  -- SELECT 1");
+        ed.toggle_comment("--");
+        assert_eq!(ed.text(), "  SELECT 1");
+    }
+
+    #[test]
+    fn toggle_comment_spans_selection() {
+        let mut ed = EditorState::from_text("a\nb\nc");
+        ed.set_selection((0, 0), (2, 1)); // all three lines
+        ed.toggle_comment("//");
+        assert_eq!(ed.text(), "// a\n// b\n// c");
+        ed.toggle_comment("//");
+        assert_eq!(ed.text(), "a\nb\nc");
     }
 
     #[test]
