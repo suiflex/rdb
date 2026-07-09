@@ -44,6 +44,7 @@ export component WorkArea inherits Rectangle {
     in-out property <bool> sql-open: false;
     // SQL editor model (Rust lexer output) + cursor
     in property <[[Span]]> editor-lines;
+    in property <string> editor-placeholder;
     in property <int> cursor-line;
     in property <int> cursor-col;
     // SQL autocomplete popup (passed down to the SQL CodeEditor)
@@ -504,6 +505,7 @@ export component WorkArea inherits Rectangle {
                 CodeEditor {
                     vertical-stretch: 1;
                     lines: root.editor-lines;
+                    placeholder: root.editor-placeholder;
                     cursor-line: root.cursor-line;
                     cursor-col: root.cursor-col;
                     completion-items: root.completion-items;

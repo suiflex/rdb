@@ -131,6 +131,7 @@ export component MainWindow inherits Window {
 
     // ----- SQL editor (lexer-highlighted) -----
     in property <[[Span]]> editor-lines;
+    in property <string> editor-placeholder;
     in property <int> cursor-line;
     in property <int> cursor-col;
     // SQL autocomplete popup
@@ -725,6 +726,7 @@ export component MainWindow inherits Window {
                         grid-col-filters: root.grid-col-filters;
                         set-col-filter(i, t) => { root.set-col-filter(i, t); }
                         editor-lines: root.editor-lines;
+                        editor-placeholder: root.editor-placeholder;
                         cursor-line: root.cursor-line;
                         cursor-col: root.cursor-col;
                         completion-items: root.completion-items;

@@ -2786,11 +2786,14 @@ fn main() -> Result<(), slint::PlatformError> {
                         ""
                     },
                 ));
-                load_editor_text(if mock::mock_mode() {
+                // Start empty; the engine hint shows as a ghost placeholder
+                // (rendered by CodeEditor) instead of seeded buffer text.
+                load_editor_text("");
+                w.set_editor_placeholder(SharedString::from(if mock::mock_mode() {
                     ""
                 } else {
                     crate::query_parse::editor_hint(sc.engine)
-                });
+                }));
                 w.set_active_table(SharedString::default());
             }
             // Fresh connection: nothing browsed, nothing expanded.

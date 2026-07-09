@@ -8,6 +8,8 @@ import { ScrollView } from "std-widgets.slint";
 
 export component CodeEditor inherits Rectangle {
     in property <[[Span]]> lines;
+    // Ghost hint shown only while the buffer is empty (engine-specific).
+    in property <string> placeholder;
     in property <int> cursor-line: 0;
     in property <int> cursor-col: 0;
     // (key text, meta/ctrl, alt/option, shift) -> true when the editor consumed
@@ -136,6 +138,19 @@ export component CodeEditor inherits Rectangle {
                 }
             }
         }
+    }
+
+    // ghost placeholder: only when the buffer is a single empty line
+    if root.placeholder != "" && root.lines.length <= 1
+        && (root.lines.length == 0 || root.lines[0].length == 0): Text {
+        x: root.gutter-w + Tokens.sp3;
+        y: Tokens.sp2;
+        height: root.line-h;
+        text: root.placeholder;
+        color: Tokens.text-ghost;
+        font-family: Tokens.mono;
+        font-size: Tokens.font-md;
+        vertical-alignment: center;
     }
 
     // ----- autocomplete popup (overlays the editor, under the caret) -----
