@@ -38,6 +38,8 @@ export component WorkArea inherits Rectangle {
     in property <bool> grid-sort-asc: true;
     callback sort-col(int);
     callback reorder-col(int, length);
+    in property <[string]> grid-col-filters;
+    callback set-col-filter(int, string);
     in-out property <bool> sql-open: false;
     // SQL editor model (Rust lexer output) + cursor
     in property <[[Span]]> editor-lines;
@@ -542,58 +544,8 @@ export component WorkArea inherits Rectangle {
             }
         }
 
-        // ================= expandable filter panel =================
-        // Available in both browse and SQL tabs — sits directly above the grid.
-        if root.filter-open && !root.fn-mode && !root.empty-mode: Rectangle {
-            height: 74px;
-            background: Tokens.chrome.with-alpha(0.5);
-            VerticalLayout {
-                padding: Tokens.sp2;
-                padding-left: Tokens.sp3;
-                padding-right: Tokens.sp3;
-                spacing: Tokens.sp1;
-                HorizontalLayout {
-                    height: 30px;
-                    spacing: Tokens.sp2;
-                    ComboBox {
-                        width: 150px;
-                        model: root.filter-columns;
-                        current-value <=> root.filter-col;
-                    }
-                    ComboBox {
-                        width: 110px;
-                        model: ["contains", "=", "≠", ">", "<", "is null", "not null"];
-                        current-value <=> root.filter-op;
-                    }
-                    FilterField {
-                        horizontal-stretch: 1;
-                        height: 28px;
-                        placeholder: "value";
-                        text <=> root.grid-filter;
-                        submitted => { root.apply-filter(); }
-                    }
-                }
-                HorizontalLayout {
-                    height: 28px;
-                    spacing: Tokens.sp2;
-                    Rectangle { horizontal-stretch: 1; }
-                    SecondaryButton {
-                        text: "Clear";
-                        clicked => {
-                            root.grid-filter = "";
-                            root.filter-col = "any column";
-                            root.filter-op = "contains";
-                            root.apply-filter();
-                        }
-                    }
-                    PrimaryButton {
-                        text: "Apply";
-                        clicked => { root.apply-filter(); }
-                    }
-                }
-            }
-            Rectangle { y: parent.height - 1px; height: 1px; width: parent.width; background: Tokens.border; }
-        }
+        // The per-column filter inputs live inside TabularGrid (aligned to the
+        // columns) and are toggled by `filter-open`; see the "Filter" button.
 
         // ================= result body =================
         if !root.fn-mode && !root.empty-mode: body := Rectangle {
@@ -612,6 +564,9 @@ export component WorkArea inherits Rectangle {
                 sort-asc: root.grid-sort-asc;
                 sort-col(i) => { root.sort-col(i); }
                 reorder-col(i, x) => { root.reorder-col(i, x); }
+                filter-open: root.filter-open;
+                col-filter-values: root.grid-col-filters;
+                set-col-filter(i, t) => { root.set-col-filter(i, t); }
                 selected-row <=> root.selected-row;
                 selected-col <=> root.selected-col;
                 editing-row: root.editing-row;

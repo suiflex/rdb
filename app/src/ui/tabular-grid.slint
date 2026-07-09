@@ -14,6 +14,9 @@ export component TabularGrid inherits ScrollView {
     in property <bool> sort-asc: true;
     callback sort-col(int);                 // header click → sort by this column
     callback reorder-col(int, length);      // header drag → (col, drop x in cell)
+    in property <bool> filter-open;         // show the per-column filter row
+    in property <[string]> col-filter-values; // current text per display column
+    callback set-col-filter(int, string);   // (display col, raw filter text)
     in-out property <int> selected-row: 0;
     in-out property <int> selected-col: -1;
     // inline edit overlay: row/col currently being edited, -1 = none
@@ -109,6 +112,40 @@ export component TabularGrid inherits ScrollView {
             Rectangle { horizontal-stretch: 1; background: Tokens.canvas; }
         }
         Rectangle { height: 1px; background: Tokens.border-strong; }
+
+        // ----- per-column filter row (type e.g. >100, matches AND) -----
+        if root.filter-open: HorizontalLayout {
+            height: 26px;
+            Rectangle { width: 44px; background: Tokens.chrome; }
+            for col[c] in root.columns: Rectangle {
+                width: root.col-widths.length > c ? root.col-widths[c] : 140px;
+                background: Tokens.chrome;
+                clip: true;
+                Rectangle {
+                    x: 2px;
+                    y: 2px;
+                    width: parent.width - 5px;
+                    height: parent.height - 4px;
+                    border-radius: Tokens.radius;
+                    border-width: 1px;
+                    border-color: fin.has-focus ? Tokens.accent : Tokens.border-strong;
+                    background: Tokens.card;
+                    fin := TextInput {
+                        x: Tokens.sp1;
+                        width: parent.width - 2 * Tokens.sp1;
+                        vertical-alignment: center;
+                        text: root.col-filter-values.length > c ? root.col-filter-values[c] : "";
+                        color: Tokens.text;
+                        font-family: Tokens.mono;
+                        font-size: Tokens.font-xs;
+                        single-line: true;
+                        accepted => { root.set-col-filter(c, self.text); }
+                    }
+                }
+            }
+            Rectangle { horizontal-stretch: 1; background: Tokens.chrome; }
+        }
+        if root.filter-open: Rectangle { height: 1px; background: Tokens.border; }
 
         // ----- rows (24px) -----
         for r in (root.col-count > 0 ? root.cells.length / root.col-count : 0): Rectangle {

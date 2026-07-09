@@ -764,11 +764,75 @@ fn project_cols(
 /// then project columns (hide + reorder). Column index arguments are ORIGINAL
 /// indices into `base`.
 #[allow(clippy::too_many_arguments)]
+/// Parse one per-column filter box into `(op, needle)`. A leading operator
+/// (`>=`,`<=`,`!=`,`>`,`<`,`=`) picks the comparison; anything else is a
+/// case-insensitive `contains`. Blank input means "no filter" (None).
+fn parse_col_filter(raw: &str) -> Option<(&'static str, String)> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return None;
+    }
+    for op in [">=", "<=", "!="] {
+        if let Some(rest) = t.strip_prefix(op) {
+            return Some((op, rest.trim().to_lowercase()));
+        }
+    }
+    for op in [">", "<", "="] {
+        if let Some(rest) = t.strip_prefix(op) {
+            return Some((op, rest.trim().to_lowercase()));
+        }
+    }
+    Some(("contains", t.to_lowercase()))
+}
+
+/// Drop rows failing any non-empty per-column filter (`col_filters` indexed by
+/// ORIGINAL column). Conditions combine with AND.
+fn apply_col_filters(g: &model::GridModel, col_filters: &[String]) -> model::GridModel {
+    let parsed: Vec<(usize, &'static str, String)> = col_filters
+        .iter()
+        .enumerate()
+        .filter_map(|(ci, raw)| parse_col_filter(raw).map(|(op, n)| (ci, op, n)))
+        .collect();
+    if parsed.is_empty() {
+        return g.clone();
+    }
+    model::GridModel {
+        columns: g.columns.clone(),
+        rows: g
+            .rows
+            .iter()
+            .filter(|row| {
+                parsed
+                    .iter()
+                    .all(|(ci, op, n)| row.get(*ci).is_some_and(|cell| cell_matches(cell, op, n)))
+            })
+            .cloned()
+            .collect(),
+    }
+}
+
+/// Per-column filter box values in DISPLAY order (visible columns only), for
+/// feeding the grid's filter-row inputs.
+fn display_col_filters(
+    col_filters: &[String],
+    order: &[usize],
+    hidden: &HashSet<usize>,
+) -> Vec<SharedString> {
+    order
+        .iter()
+        .copied()
+        .filter(|i| !hidden.contains(i))
+        .map(|i| SharedString::from(col_filters.get(i).cloned().unwrap_or_default()))
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
 fn build_grid(
     base: &model::GridModel,
     needle: &str,
     fcol: &str,
     fop: &str,
+    col_filters: &[String],
     hidden: &HashSet<usize>,
     order: &[usize],
     sort_col: i32,
@@ -780,7 +844,8 @@ fn build_grid(
         base.columns.iter().position(|c| c.name == fcol)
     };
     let filtered = filter_grid_cond(base, needle, col, fop);
-    let sorted = sort_grid(&filtered, sort_col, sort_asc);
+    let per_col = apply_col_filters(&filtered, col_filters);
+    let sorted = sort_grid(&per_col, sort_col, sort_asc);
     project_cols(&sorted, order, hidden)
 }
 
@@ -794,12 +859,25 @@ fn compute_view(
     needle: &str,
     fcol: &str,
     fop: &str,
+    col_filters: &[String],
     hidden: &HashSet<usize>,
     order: &[usize],
     sort_col: i32,
     sort_asc: bool,
 ) -> model::ResultView {
-    let g = |grid| build_grid(grid, needle, fcol, fop, hidden, order, sort_col, sort_asc);
+    let g = |grid| {
+        build_grid(
+            grid,
+            needle,
+            fcol,
+            fop,
+            col_filters,
+            hidden,
+            order,
+            sort_col,
+            sort_asc,
+        )
+    };
     match base {
         model::ResultView::Table(grid) => model::ResultView::Table(g(grid)),
         model::ResultView::Documents(d) => model::ResultView::Documents(model::DocModel {
@@ -854,7 +932,19 @@ fn group_thousands(n: u64) -> String {
 
 #[cfg(test)]
 mod fmt_tests {
-    use super::group_thousands;
+    use super::{group_thousands, parse_col_filter};
+    #[test]
+    fn col_filter_prefix_ops() {
+        assert_eq!(parse_col_filter(""), None);
+        assert_eq!(parse_col_filter("   "), None);
+        assert_eq!(parse_col_filter(">100"), Some((">", "100".to_string())));
+        assert_eq!(parse_col_filter(">= 5"), Some((">=", "5".to_string())));
+        assert_eq!(parse_col_filter("!=X"), Some(("!=", "x".to_string())));
+        assert_eq!(
+            parse_col_filter("abc"),
+            Some(("contains", "abc".to_string()))
+        );
+    }
     #[test]
     fn groups_thousands_with_dots() {
         assert_eq!(group_thousands(0), "0");
@@ -962,6 +1052,10 @@ fn main() -> Result<(), slint::PlatformError> {
     // Display order of columns as ORIGINAL indices (drag-to-reorder). Reset to
     // 0..ncols on every fresh result.
     let col_order: Arc<std::sync::Mutex<Vec<usize>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    // Per-column filter boxes, raw text indexed by ORIGINAL column. Empty =
+    // no filter. Reset to blanks on every fresh result.
+    let col_filters: Arc<std::sync::Mutex<Vec<String>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
     // Engine of the live connection, kept on the UI thread so table clicks can
     // build an engine-appropriate "browse this table" query synchronously.
     let cur_engine: Rc<RefCell<Option<rdbs_connstore::Engine>>> = Rc::new(RefCell::new(None));
@@ -2058,6 +2152,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let hidden_cols = hidden_cols.clone();
         let sort_state = sort_state.clone();
         let col_order = col_order.clone();
+        let col_filters = col_filters.clone();
         window.on_apply_filter(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -2067,6 +2162,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let fop = w.get_filter_op().to_string();
             let hidden = hidden_cols.lock().unwrap().clone();
             let order = col_order.lock().unwrap().clone();
+            let cfilters = col_filters.lock().unwrap().clone();
             let (scol, sasc) = *sort_state.lock().unwrap();
             let guard = last_view.lock().unwrap();
             let Some(v) = guard.as_ref() else {
@@ -2084,7 +2180,65 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_pending_count(0);
             w.set_editing_row(-1);
             w.set_editing_col(-1);
-            let filtered = compute_view(v, &needle, &fcol, &fop, &hidden, &order, scol, sasc);
+            let filtered = compute_view(
+                v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
+            );
+            *displayed_grid.lock().unwrap() = view_grid(&filtered);
+            apply_result(&w, filtered);
+        });
+    }
+
+    // ----- per-column filter box edited -----
+    {
+        let weak = window.as_weak();
+        let last_view = last_view.clone();
+        let edit_buf = edit_buf.clone();
+        let displayed_grid = displayed_grid.clone();
+        let hidden_cols = hidden_cols.clone();
+        let sort_state = sort_state.clone();
+        let col_order = col_order.clone();
+        let col_filters = col_filters.clone();
+        window.on_set_col_filter(move |display_c, text| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let hidden = hidden_cols.lock().unwrap().clone();
+            let order = col_order.lock().unwrap().clone();
+            let (scol, sasc) = *sort_state.lock().unwrap();
+            // display position → ORIGINAL column index
+            let visible: Vec<usize> = order
+                .iter()
+                .copied()
+                .filter(|i| !hidden.contains(i))
+                .collect();
+            let Some(&orig) = visible.get(display_c.max(0) as usize) else {
+                return;
+            };
+            let cfilters = {
+                let mut cf = col_filters.lock().unwrap();
+                if orig < cf.len() {
+                    cf[orig] = text.to_string();
+                }
+                cf.clone()
+            };
+            let needle = w.get_grid_filter().to_string().to_lowercase();
+            let fcol = w.get_filter_col().to_string();
+            let fop = w.get_filter_op().to_string();
+            let guard = last_view.lock().unwrap();
+            let Some(v) = guard.as_ref() else {
+                return;
+            };
+            if matches!(v, model::ResultView::Affected(_)) {
+                return;
+            }
+            // Filtering renumbers rows → row-keyed pending edits would misland.
+            edit_buf.lock().unwrap().clear();
+            w.set_pending_count(0);
+            w.set_editing_row(-1);
+            w.set_editing_col(-1);
+            let filtered = compute_view(
+                v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
+            );
             *displayed_grid.lock().unwrap() = view_grid(&filtered);
             apply_result(&w, filtered);
         });
@@ -2099,12 +2253,14 @@ fn main() -> Result<(), slint::PlatformError> {
         let hidden_cols = hidden_cols.clone();
         let sort_state = sort_state.clone();
         let col_order = col_order.clone();
+        let col_filters = col_filters.clone();
         window.on_sort_col(move |display_c| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
             let hidden = hidden_cols.lock().unwrap().clone();
             let order = col_order.lock().unwrap().clone();
+            let cfilters = col_filters.lock().unwrap().clone();
             // display position → ORIGINAL column index
             let visible: Vec<usize> = order
                 .iter()
@@ -2141,7 +2297,9 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_pending_count(0);
             w.set_editing_row(-1);
             w.set_editing_col(-1);
-            let sorted = compute_view(v, &needle, &fcol, &fop, &hidden, &order, scol, sasc);
+            let sorted = compute_view(
+                v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
+            );
             *displayed_grid.lock().unwrap() = view_grid(&sorted);
             apply_result(&w, sorted);
         });
@@ -2156,6 +2314,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let hidden_cols = hidden_cols.clone();
         let sort_state = sort_state.clone();
         let col_order = col_order.clone();
+        let col_filters = col_filters.clone();
         window.on_reorder_col(move |from, local_x| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -2233,7 +2392,14 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_pending_count(0);
             w.set_editing_row(-1);
             w.set_editing_col(-1);
-            let transformed = compute_view(v, &needle, &fcol, &fop, &hidden, &order, scol, sasc);
+            let cfilters = col_filters.lock().unwrap().clone();
+            // filter boxes follow their columns into the new order
+            w.set_grid_col_filters(ModelRc::from(Rc::new(VecModel::from(display_col_filters(
+                &cfilters, &order, &hidden,
+            )))));
+            let transformed = compute_view(
+                v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
+            );
             *displayed_grid.lock().unwrap() = view_grid(&transformed);
             apply_result(&w, transformed);
         });
@@ -2248,6 +2414,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let hidden_cols = hidden_cols.clone();
         let sort_state = sort_state.clone();
         let col_order = col_order.clone();
+        let col_filters = col_filters.clone();
         window.on_toggle_column(move |i| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -2289,7 +2456,13 @@ fn main() -> Result<(), slint::PlatformError> {
             if !hidden.is_empty() {
                 w.set_grid_read_only(true);
             }
-            let transformed = compute_view(v, &needle, &fcol, &fop, &hidden, &order, scol, sasc);
+            let cfilters = col_filters.lock().unwrap().clone();
+            w.set_grid_col_filters(ModelRc::from(Rc::new(VecModel::from(display_col_filters(
+                &cfilters, &order, &hidden,
+            )))));
+            let transformed = compute_view(
+                v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
+            );
             // ponytail: hiding is structural, so widths reset to type defaults
             // (manual resize is dropped) — same trade-off reorder makes.
             if let Some(g) = view_grid(&transformed) {
@@ -2539,6 +2712,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let hidden_cols = hidden_cols.clone();
         let sort_state = sort_state.clone();
         let col_order = col_order.clone();
+        let col_filters = col_filters.clone();
         Rc::new(move |sql: String| {
             let weak2 = weak.clone();
             let current = current.clone();
@@ -2549,6 +2723,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let hidden_cols = hidden_cols.clone();
             let sort_state = sort_state.clone();
             let col_order = col_order.clone();
+            let col_filters = col_filters.clone();
             if let Some(w) = weak.upgrade() {
                 w.set_query_running(true);
             }
@@ -2627,8 +2802,12 @@ fn main() -> Result<(), slint::PlatformError> {
                                 hidden_cols.lock().unwrap().clear();
                                 *col_order.lock().unwrap() = (0..ncols).collect();
                                 *sort_state.lock().unwrap() = (-1, true);
+                                *col_filters.lock().unwrap() = vec![String::new(); ncols];
                                 w.set_grid_sort_col(-1);
                                 w.set_grid_sort_asc(true);
+                                w.set_grid_col_filters(ModelRc::from(Rc::new(VecModel::from(
+                                    vec![SharedString::default(); ncols],
+                                ))));
                                 let colnames: Vec<SharedString> = match &v {
                                     model::ResultView::Table(g) => g
                                         .columns
