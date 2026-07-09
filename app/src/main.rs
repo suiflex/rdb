@@ -701,30 +701,110 @@ fn filter_grid_cond(
     }
 }
 
-/// Return a copy of `g` without the hidden column indices.
-fn hide_cols(g: &model::GridModel, hidden: &HashSet<usize>) -> model::GridModel {
-    if hidden.is_empty() {
+/// Sort rows by column `col` (an ORIGINAL column index). Numeric when both
+/// cells parse as f64, else case-insensitive text. Nulls always sort last,
+/// regardless of direction. `col < 0` or out of range leaves the grid as-is.
+fn sort_grid(g: &model::GridModel, col: i32, asc: bool) -> model::GridModel {
+    if col < 0 || col as usize >= g.columns.len() {
         return g.clone();
     }
+    let c = col as usize;
+    let mut rows = g.rows.clone();
+    rows.sort_by(|a, b| {
+        use std::cmp::Ordering;
+        let (x, y) = (&a[c], &b[c]);
+        match (x.is_null, y.is_null) {
+            (true, true) => return Ordering::Equal,
+            (true, false) => return Ordering::Greater,
+            (false, true) => return Ordering::Less,
+            _ => {}
+        }
+        let ord = match (x.text.parse::<f64>(), y.text.parse::<f64>()) {
+            (Ok(m), Ok(n)) => m.partial_cmp(&n).unwrap_or(Ordering::Equal),
+            _ => x.text.to_lowercase().cmp(&y.text.to_lowercase()),
+        };
+        if asc {
+            ord
+        } else {
+            ord.reverse()
+        }
+    });
     model::GridModel {
-        columns: g
-            .columns
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| !hidden.contains(i))
-            .map(|(_, c)| c.clone())
-            .collect(),
+        columns: g.columns.clone(),
+        rows,
+    }
+}
+
+/// Project `g`'s columns into display order `order` (ORIGINAL column indices),
+/// dropping any index in `hidden`. Both columns and each row are projected the
+/// same way, so this subsumes hide + reorder in one pass.
+fn project_cols(
+    g: &model::GridModel,
+    order: &[usize],
+    hidden: &HashSet<usize>,
+) -> model::GridModel {
+    let idx: Vec<usize> = order
+        .iter()
+        .copied()
+        .filter(|i| *i < g.columns.len() && !hidden.contains(i))
+        .collect();
+    model::GridModel {
+        columns: idx.iter().map(|&i| g.columns[i].clone()).collect(),
         rows: g
             .rows
             .iter()
-            .map(|row| {
-                row.iter()
-                    .enumerate()
-                    .filter(|(i, _)| !hidden.contains(i))
-                    .map(|(_, c)| c.clone())
-                    .collect()
-            })
+            .map(|row| idx.iter().map(|&i| row[i].clone()).collect())
             .collect(),
+    }
+}
+
+/// Build the on-screen grid from a base result grid: filter rows, sort rows,
+/// then project columns (hide + reorder). Column index arguments are ORIGINAL
+/// indices into `base`.
+#[allow(clippy::too_many_arguments)]
+fn build_grid(
+    base: &model::GridModel,
+    needle: &str,
+    fcol: &str,
+    fop: &str,
+    hidden: &HashSet<usize>,
+    order: &[usize],
+    sort_col: i32,
+    sort_asc: bool,
+) -> model::GridModel {
+    let col = if fcol == "any column" {
+        None
+    } else {
+        base.columns.iter().position(|c| c.name == fcol)
+    };
+    let filtered = filter_grid_cond(base, needle, col, fop);
+    let sorted = sort_grid(&filtered, sort_col, sort_asc);
+    project_cols(&sorted, order, hidden)
+}
+
+/// Derive the displayed `ResultView` from a cached base view by applying the
+/// active filter, sort, hidden-column set, and column order. Single source of
+/// truth for the filter / sort / hide / reorder handlers. `Affected` has no
+/// grid, so it passes through unchanged.
+#[allow(clippy::too_many_arguments)]
+fn compute_view(
+    base: &model::ResultView,
+    needle: &str,
+    fcol: &str,
+    fop: &str,
+    hidden: &HashSet<usize>,
+    order: &[usize],
+    sort_col: i32,
+    sort_asc: bool,
+) -> model::ResultView {
+    let g = |grid| build_grid(grid, needle, fcol, fop, hidden, order, sort_col, sort_asc);
+    match base {
+        model::ResultView::Table(grid) => model::ResultView::Table(g(grid)),
+        model::ResultView::Documents(d) => model::ResultView::Documents(model::DocModel {
+            json: d.json.clone(),
+            grid: g(&d.grid),
+        }),
+        model::ResultView::Affected(a) => model::ResultView::Affected(a.clone()),
     }
 }
 
@@ -847,6 +927,12 @@ fn main() -> Result<(), slint::PlatformError> {
     // Column indices (into the last result) hidden via the Columns popup.
     let hidden_cols: Arc<std::sync::Mutex<HashSet<usize>>> =
         Arc::new(std::sync::Mutex::new(HashSet::new()));
+    // Client-side sort: ORIGINAL column index (-1 = none) + ascending flag.
+    let sort_state: Arc<std::sync::Mutex<(i32, bool)>> =
+        Arc::new(std::sync::Mutex::new((-1, true)));
+    // Display order of columns as ORIGINAL indices (drag-to-reorder). Reset to
+    // 0..ncols on every fresh result.
+    let col_order: Arc<std::sync::Mutex<Vec<usize>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
     // Engine of the live connection, kept on the UI thread so table clicks can
     // build an engine-appropriate "browse this table" query synchronously.
     let cur_engine: Rc<RefCell<Option<rdbs_connstore::Engine>>> = Rc::new(RefCell::new(None));
@@ -1941,6 +2027,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let edit_buf = edit_buf.clone();
         let displayed_grid = displayed_grid.clone();
         let hidden_cols = hidden_cols.clone();
+        let sort_state = sort_state.clone();
+        let col_order = col_order.clone();
         window.on_apply_filter(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -1949,10 +2037,15 @@ fn main() -> Result<(), slint::PlatformError> {
             let fcol = w.get_filter_col().to_string();
             let fop = w.get_filter_op().to_string();
             let hidden = hidden_cols.lock().unwrap().clone();
+            let order = col_order.lock().unwrap().clone();
+            let (scol, sasc) = *sort_state.lock().unwrap();
             let guard = last_view.lock().unwrap();
             let Some(v) = guard.as_ref() else {
                 return;
             };
+            if matches!(v, model::ResultView::Affected(_)) {
+                return;
+            }
             // Filtering renumbers the visible rows, so pending edits keyed by
             // row index would land on the wrong rows — drop them.
             {
@@ -1962,28 +2055,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_pending_count(0);
             w.set_editing_row(-1);
             w.set_editing_col(-1);
-            // Filter the row-bearing views; Affected has nothing to filter.
-            let col_of = |g: &model::GridModel| {
-                if fcol == "any column" {
-                    None
-                } else {
-                    g.columns.iter().position(|c| c.name == fcol)
-                }
-            };
-            let filtered = match v {
-                model::ResultView::Table(g) => model::ResultView::Table(hide_cols(
-                    &filter_grid_cond(g, &needle, col_of(g), &fop),
-                    &hidden,
-                )),
-                model::ResultView::Documents(d) => model::ResultView::Documents(model::DocModel {
-                    json: d.json.clone(),
-                    grid: hide_cols(
-                        &filter_grid_cond(&d.grid, &needle, col_of(&d.grid), &fop),
-                        &hidden,
-                    ),
-                }),
-                model::ResultView::Affected(_) => return,
-            };
+            let filtered = compute_view(v, &needle, &fcol, &fop, &hidden, &order, scol, sasc);
             *displayed_grid.lock().unwrap() = view_grid(&filtered);
             apply_result(&w, filtered);
         });
@@ -1996,6 +2068,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let edit_buf = edit_buf.clone();
         let displayed_grid = displayed_grid.clone();
         let hidden_cols = hidden_cols.clone();
+        let sort_state = sort_state.clone();
+        let col_order = col_order.clone();
         window.on_toggle_column(move |i| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -2012,10 +2086,17 @@ fn main() -> Result<(), slint::PlatformError> {
             let flags: Vec<bool> = (0..n).map(|c| hidden.contains(&c)).collect();
             w.set_col_hidden(ModelRc::from(Rc::new(VecModel::from(flags))));
             let needle = w.get_grid_filter().to_string().to_lowercase();
+            let fcol = w.get_filter_col().to_string();
+            let fop = w.get_filter_op().to_string();
+            let order = col_order.lock().unwrap().clone();
+            let (scol, sasc) = *sort_state.lock().unwrap();
             let guard = last_view.lock().unwrap();
             let Some(v) = guard.as_ref() else {
                 return;
             };
+            if matches!(v, model::ResultView::Affected(_)) {
+                return;
+            }
             // Hiding renumbers columns: cell edits would write through the
             // wrong column index, so drop pending edits and lock editing
             // until the next refresh restores the full column set.
@@ -2030,16 +2111,9 @@ fn main() -> Result<(), slint::PlatformError> {
             if !hidden.is_empty() {
                 w.set_grid_read_only(true);
             }
-            let transformed = match v {
-                model::ResultView::Table(g) => {
-                    model::ResultView::Table(hide_cols(&filter_grid(g, &needle), &hidden))
-                }
-                model::ResultView::Documents(d) => model::ResultView::Documents(model::DocModel {
-                    json: d.json.clone(),
-                    grid: hide_cols(&filter_grid(&d.grid, &needle), &hidden),
-                }),
-                model::ResultView::Affected(_) => return,
-            };
+            let transformed = compute_view(v, &needle, &fcol, &fop, &hidden, &order, scol, sasc);
+            // ponytail: hiding is structural, so widths reset to type defaults
+            // (manual resize is dropped) — same trade-off reorder makes.
             if let Some(g) = view_grid(&transformed) {
                 let widths: Vec<f32> = g
                     .columns
@@ -2285,6 +2359,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let edit_buf = edit_buf.clone();
         let displayed_grid = displayed_grid.clone();
         let hidden_cols = hidden_cols.clone();
+        let sort_state = sort_state.clone();
+        let col_order = col_order.clone();
         Rc::new(move |sql: String| {
             let weak2 = weak.clone();
             let current = current.clone();
@@ -2293,6 +2369,8 @@ fn main() -> Result<(), slint::PlatformError> {
             let edit_buf = edit_buf.clone();
             let displayed_grid = displayed_grid.clone();
             let hidden_cols = hidden_cols.clone();
+            let sort_state = sort_state.clone();
+            let col_order = col_order.clone();
             if let Some(w) = weak.upgrade() {
                 w.set_query_running(true);
             }
@@ -2366,8 +2444,11 @@ fn main() -> Result<(), slint::PlatformError> {
                                 } as u64;
                                 *last_view.lock().unwrap() = Some(v.clone());
                                 w.set_grid_filter(SharedString::default());
-                                // Fresh result: all columns visible again.
+                                // Fresh result: all columns visible, natural
+                                // order, no client-side sort.
                                 hidden_cols.lock().unwrap().clear();
+                                *col_order.lock().unwrap() = (0..ncols).collect();
+                                *sort_state.lock().unwrap() = (-1, true);
                                 let colnames: Vec<SharedString> = match &v {
                                     model::ResultView::Table(g) => g
                                         .columns
