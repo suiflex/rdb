@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.7.0](https://github.com/suiflex/rdb/compare/v0.6.0...v0.7.0) (2026-07-09)
+
+
+### Features
+
+* **app:** add selected-cell inspector for full and JSON values ([0f1d3f8](https://github.com/suiflex/rdb/commit/0f1d3f8f7360427194f6942b275aa450699772af))
+* **app:** make cell inspector resizable by dragging its top edge ([d01bd1d](https://github.com/suiflex/rdb/commit/d01bd1d306497e386552c916ef506d8abc98bc87))
+
+
+### Bug Fixes
+
+* **app:** bubble editor keys to window shortcut scope for run ([eadb051](https://github.com/suiflex/rdb/commit/eadb051be09826c0c4f16d18cbc7ea324293c154))
+* **app:** reset last tab on close and clear grid on new tab ([a111ce7](https://github.com/suiflex/rdb/commit/a111ce7290460b130c40be66acb6ce86959ca37d))
+* **app:** search icon, ⌘⏎ run, Postgres JSON cells, tab close/new ([4e91b9a](https://github.com/suiflex/rdb/commit/4e91b9aa8be4afc32beb27d3ef3e4343d491f7a2))
+* **app:** use search SVG icon in search and filter fields ([ffa30d4](https://github.com/suiflex/rdb/commit/ffa30d45de70ad5448f474a261f5aaf9618471e9))
+
 ## [0.6.0](https://github.com/suiflex/rdb/compare/v0.5.0...v0.6.0) (2026-07-08)
 
 
