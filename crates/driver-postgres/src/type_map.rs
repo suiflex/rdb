@@ -15,6 +15,7 @@ pub enum CellKind {
     Timestamp,
     Date,
     Numeric,
+    Json,
 }
 
 /// Classify a pg `Type` into a `CellKind`. Unknown types -> `Text` (string
@@ -30,6 +31,7 @@ pub fn classify(ty: &Type) -> CellKind {
         Type::DATE => CellKind::Date,
         Type::NUMERIC => CellKind::Numeric,
         Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME => CellKind::Text,
+        Type::JSON | Type::JSONB => CellKind::Json,
         _ => CellKind::Text,
     }
 }
@@ -95,6 +97,12 @@ pub fn extract_cell(row: &Row, idx: usize) -> Cell {
             Ok(None) => Cell::Null,
             Err(_) => string_fallback(row, idx),
         },
+        CellKind::Json => match row.try_get::<_, Option<serde_json::Value>>(idx) {
+            // Compact single-line render; the UI inspector pretty-prints on demand.
+            Ok(Some(v)) => Cell::Text(v.to_string()),
+            Ok(None) => Cell::Null,
+            Err(_) => string_fallback(row, idx),
+        },
         CellKind::Text => string_fallback(row, idx),
     }
 }
@@ -141,6 +149,12 @@ mod tests {
         assert_eq!(classify(&Type::TIMESTAMP), CellKind::Timestamp);
         assert_eq!(classify(&Type::DATE), CellKind::Date);
         assert_eq!(classify(&Type::NUMERIC), CellKind::Numeric);
+    }
+
+    #[test]
+    fn json_types_classify_as_json() {
+        assert_eq!(classify(&Type::JSON), CellKind::Json);
+        assert_eq!(classify(&Type::JSONB), CellKind::Json);
     }
 
     #[test]
