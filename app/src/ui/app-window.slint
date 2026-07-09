@@ -52,6 +52,9 @@ export component MainWindow inherits Window {
     in property <string> active-table;
     in property <int> active-count: -1;   // sidebar badge: rows in active table
     in property <string> sort-text;
+    in property <int> grid-sort-col: -1;  // client-side result sort
+    in property <bool> grid-sort-asc: true;
+    callback sort-col(int);
     in property <[TreeNode]> query-tree;  // sidebar Queries/History rows
     in property <[string]> schema-list;
     in-out property <string> schema-name: "public";
@@ -696,6 +699,9 @@ export component MainWindow inherits Window {
                         status-error: root.status-error;
                         status-latency: root.status-latency;
                         sort-text: root.sort-text;
+                        grid-sort-col: root.grid-sort-col;
+                        grid-sort-asc: root.grid-sort-asc;
+                        sort-col(i) => { root.sort-col(i); }
                         editor-lines: root.editor-lines;
                         cursor-line: root.cursor-line;
                         cursor-col: root.cursor-col;

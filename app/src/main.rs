@@ -2061,6 +2061,63 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ----- header click: client-side sort by a column -----
+    {
+        let weak = window.as_weak();
+        let last_view = last_view.clone();
+        let edit_buf = edit_buf.clone();
+        let displayed_grid = displayed_grid.clone();
+        let hidden_cols = hidden_cols.clone();
+        let sort_state = sort_state.clone();
+        let col_order = col_order.clone();
+        window.on_sort_col(move |display_c| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let hidden = hidden_cols.lock().unwrap().clone();
+            let order = col_order.lock().unwrap().clone();
+            // display position → ORIGINAL column index
+            let visible: Vec<usize> = order
+                .iter()
+                .copied()
+                .filter(|i| !hidden.contains(i))
+                .collect();
+            let Some(&orig) = visible.get(display_c.max(0) as usize) else {
+                return;
+            };
+            // toggle direction on the same column, else ascending on a new one
+            {
+                let mut s = sort_state.lock().unwrap();
+                if s.0 == orig as i32 {
+                    s.1 = !s.1;
+                } else {
+                    *s = (orig as i32, true);
+                }
+            }
+            let (scol, sasc) = *sort_state.lock().unwrap();
+            w.set_grid_sort_col(display_c);
+            w.set_grid_sort_asc(sasc);
+            let needle = w.get_grid_filter().to_string().to_lowercase();
+            let fcol = w.get_filter_col().to_string();
+            let fop = w.get_filter_op().to_string();
+            let guard = last_view.lock().unwrap();
+            let Some(v) = guard.as_ref() else {
+                return;
+            };
+            if matches!(v, model::ResultView::Affected(_)) {
+                return;
+            }
+            // Sorting renumbers rows → row-keyed pending edits would misland.
+            edit_buf.lock().unwrap().clear();
+            w.set_pending_count(0);
+            w.set_editing_row(-1);
+            w.set_editing_col(-1);
+            let sorted = compute_view(v, &needle, &fcol, &fop, &hidden, &order, scol, sasc);
+            *displayed_grid.lock().unwrap() = view_grid(&sorted);
+            apply_result(&w, sorted);
+        });
+    }
+
     // ----- Columns popup: toggle a column's visibility -----
     {
         let weak = window.as_weak();
@@ -2449,6 +2506,8 @@ fn main() -> Result<(), slint::PlatformError> {
                                 hidden_cols.lock().unwrap().clear();
                                 *col_order.lock().unwrap() = (0..ncols).collect();
                                 *sort_state.lock().unwrap() = (-1, true);
+                                w.set_grid_sort_col(-1);
+                                w.set_grid_sort_asc(true);
                                 let colnames: Vec<SharedString> = match &v {
                                     model::ResultView::Table(g) => g
                                         .columns
