@@ -72,6 +72,8 @@ export component WorkArea inherits Rectangle {
     in property <int> pending-count;
     in property <bool> read-only: true;
     in-out property <string> limit-text;
+    // Draggable height of the SQL editor pane (session-local).
+    in-out property <length> editor-h: 340px;
     in property <int> limit-value;
     in property <string> limit-display;
 
@@ -327,7 +329,7 @@ export component WorkArea inherits Rectangle {
 
         // ================= SQL editor (non-browse tabs) =================
         if !root.browse-mode && !root.fn-mode && !root.empty-mode: Rectangle {
-            height: 340px;
+            height: root.editor-h;
             background: Tokens.canvas;
             VerticalLayout {
                 width: 100%;
@@ -522,6 +524,20 @@ export component WorkArea inherits Rectangle {
                     TextButton { text: "Copy"; clicked => { root.copy-results(); } }
                     TextButton { text: "Export CSV"; clicked => { root.export-csv(); } }
                     TextButton { text: "Chart"; clicked => { root.sql-view-mode = 2; } }
+                }
+            }
+        }
+
+        // draggable splitter: grow/shrink the editor vs the results (SQL tabs)
+        if !root.browse-mode && !root.fn-mode && !root.empty-mode: Rectangle {
+            height: 6px;
+            background: split-ta.has-hover || split-ta.pressed ? Tokens.accent : Tokens.chrome;
+            split-ta := TouchArea {
+                mouse-cursor: row-resize;
+                moved => {
+                    root.editor-h = clamp(
+                        root.editor-h + (self.mouse-y - self.pressed-y),
+                        120px, root.height - 200px);
                 }
             }
         }
