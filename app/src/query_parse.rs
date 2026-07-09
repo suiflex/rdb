@@ -9,6 +9,10 @@ use rdbs_core::query::{MongoKind, MongoOp, Query};
 /// Returns a human-readable error string on malformed input (shown in the
 /// result-status line; no driver call is made).
 pub fn parse_query(engine: Engine, text: &str) -> Result<Query, String> {
+    // Drop whole-line comments (Cmd+/ toggles them) before interpreting, so a
+    // commented-out query stays inert in the buffer for every engine.
+    let cleaned = strip_comment_lines(engine, text);
+    let text = cleaned.as_str();
     match engine {
         Engine::Postgres | Engine::MySql | Engine::Sqlite | Engine::Cassandra => {
             Ok(Query::Sql(text.to_string()))
@@ -32,6 +36,27 @@ pub fn editor_hint(engine: Engine) -> &'static str {
         Engine::Redis => "SET key value",
         Engine::Mongo => r#"Mongo JSON — {"collection":"c","op":"find","body":{}}"#,
     }
+}
+
+/// Line-comment marker for the engine's query language. Used by the editor's
+/// Cmd+/ toggle and to strip commented lines before a query runs.
+pub fn comment_prefix(engine: Engine) -> &'static str {
+    match engine {
+        Engine::Postgres | Engine::MySql | Engine::Sqlite | Engine::Cassandra => "--",
+        Engine::Redis => "#",
+        Engine::Mongo => "//",
+    }
+}
+
+/// Remove whole-line comments (lines whose first non-whitespace run is the
+/// engine's comment marker). Inline trailing comments are left for the engine
+/// itself to handle.
+fn strip_comment_lines(engine: Engine, text: &str) -> String {
+    let prefix = comment_prefix(engine);
+    text.lines()
+        .filter(|l| !l.trim_start().starts_with(prefix))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn parse_mongo(text: &str) -> Result<Query, String> {
@@ -95,6 +120,24 @@ mod tests {
                 Query::Sql(s) => assert_eq!(s, "SELECT 1"),
                 _ => panic!("expected Sql"),
             }
+        }
+    }
+
+    #[test]
+    fn sql_commented_lines_are_stripped() {
+        let text = "-- keep this\nSELECT 1";
+        match parse_query(Engine::Postgres, text).unwrap() {
+            Query::Sql(s) => assert_eq!(s, "SELECT 1"),
+            _ => panic!("expected Sql"),
+        }
+    }
+
+    #[test]
+    fn mongo_ignores_commented_line() {
+        let text = "// old query\n{ \"collection\": \"c\", \"op\": \"find\", \"body\": {} }";
+        match parse_query(Engine::Mongo, text).unwrap() {
+            Query::Mongo(op) => assert_eq!(op.collection, "c"),
+            _ => panic!("expected Mongo"),
         }
     }
 

@@ -44,6 +44,7 @@ export component WorkArea inherits Rectangle {
     in-out property <bool> sql-open: false;
     // SQL editor model (Rust lexer output) + cursor
     in property <[[Span]]> editor-lines;
+    in property <string> editor-placeholder;
     in property <int> cursor-line;
     in property <int> cursor-col;
     // SQL autocomplete popup (passed down to the SQL CodeEditor)
@@ -73,8 +74,6 @@ export component WorkArea inherits Rectangle {
     in property <bool> fn-mode: false;
     in property <string> fn-name;
     in property <[[Span]]> fn-lines;
-    // Fresh SQL tab with nothing typed yet → empty-state hint.
-    property <bool> empty-mode: !root.browse-mode && !root.fn-mode && root.query-text == "";
 
     // ----- pagination + edit footer -----
     in property <int> page-start;
@@ -285,63 +284,8 @@ export component WorkArea inherits Rectangle {
         }
 
         // ================= empty state (nothing open) =================
-        if root.empty-mode: Rectangle {
-            vertical-stretch: 1;
-            background: Tokens.canvas;
-            VerticalLayout {
-                alignment: center;
-                spacing: Tokens.sp4;
-                HorizontalLayout {
-                    alignment: center;
-                    Rectangle {
-                        width: 300px;
-                        height: 190px;
-                        border-radius: Tokens.radius-lg;
-                        border-width: 1px;
-                        border-color: Tokens.accent.with-alpha(0.35);
-                        background: Tokens.accent-tint.with-alpha(0.45);
-                        VerticalLayout {
-                            alignment: center;
-                            spacing: Tokens.sp2;
-                            Text {
-                                text: "▦";
-                                color: Tokens.accent.with-alpha(0.65);
-                                font-size: 44px;
-                                horizontal-alignment: center;
-                            }
-                            Text {
-                                text: "RDB";
-                                color: Tokens.accent.with-alpha(0.65);
-                                font-size: Tokens.font-md;
-                                font-family: Tokens.mono;
-                                font-weight: Tokens.weight-emphasis;
-                                horizontal-alignment: center;
-                            }
-                        }
-                    }
-                }
-                HorizontalLayout {
-                    alignment: center;
-                    spacing: Tokens.sp2;
-                    Text {
-                        text: "Open a table from the sidebar, or press";
-                        color: Tokens.text-dim;
-                        font-size: Tokens.font-md;
-                        vertical-alignment: center;
-                    }
-                    KeyCap { text: "⌘P"; }
-                    Text {
-                        text: "to jump anywhere";
-                        color: Tokens.text-dim;
-                        font-size: Tokens.font-md;
-                        vertical-alignment: center;
-                    }
-                }
-            }
-        }
-
         // ================= SQL editor (non-browse tabs) =================
-        if !root.browse-mode && !root.fn-mode && !root.empty-mode: Rectangle {
+        if !root.browse-mode && !root.fn-mode: Rectangle {
             height: root.editor-h;
             background: Tokens.canvas;
             VerticalLayout {
@@ -368,14 +312,15 @@ export component WorkArea inherits Rectangle {
                     }
                     VerticalLayout {
                         alignment: center;
+                        visible: root.sql-capable;
                         SecondaryButton { text: "Format"; height: 28px; clicked => { root.format-sql(); } }
                     }
                     VerticalLayout {
                         alignment: center;
+                        visible: root.sql-capable;
                         SecondaryButton {
                             text: "Explain";
                             height: 28px;
-                            enabled: root.sql-capable;
                             clicked => { root.explain-query(); }
                         }
                     }
@@ -504,6 +449,7 @@ export component WorkArea inherits Rectangle {
                 CodeEditor {
                     vertical-stretch: 1;
                     lines: root.editor-lines;
+                    placeholder: root.editor-placeholder;
                     cursor-line: root.cursor-line;
                     cursor-col: root.cursor-col;
                     completion-items: root.completion-items;
@@ -583,7 +529,7 @@ export component WorkArea inherits Rectangle {
         }
 
         // draggable splitter: grow/shrink the editor vs the results (SQL tabs)
-        if !root.browse-mode && !root.fn-mode && !root.empty-mode: Rectangle {
+        if !root.browse-mode && !root.fn-mode: Rectangle {
             height: 6px;
             background: split-ta.has-hover || split-ta.pressed ? Tokens.accent : Tokens.chrome;
             split-ta := TouchArea {
@@ -600,7 +546,7 @@ export component WorkArea inherits Rectangle {
         // columns) and are toggled by `filter-open`; see the "Filter" button.
 
         // ================= result body =================
-        if !root.fn-mode && !root.empty-mode: body := Rectangle {
+        if !root.fn-mode: body := Rectangle {
             vertical-stretch: 1;
             background: Tokens.canvas;
 

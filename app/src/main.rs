@@ -411,7 +411,35 @@ fn clip_get() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Record an executed query at the head of the live history (dedupe, cap 50).
+/// Max recent queries kept, in memory and on disk.
+const RECENT_CAP: usize = 50;
+
+/// Load persisted recent-query history; empty on a missing/unreadable file.
+fn load_recent() -> Vec<String> {
+    let Ok(path) = rdbs_connstore::ConnStore::recent_queries_path() else {
+        return Vec::new();
+    };
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Persist the recent-query history (best-effort; I/O errors are ignored).
+fn save_recent(list: &[String]) {
+    let Ok(path) = rdbs_connstore::ConnStore::recent_queries_path() else {
+        return;
+    };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(list) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+/// Record an executed query at the head of the history (dedupe, cap
+/// `RECENT_CAP`) and persist it, except in mock mode.
 fn record_recent(list: &RefCell<Vec<String>>, text: &str) {
     let t = text.trim();
     if t.is_empty() {
@@ -420,7 +448,10 @@ fn record_recent(list: &RefCell<Vec<String>>, text: &str) {
     let mut v = list.borrow_mut();
     v.retain(|s| s != t);
     v.insert(0, t.to_string());
-    v.truncate(50);
+    v.truncate(RECENT_CAP);
+    if !mock::mock_mode() {
+        save_recent(&v);
+    }
 }
 
 fn page_bounds(page: u64, limit: u64, total: Option<u64>, shown: u64) -> (u64, u64, bool, bool) {
@@ -1353,6 +1384,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let refresh_completion = refresh_completion.clone();
         let accept_completion = accept_completion.clone();
+        let cur_engine = cur_engine.clone();
         window.on_editor_key(move |text, meta, alt, shift| {
             // While the autocomplete popup is open it owns nav / accept / close.
             if let Some(w) = weak.upgrade() {
@@ -1464,6 +1496,15 @@ fn main() -> Result<(), slint::PlatformError> {
                         }
                         "z" => {
                             ed.undo();
+                            true
+                        }
+                        "/" => {
+                            // Comment marker follows the connected engine's query
+                            // language; default to SQL when not yet connected.
+                            let engine = cur_engine
+                                .borrow()
+                                .unwrap_or(rdbs_connstore::Engine::Postgres);
+                            ed.toggle_comment(crate::query_parse::comment_prefix(engine));
                             true
                         }
                         _ => false,
@@ -1735,7 +1776,7 @@ fn main() -> Result<(), slint::PlatformError> {
             "UPDATE emiten SET updated_at = now() WHERE code = '93344';".into(),
         ]
     } else {
-        Vec::new()
+        load_recent()
     }));
     let rebuild_query_tree = {
         let weak = window.as_weak();
@@ -2776,11 +2817,14 @@ fn main() -> Result<(), slint::PlatformError> {
                         ""
                     },
                 ));
-                load_editor_text(if mock::mock_mode() {
+                // Start empty; the engine hint shows as a ghost placeholder
+                // (rendered by CodeEditor) instead of seeded buffer text.
+                load_editor_text("");
+                w.set_editor_placeholder(SharedString::from(if mock::mock_mode() {
                     ""
                 } else {
                     crate::query_parse::editor_hint(sc.engine)
-                });
+                }));
                 w.set_active_table(SharedString::default());
             }
             // Fresh connection: nothing browsed, nothing expanded.
