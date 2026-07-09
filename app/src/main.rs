@@ -545,6 +545,23 @@ fn push_grid(w: &MainWindow, g: &model::GridModel) {
     w.set_grid_cells(ModelRc::from(Rc::new(VecModel::from(flat))));
 }
 
+/// Update only the row cells (not columns/widths), so the per-column filter
+/// inputs keep focus while the user types. Columns are assumed unchanged.
+fn set_grid_cells_only(w: &MainWindow, g: &model::GridModel) {
+    let mut flat: Vec<GridCell> = Vec::new();
+    for row in &g.rows {
+        for cell in row {
+            flat.push(GridCell {
+                text: cell.text.clone().into(),
+                is_null: cell.is_null,
+                state: 0,
+            });
+        }
+    }
+    w.set_grid_cells(ModelRc::from(Rc::new(VecModel::from(flat))));
+    w.set_result_status(SharedString::from(format!("{} rows", g.rows.len())));
+}
+
 /// Push `g` with the buffer's pending edits overlaid: changed cells show the
 /// new text (state 1), delete-marked rows state 2, insert rows appended as
 /// state-3 rows at the bottom.
@@ -2340,7 +2357,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
             );
             *displayed_grid.lock().unwrap() = view_grid(&filtered);
-            apply_result(&w, filtered);
+            // Columns are unchanged, so update only the cells — replacing the
+            // columns model would rebuild (and unfocus) the filter inputs.
+            if let model::ResultView::Table(g) = &filtered {
+                set_grid_cells_only(&w, g);
+            } else {
+                apply_result(&w, filtered);
+            }
         });
     }
 

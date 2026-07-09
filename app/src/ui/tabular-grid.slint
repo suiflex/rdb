@@ -5,7 +5,7 @@ import { Tokens } from "tokens.slint";
 import { GridColumn, GridCell } from "structs.slint";
 import { ScrollView } from "std-widgets.slint";
 
-export component TabularGrid inherits ScrollView {
+export component TabularGrid inherits Rectangle {
     in property <[GridColumn]> columns;
     in property <[GridCell]> cells;
     in property <int> col-count;
@@ -30,8 +30,14 @@ export component TabularGrid inherits ScrollView {
     callback edit-cancelled();
 
     VerticalLayout {
-        // fill ScrollView width when few columns; grow past it (scroll) when many
-        width: max(self.preferred-width, parent.visible-width);
+        // ----- frozen header band: mirrors the body's horizontal scroll so the
+        // headers stay put while rows scroll vertically -----
+        Rectangle {
+            clip: true;
+            height: Tokens.grid-header-h + 1px + (root.filter-open ? 27px : 0px);
+            VerticalLayout {
+                x: body.viewport-x;
+                width: max(self.preferred-width, body.visible-width);
 
         // ----- header (27px): "name" 600 + type dim, mono -----
         HorizontalLayout {
@@ -139,13 +145,22 @@ export component TabularGrid inherits ScrollView {
                         font-family: Tokens.mono;
                         font-size: Tokens.font-xs;
                         single-line: true;
-                        accepted => { root.set-col-filter(c, self.text); }
+                        // filter live as the user types (no Enter needed)
+                        edited => { root.set-col-filter(c, self.text); }
                     }
                 }
             }
             Rectangle { horizontal-stretch: 1; background: Tokens.chrome; }
         }
         if root.filter-open: Rectangle { height: 1px; background: Tokens.border; }
+            }
+        }
+
+        // ----- rows: the only vertically-scrolling region -----
+        body := ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                width: max(self.preferred-width, body.visible-width);
 
         // ----- rows (24px) -----
         for r in (root.col-count > 0 ? root.cells.length / root.col-count : 0): Rectangle {
@@ -271,6 +286,8 @@ export component TabularGrid inherits ScrollView {
                 }
                 // trailing filler so the row spans the full width
                 Rectangle { horizontal-stretch: 1; }
+            }
+        }
             }
         }
     }
