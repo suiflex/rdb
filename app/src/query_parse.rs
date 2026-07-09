@@ -27,9 +27,9 @@ pub fn parse_query(engine: Engine, text: &str) -> Result<Query, String> {
 /// Editor placeholder/hint per engine (shown in the UI).
 pub fn editor_hint(engine: Engine) -> &'static str {
     match engine {
-        Engine::Postgres | Engine::MySql | Engine::Sqlite => "SQL — e.g. SELECT * FROM table",
-        Engine::Cassandra => "CQL — e.g. SELECT * FROM keyspace.table",
-        Engine::Redis => "Redis command — e.g. SET key value",
+        Engine::Postgres | Engine::MySql | Engine::Sqlite => "SELECT * FROM table",
+        Engine::Cassandra => "SELECT * FROM keyspace.table",
+        Engine::Redis => "SET key value",
         Engine::Mongo => r#"Mongo JSON — {"collection":"c","op":"find","body":{}}"#,
     }
 }
