@@ -317,9 +317,9 @@ fn gen_emiten() -> Vec<Row> {
         let short: String = format!(
             "{}{}{}{}",
             &a[0..1],
-            &a[1..2].to_uppercase(),
+            a[1..2].to_uppercase(),
             &b[0..1],
-            &b[1..2].to_uppercase()
+            b[1..2].to_uppercase()
         )
         .to_uppercase();
         // Weighted sector pick keeps the per-sector totals plausible.
