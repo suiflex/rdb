@@ -5,6 +5,7 @@ import { Tokens } from "tokens.slint";
 import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow } from "structs.slint";
 import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
+import { PaletteItem } from "palette.slint";
 import {
     UnderlineSegment, SecondaryButton, PrimaryButton, TextButton, FilterField, KeyCap
 } from "components.slint";
@@ -34,13 +35,29 @@ export component WorkArea inherits Rectangle {
     in-out property <string> grid-filter;
     in property <string> active-table;
     in property <string> sort-text;      // e.g. "sort: id ↑"
+    in property <int> grid-sort-col: -1; // client-side sort: display col + dir
+    in property <bool> grid-sort-asc: true;
+    callback sort-col(int);
+    callback reorder-col(int, length);
+    in property <[string]> grid-col-filters;
+    callback set-col-filter(int, string);
     in-out property <bool> sql-open: false;
     // SQL editor model (Rust lexer output) + cursor
     in property <[[Span]]> editor-lines;
     in property <int> cursor-line;
     in property <int> cursor-col;
+    // SQL autocomplete popup (passed down to the SQL CodeEditor)
+    in property <[PaletteItem]> completion-items;
+    in property <bool> completion-visible;
+    in property <int> completion-selected;
+    callback completion-choose(int);
     in property <string> query-label;    // "emiten-per-sektor.sql · saved"
     in property <string> results-meta;   // "10 rows · 38 ms"
+    // result tabs (SQL): ⌘⏎ replaces the active one, ⌘\ appends
+    in property <[string]> result-tabs;
+    in property <int> active-result;
+    callback select-result-tab(int);
+    callback close-result-tab(int);
     callback editor-key(string, bool, bool, bool) -> bool;
     callback editor-press(int, int);
     callback editor-drag(int, int);
@@ -68,6 +85,10 @@ export component WorkArea inherits Rectangle {
     in property <int> pending-count;
     in property <bool> read-only: true;
     in-out property <string> limit-text;
+    // Draggable height of the SQL editor pane (session-local).
+    in-out property <length> editor-h: 340px;
+    in property <int> limit-value;
+    in property <string> limit-display;
 
     // Browse chrome shows whenever a table is open in this tab.
     property <bool> browse-mode: root.active-table != "";
@@ -214,58 +235,6 @@ export component WorkArea inherits Rectangle {
             }
         }
 
-        // ================= expandable filter panel =================
-        if root.browse-mode && root.filter-open: Rectangle {
-            height: 74px;
-            background: Tokens.chrome.with-alpha(0.5);
-            VerticalLayout {
-                padding: Tokens.sp2;
-                padding-left: Tokens.sp3;
-                padding-right: Tokens.sp3;
-                spacing: Tokens.sp1;
-                HorizontalLayout {
-                    height: 30px;
-                    spacing: Tokens.sp2;
-                    ComboBox {
-                        width: 150px;
-                        model: root.filter-columns;
-                        current-value <=> root.filter-col;
-                    }
-                    ComboBox {
-                        width: 110px;
-                        model: ["contains", "=", "≠", ">", "<", "is null", "not null"];
-                        current-value <=> root.filter-op;
-                    }
-                    FilterField {
-                        horizontal-stretch: 1;
-                        height: 28px;
-                        placeholder: "value";
-                        text <=> root.grid-filter;
-                        submitted => { root.apply-filter(); }
-                    }
-                }
-                HorizontalLayout {
-                    height: 28px;
-                    spacing: Tokens.sp2;
-                    Rectangle { horizontal-stretch: 1; }
-                    SecondaryButton {
-                        text: "Clear";
-                        clicked => {
-                            root.grid-filter = "";
-                            root.filter-col = "any column";
-                            root.filter-op = "contains";
-                            root.apply-filter();
-                        }
-                    }
-                    PrimaryButton {
-                        text: "Apply";
-                        clicked => { root.apply-filter(); }
-                    }
-                }
-            }
-            Rectangle { y: parent.height - 1px; height: 1px; width: parent.width; background: Tokens.border; }
-        }
-
         // ================= function view =================
         if root.fn-mode: Rectangle {
             vertical-stretch: 1;
@@ -373,7 +342,7 @@ export component WorkArea inherits Rectangle {
 
         // ================= SQL editor (non-browse tabs) =================
         if !root.browse-mode && !root.fn-mode && !root.empty-mode: Rectangle {
-            height: 340px;
+            height: root.editor-h;
             background: Tokens.canvas;
             VerticalLayout {
                 width: 100%;
@@ -419,15 +388,47 @@ export component WorkArea inherits Rectangle {
                     }
                     VerticalLayout {
                         alignment: center;
-                        SecondaryButton {
-                            text: "Limit " + root.limit-text + "  ⇅";
-                            height: 28px;
-                            clicked => {
-                                // cycle presets: 100 → 300 → 500 → 1000 → 100
-                                root.limit-text = root.limit-text == "100" ? "300"
-                                    : root.limit-text == "300" ? "500"
-                                    : root.limit-text == "500" ? "1000" : "100";
-                                root.set-limit(root.limit-text);
+                        HorizontalLayout {
+                            spacing: Tokens.sp2;
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: "Limit";
+                                    color: Tokens.text-faint;
+                                    font-size: Tokens.font-sm;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            SecondaryButton {
+                                text: "−";
+                                height: 28px;
+                                clicked => { root.set-limit("\{root.limit-value - 100}"); }
+                            }
+                            // editable field; Rust reformats with dot separators
+                            Rectangle {
+                                width: 76px;
+                                height: 28px;
+                                border-radius: Tokens.radius;
+                                border-width: 1px;
+                                border-color: Tokens.border-strong;
+                                background: Tokens.card;
+                                limit-input := TextInput {
+                                    x: Tokens.sp2;
+                                    width: parent.width - 2 * Tokens.sp2;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: right;
+                                    text: root.limit-display;
+                                    color: Tokens.text;
+                                    font-family: Tokens.mono;
+                                    font-size: Tokens.font-sm;
+                                    single-line: true;
+                                    accepted => { root.set-limit(self.text); }
+                                }
+                            }
+                            SecondaryButton {
+                                text: "+";
+                                height: 28px;
+                                clicked => { root.set-limit("\{root.limit-value + 100}"); }
                             }
                         }
                     }
@@ -505,6 +506,10 @@ export component WorkArea inherits Rectangle {
                     lines: root.editor-lines;
                     cursor-line: root.cursor-line;
                     cursor-col: root.cursor-col;
+                    completion-items: root.completion-items;
+                    completion-visible: root.completion-visible;
+                    completion-selected: root.completion-selected;
+                    completion-choose(i) => { root.completion-choose(i); }
                     edit-key(t, cmd, alt, shift) => { root.editor-key(t, cmd, alt, shift) }
                     press-pos(l, c) => { root.editor-press(l, c); }
                     drag-pos(l, c) => { root.editor-drag(l, c); }
@@ -532,12 +537,67 @@ export component WorkArea inherits Rectangle {
                         vertical-alignment: center;
                     }
                     Rectangle { horizontal-stretch: 1; }
+                    TextButton { text: root.filter-open ? "Filter ▲" : "Filter ▼"; clicked => { root.filter-open = !root.filter-open; } }
                     TextButton { text: "Copy"; clicked => { root.copy-results(); } }
                     TextButton { text: "Export CSV"; clicked => { root.export-csv(); } }
                     TextButton { text: "Chart"; clicked => { root.sql-view-mode = 2; } }
                 }
+                // result tabs — appear once ⌘\ has spawned a second result
+                if root.result-tabs.length > 1: HorizontalLayout {
+                    height: 30px;
+                    padding-left: Tokens.sp3;
+                    padding-right: Tokens.sp3;
+                    spacing: Tokens.sp1;
+                    alignment: start;
+                    for name[i] in root.result-tabs: Rectangle {
+                        height: 24px;
+                        width: rl.preferred-width + 2 * Tokens.sp2 + 18px;
+                        border-radius: Tokens.radius;
+                        background: i == root.active-result ? Tokens.accent-tint
+                            : rta.has-hover ? Tokens.chrome : transparent;
+                        rta := TouchArea { clicked => { root.select-result-tab(i); } }
+                        HorizontalLayout {
+                            padding-left: Tokens.sp2;
+                            padding-right: Tokens.sp1;
+                            spacing: Tokens.sp1;
+                            rl := Text {
+                                text: name;
+                                color: i == root.active-result ? Tokens.on-tint : Tokens.text-dim;
+                                font-size: Tokens.font-sm;
+                                vertical-alignment: center;
+                            }
+                            Rectangle {
+                                width: 16px;
+                                Text {
+                                    text: "×";
+                                    color: Tokens.text-faint;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: center;
+                                }
+                                TouchArea { clicked => { root.close-result-tab(i); } }
+                            }
+                        }
+                    }
+                }
             }
         }
+
+        // draggable splitter: grow/shrink the editor vs the results (SQL tabs)
+        if !root.browse-mode && !root.fn-mode && !root.empty-mode: Rectangle {
+            height: 6px;
+            background: split-ta.has-hover || split-ta.pressed ? Tokens.accent : Tokens.chrome;
+            split-ta := TouchArea {
+                mouse-cursor: row-resize;
+                moved => {
+                    root.editor-h = clamp(
+                        root.editor-h + (self.mouse-y - self.pressed-y),
+                        120px, root.height - 200px);
+                }
+            }
+        }
+
+        // The per-column filter inputs live inside TabularGrid (aligned to the
+        // columns) and are toggled by `filter-open`; see the "Filter" button.
 
         // ================= result body =================
         if !root.fn-mode && !root.empty-mode: body := Rectangle {
@@ -552,6 +612,13 @@ export component WorkArea inherits Rectangle {
                 cells: root.cells;
                 col-count: root.col-count;
                 col-widths: root.col-widths;
+                sorted-col: root.grid-sort-col;
+                sort-asc: root.grid-sort-asc;
+                sort-col(i) => { root.sort-col(i); }
+                reorder-col(i, x) => { root.reorder-col(i, x); }
+                filter-open: root.filter-open;
+                col-filter-values: root.grid-col-filters;
+                set-col-filter(i, t) => { root.set-col-filter(i, t); }
                 selected-row <=> root.selected-row;
                 selected-col <=> root.selected-col;
                 editing-row: root.editing-row;

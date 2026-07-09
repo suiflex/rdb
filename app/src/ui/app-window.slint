@@ -52,6 +52,12 @@ export component MainWindow inherits Window {
     in property <string> active-table;
     in property <int> active-count: -1;   // sidebar badge: rows in active table
     in property <string> sort-text;
+    in property <int> grid-sort-col: -1;  // client-side result sort
+    in property <bool> grid-sort-asc: true;
+    callback sort-col(int);
+    callback reorder-col(int, length);
+    in property <[string]> grid-col-filters;
+    callback set-col-filter(int, string);
     in property <[TreeNode]> query-tree;  // sidebar Queries/History rows
     in property <[string]> schema-list;
     in-out property <string> schema-name: "public";
@@ -127,6 +133,11 @@ export component MainWindow inherits Window {
     in property <[[Span]]> editor-lines;
     in property <int> cursor-line;
     in property <int> cursor-col;
+    // SQL autocomplete popup
+    in property <[PaletteItem]> completion-items;
+    in property <bool> completion-visible;
+    in property <int> completion-selected;
+    callback completion-choose(int);
     in property <string> query-label;
     in property <string> results-meta;
     in-out property <int> sidebar-mode: 0;
@@ -175,6 +186,8 @@ export component MainWindow inherits Window {
     in property <bool> status-error;
     in property <bool> query-running;
     in-out property <string> limit-text: "300";
+    in-out property <int> limit-value: 300;      // raw limit for stepper math
+    in-out property <string> limit-display: "300"; // dotted, e.g. "1.000"
     callback prev-page();
     callback next-page();
     callback refresh-page();
@@ -194,6 +207,11 @@ export component MainWindow inherits Window {
     in property <bool> palette-open;
     in property <[PaletteItem]> palette-items;
     callback new-tab();
+    callback run-new-tab();   // ⌘\: run current statement into a new result tab
+    in property <[string]> result-tabs;   // "Result 1", "Result 2", …
+    in property <int> active-result;
+    callback select-result-tab(int);
+    callback close-result-tab(int);
     callback close-tab();
     callback select-tab(int);
     callback toggle-palette();
@@ -263,6 +281,10 @@ export component MainWindow inherits Window {
                 }
                 if (e.text == Key.Return) {
                     root.run-query();
+                    return accept;
+                }
+                if (e.text == "\\") {
+                    root.run-new-tab();
                     return accept;
                 }
                 if (e.text == "s") {
@@ -696,9 +718,23 @@ export component MainWindow inherits Window {
                         status-error: root.status-error;
                         status-latency: root.status-latency;
                         sort-text: root.sort-text;
+                        grid-sort-col: root.grid-sort-col;
+                        grid-sort-asc: root.grid-sort-asc;
+                        sort-col(i) => { root.sort-col(i); }
+                        reorder-col(i, x) => { root.reorder-col(i, x); }
+                        grid-col-filters: root.grid-col-filters;
+                        set-col-filter(i, t) => { root.set-col-filter(i, t); }
                         editor-lines: root.editor-lines;
                         cursor-line: root.cursor-line;
                         cursor-col: root.cursor-col;
+                        completion-items: root.completion-items;
+                        completion-visible: root.completion-visible;
+                        completion-selected: root.completion-selected;
+                        completion-choose(i) => { root.completion-choose(i); }
+                        result-tabs: root.result-tabs;
+                        active-result: root.active-result;
+                        select-result-tab(i) => { root.select-result-tab(i); }
+                        close-result-tab(i) => { root.close-result-tab(i); }
                         query-label: root.query-label;
                         results-meta: root.results-meta;
                         fn-mode: root.fn-mode;
@@ -743,6 +779,8 @@ export component MainWindow inherits Window {
                         read-only: root.grid-read-only;
                         query-running: root.query-running;
                         limit-text <=> root.limit-text;
+                        limit-value: root.limit-value;
+                        limit-display: root.limit-display;
                         run => {
                             root.run-query();
                         }

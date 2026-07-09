@@ -12,6 +12,7 @@
 
 slint::include_modules!();
 
+mod completion;
 mod dispatch;
 mod editor;
 mod export;
@@ -348,6 +349,15 @@ struct BrowseState {
     pk_cols: Vec<String>,
 }
 
+/// One cached SQL result, shown as a result tab. ⌘⏎ replaces the active one;
+/// ⌘\ appends a new one.
+#[derive(Clone)]
+struct StoredResult {
+    view: model::ResultView,
+    meta: String,
+    latency: String,
+}
+
 /// 1-based display bounds of the current page window plus prev/next
 /// availability. `shown` is how many rows the page actually returned.
 /// Connect + ping, bounded to 8s so "Testing connection…" always resolves.
@@ -544,6 +554,23 @@ fn push_grid(w: &MainWindow, g: &model::GridModel) {
     w.set_grid_cells(ModelRc::from(Rc::new(VecModel::from(flat))));
 }
 
+/// Update only the row cells (not columns/widths), so the per-column filter
+/// inputs keep focus while the user types. Columns are assumed unchanged.
+fn set_grid_cells_only(w: &MainWindow, g: &model::GridModel) {
+    let mut flat: Vec<GridCell> = Vec::new();
+    for row in &g.rows {
+        for cell in row {
+            flat.push(GridCell {
+                text: cell.text.clone().into(),
+                is_null: cell.is_null,
+                state: 0,
+            });
+        }
+    }
+    w.set_grid_cells(ModelRc::from(Rc::new(VecModel::from(flat))));
+    w.set_result_status(SharedString::from(format!("{} rows", g.rows.len())));
+}
+
 /// Push `g` with the buffer's pending edits overlaid: changed cells show the
 /// new text (state 1), delete-marked rows state 2, insert rows appended as
 /// state-3 rows at the bottom.
@@ -650,6 +677,32 @@ async fn fetch_indexes(
     }
 }
 
+/// Does one cell satisfy `op` against `needle` (already lowercased)? Numeric
+/// comparison when both sides parse as f64, else case-insensitive text.
+/// Shared by the global filter and the per-column filter row.
+fn cell_matches(cell: &model::VmCell, op: &str, needle: &str) -> bool {
+    use std::cmp::Ordering;
+    match op {
+        "is null" => cell.is_null,
+        "not null" => !cell.is_null,
+        "=" => cell.text.to_lowercase() == needle,
+        "≠" | "!=" => cell.text.to_lowercase() != needle,
+        ">" | "<" | ">=" | "<=" => {
+            let ord = match (cell.text.parse::<f64>(), needle.parse::<f64>()) {
+                (Ok(a), Ok(b)) => a.partial_cmp(&b),
+                _ => Some(cell.text.to_lowercase().as_str().cmp(needle)),
+            };
+            match ord {
+                Some(Ordering::Greater) => op == ">" || op == ">=",
+                Some(Ordering::Less) => op == "<" || op == "<=",
+                Some(Ordering::Equal) => op == ">=" || op == "<=",
+                None => false,
+            }
+        }
+        _ => cell.text.to_lowercase().contains(needle),
+    }
+}
+
 /// Row filter with an optional column + operator condition (`needle` already
 /// lowercased). `col: None` falls back to the all-cell contains filter.
 fn filter_grid_cond(
@@ -666,65 +719,199 @@ fn filter_grid_cond(
     if needle.is_empty() && op != "is null" && op != "not null" {
         return g.clone();
     }
-    let keep = |row: &[model::VmCell]| -> bool {
-        let Some(cell) = row.get(c) else {
-            return false;
-        };
-        match op {
-            "is null" => cell.is_null,
-            "not null" => !cell.is_null,
-            "=" => cell.text.to_lowercase() == needle,
-            "≠" => cell.text.to_lowercase() != needle,
-            ">" | "<" => match (cell.text.parse::<f64>(), needle.parse::<f64>()) {
-                (Ok(a), Ok(b)) => {
-                    if op == ">" {
-                        a > b
-                    } else {
-                        a < b
-                    }
-                }
-                _ => {
-                    let t = cell.text.to_lowercase();
-                    if op == ">" {
-                        t.as_str() > needle
-                    } else {
-                        t.as_str() < needle
-                    }
-                }
-            },
-            _ => cell.text.to_lowercase().contains(needle),
-        }
-    };
     model::GridModel {
         columns: g.columns.clone(),
-        rows: g.rows.iter().filter(|r| keep(r)).cloned().collect(),
-    }
-}
-
-/// Return a copy of `g` without the hidden column indices.
-fn hide_cols(g: &model::GridModel, hidden: &HashSet<usize>) -> model::GridModel {
-    if hidden.is_empty() {
-        return g.clone();
-    }
-    model::GridModel {
-        columns: g
-            .columns
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| !hidden.contains(i))
-            .map(|(_, c)| c.clone())
-            .collect(),
         rows: g
             .rows
             .iter()
-            .map(|row| {
-                row.iter()
-                    .enumerate()
-                    .filter(|(i, _)| !hidden.contains(i))
-                    .map(|(_, c)| c.clone())
-                    .collect()
-            })
+            .filter(|r| r.get(c).is_some_and(|cell| cell_matches(cell, op, needle)))
+            .cloned()
             .collect(),
+    }
+}
+
+/// Sort rows by column `col` (an ORIGINAL column index). Numeric when both
+/// cells parse as f64, else case-insensitive text. Nulls always sort last,
+/// regardless of direction. `col < 0` or out of range leaves the grid as-is.
+fn sort_grid(g: &model::GridModel, col: i32, asc: bool) -> model::GridModel {
+    if col < 0 || col as usize >= g.columns.len() {
+        return g.clone();
+    }
+    let c = col as usize;
+    let mut rows = g.rows.clone();
+    rows.sort_by(|a, b| {
+        use std::cmp::Ordering;
+        let (x, y) = (&a[c], &b[c]);
+        match (x.is_null, y.is_null) {
+            (true, true) => return Ordering::Equal,
+            (true, false) => return Ordering::Greater,
+            (false, true) => return Ordering::Less,
+            _ => {}
+        }
+        let ord = match (x.text.parse::<f64>(), y.text.parse::<f64>()) {
+            (Ok(m), Ok(n)) => m.partial_cmp(&n).unwrap_or(Ordering::Equal),
+            _ => x.text.to_lowercase().cmp(&y.text.to_lowercase()),
+        };
+        if asc {
+            ord
+        } else {
+            ord.reverse()
+        }
+    });
+    model::GridModel {
+        columns: g.columns.clone(),
+        rows,
+    }
+}
+
+/// Project `g`'s columns into display order `order` (ORIGINAL column indices),
+/// dropping any index in `hidden`. Both columns and each row are projected the
+/// same way, so this subsumes hide + reorder in one pass.
+fn project_cols(
+    g: &model::GridModel,
+    order: &[usize],
+    hidden: &HashSet<usize>,
+) -> model::GridModel {
+    let idx: Vec<usize> = order
+        .iter()
+        .copied()
+        .filter(|i| *i < g.columns.len() && !hidden.contains(i))
+        .collect();
+    model::GridModel {
+        columns: idx.iter().map(|&i| g.columns[i].clone()).collect(),
+        rows: g
+            .rows
+            .iter()
+            .map(|row| idx.iter().map(|&i| row[i].clone()).collect())
+            .collect(),
+    }
+}
+
+/// Build the on-screen grid from a base result grid: filter rows, sort rows,
+/// then project columns (hide + reorder). Column index arguments are ORIGINAL
+/// indices into `base`.
+#[allow(clippy::too_many_arguments)]
+/// Parse one per-column filter box into `(op, needle)`. A leading operator
+/// (`>=`,`<=`,`!=`,`>`,`<`,`=`) picks the comparison; anything else is a
+/// case-insensitive `contains`. Blank input means "no filter" (None).
+fn parse_col_filter(raw: &str) -> Option<(&'static str, String)> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return None;
+    }
+    for op in [">=", "<=", "!="] {
+        if let Some(rest) = t.strip_prefix(op) {
+            return Some((op, rest.trim().to_lowercase()));
+        }
+    }
+    for op in [">", "<", "="] {
+        if let Some(rest) = t.strip_prefix(op) {
+            return Some((op, rest.trim().to_lowercase()));
+        }
+    }
+    Some(("contains", t.to_lowercase()))
+}
+
+/// Drop rows failing any non-empty per-column filter (`col_filters` indexed by
+/// ORIGINAL column). Conditions combine with AND.
+fn apply_col_filters(g: &model::GridModel, col_filters: &[String]) -> model::GridModel {
+    let parsed: Vec<(usize, &'static str, String)> = col_filters
+        .iter()
+        .enumerate()
+        .filter_map(|(ci, raw)| parse_col_filter(raw).map(|(op, n)| (ci, op, n)))
+        .collect();
+    if parsed.is_empty() {
+        return g.clone();
+    }
+    model::GridModel {
+        columns: g.columns.clone(),
+        rows: g
+            .rows
+            .iter()
+            .filter(|row| {
+                parsed
+                    .iter()
+                    .all(|(ci, op, n)| row.get(*ci).is_some_and(|cell| cell_matches(cell, op, n)))
+            })
+            .cloned()
+            .collect(),
+    }
+}
+
+/// Per-column filter box values in DISPLAY order (visible columns only), for
+/// feeding the grid's filter-row inputs.
+fn display_col_filters(
+    col_filters: &[String],
+    order: &[usize],
+    hidden: &HashSet<usize>,
+) -> Vec<SharedString> {
+    order
+        .iter()
+        .copied()
+        .filter(|i| !hidden.contains(i))
+        .map(|i| SharedString::from(col_filters.get(i).cloned().unwrap_or_default()))
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_grid(
+    base: &model::GridModel,
+    needle: &str,
+    fcol: &str,
+    fop: &str,
+    col_filters: &[String],
+    hidden: &HashSet<usize>,
+    order: &[usize],
+    sort_col: i32,
+    sort_asc: bool,
+) -> model::GridModel {
+    let col = if fcol == "any column" {
+        None
+    } else {
+        base.columns.iter().position(|c| c.name == fcol)
+    };
+    let filtered = filter_grid_cond(base, needle, col, fop);
+    let per_col = apply_col_filters(&filtered, col_filters);
+    let sorted = sort_grid(&per_col, sort_col, sort_asc);
+    project_cols(&sorted, order, hidden)
+}
+
+/// Derive the displayed `ResultView` from a cached base view by applying the
+/// active filter, sort, hidden-column set, and column order. Single source of
+/// truth for the filter / sort / hide / reorder handlers. `Affected` has no
+/// grid, so it passes through unchanged.
+#[allow(clippy::too_many_arguments)]
+fn compute_view(
+    base: &model::ResultView,
+    needle: &str,
+    fcol: &str,
+    fop: &str,
+    col_filters: &[String],
+    hidden: &HashSet<usize>,
+    order: &[usize],
+    sort_col: i32,
+    sort_asc: bool,
+) -> model::ResultView {
+    let g = |grid| {
+        build_grid(
+            grid,
+            needle,
+            fcol,
+            fop,
+            col_filters,
+            hidden,
+            order,
+            sort_col,
+            sort_asc,
+        )
+    };
+    match base {
+        model::ResultView::Table(grid) => model::ResultView::Table(g(grid)),
+        model::ResultView::Documents(d) => model::ResultView::Documents(model::DocModel {
+            json: d.json.clone(),
+            grid: g(&d.grid),
+        }),
+        model::ResultView::Affected(a) => model::ResultView::Affected(a.clone()),
     }
 }
 
@@ -753,6 +940,164 @@ fn apply_result(w: &MainWindow, view: model::ResultView) {
             clear_grid(w);
             w.set_result_status(SharedString::from(status));
         }
+    }
+}
+
+/// Present a fresh result view: reset all client-side view state (filter, sort,
+/// hidden, order, per-column filters, pending edits), rebuild the column
+/// metadata + widths + chart, and push it to the grid. Shared by a new query
+/// run and by switching between result tabs.
+#[allow(clippy::too_many_arguments)]
+fn present_view(
+    w: &MainWindow,
+    v: model::ResultView,
+    meta: &str,
+    latency: &str,
+    last_view: &Arc<std::sync::Mutex<Option<model::ResultView>>>,
+    displayed_grid: &Arc<std::sync::Mutex<Option<model::GridModel>>>,
+    hidden_cols: &Arc<std::sync::Mutex<HashSet<usize>>>,
+    sort_state: &Arc<std::sync::Mutex<(i32, bool)>>,
+    col_order: &Arc<std::sync::Mutex<Vec<usize>>>,
+    col_filters: &Arc<std::sync::Mutex<Vec<String>>>,
+    edit_buf: &Arc<std::sync::Mutex<model::EditBuffer>>,
+    browse: &Arc<std::sync::Mutex<BrowseState>>,
+) {
+    let ncols = match &v {
+        model::ResultView::Table(g) => g.columns.len(),
+        model::ResultView::Documents(d) => d.grid.columns.len(),
+        _ => 0,
+    };
+    let shown = match &v {
+        model::ResultView::Table(g) => g.rows.len(),
+        model::ResultView::Documents(d) => d.grid.rows.len(),
+        model::ResultView::Affected(_) => 0,
+    } as u64;
+    *last_view.lock().unwrap() = Some(v.clone());
+    w.set_grid_filter(SharedString::default());
+    hidden_cols.lock().unwrap().clear();
+    *col_order.lock().unwrap() = (0..ncols).collect();
+    *sort_state.lock().unwrap() = (-1, true);
+    *col_filters.lock().unwrap() = vec![String::new(); ncols];
+    w.set_grid_sort_col(-1);
+    w.set_grid_sort_asc(true);
+    w.set_grid_col_filters(ModelRc::from(Rc::new(VecModel::from(vec![
+            SharedString::default();
+            ncols
+        ]))));
+    let colnames: Vec<SharedString> = match &v {
+        model::ResultView::Table(g) => g
+            .columns
+            .iter()
+            .map(|c| SharedString::from(c.name.clone()))
+            .collect(),
+        model::ResultView::Documents(d) => d
+            .grid
+            .columns
+            .iter()
+            .map(|c| SharedString::from(c.name.clone()))
+            .collect(),
+        _ => Vec::new(),
+    };
+    w.set_col_hidden(ModelRc::from(Rc::new(VecModel::from(vec![
+        false;
+        colnames.len()
+    ]))));
+    let mut fcols: Vec<SharedString> = vec![SharedString::from("any column")];
+    fcols.extend(colnames.iter().cloned());
+    w.set_filter_columns(ModelRc::from(Rc::new(VecModel::from(fcols))));
+    w.set_all_columns(ModelRc::from(Rc::new(VecModel::from(colnames))));
+    *displayed_grid.lock().unwrap() = view_grid(&v);
+    {
+        let st = browse.lock().unwrap();
+        let mut b = edit_buf.lock().unwrap();
+        b.clear();
+        b.table = st.table.clone();
+        b.pk_cols = st.pk_cols.clone();
+    }
+    w.set_pending_count(0);
+    w.set_editing_row(-1);
+    w.set_editing_col(-1);
+    w.set_status_error(false);
+    w.set_status_latency(SharedString::from(latency));
+    w.set_results_meta(SharedString::from(meta));
+    let widths: Vec<f32> = match &v {
+        model::ResultView::Table(g) => g
+            .columns
+            .iter()
+            .map(|c| default_col_width(&c.name, &c.type_name))
+            .collect(),
+        _ => vec![140.0; ncols],
+    };
+    w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(widths))));
+    let bars: Vec<ChartBar> = match &v {
+        model::ResultView::Table(g) => model::chart_data(g)
+            .into_iter()
+            .map(|(label, value, frac)| ChartBar {
+                label: label.into(),
+                value: value.into(),
+                frac,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    w.set_chart_bars(ModelRc::from(Rc::new(VecModel::from(bars))));
+    apply_result(w, v);
+    let st = browse.lock().unwrap().clone();
+    if st.table.is_some() {
+        let (start, end, prev, next) = page_bounds(st.page, st.limit, st.total, shown);
+        w.set_page_start(start as i32);
+        w.set_page_end(end as i32);
+        w.set_total_rows(st.total.map(|t| t as i32).unwrap_or(-1));
+        w.set_can_prev(prev);
+        w.set_can_next(next);
+    }
+}
+
+/// Set the result-tab strip labels ("Result 1", …) and active index.
+fn set_result_tabs(w: &MainWindow, count: usize, active: usize) {
+    let labels: Vec<SharedString> = (1..=count)
+        .map(|n| SharedString::from(format!("Result {n}")))
+        .collect();
+    w.set_result_tabs(ModelRc::from(Rc::new(VecModel::from(labels))));
+    w.set_active_result(active as i32);
+}
+
+/// Format a number with `.` thousands separators (e.g. 1000 → "1.000").
+fn group_thousands(n: u64) -> String {
+    let s = n.to_string();
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, b) in bytes.iter().enumerate() {
+        if i > 0 && (bytes.len() - i).is_multiple_of(3) {
+            out.push('.');
+        }
+        out.push(*b as char);
+    }
+    out
+}
+
+#[cfg(test)]
+mod fmt_tests {
+    use super::{group_thousands, parse_col_filter};
+    #[test]
+    fn col_filter_prefix_ops() {
+        assert_eq!(parse_col_filter(""), None);
+        assert_eq!(parse_col_filter("   "), None);
+        assert_eq!(parse_col_filter(">100"), Some((">", "100".to_string())));
+        assert_eq!(parse_col_filter(">= 5"), Some((">=", "5".to_string())));
+        assert_eq!(parse_col_filter("!=X"), Some(("!=", "x".to_string())));
+        assert_eq!(
+            parse_col_filter("abc"),
+            Some(("contains", "abc".to_string()))
+        );
+    }
+    #[test]
+    fn groups_thousands_with_dots() {
+        assert_eq!(group_thousands(0), "0");
+        assert_eq!(group_thousands(999), "999");
+        assert_eq!(group_thousands(1000), "1.000");
+        assert_eq!(group_thousands(10_000), "10.000");
+        assert_eq!(group_thousands(1_234_567), "1.234.567");
     }
 }
 
@@ -847,6 +1192,22 @@ fn main() -> Result<(), slint::PlatformError> {
     // Column indices (into the last result) hidden via the Columns popup.
     let hidden_cols: Arc<std::sync::Mutex<HashSet<usize>>> =
         Arc::new(std::sync::Mutex::new(HashSet::new()));
+    // Client-side sort: ORIGINAL column index (-1 = none) + ascending flag.
+    let sort_state: Arc<std::sync::Mutex<(i32, bool)>> =
+        Arc::new(std::sync::Mutex::new((-1, true)));
+    // Display order of columns as ORIGINAL indices (drag-to-reorder). Reset to
+    // 0..ncols on every fresh result.
+    let col_order: Arc<std::sync::Mutex<Vec<usize>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    // Per-column filter boxes, raw text indexed by ORIGINAL column. Empty =
+    // no filter. Reset to blanks on every fresh result.
+    let col_filters: Arc<std::sync::Mutex<Vec<String>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    // Result tabs for the SQL editor: cached results + the active index. ⌘\
+    // sets `result_new_tab` so the next run appends instead of replacing.
+    let results: Arc<std::sync::Mutex<Vec<StoredResult>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let active_result: Arc<std::sync::Mutex<usize>> = Arc::new(std::sync::Mutex::new(0));
+    let result_new_tab = Arc::new(std::sync::atomic::AtomicBool::new(false));
     // Engine of the live connection, kept on the UI thread so table clicks can
     // build an engine-appropriate "browse this table" query synchronously.
     let cur_engine: Rc<RefCell<Option<rdbs_connstore::Engine>>> = Rc::new(RefCell::new(None));
@@ -921,10 +1282,103 @@ fn main() -> Result<(), slint::PlatformError> {
         })
     };
     load_editor_text("");
+
+    // ----- SQL autocomplete: recompute popup, accept a choice -----
+    // completion_ctx = (word char length to replace, candidate labels).
+    let completion_ctx: Rc<RefCell<(usize, Vec<String>)>> = Rc::new(RefCell::new((0, Vec::new())));
+    let refresh_completion: Rc<dyn Fn()> = {
+        let weak = window.as_weak();
+        let ed_state = ed_state.clone();
+        let raw_nodes = raw_nodes.clone();
+        let completion_ctx = completion_ctx.clone();
+        Rc::new(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let before = ed_state.borrow().before_cursor().to_string();
+            let (word_len, cands) = completion::suggest(&before, &raw_nodes.lock().unwrap());
+            if cands.is_empty() {
+                w.set_completion_visible(false);
+                *completion_ctx.borrow_mut() = (0, Vec::new());
+                return;
+            }
+            let items: Vec<PaletteItem> = cands
+                .iter()
+                .map(|c| PaletteItem {
+                    label: c.label.clone().into(),
+                    kind: c.kind.clone().into(),
+                    sub: c.sub.clone().into(),
+                    local: false,
+                })
+                .collect();
+            *completion_ctx.borrow_mut() =
+                (word_len, cands.iter().map(|c| c.label.clone()).collect());
+            w.set_completion_items(ModelRc::from(Rc::new(VecModel::from(items))));
+            w.set_completion_selected(0);
+            w.set_completion_visible(true);
+        })
+    };
+    let accept_completion: Rc<dyn Fn(i32)> = {
+        let weak = window.as_weak();
+        let ed_state = ed_state.clone();
+        let sync_editor = sync_editor.clone();
+        let completion_ctx = completion_ctx.clone();
+        Rc::new(move |idx: i32| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let (word_len, labels) = completion_ctx.borrow().clone();
+            let Some(label) = labels.get(idx.max(0) as usize).cloned() else {
+                return;
+            };
+            {
+                let mut ed = ed_state.borrow_mut();
+                for _ in 0..word_len {
+                    ed.backspace();
+                }
+                ed.insert(&label);
+            }
+            w.set_completion_visible(false);
+            *completion_ctx.borrow_mut() = (0, Vec::new());
+            sync_editor();
+        })
+    };
+    {
+        let accept = accept_completion.clone();
+        window.on_completion_choose(move |i| accept(i));
+    }
     {
         let ed_state = ed_state.clone();
         let sync_editor = sync_editor.clone();
+        let weak = window.as_weak();
+        let refresh_completion = refresh_completion.clone();
+        let accept_completion = accept_completion.clone();
         window.on_editor_key(move |text, meta, alt, shift| {
+            // While the autocomplete popup is open it owns nav / accept / close.
+            if let Some(w) = weak.upgrade() {
+                if w.get_completion_visible() {
+                    let n = w.get_completion_items().row_count() as i32;
+                    match text.as_str() {
+                        "\u{f700}" if n > 0 => {
+                            w.set_completion_selected((w.get_completion_selected() - 1 + n) % n);
+                            return true;
+                        }
+                        "\u{f701}" if n > 0 => {
+                            w.set_completion_selected((w.get_completion_selected() + 1) % n);
+                            return true;
+                        }
+                        "\t" | "\n" | "\r" => {
+                            accept_completion(w.get_completion_selected());
+                            return true;
+                        }
+                        "\u{1b}" => {
+                            w.set_completion_visible(false);
+                            return true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
             // Cursor motion first: arrows / home / end, with macOS ⌘ (line &
             // document) and ⌥ (word) semantics. shift extends the selection.
             if matches!(
@@ -1093,6 +1547,8 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             if handled {
                 sync_editor();
+                // Typing/deleting shifts the completion context — recompute.
+                refresh_completion();
             }
             handled
         });
@@ -1100,7 +1556,11 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let ed_state = ed_state.clone();
         let sync_editor = sync_editor.clone();
+        let weak = window.as_weak();
         window.on_editor_press(move |line, col| {
+            if let Some(w) = weak.upgrade() {
+                w.set_completion_visible(false);
+            }
             ed_state.borrow_mut().move_to(line, col, false);
             sync_editor();
         });
@@ -1941,6 +2401,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let edit_buf = edit_buf.clone();
         let displayed_grid = displayed_grid.clone();
         let hidden_cols = hidden_cols.clone();
+        let sort_state = sort_state.clone();
+        let col_order = col_order.clone();
+        let col_filters = col_filters.clone();
         window.on_apply_filter(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -1949,10 +2412,16 @@ fn main() -> Result<(), slint::PlatformError> {
             let fcol = w.get_filter_col().to_string();
             let fop = w.get_filter_op().to_string();
             let hidden = hidden_cols.lock().unwrap().clone();
+            let order = col_order.lock().unwrap().clone();
+            let cfilters = col_filters.lock().unwrap().clone();
+            let (scol, sasc) = *sort_state.lock().unwrap();
             let guard = last_view.lock().unwrap();
             let Some(v) = guard.as_ref() else {
                 return;
             };
+            if matches!(v, model::ResultView::Affected(_)) {
+                return;
+            }
             // Filtering renumbers the visible rows, so pending edits keyed by
             // row index would land on the wrong rows — drop them.
             {
@@ -1962,30 +2431,234 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_pending_count(0);
             w.set_editing_row(-1);
             w.set_editing_col(-1);
-            // Filter the row-bearing views; Affected has nothing to filter.
-            let col_of = |g: &model::GridModel| {
-                if fcol == "any column" {
-                    None
-                } else {
-                    g.columns.iter().position(|c| c.name == fcol)
-                }
-            };
-            let filtered = match v {
-                model::ResultView::Table(g) => model::ResultView::Table(hide_cols(
-                    &filter_grid_cond(g, &needle, col_of(g), &fop),
-                    &hidden,
-                )),
-                model::ResultView::Documents(d) => model::ResultView::Documents(model::DocModel {
-                    json: d.json.clone(),
-                    grid: hide_cols(
-                        &filter_grid_cond(&d.grid, &needle, col_of(&d.grid), &fop),
-                        &hidden,
-                    ),
-                }),
-                model::ResultView::Affected(_) => return,
-            };
+            let filtered = compute_view(
+                v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
+            );
             *displayed_grid.lock().unwrap() = view_grid(&filtered);
             apply_result(&w, filtered);
+        });
+    }
+
+    // ----- per-column filter box edited -----
+    {
+        let weak = window.as_weak();
+        let last_view = last_view.clone();
+        let edit_buf = edit_buf.clone();
+        let displayed_grid = displayed_grid.clone();
+        let hidden_cols = hidden_cols.clone();
+        let sort_state = sort_state.clone();
+        let col_order = col_order.clone();
+        let col_filters = col_filters.clone();
+        window.on_set_col_filter(move |display_c, text| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let hidden = hidden_cols.lock().unwrap().clone();
+            let order = col_order.lock().unwrap().clone();
+            let (scol, sasc) = *sort_state.lock().unwrap();
+            // display position → ORIGINAL column index
+            let visible: Vec<usize> = order
+                .iter()
+                .copied()
+                .filter(|i| !hidden.contains(i))
+                .collect();
+            let Some(&orig) = visible.get(display_c.max(0) as usize) else {
+                return;
+            };
+            let cfilters = {
+                let mut cf = col_filters.lock().unwrap();
+                if orig < cf.len() {
+                    cf[orig] = text.to_string();
+                }
+                cf.clone()
+            };
+            let needle = w.get_grid_filter().to_string().to_lowercase();
+            let fcol = w.get_filter_col().to_string();
+            let fop = w.get_filter_op().to_string();
+            let guard = last_view.lock().unwrap();
+            let Some(v) = guard.as_ref() else {
+                return;
+            };
+            if matches!(v, model::ResultView::Affected(_)) {
+                return;
+            }
+            // Filtering renumbers rows → row-keyed pending edits would misland.
+            edit_buf.lock().unwrap().clear();
+            w.set_pending_count(0);
+            w.set_editing_row(-1);
+            w.set_editing_col(-1);
+            let filtered = compute_view(
+                v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
+            );
+            *displayed_grid.lock().unwrap() = view_grid(&filtered);
+            // Columns are unchanged, so update only the cells — replacing the
+            // columns model would rebuild (and unfocus) the filter inputs.
+            if let model::ResultView::Table(g) = &filtered {
+                set_grid_cells_only(&w, g);
+            } else {
+                apply_result(&w, filtered);
+            }
+        });
+    }
+
+    // ----- header click: client-side sort by a column -----
+    {
+        let weak = window.as_weak();
+        let last_view = last_view.clone();
+        let edit_buf = edit_buf.clone();
+        let displayed_grid = displayed_grid.clone();
+        let hidden_cols = hidden_cols.clone();
+        let sort_state = sort_state.clone();
+        let col_order = col_order.clone();
+        let col_filters = col_filters.clone();
+        window.on_sort_col(move |display_c| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let hidden = hidden_cols.lock().unwrap().clone();
+            let order = col_order.lock().unwrap().clone();
+            let cfilters = col_filters.lock().unwrap().clone();
+            // display position → ORIGINAL column index
+            let visible: Vec<usize> = order
+                .iter()
+                .copied()
+                .filter(|i| !hidden.contains(i))
+                .collect();
+            let Some(&orig) = visible.get(display_c.max(0) as usize) else {
+                return;
+            };
+            // toggle direction on the same column, else ascending on a new one
+            {
+                let mut s = sort_state.lock().unwrap();
+                if s.0 == orig as i32 {
+                    s.1 = !s.1;
+                } else {
+                    *s = (orig as i32, true);
+                }
+            }
+            let (scol, sasc) = *sort_state.lock().unwrap();
+            w.set_grid_sort_col(display_c);
+            w.set_grid_sort_asc(sasc);
+            let needle = w.get_grid_filter().to_string().to_lowercase();
+            let fcol = w.get_filter_col().to_string();
+            let fop = w.get_filter_op().to_string();
+            let guard = last_view.lock().unwrap();
+            let Some(v) = guard.as_ref() else {
+                return;
+            };
+            if matches!(v, model::ResultView::Affected(_)) {
+                return;
+            }
+            // Sorting renumbers rows → row-keyed pending edits would misland.
+            edit_buf.lock().unwrap().clear();
+            w.set_pending_count(0);
+            w.set_editing_row(-1);
+            w.set_editing_col(-1);
+            let sorted = compute_view(
+                v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
+            );
+            *displayed_grid.lock().unwrap() = view_grid(&sorted);
+            apply_result(&w, sorted);
+        });
+    }
+
+    // ----- header drag: reorder result columns -----
+    {
+        let weak = window.as_weak();
+        let last_view = last_view.clone();
+        let edit_buf = edit_buf.clone();
+        let displayed_grid = displayed_grid.clone();
+        let hidden_cols = hidden_cols.clone();
+        let sort_state = sort_state.clone();
+        let col_order = col_order.clone();
+        let col_filters = col_filters.clone();
+        window.on_reorder_col(move |from, local_x| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let from = from.max(0) as usize;
+            let widths: Vec<f32> = w.get_grid_col_widths().iter().collect();
+            if from >= widths.len() {
+                return;
+            }
+            // absolute drop position within the columns strip → target display col
+            let start: f32 = widths.iter().take(from).sum();
+            let drop = start + local_x;
+            let mut acc = 0.0f32;
+            let mut target = widths.len() - 1;
+            for (i, wd) in widths.iter().enumerate() {
+                if drop < acc + wd {
+                    target = i;
+                    break;
+                }
+                acc += wd;
+            }
+            if target == from {
+                return;
+            }
+            let hidden = hidden_cols.lock().unwrap().clone();
+            // move the dragged column among the visible entries of col_order
+            {
+                let mut order = col_order.lock().unwrap();
+                let visible: Vec<usize> = order
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .filter(|(_, i)| !hidden.contains(i))
+                    .map(|(pos, _)| pos)
+                    .collect();
+                if from >= visible.len() || target >= visible.len() {
+                    return;
+                }
+                let (fp, tp) = (visible[from], visible[target]);
+                let val = order.remove(fp);
+                let ins = if tp > fp { tp - 1 } else { tp };
+                order.insert(ins, val);
+            }
+            // move the width the same way so a manual resize follows the column
+            let mut widths = widths;
+            let wv = widths.remove(from);
+            let ins = if target > from { target - 1 } else { target };
+            widths.insert(ins, wv);
+            w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(widths))));
+            let order = col_order.lock().unwrap().clone();
+            let (scol, sasc) = *sort_state.lock().unwrap();
+            // keep the sort arrow on the same column after the shuffle
+            if scol >= 0 {
+                let vis: Vec<usize> = order
+                    .iter()
+                    .copied()
+                    .filter(|i| !hidden.contains(i))
+                    .collect();
+                if let Some(p) = vis.iter().position(|&i| i as i32 == scol) {
+                    w.set_grid_sort_col(p as i32);
+                }
+            }
+            let needle = w.get_grid_filter().to_string().to_lowercase();
+            let fcol = w.get_filter_col().to_string();
+            let fop = w.get_filter_op().to_string();
+            let guard = last_view.lock().unwrap();
+            let Some(v) = guard.as_ref() else {
+                return;
+            };
+            if matches!(v, model::ResultView::Affected(_)) {
+                return;
+            }
+            // Reorder renumbers columns → col-keyed pending edits would misland.
+            edit_buf.lock().unwrap().clear();
+            w.set_pending_count(0);
+            w.set_editing_row(-1);
+            w.set_editing_col(-1);
+            let cfilters = col_filters.lock().unwrap().clone();
+            // filter boxes follow their columns into the new order
+            w.set_grid_col_filters(ModelRc::from(Rc::new(VecModel::from(display_col_filters(
+                &cfilters, &order, &hidden,
+            )))));
+            let transformed = compute_view(
+                v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
+            );
+            *displayed_grid.lock().unwrap() = view_grid(&transformed);
+            apply_result(&w, transformed);
         });
     }
 
@@ -1996,6 +2669,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let edit_buf = edit_buf.clone();
         let displayed_grid = displayed_grid.clone();
         let hidden_cols = hidden_cols.clone();
+        let sort_state = sort_state.clone();
+        let col_order = col_order.clone();
+        let col_filters = col_filters.clone();
         window.on_toggle_column(move |i| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -2012,10 +2688,17 @@ fn main() -> Result<(), slint::PlatformError> {
             let flags: Vec<bool> = (0..n).map(|c| hidden.contains(&c)).collect();
             w.set_col_hidden(ModelRc::from(Rc::new(VecModel::from(flags))));
             let needle = w.get_grid_filter().to_string().to_lowercase();
+            let fcol = w.get_filter_col().to_string();
+            let fop = w.get_filter_op().to_string();
+            let order = col_order.lock().unwrap().clone();
+            let (scol, sasc) = *sort_state.lock().unwrap();
             let guard = last_view.lock().unwrap();
             let Some(v) = guard.as_ref() else {
                 return;
             };
+            if matches!(v, model::ResultView::Affected(_)) {
+                return;
+            }
             // Hiding renumbers columns: cell edits would write through the
             // wrong column index, so drop pending edits and lock editing
             // until the next refresh restores the full column set.
@@ -2030,16 +2713,15 @@ fn main() -> Result<(), slint::PlatformError> {
             if !hidden.is_empty() {
                 w.set_grid_read_only(true);
             }
-            let transformed = match v {
-                model::ResultView::Table(g) => {
-                    model::ResultView::Table(hide_cols(&filter_grid(g, &needle), &hidden))
-                }
-                model::ResultView::Documents(d) => model::ResultView::Documents(model::DocModel {
-                    json: d.json.clone(),
-                    grid: hide_cols(&filter_grid(&d.grid, &needle), &hidden),
-                }),
-                model::ResultView::Affected(_) => return,
-            };
+            let cfilters = col_filters.lock().unwrap().clone();
+            w.set_grid_col_filters(ModelRc::from(Rc::new(VecModel::from(display_col_filters(
+                &cfilters, &order, &hidden,
+            )))));
+            let transformed = compute_view(
+                v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
+            );
+            // ponytail: hiding is structural, so widths reset to type defaults
+            // (manual resize is dropped) — same trade-off reorder makes.
             if let Some(g) = view_grid(&transformed) {
                 let widths: Vec<f32> = g
                     .columns
@@ -2285,6 +2967,12 @@ fn main() -> Result<(), slint::PlatformError> {
         let edit_buf = edit_buf.clone();
         let displayed_grid = displayed_grid.clone();
         let hidden_cols = hidden_cols.clone();
+        let sort_state = sort_state.clone();
+        let col_order = col_order.clone();
+        let col_filters = col_filters.clone();
+        let results = results.clone();
+        let active_result = active_result.clone();
+        let result_new_tab = result_new_tab.clone();
         Rc::new(move |sql: String| {
             let weak2 = weak.clone();
             let current = current.clone();
@@ -2293,6 +2981,13 @@ fn main() -> Result<(), slint::PlatformError> {
             let edit_buf = edit_buf.clone();
             let displayed_grid = displayed_grid.clone();
             let hidden_cols = hidden_cols.clone();
+            let sort_state = sort_state.clone();
+            let col_order = col_order.clone();
+            let col_filters = col_filters.clone();
+            let results = results.clone();
+            let active_result = active_result.clone();
+            // ⌘\ set this; consume it so the next plain run replaces again.
+            let new_tab = result_new_tab.swap(false, std::sync::atomic::Ordering::SeqCst);
             if let Some(w) = weak.upgrade() {
                 w.set_query_running(true);
             }
@@ -2351,105 +3046,55 @@ fn main() -> Result<(), slint::PlatformError> {
                         w.set_query_running(false);
                         match (view, err) {
                             (Some(v), _) => {
-                                // Only tabular-shaped views have resizable columns.
-                                let ncols = match &v {
-                                    model::ResultView::Table(g) => g.columns.len(),
-                                    model::ResultView::Documents(d) => d.grid.columns.len(),
-                                    _ => 0,
-                                };
-                                // Cache for client-side filtering, then reset the
-                                // filter input so the full result shows first.
                                 let shown = match &v {
                                     model::ResultView::Table(g) => g.rows.len(),
                                     model::ResultView::Documents(d) => d.grid.rows.len(),
                                     model::ResultView::Affected(_) => 0,
                                 } as u64;
-                                *last_view.lock().unwrap() = Some(v.clone());
-                                w.set_grid_filter(SharedString::default());
-                                // Fresh result: all columns visible again.
-                                hidden_cols.lock().unwrap().clear();
-                                let colnames: Vec<SharedString> = match &v {
-                                    model::ResultView::Table(g) => g
-                                        .columns
-                                        .iter()
-                                        .map(|c| SharedString::from(c.name.clone()))
-                                        .collect(),
-                                    model::ResultView::Documents(d) => d
-                                        .grid
-                                        .columns
-                                        .iter()
-                                        .map(|c| SharedString::from(c.name.clone()))
-                                        .collect(),
-                                    _ => Vec::new(),
-                                };
-                                w.set_col_hidden(ModelRc::from(Rc::new(VecModel::from(
-                                    vec![false; colnames.len()],
-                                ))));
-                                let mut fcols: Vec<SharedString> =
-                                    vec![SharedString::from("any column")];
-                                fcols.extend(colnames.iter().cloned());
-                                w.set_filter_columns(ModelRc::from(Rc::new(VecModel::from(fcols))));
-                                w.set_all_columns(ModelRc::from(Rc::new(VecModel::from(colnames))));
-                                // Fresh result: pending edits refer to rows that
-                                // no longer exist — drop them and re-anchor the
-                                // buffer to the (possibly new) browse target.
-                                *displayed_grid.lock().unwrap() = view_grid(&v);
-                                {
-                                    let st = browse.lock().unwrap();
-                                    let mut b = edit_buf.lock().unwrap();
-                                    b.clear();
-                                    b.table = st.table.clone();
-                                    b.pk_cols = st.pk_cols.clone();
-                                }
-                                w.set_pending_count(0);
-                                w.set_editing_row(-1);
-                                w.set_editing_col(-1);
-                                w.set_status_error(false);
-                                w.set_status_latency(SharedString::from(format!(
-                                    "{elapsed_ms} ms"
-                                )));
-                                w.set_results_meta(SharedString::from(if n_stmts > 1 {
+                                let meta = if n_stmts > 1 {
                                     format!("{n_stmts} statements · {shown} rows · {elapsed_ms} ms")
                                 } else {
                                     format!("{shown} rows · {elapsed_ms} ms")
-                                }));
-                                // Fresh result: type-aware default column widths.
-                                let widths: Vec<f32> = match &v {
-                                    model::ResultView::Table(g) => g
-                                        .columns
-                                        .iter()
-                                        .map(|c| default_col_width(&c.name, &c.type_name))
-                                        .collect(),
-                                    _ => vec![140.0; ncols],
                                 };
-                                w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(
-                                    widths,
-                                ))));
-                                // Chart segment data (SQL results only).
-                                let bars: Vec<ChartBar> = match &v {
-                                    model::ResultView::Table(g) => model::chart_data(g)
-                                        .into_iter()
-                                        .map(|(label, value, frac)| ChartBar {
-                                            label: label.into(),
-                                            value: value.into(),
-                                            frac,
-                                        })
-                                        .collect(),
-                                    _ => Vec::new(),
-                                };
-                                w.set_chart_bars(ModelRc::from(Rc::new(VecModel::from(bars))));
-                                apply_result(&w, v);
-                                // Browse mode: refresh the pagination footer.
-                                let st = browse.lock().unwrap().clone();
-                                if st.table.is_some() {
-                                    let (start, end, prev, next) =
-                                        page_bounds(st.page, st.limit, st.total, shown);
-                                    w.set_page_start(start as i32);
-                                    w.set_page_end(end as i32);
-                                    w.set_total_rows(st.total.map(|t| t as i32).unwrap_or(-1));
-                                    w.set_can_prev(prev);
-                                    w.set_can_next(next);
+                                let latency = format!("{elapsed_ms} ms");
+                                // Result tabs are for SQL runs; browse stays single.
+                                let is_browse = browse.lock().unwrap().table.is_some();
+                                if is_browse {
+                                    results.lock().unwrap().clear();
+                                    set_result_tabs(&w, 0, 0);
+                                } else {
+                                    let mut rv = results.lock().unwrap();
+                                    let mut ar = active_result.lock().unwrap();
+                                    let sr = StoredResult {
+                                        view: v.clone(),
+                                        meta: meta.clone(),
+                                        latency: latency.clone(),
+                                    };
+                                    if new_tab || rv.is_empty() {
+                                        rv.push(sr);
+                                        *ar = rv.len() - 1;
+                                    } else {
+                                        if *ar >= rv.len() {
+                                            *ar = 0;
+                                        }
+                                        rv[*ar] = sr;
+                                    }
+                                    set_result_tabs(&w, rv.len(), *ar);
                                 }
+                                present_view(
+                                    &w,
+                                    v,
+                                    &meta,
+                                    &latency,
+                                    &last_view,
+                                    &displayed_grid,
+                                    &hidden_cols,
+                                    &sort_state,
+                                    &col_order,
+                                    &col_filters,
+                                    &edit_buf,
+                                    &browse,
+                                );
                             }
                             (None, Some(e)) => {
                                 *last_view.lock().unwrap() = None;
@@ -2470,11 +3115,24 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let run_sql = run_sql.clone();
+        let ed_state = ed_state.clone();
         let recent_queries = recent_queries.clone();
         let rebuild_query_tree = rebuild_query_tree.clone();
         window.on_run_query(move || {
             if let Some(w) = weak.upgrade() {
-                let text = w.get_query_text().to_string();
+                // ⌘⏎ / Run: the highlighted selection, else just the statement
+                // under the cursor — so a buffer with several statements runs
+                // only the one the user is editing (⌘A then Run for all).
+                let text = {
+                    let ed = ed_state.borrow();
+                    ed.selected_text()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| ed.current_statement())
+                };
+                if text.is_empty() {
+                    return;
+                }
                 record_recent(&recent_queries, &text);
                 // A manual query result has no row identity — never editable.
                 // (The browse path re-enables editing after its PK fetch.)
@@ -2835,11 +3493,24 @@ fn main() -> Result<(), slint::PlatformError> {
         let run_browse = run_browse.clone();
         let guard_pending = guard_pending.clone();
         window.on_set_limit(move |text| {
-            if weak.upgrade().is_some_and(|w| guard_pending(&w)) {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            // Echo the current limit into both the raw value (stepper math) and
+            // the dotted display, so the field always shows a clean number.
+            let echo = |w: &MainWindow, l: u64| {
+                w.set_limit_value(l as i32);
+                w.set_limit_text(SharedString::from(l.to_string()));
+                w.set_limit_display(SharedString::from(group_thousands(l)));
+            };
+            if guard_pending(&w) {
+                echo(&w, browse.lock().unwrap().limit);
                 return;
             }
-            let parsed = text.trim().parse::<u64>().ok();
-            let Some(l) = parsed.map(|l| l.clamp(1, 10_000)) else {
+            // The manual field may contain dot separators — keep digits only.
+            let digits: String = text.chars().filter(|c| c.is_ascii_digit()).collect();
+            let Some(l) = digits.parse::<u64>().ok().map(|l| l.clamp(1, 10_000)) else {
+                echo(&w, browse.lock().unwrap().limit);
                 return;
             };
             {
@@ -2847,6 +3518,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 st.limit = l;
                 st.page = 0;
             }
+            echo(&w, l);
             run_browse();
         });
     }
@@ -3032,6 +3704,8 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let tab_texts = tab_texts.clone();
+        let results = results.clone();
+        let active_result = active_result.clone();
         window.on_new_tab(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -3048,7 +3722,133 @@ fn main() -> Result<(), slint::PlatformError> {
             set_tab_titles(&w, count);
             w.set_active_tab((count - 1) as i32);
             w.set_query_text(SharedString::default());
+            // Fresh query tab starts with no result tabs.
+            results.lock().unwrap().clear();
+            *active_result.lock().unwrap() = 0;
+            set_result_tabs(&w, 0, 0);
             clear_grid(&w);
+        });
+    }
+
+    // ----- ⌘\: run the current statement into a NEW result tab -----
+    {
+        let weak = window.as_weak();
+        let ed_state = ed_state.clone();
+        let run_sql = run_sql.clone();
+        let recent_queries = recent_queries.clone();
+        let result_new_tab = result_new_tab.clone();
+        window.on_run_new_tab(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let stmt = {
+                let ed = ed_state.borrow();
+                ed.selected_text()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| ed.current_statement())
+            };
+            if stmt.is_empty() {
+                return;
+            }
+            // Same editor; the run lands in an appended result tab.
+            result_new_tab.store(true, std::sync::atomic::Ordering::SeqCst);
+            w.set_grid_read_only(true);
+            record_recent(&recent_queries, &stmt);
+            run_sql(stmt);
+        });
+    }
+
+    // ----- switch / close result tabs -----
+    {
+        let weak = window.as_weak();
+        let results = results.clone();
+        let active_result = active_result.clone();
+        let last_view = last_view.clone();
+        let displayed_grid = displayed_grid.clone();
+        let hidden_cols = hidden_cols.clone();
+        let sort_state = sort_state.clone();
+        let col_order = col_order.clone();
+        let col_filters = col_filters.clone();
+        let edit_buf = edit_buf.clone();
+        let browse = browse.clone();
+        window.on_select_result_tab(move |i| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let i = i.max(0) as usize;
+            let sr = results.lock().unwrap().get(i).cloned();
+            let Some(sr) = sr else {
+                return;
+            };
+            *active_result.lock().unwrap() = i;
+            w.set_active_result(i as i32);
+            present_view(
+                &w,
+                sr.view,
+                &sr.meta,
+                &sr.latency,
+                &last_view,
+                &displayed_grid,
+                &hidden_cols,
+                &sort_state,
+                &col_order,
+                &col_filters,
+                &edit_buf,
+                &browse,
+            );
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let results = results.clone();
+        let active_result = active_result.clone();
+        let last_view = last_view.clone();
+        let displayed_grid = displayed_grid.clone();
+        let hidden_cols = hidden_cols.clone();
+        let sort_state = sort_state.clone();
+        let col_order = col_order.clone();
+        let col_filters = col_filters.clone();
+        let edit_buf = edit_buf.clone();
+        let browse = browse.clone();
+        window.on_close_result_tab(move |i| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let i = i.max(0) as usize;
+            let (count, active, sr) = {
+                let mut rv = results.lock().unwrap();
+                if i >= rv.len() {
+                    return;
+                }
+                rv.remove(i);
+                let mut ar = active_result.lock().unwrap();
+                if *ar >= rv.len() {
+                    *ar = rv.len().saturating_sub(1);
+                }
+                (rv.len(), *ar, rv.get(*ar).cloned())
+            };
+            set_result_tabs(&w, count, active);
+            match sr {
+                Some(sr) => present_view(
+                    &w,
+                    sr.view,
+                    &sr.meta,
+                    &sr.latency,
+                    &last_view,
+                    &displayed_grid,
+                    &hidden_cols,
+                    &sort_state,
+                    &col_order,
+                    &col_filters,
+                    &edit_buf,
+                    &browse,
+                ),
+                None => {
+                    clear_grid(&w);
+                    *last_view.lock().unwrap() = None;
+                }
+            }
         });
     }
 

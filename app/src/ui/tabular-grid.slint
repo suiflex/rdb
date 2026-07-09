@@ -5,11 +5,18 @@ import { Tokens } from "tokens.slint";
 import { GridColumn, GridCell } from "structs.slint";
 import { ScrollView } from "std-widgets.slint";
 
-export component TabularGrid inherits ScrollView {
+export component TabularGrid inherits Rectangle {
     in property <[GridColumn]> columns;
     in property <[GridCell]> cells;
     in property <int> col-count;
     in property <[length]> col-widths;     // per-column pixel widths (drag-resizable)
+    in property <int> sorted-col: -1;       // display col currently sorted, -1 none
+    in property <bool> sort-asc: true;
+    callback sort-col(int);                 // header click → sort by this column
+    callback reorder-col(int, length);      // header drag → (col, drop x in cell)
+    in property <bool> filter-open;         // show the per-column filter row
+    in property <[string]> col-filter-values; // current text per display column
+    callback set-col-filter(int, string);   // (display col, raw filter text)
     in-out property <int> selected-row: 0;
     in-out property <int> selected-col: -1;
     // inline edit overlay: row/col currently being edited, -1 = none
@@ -23,8 +30,14 @@ export component TabularGrid inherits ScrollView {
     callback edit-cancelled();
 
     VerticalLayout {
-        // fill ScrollView width when few columns; grow past it (scroll) when many
-        width: max(self.preferred-width, parent.visible-width);
+        // ----- frozen header band: mirrors the body's horizontal scroll so the
+        // headers stay put while rows scroll vertically -----
+        Rectangle {
+            clip: true;
+            height: Tokens.grid-header-h + 1px + (root.filter-open ? 27px : 0px);
+            VerticalLayout {
+                x: body.viewport-x;
+                width: max(self.preferred-width, body.visible-width);
 
         // ----- header (27px): "name" 600 + type dim, mono -----
         HorizontalLayout {
@@ -59,6 +72,36 @@ export component TabularGrid inherits ScrollView {
                         font-family: Tokens.mono;
                         font-size: Tokens.font-xs;
                     }
+                    Rectangle { horizontal-stretch: 1; }
+                    // asc/desc arrow when this column drives the sort
+                    Text {
+                        vertical-alignment: center;
+                        text: root.sorted-col == c ? (root.sort-asc ? "↑" : "↓") : "";
+                        color: Tokens.accent;
+                        font-family: Tokens.mono;
+                        font-size: Tokens.font-sm;
+                    }
+                }
+                // header (minus the resize handle): click sorts, drag reorders
+                TouchArea {
+                    width: parent.width - 5px;
+                    x: 0;
+                    property <bool> dragging;
+                    moved => {
+                        if (abs(self.mouse-x - self.pressed-x) > 6px) {
+                            self.dragging = true;
+                        }
+                    }
+                    pointer-event(e) => {
+                        if (e.kind == PointerEventKind.down) { self.dragging = false; }
+                        if (e.kind == PointerEventKind.up) {
+                            if (self.dragging) {
+                                root.reorder-col(c, self.mouse-x);
+                            } else {
+                                root.sort-col(c);
+                            }
+                        }
+                    }
                 }
                 Rectangle { width: 1px; x: parent.width - 1px; background: Tokens.border; }
                 // right-edge drag handle to resize this column
@@ -75,6 +118,49 @@ export component TabularGrid inherits ScrollView {
             Rectangle { horizontal-stretch: 1; background: Tokens.canvas; }
         }
         Rectangle { height: 1px; background: Tokens.border-strong; }
+
+        // ----- per-column filter row (type e.g. >100, matches AND) -----
+        if root.filter-open: HorizontalLayout {
+            height: 26px;
+            Rectangle { width: 44px; background: Tokens.chrome; }
+            for col[c] in root.columns: Rectangle {
+                width: root.col-widths.length > c ? root.col-widths[c] : 140px;
+                background: Tokens.chrome;
+                clip: true;
+                Rectangle {
+                    x: 2px;
+                    y: 2px;
+                    width: parent.width - 5px;
+                    height: parent.height - 4px;
+                    border-radius: Tokens.radius;
+                    border-width: 1px;
+                    border-color: fin.has-focus ? Tokens.accent : Tokens.border-strong;
+                    background: Tokens.card;
+                    fin := TextInput {
+                        x: Tokens.sp1;
+                        width: parent.width - 2 * Tokens.sp1;
+                        vertical-alignment: center;
+                        text: root.col-filter-values.length > c ? root.col-filter-values[c] : "";
+                        color: Tokens.text;
+                        font-family: Tokens.mono;
+                        font-size: Tokens.font-xs;
+                        single-line: true;
+                        // filter live as the user types (no Enter needed)
+                        edited => { root.set-col-filter(c, self.text); }
+                    }
+                }
+            }
+            Rectangle { horizontal-stretch: 1; background: Tokens.chrome; }
+        }
+        if root.filter-open: Rectangle { height: 1px; background: Tokens.border; }
+            }
+        }
+
+        // ----- rows: the only vertically-scrolling region -----
+        body := ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                width: max(self.preferred-width, body.visible-width);
 
         // ----- rows (24px) -----
         for r in (root.col-count > 0 ? root.cells.length / root.col-count : 0): Rectangle {
@@ -200,6 +286,8 @@ export component TabularGrid inherits ScrollView {
                 }
                 // trailing filler so the row spans the full width
                 Rectangle { horizontal-stretch: 1; }
+            }
+        }
             }
         }
     }
