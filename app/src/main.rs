@@ -3048,6 +3048,7 @@ fn main() -> Result<(), slint::PlatformError> {
             set_tab_titles(&w, count);
             w.set_active_tab((count - 1) as i32);
             w.set_query_text(SharedString::default());
+            clear_grid(&w);
         });
     }
 
@@ -3061,6 +3062,14 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             let mut t = tab_texts.borrow_mut();
             if t.len() <= 1 {
+                // Only tab: nothing to remove, so reset it to a blank slate
+                // instead of silently no-op'ing (which read as "close broken").
+                if let Some(slot) = t.get_mut(0) {
+                    slot.clear();
+                }
+                drop(t);
+                w.set_query_text(SharedString::default());
+                clear_grid(&w);
                 return;
             }
             let active = w.get_active_tab() as usize;
