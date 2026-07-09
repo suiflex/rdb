@@ -200,6 +200,7 @@ export component MainWindow inherits Window {
     in property <bool> palette-open;
     in property <[PaletteItem]> palette-items;
     callback new-tab();
+    callback run-new-tab();   // ⌘\: run current statement in a fresh tab
     callback close-tab();
     callback select-tab(int);
     callback toggle-palette();
@@ -269,6 +270,10 @@ export component MainWindow inherits Window {
                 }
                 if (e.text == Key.Return) {
                     root.run-query();
+                    return accept;
+                }
+                if (e.text == "\\") {
+                    root.run-new-tab();
                     return accept;
                 }
                 if (e.text == "s") {

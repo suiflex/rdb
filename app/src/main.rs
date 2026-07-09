@@ -3338,6 +3338,47 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ----- ⌘\: run the current statement in a fresh tab -----
+    {
+        let weak = window.as_weak();
+        let tab_texts = tab_texts.clone();
+        let ed_state = ed_state.clone();
+        let run_sql = run_sql.clone();
+        let load_editor_text = load_editor_text.clone();
+        let recent_queries = recent_queries.clone();
+        window.on_run_new_tab(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let stmt = {
+                let ed = ed_state.borrow();
+                ed.selected_text()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| ed.current_statement())
+            };
+            if stmt.is_empty() {
+                return;
+            }
+            // Stash the current tab, open a fresh one holding the statement.
+            let active = w.get_active_tab() as usize;
+            {
+                let mut t = tab_texts.borrow_mut();
+                if let Some(slot) = t.get_mut(active) {
+                    *slot = w.get_query_text().to_string();
+                }
+                t.push(stmt.clone());
+            }
+            let count = tab_texts.borrow().len();
+            set_tab_titles(&w, count);
+            w.set_active_tab((count - 1) as i32);
+            load_editor_text(&stmt);
+            w.set_grid_read_only(true);
+            record_recent(&recent_queries, &stmt);
+            run_sql(stmt);
+        });
+    }
+
     // ----- close tab -----
     {
         let weak = window.as_weak();
