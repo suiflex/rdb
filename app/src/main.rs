@@ -3135,6 +3135,28 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(w) = weak.upgrade() {
                 w.set_selected_row(r);
                 w.set_selected_col(c);
+                // Feed the bottom inspector: full cell value, pretty-printed
+                // when it parses as JSON so json/jsonb columns are readable.
+                let cols = w.get_grid_col_count();
+                let val = if cols > 0 && c >= 0 && r >= 0 {
+                    let idx = (r * cols + c) as usize;
+                    w.get_grid_cells().row_data(idx).map(|cell| {
+                        if cell.is_null {
+                            "NULL".to_string()
+                        } else {
+                            let t = cell.text.to_string();
+                            match serde_json::from_str::<serde_json::Value>(&t) {
+                                Ok(v) if v.is_object() || v.is_array() => {
+                                    serde_json::to_string_pretty(&v).unwrap_or(t)
+                                }
+                                _ => t,
+                            }
+                        }
+                    })
+                } else {
+                    None
+                };
+                w.set_selected_cell_value(SharedString::from(val.unwrap_or_default()));
             }
         });
     }

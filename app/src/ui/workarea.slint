@@ -26,6 +26,7 @@ export component WorkArea inherits Rectangle {
     in property <string> status-latency;
     in-out property <int> selected-row: 0;
     in-out property <int> selected-col: -1;
+    in property <string> selected-cell-value;   // full text of the selected cell (pretty JSON when it parses)
     in property <int> editing-row: -1;
     in property <int> editing-col: -1;
     in-out property <bool> show-structure: false;
@@ -561,6 +562,31 @@ export component WorkArea inherits Rectangle {
                 cell-edited(r, c, t) => { root.cell-edited(r, c, t); }
                 cell-advance(r, c, t, fwd) => { root.cell-advance(r, c, t, fwd); }
                 edit-cancelled() => { root.edit-cancelled(); }
+            }
+
+            // Selected-cell inspector: full value of the clicked cell (pretty
+            // JSON when it parses). Overlays the grid's bottom edge, only while
+            // a cell is selected — lets long/JSON cells stay single-line above.
+            if root.result-kind == 0 && root.selected-col >= 0 && root.selected-cell-value != "": Rectangle {
+                y: parent.height - self.height;
+                height: min(140px, parent.height * 0.45);
+                width: 100%;
+                background: Tokens.card;
+                Rectangle { height: 1px; y: 0; background: Tokens.border-strong; }
+                ScrollView {
+                    width: 100%;
+                    height: 100%;
+                    VerticalLayout {
+                        padding: Tokens.sp3;
+                        Text {
+                            text: root.selected-cell-value;
+                            color: Tokens.text;
+                            font-family: Tokens.mono;
+                            font-size: Tokens.font-sm;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
             }
 
             // empty result: distinct from an error, distinct from loading
