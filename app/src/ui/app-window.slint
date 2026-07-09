@@ -422,6 +422,16 @@ export component MainWindow inherits Window {
                             mono: true;
                         }
                     }
+                    // disconnect: drop the driver and return to the picker
+                    // (which lists every connection = switch to another DB)
+                    VerticalLayout {
+                        alignment: center;
+                        GlyphButton {
+                            glyph: "⏏";
+                            danger-hover: true;
+                            clicked => { root.disconnect(); }
+                        }
+                    }
                     if root.bc-db != "": Text {
                         text: "›";
                         color: Tokens.text-faint;
