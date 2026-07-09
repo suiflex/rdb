@@ -369,14 +369,15 @@ export component WorkArea inherits Rectangle {
                     }
                     VerticalLayout {
                         alignment: center;
+                        visible: root.sql-capable;
                         SecondaryButton { text: "Format"; height: 28px; clicked => { root.format-sql(); } }
                     }
                     VerticalLayout {
                         alignment: center;
+                        visible: root.sql-capable;
                         SecondaryButton {
                             text: "Explain";
                             height: 28px;
-                            enabled: root.sql-capable;
                             clicked => { root.explain-query(); }
                         }
                     }
