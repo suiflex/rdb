@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.8.0](https://github.com/suiflex/rdb/compare/v0.7.0...v0.8.0) (2026-07-09)
+
+
+### Features
+
+* **app:** ⌘\\ runs the current statement in a new tab ([b88124b](https://github.com/suiflex/rdb/commit/b88124b405f7efffb2d642f1f1445c126df3ded8))
+* **app:** client-side column sort with header arrows ([5c55e91](https://github.com/suiflex/rdb/commit/5c55e918cbada44f43d3059178a6914defa7a37f))
+* **app:** data grid and editor UX overhaul ([8942bf4](https://github.com/suiflex/rdb/commit/8942bf4f883a852dc6dc5e77a74b885b7acdd9dd))
+* **app:** drag-to-reorder result columns ([4df638d](https://github.com/suiflex/rdb/commit/4df638d53bf7e5c34fb3631d4fdd1eb6d16e381f))
+* **app:** draggable editor/results split ([f3322ca](https://github.com/suiflex/rdb/commit/f3322caa2412df3b87bfb863792ec955067f69f6))
+* **app:** editable limit stepper with thousands grouping ([48792bb](https://github.com/suiflex/rdb/commit/48792bb6d9df78fbdffdf91dc9f9032f2944b819))
+* **app:** per-column filter row with operator prefixes ([b83cc28](https://github.com/suiflex/rdb/commit/b83cc285087495d14c8e9734894ee3605c8e6a0b))
+* **app:** result tabs — ⌘\\ opens a new result, ⌘⏎ replaces ([b60e235](https://github.com/suiflex/rdb/commit/b60e235c44e2cd59da188b6982d8f3a0d2908bb0))
+* **app:** run the statement under the cursor on ⌘⏎ ([3540d0a](https://github.com/suiflex/rdb/commit/3540d0aac64ae3bdbd4d6a4d79671742bf4d38e6))
+* **app:** schema/table/column autocomplete in the SQL editor ([658ce2e](https://github.com/suiflex/rdb/commit/658ce2ec1773f984bc2dd1cb4ccd0ac428350e09))
+* **app:** show filter panel in SQL query tabs ([9a54e4a](https://github.com/suiflex/rdb/commit/9a54e4acf96d1103f07136ab6535b5a50c40cc65))
+
+
+### Bug Fixes
+
+* **app:** remove useless borrows in formatting call ([d9ed408](https://github.com/suiflex/rdb/commit/d9ed408edabfc2115156bc80084407c0b2c5c0d9))
+* **app:** sticky result header and live per-column filtering ([1787838](https://github.com/suiflex/rdb/commit/178783894f4029de829f0bca58962dd4090ece25))
+* **app:** useless borrows in formatting call in emiten mock ([70bcff0](https://github.com/suiflex/rdb/commit/70bcff0a0b9b302ed56690dd344a2e0ffd37a412))
+
 ## [0.7.0](https://github.com/suiflex/rdb/compare/v0.6.0...v0.7.0) (2026-07-09)
 
 
