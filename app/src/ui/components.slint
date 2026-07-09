@@ -250,11 +250,9 @@ export component SearchCommandPill inherits Rectangle {
         padding-left: Tokens.sp3;
         padding-right: 5px;
         spacing: Tokens.sp2;
-        Text {
-            text: "⌕";
-            color: Tokens.text-faint;
-            font-size: Tokens.font-md;
-            vertical-alignment: center;
+        VerticalLayout {
+            alignment: center;
+            AppIcon { name: "search"; size: 14px; color: Tokens.text-faint; }
         }
         Text {
             text: root.placeholder;
@@ -409,11 +407,9 @@ export component FilterField inherits Rectangle {
         padding-left: Tokens.sp2;
         padding-right: 6px;
         spacing: Tokens.sp2;
-        Text {
-            text: "⌕";
-            color: Tokens.text-faint;
-            font-size: Tokens.font-md;
-            vertical-alignment: center;
+        VerticalLayout {
+            alignment: center;
+            AppIcon { name: "search"; size: 14px; color: Tokens.text-faint; }
         }
         input := TextInput {
             font-size: Tokens.font-sm;

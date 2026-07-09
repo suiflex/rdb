@@ -26,6 +26,7 @@ export component WorkArea inherits Rectangle {
     in property <string> status-latency;
     in-out property <int> selected-row: 0;
     in-out property <int> selected-col: -1;
+    in property <string> selected-cell-value;   // full text of the selected cell (pretty JSON when it parses)
     in property <int> editing-row: -1;
     in property <int> editing-col: -1;
     in-out property <bool> show-structure: false;
@@ -539,7 +540,7 @@ export component WorkArea inherits Rectangle {
         }
 
         // ================= result body =================
-        if !root.fn-mode && !root.empty-mode: Rectangle {
+        if !root.fn-mode && !root.empty-mode: body := Rectangle {
             vertical-stretch: 1;
             background: Tokens.canvas;
 
@@ -561,6 +562,48 @@ export component WorkArea inherits Rectangle {
                 cell-edited(r, c, t) => { root.cell-edited(r, c, t); }
                 cell-advance(r, c, t, fwd) => { root.cell-advance(r, c, t, fwd); }
                 edit-cancelled() => { root.edit-cancelled(); }
+            }
+
+            // Selected-cell inspector: full value of the clicked cell (pretty
+            // JSON when it parses). Overlays the grid's bottom edge, only while
+            // a cell is selected — lets long/JSON cells stay single-line above.
+            // Drag the top edge to resize (row-resize like the column handles).
+            if root.result-kind == 0 && root.selected-col >= 0 && root.selected-cell-value != "": panel := Rectangle {
+                property <length> panel-h: 200px;
+                y: parent.height - self.height;
+                height: clamp(self.panel-h, 60px, body.height - 60px);
+                width: 100%;
+                background: Tokens.card;
+                ScrollView {
+                    y: 5px;
+                    width: 100%;
+                    height: parent.height - 5px;
+                    VerticalLayout {
+                        padding: Tokens.sp3;
+                        Text {
+                            text: root.selected-cell-value;
+                            color: Tokens.text;
+                            font-family: Tokens.mono;
+                            font-size: Tokens.font-sm;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+                // top drag handle: 5px grab strip; dragging up grows the panel.
+                Rectangle {
+                    height: 5px;
+                    y: 0;
+                    width: 100%;
+                    background: grip.has-hover || grip.pressed ? Tokens.accent : Tokens.border-strong;
+                    grip := TouchArea {
+                        mouse-cursor: row-resize;
+                        moved => {
+                            panel.panel-h = clamp(
+                                panel.height - (self.mouse-y - self.pressed-y),
+                                60px, body.height - 60px);
+                        }
+                    }
+                }
             }
 
             // empty result: distinct from an error, distinct from loading

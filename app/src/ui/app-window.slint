@@ -95,6 +95,7 @@ export component MainWindow inherits Window {
     in property <string> result-status;
     in-out property <int> selected-row: 0;
     in-out property <int> selected-col: -1;
+    in property <string> selected-cell-value;
     in property <int> editing-row: -1;
     in property <int> editing-col: -1;
     callback select-cell(int, int);
@@ -337,10 +338,11 @@ export component MainWindow inherits Window {
             }
             return reject;
         }
-    }
 
-    VerticalLayout {
-        spacing: 0px;
+        // The whole app UI lives inside this FocusScope so keys the editor and
+        // other inner FocusScopes reject bubble up here to the ⌘ shortcut table.
+        VerticalLayout {
+            spacing: 0px;
 
         // ================= toolbar row (44px, under native titlebar) =================
         Rectangle {
@@ -725,6 +727,7 @@ export component MainWindow inherits Window {
                         find-close() => { root.find-close(); }
                         selected-row: root.selected-row;
                         selected-col: root.selected-col;
+                        selected-cell-value: root.selected-cell-value;
                         editing-row: root.editing-row;
                         editing-col: root.editing-col;
                         show-structure <=> root.show-structure;
@@ -918,5 +921,6 @@ export component MainWindow inherits Window {
         cancel() => {
             root.form-cancel();
         }
+    }
     }
 }
