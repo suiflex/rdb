@@ -411,7 +411,35 @@ fn clip_get() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Record an executed query at the head of the live history (dedupe, cap 50).
+/// Max recent queries kept, in memory and on disk.
+const RECENT_CAP: usize = 50;
+
+/// Load persisted recent-query history; empty on a missing/unreadable file.
+fn load_recent() -> Vec<String> {
+    let Ok(path) = rdbs_connstore::ConnStore::recent_queries_path() else {
+        return Vec::new();
+    };
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Persist the recent-query history (best-effort; I/O errors are ignored).
+fn save_recent(list: &[String]) {
+    let Ok(path) = rdbs_connstore::ConnStore::recent_queries_path() else {
+        return;
+    };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(list) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+/// Record an executed query at the head of the history (dedupe, cap
+/// `RECENT_CAP`) and persist it, except in mock mode.
 fn record_recent(list: &RefCell<Vec<String>>, text: &str) {
     let t = text.trim();
     if t.is_empty() {
@@ -420,7 +448,10 @@ fn record_recent(list: &RefCell<Vec<String>>, text: &str) {
     let mut v = list.borrow_mut();
     v.retain(|s| s != t);
     v.insert(0, t.to_string());
-    v.truncate(50);
+    v.truncate(RECENT_CAP);
+    if !mock::mock_mode() {
+        save_recent(&v);
+    }
 }
 
 fn page_bounds(page: u64, limit: u64, total: Option<u64>, shown: u64) -> (u64, u64, bool, bool) {
@@ -1745,7 +1776,7 @@ fn main() -> Result<(), slint::PlatformError> {
             "UPDATE emiten SET updated_at = now() WHERE code = '93344';".into(),
         ]
     } else {
-        Vec::new()
+        load_recent()
     }));
     let rebuild_query_tree = {
         let weak = window.as_weak();
