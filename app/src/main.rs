@@ -836,6 +836,33 @@ fn apply_result(w: &MainWindow, view: model::ResultView) {
     }
 }
 
+/// Format a number with `.` thousands separators (e.g. 1000 → "1.000").
+fn group_thousands(n: u64) -> String {
+    let s = n.to_string();
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, b) in bytes.iter().enumerate() {
+        if i > 0 && (bytes.len() - i).is_multiple_of(3) {
+            out.push('.');
+        }
+        out.push(*b as char);
+    }
+    out
+}
+
+#[cfg(test)]
+mod fmt_tests {
+    use super::group_thousands;
+    #[test]
+    fn groups_thousands_with_dots() {
+        assert_eq!(group_thousands(0), "0");
+        assert_eq!(group_thousands(999), "999");
+        assert_eq!(group_thousands(1000), "1.000");
+        assert_eq!(group_thousands(10_000), "10.000");
+        assert_eq!(group_thousands(1_234_567), "1.234.567");
+    }
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     // tokio multi-thread runtime on background threads; the Slint event loop
     // owns the main thread. Async results return via invoke_from_event_loop.
@@ -3067,11 +3094,24 @@ fn main() -> Result<(), slint::PlatformError> {
         let run_browse = run_browse.clone();
         let guard_pending = guard_pending.clone();
         window.on_set_limit(move |text| {
-            if weak.upgrade().is_some_and(|w| guard_pending(&w)) {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            // Echo the current limit into both the raw value (stepper math) and
+            // the dotted display, so the field always shows a clean number.
+            let echo = |w: &MainWindow, l: u64| {
+                w.set_limit_value(l as i32);
+                w.set_limit_text(SharedString::from(l.to_string()));
+                w.set_limit_display(SharedString::from(group_thousands(l)));
+            };
+            if guard_pending(&w) {
+                echo(&w, browse.lock().unwrap().limit);
                 return;
             }
-            let parsed = text.trim().parse::<u64>().ok();
-            let Some(l) = parsed.map(|l| l.clamp(1, 10_000)) else {
+            // The manual field may contain dot separators — keep digits only.
+            let digits: String = text.chars().filter(|c| c.is_ascii_digit()).collect();
+            let Some(l) = digits.parse::<u64>().ok().map(|l| l.clamp(1, 10_000)) else {
+                echo(&w, browse.lock().unwrap().limit);
                 return;
             };
             {
@@ -3079,6 +3119,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 st.limit = l;
                 st.page = 0;
             }
+            echo(&w, l);
             run_browse();
         });
     }

@@ -72,6 +72,8 @@ export component WorkArea inherits Rectangle {
     in property <int> pending-count;
     in property <bool> read-only: true;
     in-out property <string> limit-text;
+    in property <int> limit-value;
+    in property <string> limit-display;
 
     // Browse chrome shows whenever a table is open in this tab.
     property <bool> browse-mode: root.active-table != "";
@@ -371,15 +373,47 @@ export component WorkArea inherits Rectangle {
                     }
                     VerticalLayout {
                         alignment: center;
-                        SecondaryButton {
-                            text: "Limit " + root.limit-text + "  ⇅";
-                            height: 28px;
-                            clicked => {
-                                // cycle presets: 100 → 300 → 500 → 1000 → 100
-                                root.limit-text = root.limit-text == "100" ? "300"
-                                    : root.limit-text == "300" ? "500"
-                                    : root.limit-text == "500" ? "1000" : "100";
-                                root.set-limit(root.limit-text);
+                        HorizontalLayout {
+                            spacing: Tokens.sp2;
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: "Limit";
+                                    color: Tokens.text-faint;
+                                    font-size: Tokens.font-sm;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            SecondaryButton {
+                                text: "−";
+                                height: 28px;
+                                clicked => { root.set-limit("\{root.limit-value - 100}"); }
+                            }
+                            // editable field; Rust reformats with dot separators
+                            Rectangle {
+                                width: 76px;
+                                height: 28px;
+                                border-radius: Tokens.radius;
+                                border-width: 1px;
+                                border-color: Tokens.border-strong;
+                                background: Tokens.card;
+                                limit-input := TextInput {
+                                    x: Tokens.sp2;
+                                    width: parent.width - 2 * Tokens.sp2;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: right;
+                                    text: root.limit-display;
+                                    color: Tokens.text;
+                                    font-family: Tokens.mono;
+                                    font-size: Tokens.font-sm;
+                                    single-line: true;
+                                    accepted => { root.set-limit(self.text); }
+                                }
+                            }
+                            SecondaryButton {
+                                text: "+";
+                                height: 28px;
+                                clicked => { root.set-limit("\{root.limit-value + 100}"); }
                             }
                         }
                     }

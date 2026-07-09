@@ -179,6 +179,8 @@ export component MainWindow inherits Window {
     in property <bool> status-error;
     in property <bool> query-running;
     in-out property <string> limit-text: "300";
+    in-out property <int> limit-value: 300;      // raw limit for stepper math
+    in-out property <string> limit-display: "300"; // dotted, e.g. "1.000"
     callback prev-page();
     callback next-page();
     callback refresh-page();
@@ -751,6 +753,8 @@ export component MainWindow inherits Window {
                         read-only: root.grid-read-only;
                         query-running: root.query-running;
                         limit-text <=> root.limit-text;
+                        limit-value: root.limit-value;
+                        limit-display: root.limit-display;
                         run => {
                             root.run-query();
                         }
