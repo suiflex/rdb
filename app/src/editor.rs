@@ -770,6 +770,47 @@ pub fn find_matches(lines: &[String], needle: &str) -> Vec<(usize, usize, usize)
     out
 }
 
+/// Inclusive `(first_line, last_line)` of each SQL statement, for the editor's
+/// gutter fold arrows. Uses the same string/comment rules as
+/// [`split_statements`] (a `;` inside a `'literal'` or after `--` doesn't end a
+/// statement), carrying string state across lines. Blank leading lines are
+/// skipped so a block starts at its first content line. A block is foldable
+/// only when `last_line > first_line`.
+pub fn statement_line_spans(lines: &[String]) -> Vec<(usize, usize)> {
+    let mut out: Vec<(usize, usize)> = Vec::new();
+    let mut in_str = false;
+    let mut start: Option<usize> = None;
+    for (li, line) in lines.iter().enumerate() {
+        if start.is_none() && !line.trim().is_empty() {
+            start = Some(li);
+        }
+        let chars: Vec<char> = line.chars().collect();
+        let mut i = 0;
+        let mut ends = false;
+        while i < chars.len() {
+            let c = chars[i];
+            if c == '\'' {
+                in_str = !in_str;
+            } else if !in_str && c == '-' && chars.get(i + 1) == Some(&'-') {
+                break; // rest of the line is a comment
+            } else if c == ';' && !in_str {
+                ends = true;
+            }
+            i += 1;
+        }
+        if ends {
+            if let Some(s) = start.take() {
+                out.push((s, li));
+            }
+        }
+    }
+    // Trailing statement without a terminating ';'.
+    if let (Some(s), false) = (start, lines.is_empty()) {
+        out.push((s, lines.len() - 1));
+    }
+    out
+}
+
 /// True when a statement segment carries no executable SQL — only whitespace
 /// and `--` line comments.
 fn is_blank_sql(seg: &str) -> bool {
@@ -787,6 +828,24 @@ mod tests {
             .into_iter()
             .map(|s| (s.text, s.kind))
             .collect()
+    }
+
+    fn spans(text: &str) -> Vec<(usize, usize)> {
+        let lines: Vec<String> = text.lines().map(str::to_string).collect();
+        statement_line_spans(&lines)
+    }
+
+    #[test]
+    fn fold_spans_group_multiline_statements() {
+        // Two statements: lines 0-2 (ends with ;) and lines 3-4 (no ;).
+        assert_eq!(
+            spans("select *\nfrom t\nwhere x=1;\nupdate t\nset a=1"),
+            vec![(0, 2), (3, 4)]
+        );
+        // Semicolon inside a literal does not split.
+        assert_eq!(spans("select 'a;b'\nfrom t;"), vec![(0, 1)]);
+        // A semicolon after `--` is a comment, not a terminator.
+        assert_eq!(spans("select 1 -- a;b\nfrom t;"), vec![(0, 1)]);
     }
 
     #[test]
