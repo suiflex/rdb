@@ -1,0 +1,150 @@
+name: release-build
+
+# Fires when release-please publishes the GitHub Release for a new tag.
+# Builds per-platform binaries, attaches them to the Release, then updates the
+# Homebrew tap and Scoop bucket in two independent sibling jobs.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            ext: tar.gz
+          - os: macos-13
+            target: x86_64-apple-darwin
+            ext: tar.gz
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.target }}
+      # ponytail: same minimal Slint deps as the CI workflow; extend if the
+      # build errors demanding another lib.
+      - name: Install Slint system deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libfontconfig1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxkbcommon-dev
+      - name: Build release binary
+        run: cargo build --release -p rdbs --target ${{ matrix.target }}
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        run: |
+          tar -czf "rdbs-${{ matrix.target }}.tar.gz" \
+            -C "target/${{ matrix.target }}/release" rdbs
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path "target/${{ matrix.target }}/release/rdbs.exe" `
+            -DestinationPath "rdbs-${{ matrix.target }}.zip"
+      - name: Upload asset to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            "rdbs-${{ matrix.target }}.${{ matrix.ext }}" --clobber
+
+  # ---- publish jobs: siblings, both need `build`, neither needs the other ----
+  # A failure in one does NOT cancel the other (GitHub only cancels a job's own
+  # dependents). Single shared PAT: secrets.TAP_PUBLISH_TOKEN.
+
+  publish-homebrew:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render formula and push to tap
+        env:
+          GH_TOKEN: ${{ secrets.TAP_PUBLISH_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          base="https://github.com/${REPO}/releases/download/${TAG}"
+
+          dl() { gh release download "$TAG" -R "$REPO" -p "$1" -O "$1" --clobber; }
+          sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
+
+          dl "rdbs-aarch64-apple-darwin.tar.gz"
+          dl "rdbs-x86_64-apple-darwin.tar.gz"
+          dl "rdbs-x86_64-unknown-linux-gnu.tar.gz"
+          arm_sha="$(sha rdbs-aarch64-apple-darwin.tar.gz)"
+          intel_sha="$(sha rdbs-x86_64-apple-darwin.tar.gz)"
+          linux_sha="$(sha rdbs-x86_64-unknown-linux-gnu.tar.gz)"
+
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/suiflex/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          sed -e "s|@VERSION@|${VERSION}|g" \
+              -e "s|@BASE@|${base}|g" \
+              -e "s|@ARM_SHA@|${arm_sha}|g" \
+              -e "s|@INTEL_SHA@|${intel_sha}|g" \
+              -e "s|@LINUX_SHA@|${linux_sha}|g" \
+              packaging/rdbs.rb.tmpl > tap/Formula/rdbs.rb
+
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/rdbs.rb
+          git commit -m "rdbs ${VERSION}" || { echo "no change"; exit 0; }
+          git push
+
+  publish-scoop:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render manifest and push to bucket
+        env:
+          GH_TOKEN: ${{ secrets.TAP_PUBLISH_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          base="https://github.com/${REPO}/releases/download/${TAG}"
+          asset="rdbs-x86_64-pc-windows-msvc.zip"
+
+          gh release download "$TAG" -R "$REPO" -p "$asset" -O "$asset" --clobber
+          win_sha="$(shasum -a 256 "$asset" | cut -d' ' -f1)"
+
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/suiflex/scoop-bucket.git" bucket
+          mkdir -p bucket/bucket
+          sed -e "s|@VERSION@|${VERSION}|g" \
+              -e "s|@BASE@|${base}|g" \
+              -e "s|@WIN_SHA@|${win_sha}|g" \
+              packaging/rdbs.json.tmpl > bucket/bucket/rdbs.json
+
+          cd bucket
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bucket/rdbs.json
+          git commit -m "rdbs ${VERSION}" || { echo "no change"; exit 0; }
+          git push

@@ -89,6 +89,23 @@ curl -fsSL https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install
 
 The script installs `rdbs` into `/usr/local/bin` when writable, otherwise it falls back to `~/.local/bin`.
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew install suiflex/tap/rdbs
+```
+
+Upgrade later with `brew upgrade rdbs`.
+
+### Scoop (Windows)
+
+```powershell
+scoop bucket add suiflex https://github.com/suiflex/scoop-bucket
+scoop install rdbs
+```
+
+Upgrade later with `scoop update rdbs`.
+
 ## Build from source
 
 | Tool | Version |

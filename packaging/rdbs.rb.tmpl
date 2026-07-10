@@ -1,0 +1,33 @@
+# Rendered by .github/workflows/release-build.yml into suiflex/homebrew-tap.
+# Placeholders (@VERSION@, @BASE@, @ARM_SHA@, @INTEL_SHA@, @LINUX_SHA@) are
+# filled in via sed on each release. Edit the template, not the generated file.
+class Rdbs < Formula
+  desc "Native cross-platform database manager (PostgreSQL, MySQL, Redis, MongoDB)"
+  homepage "https://github.com/suiflex/rdb"
+  version "@VERSION@"
+  license "MIT"
+
+  on_macos do
+    on_arm do
+      url "@BASE@/rdbs-aarch64-apple-darwin.tar.gz"
+      sha256 "@ARM_SHA@"
+    end
+    on_intel do
+      url "@BASE@/rdbs-x86_64-apple-darwin.tar.gz"
+      sha256 "@INTEL_SHA@"
+    end
+  end
+
+  on_linux do
+    url "@BASE@/rdbs-x86_64-unknown-linux-gnu.tar.gz"
+    sha256 "@LINUX_SHA@"
+  end
+
+  def install
+    bin.install "rdbs"
+  end
+
+  test do
+    assert_match "rdbs", shell_output("#{bin}/rdbs --version")
+  end
+end
