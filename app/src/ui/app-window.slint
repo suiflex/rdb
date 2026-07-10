@@ -3,7 +3,7 @@ export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
-    SearchCommandPill, BreadcrumbChip, GlyphButton, IconButton
+    SearchCommandPill, BreadcrumbChip, GlyphButton, IconButton, PrimaryButton, SecondaryButton
 } from "components.slint";
 import { Sidebar } from "sidebar.slint";
 import { ConnPicker } from "picker.slint";
@@ -63,6 +63,14 @@ export component MainWindow inherits Window {
     in-out property <string> schema-name: "public";
     callback connect-clicked(int);
 callback cancel-connect();
+// Rename a query tab via a modal (inline edit re-enters Slint's event
+// dispatch and panics). `open-rename` stashes the target + current title,
+// `rename-commit` applies `rename-text` to `rename-target`.
+callback open-rename(int, string);
+callback rename-commit();
+in-out property <bool> rename-modal-open: false;
+in-out property <int> rename-target: -1;
+in-out property <string> rename-text;
     callback toggle-group(string);
     callback open-table(string, string);   // (database, container)
     callback toggle-schema-node(string);
@@ -601,7 +609,7 @@ callback cancel-connect();
                     horizontal-stretch: 1;
                     spacing: 0px;
                     // ----- doc-tab row (36px, tabs h30, active = card + accent top inset) -----
-                    Rectangle {
+                    tabbar := Rectangle {
                         height: Tokens.doc-tab-row-h;
                         background: Tokens.chrome;
                         HorizontalLayout {
@@ -617,6 +625,9 @@ callback cancel-connect();
                                 tab-ta := TouchArea {
                                     clicked => {
                                         root.select-tab(i);
+                                    }
+                                    double-clicked => {
+                                        root.open-rename(i, tab.title);
                                     }
                                 }
 
@@ -916,6 +927,82 @@ callback cancel-connect();
             root.schema-modal-open = false;
         }
         new-item => { }
+    }
+
+    // ----- Rename query tab -----
+    rename-modal := Rectangle {
+        visible: root.rename-modal-open;
+        background: Tokens.veil;
+        TouchArea { clicked => { root.rename-modal-open = false; } }
+        // Focus the field once the modal shows; `changed` runs after the
+        // triggering event settles, so it can't re-enter dispatch (an inline
+        // init-focus does, and panics "Recursion detected").
+        changed visible => {
+            if (self.visible) { ti.focus(); }
+        }
+        Rectangle {
+            width: 360px;
+            x: (parent.width - self.width) / 2;
+            y: 120px;
+            height: box.preferred-height;
+            border-radius: Tokens.modal-radius;
+            background: Tokens.card;
+            border-width: 1px;
+            border-color: Tokens.border;
+            drop-shadow-blur: 42px;
+            drop-shadow-offset-y: 12px;
+            drop-shadow-color: #1C191426;
+            TouchArea {}
+            box := VerticalLayout {
+                padding: Tokens.sp4;
+                spacing: Tokens.sp3;
+                Text {
+                    text: "Rename tab";
+                    color: Tokens.text;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+                Rectangle {
+                    height: 34px;
+                    border-radius: Tokens.radius;
+                    background: Tokens.canvas;
+                    border-width: 1px;
+                    border-color: Tokens.border;
+                    ti := TextInput {
+                        x: Tokens.sp2;
+                        width: parent.width - 2 * Tokens.sp2;
+                        vertical-alignment: center;
+                        text <=> root.rename-text;
+                        color: Tokens.text;
+                        font-family: Tokens.mono;
+                        font-size: Tokens.font-md;
+                        single-line: true;
+                        accepted => {
+                            root.rename-commit();
+                            root.rename-modal-open = false;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    alignment: end;
+                    SecondaryButton {
+                        text: "Cancel";
+                        height: 30px;
+                        clicked => { root.rename-modal-open = false; }
+                    }
+                    PrimaryButton {
+                        text: "Rename";
+                        height: 30px;
+                        clicked => {
+                            root.rename-commit();
+                            root.rename-modal-open = false;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // ----- Open Connection (⌘O) -----

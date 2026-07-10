@@ -549,12 +549,18 @@ fn browse_text(
     }
 }
 
-/// Rebuild the tab model titles "Query 1..N".
-fn set_tab_titles(w: &MainWindow, count: usize) {
-    let items: Vec<TabItem> = (1..=count)
-        .map(|n| TabItem {
+/// Rebuild the tab model. A `Some` title is a user rename; `None` falls back
+/// to the positional "Query N".
+fn set_tab_titles(w: &MainWindow, titles: &[Option<String>]) {
+    let items: Vec<TabItem> = titles
+        .iter()
+        .enumerate()
+        .map(|(i, t)| TabItem {
             kind: "sql".into(),
-            title: format!("Query {n}").into(),
+            title: t
+                .clone()
+                .unwrap_or_else(|| format!("Query {}", i + 1))
+                .into(),
         })
         .collect();
     w.set_tabs(ModelRc::from(Rc::new(VecModel::from(items))));
@@ -2397,6 +2403,8 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // Per-tab query text. MVP: switching tabs swaps the editor text.
     let tab_texts: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(vec![String::new()]));
+    // Parallel to `tab_texts`: Some = user rename, None = default "Query N".
+    let tab_titles: Rc<RefCell<Vec<Option<String>>>> = Rc::new(RefCell::new(vec![None]));
     window.set_tabs(ModelRc::from(Rc::new(VecModel::from(vec![TabItem {
         title: "Query 1".into(),
         kind: "sql".into(),
@@ -3817,6 +3825,7 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let tab_texts = tab_texts.clone();
+        let tab_titles = tab_titles.clone();
         let results = results.clone();
         let active_result = active_result.clone();
         window.on_new_tab(move || {
@@ -3831,8 +3840,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 t.push(String::new());
             }
+            tab_titles.borrow_mut().push(None);
             let count = tab_texts.borrow().len();
-            set_tab_titles(&w, count);
+            set_tab_titles(&w, &tab_titles.borrow());
             w.set_active_tab((count - 1) as i32);
             w.set_query_text(SharedString::default());
             // Fresh query tab starts with no result tabs.
@@ -3969,6 +3979,7 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let tab_texts = tab_texts.clone();
+        let tab_titles = tab_titles.clone();
         window.on_close_tab(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -3981,6 +3992,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     slot.clear();
                 }
                 drop(t);
+                *tab_titles.borrow_mut() = vec![None];
+                set_tab_titles(&w, &tab_titles.borrow());
                 w.set_query_text(SharedString::default());
                 clear_grid(&w);
                 return;
@@ -3990,11 +4003,47 @@ fn main() -> Result<(), slint::PlatformError> {
             t.remove(remove_at);
             let new_active = active.saturating_sub(1).min(t.len() - 1);
             let text = t[new_active].clone();
-            let count = t.len();
             drop(t);
-            set_tab_titles(&w, count);
+            {
+                let mut titles = tab_titles.borrow_mut();
+                if remove_at < titles.len() {
+                    titles.remove(remove_at);
+                }
+            }
+            set_tab_titles(&w, &tab_titles.borrow());
             w.set_active_tab(new_active as i32);
             w.set_query_text(SharedString::from(text));
+        });
+    }
+
+    // ----- rename a query tab (double-click opens a modal) -----
+    {
+        let weak = window.as_weak();
+        window.on_open_rename(move |idx, title| {
+            if let Some(w) = weak.upgrade() {
+                w.set_rename_target(idx);
+                w.set_rename_text(title);
+                w.set_rename_modal_open(true);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let tab_titles = tab_titles.clone();
+        window.on_rename_commit(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let i = w.get_rename_target().max(0) as usize;
+            let name = w.get_rename_text().trim().to_string();
+            {
+                let mut titles = tab_titles.borrow_mut();
+                if let Some(slot) = titles.get_mut(i) {
+                    // Empty name reverts to the default "Query N".
+                    *slot = if name.is_empty() { None } else { Some(name) };
+                }
+            }
+            set_tab_titles(&w, &tab_titles.borrow());
         });
     }
 
