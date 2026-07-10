@@ -2004,17 +2004,63 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let weak = window.as_weak();
+        let rt = rt.clone();
+        let current = current.clone();
+        let raw_nodes = raw_nodes.clone();
+        let cur_engine = cur_engine.clone();
+        let expanded_tables = expanded_tables.clone();
+        let collapsed_categories = collapsed_categories.clone();
         window.on_schema_choose(move |idx| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            if let Some(it) = w.get_schema_items().row_data(idx.max(0) as usize) {
-                w.set_schema_name(it.label.clone());
-                w.set_bc_schema(it.label);
-                // Anything browsed belonged to the old schema; force a fresh pick.
-                w.set_active_table(SharedString::default());
-            }
             w.set_schema_modal_open(false);
+            let Some(it) = w.get_schema_items().row_data(idx.max(0) as usize) else {
+                return;
+            };
+            let schema_name = it.label.to_string();
+            w.set_schema_name(it.label.clone());
+            w.set_bc_schema(it.label);
+            // Anything browsed belonged to the old schema; force a fresh pick and
+            // drop expand/collapse state that referenced the old schema's tables.
+            w.set_active_table(SharedString::default());
+            expanded_tables.lock().unwrap().clear();
+            collapsed_categories.borrow_mut().clear();
+            let engine = *cur_engine.borrow();
+            let Some(engine) = engine else {
+                return;
+            };
+            // Refetch the table tree for the chosen schema off the event loop.
+            let weak2 = weak.clone();
+            let current = current.clone();
+            let raw_nodes = raw_nodes.clone();
+            rt.spawn(async move {
+                let guard = current.lock_owned().await;
+                let Some((_, driver)) = guard.as_ref() else {
+                    return;
+                };
+                let Ok(schema) = driver.schema_for(&schema_name).await else {
+                    return;
+                };
+                let nodes = model::to_tree_model(&schema);
+                let rows = schema_display_rows(
+                    &nodes,
+                    &HashSet::new(),
+                    &HashSet::new(),
+                    &HashSet::new(),
+                    Some(engine),
+                    "",
+                );
+                drop(guard);
+                *raw_nodes.lock().unwrap() = nodes;
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak2.upgrade() {
+                        w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
+                        let empty_cols: Vec<StructField> = Vec::new();
+                        w.set_structure_columns(ModelRc::from(Rc::new(VecModel::from(empty_cols))));
+                    }
+                });
+            });
         });
     }
     {
