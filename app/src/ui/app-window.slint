@@ -233,6 +233,13 @@ in-out property <string> rename-text;
     callback move-row(int);
     callback toggle-theme();
 
+    // ----- update reminder banner (fed from Rust) -----
+    in property <bool> update-available: false;
+    in property <string> update-version;   // e.g. "1.2.0"
+    in property <string> update-hint;      // install-method upgrade instruction
+    callback update-open();                // open the release page
+    callback update-dismiss();             // hide until next launch
+
     // ----- connection form -----
     in property <bool> form-open;
     in property <bool> form-edit-mode;
@@ -1067,5 +1074,67 @@ in-out property <string> rename-text;
             root.form-cancel();
         }
     }
+    }
+
+    // ----- update reminder banner (floating, bottom-right, drawn on top) -----
+    if root.update-available: Rectangle {
+        x: parent.width - self.width - 16px;
+        y: parent.height - self.height - 16px;
+        width: banner-row.preferred-width + 28px;
+        height: 44px;
+        background: Tokens.card;
+        border-radius: Tokens.radius;
+        border-width: 1px;
+        border-color: Tokens.accent;
+        drop-shadow-blur: 16px;
+        drop-shadow-color: #000000.with-alpha(0.28);
+
+        banner-row := HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 14px;
+            spacing: 12px;
+            alignment: start;
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 1px;
+                Text {
+                    text: "Update available — v" + root.update-version;
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: Tokens.text;
+                }
+                Text {
+                    text: root.update-hint;
+                    font-size: 11px;
+                    color: Tokens.text-dim;
+                }
+            }
+
+            TouchArea {
+                width: 62px;
+                clicked => { root.update-open(); }
+                Rectangle {
+                    background: parent.has-hover ? Tokens.accent-hover : Tokens.accent;
+                    border-radius: Tokens.radius;
+                    Text {
+                        text: "Update";
+                        font-size: 12px;
+                        font-weight: 600;
+                        color: #FFFFFF;
+                    }
+                }
+            }
+
+            TouchArea {
+                width: 20px;
+                clicked => { root.update-dismiss(); }
+                Text {
+                    text: "✕";
+                    font-size: 13px;
+                    color: parent.has-hover ? Tokens.text : Tokens.text-dim;
+                }
+            }
+        }
     }
 }
