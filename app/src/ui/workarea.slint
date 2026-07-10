@@ -13,6 +13,8 @@ import { ScrollView, ComboBox } from "std-widgets.slint";
 
 export component WorkArea inherits Rectangle {
     // ----- editor / results state (wired 1:1 from MainWindow) -----
+    // Collapse the SQL editor pane to give the results grid more room.
+    property <bool> editor-collapsed: false;
     in-out property <string> query-text;
     in property <[GridColumn]> columns;
     in property <[GridCell]> cells;
@@ -446,7 +448,7 @@ export component WorkArea inherits Rectangle {
                         }
                     }
                 }
-                CodeEditor {
+                if !root.editor-collapsed: CodeEditor {
                     vertical-stretch: 1;
                     lines: root.editor-lines;
                     placeholder: root.editor-placeholder;
@@ -483,6 +485,7 @@ export component WorkArea inherits Rectangle {
                         vertical-alignment: center;
                     }
                     Rectangle { horizontal-stretch: 1; }
+                    TextButton { text: root.editor-collapsed ? "Editor ▸" : "Editor ▾"; clicked => { root.editor-collapsed = !root.editor-collapsed; } }
                     TextButton { text: root.filter-open ? "Filter ▲" : "Filter ▼"; clicked => { root.filter-open = !root.filter-open; } }
                     TextButton { text: "Copy"; clicked => { root.copy-results(); } }
                     TextButton { text: "Export CSV"; clicked => { root.export-csv(); } }
