@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.9.0](https://github.com/suiflex/rdb/compare/v0.8.0...v0.9.0) (2026-07-10)
+
+
+### Features
+
+* **app:** add disconnect button to top bar ([b67dcc4](https://github.com/suiflex/rdb/commit/b67dcc471fda55b93ee98ceb8546bfaa5ec9ecfc))
+* **app:** add editor comment toggle ([8ea6144](https://github.com/suiflex/rdb/commit/8ea6144b0e7b959fe43579c7a7b3376e53a2dbaa))
+* **app:** cancel an in-flight connection attempt ([21233c4](https://github.com/suiflex/rdb/commit/21233c456f35c89caeff7283dcf7a678c50639ed))
+* **app:** collapse the SQL editor pane ([c0f1dc9](https://github.com/suiflex/rdb/commit/c0f1dc96f90684a70c989ed96af359c3d7fc0c9c))
+* **app:** compute per-statement line spans for editor folding ([0f05232](https://github.com/suiflex/rdb/commit/0f05232b2aa4fc54b599242b39e9fd9c12f6378e))
+* **app:** per-statement code folding in the SQL editor ([8dceecb](https://github.com/suiflex/rdb/commit/8dceecbc1cd37872186cde6956a8ddfa632ac302))
+* **app:** persist recent query history to disk ([997371f](https://github.com/suiflex/rdb/commit/997371f36701f65a16559871901c778d0d8fe014))
+* **app:** refetch table sidebar when switching schema ([93dd533](https://github.com/suiflex/rdb/commit/93dd533aff6c1de5c9f0082ecf7c0d0081f41371))
+* **app:** rename query tabs via a modal ([5d0b72c](https://github.com/suiflex/rdb/commit/5d0b72c2174860100eaf4ad56e7ab7c7ef77ed34))
+* **app:** schema switch refetch, connect cancel, tab rename, editor folding ([b36306c](https://github.com/suiflex/rdb/commit/b36306cc30a6abe9817d2d6231ff2ed69cfe092a))
+* **app:** strip line comments per engine in query_parse ([4bd6f3d](https://github.com/suiflex/rdb/commit/4bd6f3de899eb8d1a63956117b1c2910adc80fd8))
+* **app:** wire Cmd+/ comment toggle in editor key handler ([35b091e](https://github.com/suiflex/rdb/commit/35b091e96d058b2cd67c134a7df7c4c9bb99805f))
+* per-engine query tab, Cmd+/ comment, disconnect, history persistence ([c1a73b9](https://github.com/suiflex/rdb/commit/c1a73b901e3357bc90bc687428ddc996585394ef))
+
+
+### Bug Fixes
+
+* **app:** keep query editor visible and typeable when empty ([e3f5fb8](https://github.com/suiflex/rdb/commit/e3f5fb8f454c9b92ec15267ffe77caf0ef8c7cca))
+* **app:** render engine hint as placeholder, not seeded buffer text ([fefac4e](https://github.com/suiflex/rdb/commit/fefac4eb12b360255a71cd134b3ae56f47d19186))
+
 ## [0.8.0](https://github.com/suiflex/rdb/compare/v0.7.0...v0.8.0) (2026-07-09)
 
 
