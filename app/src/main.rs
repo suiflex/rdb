@@ -22,6 +22,7 @@ mod query_parse;
 mod shot;
 mod sql_format;
 mod theme;
+mod update;
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -5080,6 +5081,60 @@ fn main() -> Result<(), slint::PlatformError> {
                 build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
             w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
         });
+    }
+
+    // ----- update reminder: open the release page / dismiss -----
+    {
+        window.on_update_open(move || {
+            let _ = open::that(update::release_page());
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_update_dismiss(move || {
+            if let Some(w) = weak.upgrade() {
+                w.set_update_available(false);
+            }
+        });
+    }
+
+    // ----- update check: once/day, gated by the setting, off the UI thread -----
+    // Skip in mock mode so the reference screenshots stay deterministic.
+    if !mock::mock_mode() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let (enabled, last) = {
+            let s = settings.borrow();
+            (s.get().update_check, s.get().last_update_check)
+        };
+        if enabled && update::due_for_check(last, now) {
+            // Persist "checked now" up front on the UI thread — the Rc settings
+            // store cannot cross into the worker thread. Worst case a failed
+            // check simply waits a day, which is the intended throttle.
+            let _ = settings
+                .borrow_mut()
+                .update(|s| s.last_update_check = Some(now));
+            let weak = window.as_weak();
+            std::thread::spawn(move || {
+                let Some(tag) = update::fetch_latest_tag() else {
+                    return;
+                };
+                if !update::is_newer(&tag, env!("CARGO_PKG_VERSION")) {
+                    return;
+                }
+                let version = tag.trim_start_matches('v').to_string();
+                let hint = update::InstallMethod::detect().upgrade_hint().to_string();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak.upgrade() {
+                        w.set_update_version(version.into());
+                        w.set_update_hint(hint.into());
+                        w.set_update_available(true);
+                    }
+                });
+            });
+        }
     }
 
     shot::install(&window);
