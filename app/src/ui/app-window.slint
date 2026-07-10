@@ -62,6 +62,7 @@ export component MainWindow inherits Window {
     in property <[string]> schema-list;
     in-out property <string> schema-name: "public";
     callback connect-clicked(int);
+callback cancel-connect();
     callback toggle-group(string);
     callback open-table(string, string);   // (database, container)
     callback toggle-schema-node(string);
@@ -519,6 +520,7 @@ export component MainWindow inherits Window {
             sel-footer: root.sel-footer;
             select-conn(i) => { root.select-conn(i); }
             connect-clicked(i) => { root.connect-clicked(i); }
+            cancel-connect() => { root.cancel-connect(); }
             test-clicked(i) => { root.test-conn-quick(i); }
             add-clicked() => { root.open-add-form(); }
             edit-clicked(i) => { root.open-edit-form(i); }

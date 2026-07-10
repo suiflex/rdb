@@ -27,6 +27,7 @@ export component ConnPicker inherits Rectangle {
 
     callback select-conn(int);
     callback connect-clicked(int);
+    callback cancel-connect();
     callback test-clicked(int);
     callback add-clicked();
     callback edit-clicked(int);
@@ -288,6 +289,11 @@ export component ConnPicker inherits Rectangle {
                                     enabled: !root.connecting;
                                     height: 30px;
                                     clicked => { root.connect-clicked(root.selected-conn); }
+                                }
+                                if root.connecting: SecondaryButton {
+                                    text: "Cancel";
+                                    height: 30px;
+                                    clicked => { root.cancel-connect(); }
                                 }
                                 SecondaryButton {
                                     text: "Test";

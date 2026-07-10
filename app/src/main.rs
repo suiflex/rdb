@@ -2822,6 +2822,10 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // Handle of the in-flight connect task, so the Cancel button can abort it.
+    let connect_handle: Rc<RefCell<Option<tokio::task::JoinHandle<()>>>> =
+        Rc::new(RefCell::new(None));
+
     // ----- connect: spawn driver work on tokio, push schema back to UI -----
     {
         let weak = window.as_weak();
@@ -2835,6 +2839,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let cur_engine = cur_engine.clone();
         let load_editor_text = load_editor_text.clone();
         let fn_defs = fn_defs.clone();
+        let connect_handle = connect_handle.clone();
         window.on_connect_clicked(move |idx| {
             let i = idx as usize;
             let (sc, cfg) = {
@@ -2887,20 +2892,28 @@ fn main() -> Result<(), slint::PlatformError> {
             let engine = sc.engine;
             let raw_nodes = raw_nodes.clone();
             let fn_defs = fn_defs.clone();
-            rt.spawn(async move {
+            let handle = rt.spawn(async move {
                 let mut slot = match claimed {
                     Some(g) => g,
                     None => store_driver.clone().lock_owned().await,
                 };
                 *slot = None;
-                let result = async {
+                // Bound the attempt so an unreachable host can't spin forever;
+                // the Cancel button aborts sooner.
+                let attempt = async {
                     let cfg =
                         cfg.map_err(|e| rdbs_core::error::RdbsError::Connection(e.to_string()))?;
                     let driver = AnyDriver::connect(engine, &cfg).await?;
                     let schema = driver.schema().await?;
                     Ok::<_, rdbs_core::error::RdbsError>((driver, schema))
-                }
-                .await;
+                };
+                let result =
+                    match tokio::time::timeout(std::time::Duration::from_secs(15), attempt).await {
+                        Ok(r) => r,
+                        Err(_) => Err(rdbs_core::error::RdbsError::Connection(
+                            "connection timed out".into(),
+                        )),
+                    };
 
                 match result {
                     Ok((driver, schema)) => {
@@ -3019,6 +3032,23 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 }
             });
+            *connect_handle.borrow_mut() = Some(handle);
+        });
+    }
+
+    // ----- cancel an in-flight connect -----
+    {
+        let weak = window.as_weak();
+        let connect_handle = connect_handle.clone();
+        window.on_cancel_connect(move || {
+            if let Some(h) = connect_handle.borrow_mut().take() {
+                h.abort();
+            }
+            if let Some(w) = weak.upgrade() {
+                w.set_connecting(false);
+                w.set_connected(false);
+                w.set_picker_error(SharedString::from("connection cancelled"));
+            }
         });
     }
 
