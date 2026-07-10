@@ -1270,9 +1270,14 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- SQL editor: Rust-owned buffer + lexer feeding the span model -----
     let ed_state: Rc<RefCell<editor::EditorState>> =
         Rc::new(RefCell::new(editor::EditorState::from_text("")));
+    // Statement head lines the user has folded closed. Kept by line index and
+    // re-validated against the current statement spans on every render, so an
+    // edit that shifts lines can only unfold — never hide the wrong lines.
+    let folded_heads: Rc<RefCell<HashSet<usize>>> = Rc::new(RefCell::new(HashSet::new()));
     let sync_editor = {
         let weak = window.as_weak();
         let ed_state = ed_state.clone();
+        let folded_heads = folded_heads.clone();
         move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -1305,6 +1310,25 @@ fn main() -> Result<(), slint::PlatformError> {
                 })
                 .collect();
             w.set_editor_lines(ModelRc::from(Rc::new(VecModel::from(lines))));
+            // Fold arrows: 1 = open head, 2 = closed head, 0 = plain line.
+            // `hidden` blanks out the body lines of a closed statement.
+            let n = ed.lines.len();
+            let mut hidden = vec![false; n];
+            let mut fold_state = vec![0i32; n];
+            let folded = folded_heads.borrow();
+            for (h, e) in editor::statement_line_spans(&ed.lines) {
+                if e > h {
+                    let closed = folded.contains(&h);
+                    fold_state[h] = if closed { 2 } else { 1 };
+                    if closed {
+                        for hl in hidden.iter_mut().take(e + 1).skip(h + 1) {
+                            *hl = true;
+                        }
+                    }
+                }
+            }
+            w.set_editor_line_hidden(ModelRc::from(Rc::new(VecModel::from(hidden))));
+            w.set_editor_fold_state(ModelRc::from(Rc::new(VecModel::from(fold_state))));
             w.set_cursor_line(ed.line as i32);
             w.set_cursor_col(ed.col as i32);
             w.set_query_text(SharedString::from(ed.text()));
@@ -1319,6 +1343,39 @@ fn main() -> Result<(), slint::PlatformError> {
         })
     };
     load_editor_text("");
+
+    // ----- toggle a statement fold from the gutter arrow -----
+    {
+        let ed_state = ed_state.clone();
+        let folded_heads = folded_heads.clone();
+        let sync_editor = sync_editor.clone();
+        window.on_toggle_fold(move |line| {
+            let head = line.max(0) as usize;
+            let now_closed = {
+                let mut f = folded_heads.borrow_mut();
+                if f.remove(&head) {
+                    false
+                } else {
+                    f.insert(head);
+                    true
+                }
+            };
+            // Folding a block that contains the caret would strand it on a
+            // hidden line; pull the caret up to the visible head.
+            if now_closed {
+                let mut ed = ed_state.borrow_mut();
+                if let Some((_, e)) = editor::statement_line_spans(&ed.lines)
+                    .into_iter()
+                    .find(|(h, _)| *h == head)
+                {
+                    if ed.line > head && ed.line <= e {
+                        ed.move_to(head as i32, 0, false);
+                    }
+                }
+            }
+            sync_editor();
+        });
+    }
 
     // ----- SQL autocomplete: recompute popup, accept a choice -----
     // completion_ctx = (word char length to replace, candidate labels).

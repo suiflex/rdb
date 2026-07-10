@@ -140,6 +140,9 @@ in-out property <string> rename-text;
 
     // ----- SQL editor (lexer-highlighted) -----
     in property <[[Span]]> editor-lines;
+    in property <[int]> editor-fold-state;
+    in property <[bool]> editor-line-hidden;
+    callback toggle-fold(int);
     in property <string> editor-placeholder;
     in property <int> cursor-line;
     in property <int> cursor-col;
@@ -749,6 +752,9 @@ in-out property <string> rename-text;
                         grid-col-filters: root.grid-col-filters;
                         set-col-filter(i, t) => { root.set-col-filter(i, t); }
                         editor-lines: root.editor-lines;
+                        editor-fold-state: root.editor-fold-state;
+                        editor-line-hidden: root.editor-line-hidden;
+                        toggle-fold(l) => { root.toggle-fold(l); }
                         editor-placeholder: root.editor-placeholder;
                         cursor-line: root.cursor-line;
                         cursor-col: root.cursor-col;
