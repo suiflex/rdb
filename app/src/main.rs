@@ -1172,6 +1172,33 @@ fn main() -> Result<(), slint::PlatformError> {
         },
     ));
 
+    // App preferences (theme, update-check, UI state), persisted alongside the
+    // connection store. Follows the same RDBS_STORE_DIR / mock overrides so
+    // tests and the reference screenshots never touch the user's real file.
+    let settings: Rc<RefCell<rdbs_connstore::SettingsStore>> = Rc::new(RefCell::new(
+        if let Ok(dir) = std::env::var("RDBS_STORE_DIR") {
+            let dir = std::path::PathBuf::from(dir);
+            rdbs_connstore::SettingsStore::load(dir.join("settings.json"))
+                .expect("load RDBS_STORE_DIR settings")
+        } else if mock::mock_mode() {
+            let dir = std::env::temp_dir().join(format!("rdbs-mock-{}", std::process::id()));
+            let _ = std::fs::create_dir_all(&dir);
+            rdbs_connstore::SettingsStore::load(dir.join("settings.json")).expect("mock settings")
+        } else {
+            rdbs_connstore::SettingsStore::open_default().unwrap_or_else(|_| {
+                let dir = std::env::temp_dir().join("dbm");
+                let _ = std::fs::create_dir_all(&dir);
+                rdbs_connstore::SettingsStore::load(dir.join("settings.json"))
+                    .expect("settings fallback")
+            })
+        },
+    ));
+
+    // Apply the saved theme before the first paint.
+    window
+        .global::<Theme>()
+        .set_dark(settings.borrow().get().theme.is_dark());
+
     // Fixed window size for the screenshot loop: RDBS_WIN=WxH (logical px).
     if let Ok(spec) = std::env::var("RDBS_WIN") {
         if let Some((w, h)) = spec.split_once('x') {
@@ -1193,8 +1220,18 @@ fn main() -> Result<(), slint::PlatformError> {
         for g in ["OSS", "LOCAL", "SPMB", UNGROUPED] {
             c.insert(g.to_string());
         }
+    } else {
+        // Restore the groups the user had collapsed last session.
+        let mut c = collapsed.borrow_mut();
+        for g in &settings.borrow().get().ui_state.collapsed_groups {
+            c.insert(g.clone());
+        }
     }
     // Current connection-picker search text.
+    // ponytail: filter text is session-only; restoring it would need the picker
+    // FilterField to expose a settable `text` (it is write-only today), and a
+    // pre-filled box on launch is dubious UX. AppSettings keeps the field for
+    // when that plumbing is worth adding.
     let conn_filter: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
 
     // Schema sidebar state: raw flat nodes from the last connect (Send, so the
@@ -2479,6 +2516,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let store = store.clone();
         let collapsed = collapsed.clone();
         let conn_filter = conn_filter.clone();
+        let settings = settings.clone();
         window.on_toggle_group(move |g| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -2490,6 +2528,12 @@ fn main() -> Result<(), slint::PlatformError> {
                     c.insert(g);
                 }
             }
+            // Persist the new collapsed set (best-effort; a write failure must
+            // not break the UI).
+            let groups: Vec<String> = collapsed.borrow().iter().cloned().collect();
+            let _ = settings
+                .borrow_mut()
+                .update(|s| s.ui_state.collapsed_groups = groups);
             let items =
                 build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
             w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
@@ -4585,11 +4629,15 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- light/dark toggle -----
     {
         let weak = window.as_weak();
+        let settings = settings.clone();
         window.on_toggle_theme(move || {
             if let Some(w) = weak.upgrade() {
                 let t = w.global::<Theme>();
                 let now = t.get_dark();
                 t.set_dark(!now);
+                let _ = settings
+                    .borrow_mut()
+                    .update(|s| s.theme = rdbs_connstore::ThemeMode::from_dark(!now));
             }
         });
     }
