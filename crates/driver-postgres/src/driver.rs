@@ -70,7 +70,25 @@ impl Driver for PostgresDriver {
     }
 
     async fn schema(&self) -> Result<Schema> {
-        schema_impl(&self.client).await
+        schema_impl(&self.client, "public").await
+    }
+
+    async fn schema_for(&self, schema: &str) -> Result<Schema> {
+        schema_impl(&self.client, schema).await
+    }
+
+    async fn list_schemas(&self) -> Result<Vec<String>> {
+        let rows = self
+            .client
+            .query(
+                "SELECT schema_name FROM information_schema.schemata \
+                 WHERE schema_name NOT LIKE 'pg_%' \
+                 AND schema_name <> 'information_schema' ORDER BY 1",
+                &[],
+            )
+            .await
+            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+        Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect())
     }
 
     async fn query(&self, q: &Query) -> Result<ResultSet> {
@@ -220,7 +238,7 @@ fn column_meta(rows: &[tokio_postgres::Row]) -> Vec<Column> {
     }
 }
 
-async fn schema_impl(client: &Client) -> Result<Schema> {
+async fn schema_impl(client: &Client, schema: &str) -> Result<Schema> {
     // The current database name groups everything under one logical Database.
     let db_row = client
         .query_one("SELECT current_database()", &[])
@@ -230,7 +248,7 @@ async fn schema_impl(client: &Client) -> Result<Schema> {
         .try_get(0)
         .map_err(|e| RdbsError::Schema(e.to_string()))?;
 
-    // User tables + columns from information_schema, public schema only.
+    // User tables + columns from information_schema, scoped to one schema.
     // Ordered so columns of the same table are contiguous for grouping.
     let rows = client
         .query(
@@ -238,9 +256,9 @@ async fn schema_impl(client: &Client) -> Result<Schema> {
              FROM information_schema.columns c \
              JOIN information_schema.tables t \
                ON t.table_schema = c.table_schema AND t.table_name = c.table_name \
-             WHERE c.table_schema = 'public' AND t.table_type = 'BASE TABLE' \
+             WHERE c.table_schema = $1 AND t.table_type = 'BASE TABLE' \
              ORDER BY c.table_name, c.ordinal_position",
-            &[],
+            &[&schema],
         )
         .await
         .map_err(|e| RdbsError::Schema(e.to_string()))?;
@@ -275,9 +293,9 @@ async fn schema_impl(client: &Client) -> Result<Schema> {
             "SELECT p.proname, pg_catalog.pg_get_functiondef(p.oid) \
              FROM pg_catalog.pg_proc p \
              JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
-             WHERE n.nspname = 'public' AND p.prokind = 'f' \
+             WHERE n.nspname = $1 AND p.prokind = 'f' \
              ORDER BY p.proname",
-            &[],
+            &[&schema],
         )
         .await
     {

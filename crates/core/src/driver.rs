@@ -25,6 +25,19 @@ pub trait Driver: Send + Sync {
     /// fill them lazily via [`Driver::containers`] when a database is expanded.
     async fn schema(&self) -> Result<Schema>;
 
+    /// Switchable namespaces/schemas the sidebar can browse (e.g. Postgres
+    /// schemas). Default empty: the engine has nothing to switch and the UI
+    /// keeps its current schema name.
+    async fn list_schemas(&self) -> Result<Vec<String>> {
+        Ok(Vec::new())
+    }
+
+    /// Schema tree scoped to one namespace (e.g. a specific Postgres schema).
+    /// Default delegates to [`Driver::schema`] for engines without namespaces.
+    async fn schema_for(&self, _schema: &str) -> Result<Schema> {
+        self.schema().await
+    }
+
     /// List the containers (tables/collections) of one database, fetched on
     /// demand. Default is empty for engines that return everything in `schema`.
     async fn containers(&self, _database: &str) -> Result<Vec<crate::schema::Container>> {

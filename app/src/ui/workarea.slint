@@ -13,6 +13,8 @@ import { ScrollView, ComboBox } from "std-widgets.slint";
 
 export component WorkArea inherits Rectangle {
     // ----- editor / results state (wired 1:1 from MainWindow) -----
+    // Collapse the SQL editor pane to give the results grid more room.
+    property <bool> editor-collapsed: false;
     in-out property <string> query-text;
     in property <[GridColumn]> columns;
     in property <[GridCell]> cells;
@@ -44,6 +46,9 @@ export component WorkArea inherits Rectangle {
     in-out property <bool> sql-open: false;
     // SQL editor model (Rust lexer output) + cursor
     in property <[[Span]]> editor-lines;
+    in property <[int]> editor-fold-state;
+    in property <[bool]> editor-line-hidden;
+    callback toggle-fold(int);
     in property <string> editor-placeholder;
     in property <int> cursor-line;
     in property <int> cursor-col;
@@ -446,9 +451,12 @@ export component WorkArea inherits Rectangle {
                         }
                     }
                 }
-                CodeEditor {
+                if !root.editor-collapsed: CodeEditor {
                     vertical-stretch: 1;
                     lines: root.editor-lines;
+                    fold-state: root.editor-fold-state;
+                    line-hidden: root.editor-line-hidden;
+                    toggle-fold(l) => { root.toggle-fold(l); }
                     placeholder: root.editor-placeholder;
                     cursor-line: root.cursor-line;
                     cursor-col: root.cursor-col;
@@ -483,6 +491,7 @@ export component WorkArea inherits Rectangle {
                         vertical-alignment: center;
                     }
                     Rectangle { horizontal-stretch: 1; }
+                    TextButton { text: root.editor-collapsed ? "Editor ▸" : "Editor ▾"; clicked => { root.editor-collapsed = !root.editor-collapsed; } }
                     TextButton { text: root.filter-open ? "Filter ▲" : "Filter ▼"; clicked => { root.filter-open = !root.filter-open; } }
                     TextButton { text: "Copy"; clicked => { root.copy-results(); } }
                     TextButton { text: "Export CSV"; clicked => { root.export-csv(); } }

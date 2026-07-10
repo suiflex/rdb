@@ -549,12 +549,18 @@ fn browse_text(
     }
 }
 
-/// Rebuild the tab model titles "Query 1..N".
-fn set_tab_titles(w: &MainWindow, count: usize) {
-    let items: Vec<TabItem> = (1..=count)
-        .map(|n| TabItem {
+/// Rebuild the tab model. A `Some` title is a user rename; `None` falls back
+/// to the positional "Query N".
+fn set_tab_titles(w: &MainWindow, titles: &[Option<String>]) {
+    let items: Vec<TabItem> = titles
+        .iter()
+        .enumerate()
+        .map(|(i, t)| TabItem {
             kind: "sql".into(),
-            title: format!("Query {n}").into(),
+            title: t
+                .clone()
+                .unwrap_or_else(|| format!("Query {}", i + 1))
+                .into(),
         })
         .collect();
     w.set_tabs(ModelRc::from(Rc::new(VecModel::from(items))));
@@ -1264,9 +1270,14 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- SQL editor: Rust-owned buffer + lexer feeding the span model -----
     let ed_state: Rc<RefCell<editor::EditorState>> =
         Rc::new(RefCell::new(editor::EditorState::from_text("")));
+    // Statement head lines the user has folded closed. Kept by line index and
+    // re-validated against the current statement spans on every render, so an
+    // edit that shifts lines can only unfold — never hide the wrong lines.
+    let folded_heads: Rc<RefCell<HashSet<usize>>> = Rc::new(RefCell::new(HashSet::new()));
     let sync_editor = {
         let weak = window.as_weak();
         let ed_state = ed_state.clone();
+        let folded_heads = folded_heads.clone();
         move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -1299,6 +1310,25 @@ fn main() -> Result<(), slint::PlatformError> {
                 })
                 .collect();
             w.set_editor_lines(ModelRc::from(Rc::new(VecModel::from(lines))));
+            // Fold arrows: 1 = open head, 2 = closed head, 0 = plain line.
+            // `hidden` blanks out the body lines of a closed statement.
+            let n = ed.lines.len();
+            let mut hidden = vec![false; n];
+            let mut fold_state = vec![0i32; n];
+            let folded = folded_heads.borrow();
+            for (h, e) in editor::statement_line_spans(&ed.lines) {
+                if e > h {
+                    let closed = folded.contains(&h);
+                    fold_state[h] = if closed { 2 } else { 1 };
+                    if closed {
+                        for hl in hidden.iter_mut().take(e + 1).skip(h + 1) {
+                            *hl = true;
+                        }
+                    }
+                }
+            }
+            w.set_editor_line_hidden(ModelRc::from(Rc::new(VecModel::from(hidden))));
+            w.set_editor_fold_state(ModelRc::from(Rc::new(VecModel::from(fold_state))));
             w.set_cursor_line(ed.line as i32);
             w.set_cursor_col(ed.col as i32);
             w.set_query_text(SharedString::from(ed.text()));
@@ -1313,6 +1343,39 @@ fn main() -> Result<(), slint::PlatformError> {
         })
     };
     load_editor_text("");
+
+    // ----- toggle a statement fold from the gutter arrow -----
+    {
+        let ed_state = ed_state.clone();
+        let folded_heads = folded_heads.clone();
+        let sync_editor = sync_editor.clone();
+        window.on_toggle_fold(move |line| {
+            let head = line.max(0) as usize;
+            let now_closed = {
+                let mut f = folded_heads.borrow_mut();
+                if f.remove(&head) {
+                    false
+                } else {
+                    f.insert(head);
+                    true
+                }
+            };
+            // Folding a block that contains the caret would strand it on a
+            // hidden line; pull the caret up to the visible head.
+            if now_closed {
+                let mut ed = ed_state.borrow_mut();
+                if let Some((_, e)) = editor::statement_line_spans(&ed.lines)
+                    .into_iter()
+                    .find(|(h, _)| *h == head)
+                {
+                    if ed.line > head && ed.line <= e {
+                        ed.move_to(head as i32, 0, false);
+                    }
+                }
+            }
+            sync_editor();
+        });
+    }
 
     // ----- SQL autocomplete: recompute popup, accept a choice -----
     // completion_ctx = (word char length to replace, candidate labels).
@@ -2004,17 +2067,63 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let weak = window.as_weak();
+        let rt = rt.clone();
+        let current = current.clone();
+        let raw_nodes = raw_nodes.clone();
+        let cur_engine = cur_engine.clone();
+        let expanded_tables = expanded_tables.clone();
+        let collapsed_categories = collapsed_categories.clone();
         window.on_schema_choose(move |idx| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            if let Some(it) = w.get_schema_items().row_data(idx.max(0) as usize) {
-                w.set_schema_name(it.label.clone());
-                w.set_bc_schema(it.label);
-                // Anything browsed belonged to the old schema; force a fresh pick.
-                w.set_active_table(SharedString::default());
-            }
             w.set_schema_modal_open(false);
+            let Some(it) = w.get_schema_items().row_data(idx.max(0) as usize) else {
+                return;
+            };
+            let schema_name = it.label.to_string();
+            w.set_schema_name(it.label.clone());
+            w.set_bc_schema(it.label);
+            // Anything browsed belonged to the old schema; force a fresh pick and
+            // drop expand/collapse state that referenced the old schema's tables.
+            w.set_active_table(SharedString::default());
+            expanded_tables.lock().unwrap().clear();
+            collapsed_categories.borrow_mut().clear();
+            let engine = *cur_engine.borrow();
+            let Some(engine) = engine else {
+                return;
+            };
+            // Refetch the table tree for the chosen schema off the event loop.
+            let weak2 = weak.clone();
+            let current = current.clone();
+            let raw_nodes = raw_nodes.clone();
+            rt.spawn(async move {
+                let guard = current.lock_owned().await;
+                let Some((_, driver)) = guard.as_ref() else {
+                    return;
+                };
+                let Ok(schema) = driver.schema_for(&schema_name).await else {
+                    return;
+                };
+                let nodes = model::to_tree_model(&schema);
+                let rows = schema_display_rows(
+                    &nodes,
+                    &HashSet::new(),
+                    &HashSet::new(),
+                    &HashSet::new(),
+                    Some(engine),
+                    "",
+                );
+                drop(guard);
+                *raw_nodes.lock().unwrap() = nodes;
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak2.upgrade() {
+                        w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
+                        let empty_cols: Vec<StructField> = Vec::new();
+                        w.set_structure_columns(ModelRc::from(Rc::new(VecModel::from(empty_cols))));
+                    }
+                });
+            });
         });
     }
     {
@@ -2351,6 +2460,8 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // Per-tab query text. MVP: switching tabs swaps the editor text.
     let tab_texts: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(vec![String::new()]));
+    // Parallel to `tab_texts`: Some = user rename, None = default "Query N".
+    let tab_titles: Rc<RefCell<Vec<Option<String>>>> = Rc::new(RefCell::new(vec![None]));
     window.set_tabs(ModelRc::from(Rc::new(VecModel::from(vec![TabItem {
         title: "Query 1".into(),
         kind: "sql".into(),
@@ -2776,6 +2887,10 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // Handle of the in-flight connect task, so the Cancel button can abort it.
+    let connect_handle: Rc<RefCell<Option<tokio::task::JoinHandle<()>>>> =
+        Rc::new(RefCell::new(None));
+
     // ----- connect: spawn driver work on tokio, push schema back to UI -----
     {
         let weak = window.as_weak();
@@ -2789,6 +2904,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let cur_engine = cur_engine.clone();
         let load_editor_text = load_editor_text.clone();
         let fn_defs = fn_defs.clone();
+        let connect_handle = connect_handle.clone();
         window.on_connect_clicked(move |idx| {
             let i = idx as usize;
             let (sc, cfg) = {
@@ -2841,45 +2957,46 @@ fn main() -> Result<(), slint::PlatformError> {
             let engine = sc.engine;
             let raw_nodes = raw_nodes.clone();
             let fn_defs = fn_defs.clone();
-            rt.spawn(async move {
+            let handle = rt.spawn(async move {
                 let mut slot = match claimed {
                     Some(g) => g,
                     None => store_driver.clone().lock_owned().await,
                 };
                 *slot = None;
-                let result = async {
+                // Bound the attempt so an unreachable host can't spin forever;
+                // the Cancel button aborts sooner.
+                let attempt = async {
                     let cfg =
                         cfg.map_err(|e| rdbs_core::error::RdbsError::Connection(e.to_string()))?;
                     let driver = AnyDriver::connect(engine, &cfg).await?;
                     let schema = driver.schema().await?;
                     Ok::<_, rdbs_core::error::RdbsError>((driver, schema))
-                }
-                .await;
+                };
+                let result =
+                    match tokio::time::timeout(std::time::Duration::from_secs(15), attempt).await {
+                        Ok(r) => r,
+                        Err(_) => Err(rdbs_core::error::RdbsError::Connection(
+                            "connection timed out".into(),
+                        )),
+                    };
 
                 match result {
                     Ok((driver, schema)) => {
                         // Postgres: list real namespaces so the sidebar schema
-                        // switcher offers more than "public".
-                        let mut pg_schemas: Vec<SharedString> = Vec::new();
-                        if matches!(engine, rdbs_connstore::Engine::Postgres) {
-                            let q = rdbs_core::query::Query::Sql(
-                                "SELECT schema_name FROM information_schema.schemata \
-                                 WHERE schema_name NOT LIKE 'pg_%' \
-                                 AND schema_name <> 'information_schema' ORDER BY 1"
-                                    .into(),
-                            );
-                            if let Ok(rdbs_core::result::ResultSet::Tabular { rows, .. }) =
-                                driver.query(&q).await
-                            {
-                                for r in rows {
-                                    if let Some(rdbs_core::result::Cell::Text(s)) =
-                                        r.into_iter().next()
-                                    {
-                                        pg_schemas.push(SharedString::from(s));
-                                    }
-                                }
-                            }
-                        }
+                        // switcher offers more than "public". Engine-specific SQL
+                        // lives in the driver, not here.
+                        let pg_schemas: Vec<SharedString> =
+                            if matches!(engine, rdbs_connstore::Engine::Postgres) {
+                                driver
+                                    .list_schemas()
+                                    .await
+                                    .unwrap_or_default()
+                                    .into_iter()
+                                    .map(SharedString::from)
+                                    .collect()
+                            } else {
+                                Vec::new()
+                            };
                         *slot = Some((engine, driver));
                         drop(slot);
                         let nodes = model::to_tree_model(&schema);
@@ -2980,6 +3097,23 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 }
             });
+            *connect_handle.borrow_mut() = Some(handle);
+        });
+    }
+
+    // ----- cancel an in-flight connect -----
+    {
+        let weak = window.as_weak();
+        let connect_handle = connect_handle.clone();
+        window.on_cancel_connect(move || {
+            if let Some(h) = connect_handle.borrow_mut().take() {
+                h.abort();
+            }
+            if let Some(w) = weak.upgrade() {
+                w.set_connecting(false);
+                w.set_connected(false);
+                w.set_picker_error(SharedString::from("connection cancelled"));
+            }
         });
     }
 
@@ -3748,6 +3882,7 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let tab_texts = tab_texts.clone();
+        let tab_titles = tab_titles.clone();
         let results = results.clone();
         let active_result = active_result.clone();
         window.on_new_tab(move || {
@@ -3762,8 +3897,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 t.push(String::new());
             }
+            tab_titles.borrow_mut().push(None);
             let count = tab_texts.borrow().len();
-            set_tab_titles(&w, count);
+            set_tab_titles(&w, &tab_titles.borrow());
             w.set_active_tab((count - 1) as i32);
             w.set_query_text(SharedString::default());
             // Fresh query tab starts with no result tabs.
@@ -3900,6 +4036,7 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let tab_texts = tab_texts.clone();
+        let tab_titles = tab_titles.clone();
         window.on_close_tab(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -3912,6 +4049,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     slot.clear();
                 }
                 drop(t);
+                *tab_titles.borrow_mut() = vec![None];
+                set_tab_titles(&w, &tab_titles.borrow());
                 w.set_query_text(SharedString::default());
                 clear_grid(&w);
                 return;
@@ -3921,11 +4060,47 @@ fn main() -> Result<(), slint::PlatformError> {
             t.remove(remove_at);
             let new_active = active.saturating_sub(1).min(t.len() - 1);
             let text = t[new_active].clone();
-            let count = t.len();
             drop(t);
-            set_tab_titles(&w, count);
+            {
+                let mut titles = tab_titles.borrow_mut();
+                if remove_at < titles.len() {
+                    titles.remove(remove_at);
+                }
+            }
+            set_tab_titles(&w, &tab_titles.borrow());
             w.set_active_tab(new_active as i32);
             w.set_query_text(SharedString::from(text));
+        });
+    }
+
+    // ----- rename a query tab (double-click opens a modal) -----
+    {
+        let weak = window.as_weak();
+        window.on_open_rename(move |idx, title| {
+            if let Some(w) = weak.upgrade() {
+                w.set_rename_target(idx);
+                w.set_rename_text(title);
+                w.set_rename_modal_open(true);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let tab_titles = tab_titles.clone();
+        window.on_rename_commit(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let i = w.get_rename_target().max(0) as usize;
+            let name = w.get_rename_text().trim().to_string();
+            {
+                let mut titles = tab_titles.borrow_mut();
+                if let Some(slot) = titles.get_mut(i) {
+                    // Empty name reverts to the default "Query N".
+                    *slot = if name.is_empty() { None } else { Some(name) };
+                }
+            }
+            set_tab_titles(&w, &tab_titles.borrow());
         });
     }
 

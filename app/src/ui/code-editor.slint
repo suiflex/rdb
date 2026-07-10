@@ -8,6 +8,12 @@ import { ScrollView } from "std-widgets.slint";
 
 export component CodeEditor inherits Rectangle {
     in property <[[Span]]> lines;
+    // Per-line fold metadata, parallel to `lines`. `fold-state`: 0 plain,
+    // 1 open statement head (▾), 2 closed head (▸). `line-hidden`: body line
+    // of a closed statement, collapsed to zero height.
+    in property <[int]> fold-state;
+    in property <[bool]> line-hidden;
+    callback toggle-fold(int);
     // Ghost hint shown only while the buffer is empty (engine-specific).
     in property <string> placeholder;
     in property <int> cursor-line: 0;
@@ -58,7 +64,9 @@ export component CodeEditor inherits Rectangle {
                 padding-bottom: Tokens.sp2;
 
                 for line[li] in root.lines: Rectangle {
-                    height: root.line-h;
+                    height: root.line-hidden[li] ? 0 : root.line-h;
+                    clip: true;
+                    visible: !root.line-hidden[li];
                     background: li == root.cursor-line ? Tokens.editor-line : transparent;
 
                     // Char column under the pointer, hit-tested from the mono
@@ -88,18 +96,38 @@ export component CodeEditor inherits Rectangle {
 
                     HorizontalLayout {
                         spacing: 0;
-                        // gutter number
+                        // gutter: fold-arrow slot (left) + line number (right)
                         Rectangle {
                             width: root.gutter-w;
-                            Text {
-                                width: parent.width - 12px;
-                                horizontal-alignment: right;
-                                vertical-alignment: center;
-                                text: li + 1;
-                                color: li == root.cursor-line ? Tokens.text : Tokens.text-ghost;
-                                font-family: Tokens.mono;
-                                font-size: Tokens.font-sm;
-                                font-weight: li == root.cursor-line ? 600 : 400;
+                            HorizontalLayout {
+                                padding-right: 6px;
+                                spacing: 2px;
+                                Rectangle {
+                                    width: 14px;
+                                    if root.fold-state[li] != 0: fold-ta := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            root.toggle-fold(li);
+                                        }
+                                        Text {
+                                            text: root.fold-state[li] == 2 ? "▶" : "▼";
+                                            color: fold-ta.has-hover ? Tokens.accent : Tokens.text-dim;
+                                            font-size: 10px;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                                Text {
+                                    horizontal-stretch: 1;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                    text: li + 1;
+                                    color: li == root.cursor-line ? Tokens.text : Tokens.text-ghost;
+                                    font-family: Tokens.mono;
+                                    font-size: Tokens.font-sm;
+                                    font-weight: li == root.cursor-line ? 600 : 400;
+                                }
                             }
                         }
                         Rectangle { width: Tokens.sp3; }
@@ -123,6 +151,14 @@ export component CodeEditor inherits Rectangle {
                                     font-italic: span.kind == 4;
                                 }
                             }
+                        }
+                        // folded indicator: the collapsed statement's body
+                        if root.fold-state[li] == 2: Text {
+                            text: " ⋯";
+                            color: Tokens.text-faint;
+                            font-family: Tokens.mono;
+                            font-size: Tokens.font-md;
+                            vertical-alignment: center;
                         }
                         Rectangle { horizontal-stretch: 1; }
                     }
