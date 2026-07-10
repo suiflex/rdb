@@ -2859,27 +2859,20 @@ fn main() -> Result<(), slint::PlatformError> {
                 match result {
                     Ok((driver, schema)) => {
                         // Postgres: list real namespaces so the sidebar schema
-                        // switcher offers more than "public".
-                        let mut pg_schemas: Vec<SharedString> = Vec::new();
-                        if matches!(engine, rdbs_connstore::Engine::Postgres) {
-                            let q = rdbs_core::query::Query::Sql(
-                                "SELECT schema_name FROM information_schema.schemata \
-                                 WHERE schema_name NOT LIKE 'pg_%' \
-                                 AND schema_name <> 'information_schema' ORDER BY 1"
-                                    .into(),
-                            );
-                            if let Ok(rdbs_core::result::ResultSet::Tabular { rows, .. }) =
-                                driver.query(&q).await
-                            {
-                                for r in rows {
-                                    if let Some(rdbs_core::result::Cell::Text(s)) =
-                                        r.into_iter().next()
-                                    {
-                                        pg_schemas.push(SharedString::from(s));
-                                    }
-                                }
-                            }
-                        }
+                        // switcher offers more than "public". Engine-specific SQL
+                        // lives in the driver, not here.
+                        let pg_schemas: Vec<SharedString> =
+                            if matches!(engine, rdbs_connstore::Engine::Postgres) {
+                                driver
+                                    .list_schemas()
+                                    .await
+                                    .unwrap_or_default()
+                                    .into_iter()
+                                    .map(SharedString::from)
+                                    .collect()
+                            } else {
+                                Vec::new()
+                            };
                         *slot = Some((engine, driver));
                         drop(slot);
                         let nodes = model::to_tree_model(&schema);
