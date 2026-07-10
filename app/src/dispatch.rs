@@ -102,6 +102,32 @@ impl AnyDriver {
         }
     }
 
+    #[allow(dead_code)]
+    pub async fn schema_for(&self, schema: &str) -> Result<Schema> {
+        match self {
+            AnyDriver::Postgres(d) => d.schema_for(schema).await,
+            AnyDriver::Mysql(d) => d.schema_for(schema).await,
+            AnyDriver::Redis(d) => d.schema_for(schema).await,
+            AnyDriver::Mongo(d) => d.schema_for(schema).await,
+            AnyDriver::Sqlite(d) => d.schema_for(schema).await,
+            AnyDriver::Cassandra(d) => d.schema_for(schema).await,
+            AnyDriver::Mock(d) => d.schema_for(schema).await,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub async fn list_schemas(&self) -> Result<Vec<String>> {
+        match self {
+            AnyDriver::Postgres(d) => d.list_schemas().await,
+            AnyDriver::Mysql(d) => d.list_schemas().await,
+            AnyDriver::Redis(d) => d.list_schemas().await,
+            AnyDriver::Mongo(d) => d.list_schemas().await,
+            AnyDriver::Sqlite(d) => d.list_schemas().await,
+            AnyDriver::Cassandra(d) => d.list_schemas().await,
+            AnyDriver::Mock(d) => d.list_schemas().await,
+        }
+    }
+
     pub async fn containers(&self, database: &str) -> Result<Vec<Container>> {
         match self {
             AnyDriver::Postgres(d) => d.containers(database).await,
