@@ -240,6 +240,11 @@ in-out property <string> rename-text;
     callback update-open();                // open the release page
     callback update-dismiss();             // hide until next launch
 
+    // ----- app settings modal -----
+    in-out property <bool> settings-open: false;
+    in property <bool> update-check-enabled: true;
+    callback set-update-check(bool);
+
     // ----- connection form -----
     in property <bool> form-open;
     in property <bool> form-edit-mode;
@@ -481,6 +486,14 @@ in-out property <string> rename-text;
                     SearchCommandPill {
                         width: 248px;
                         activated => { root.toggle-palette(); }
+                    }
+                }
+                // app settings (always available, in and out of a connection)
+                VerticalLayout {
+                    alignment: center;
+                    GlyphButton {
+                        glyph: "⚙";
+                        clicked => { root.settings-open = true; }
                     }
                 }
                 if root.connected: VerticalLayout {
@@ -1133,6 +1146,122 @@ in-out property <string> rename-text;
                     text: "✕";
                     font-size: 13px;
                     color: parent.has-hover ? Tokens.text : Tokens.text-dim;
+                }
+            }
+        }
+    }
+
+    // ----- app settings modal (veil + centered card) -----
+    if root.settings-open: Rectangle {
+        background: Tokens.veil;
+        TouchArea {
+            clicked => { root.settings-open = false; }
+        }
+
+        Rectangle {
+            width: 420px;
+            x: (parent.width - self.width) / 2;
+            y: 120px;
+            height: settings-card.preferred-height;
+            border-radius: Tokens.modal-radius;
+            background: Tokens.card;
+            border-width: 1px;
+            border-color: Tokens.border;
+            drop-shadow-blur: 42px;
+            drop-shadow-offset-y: 12px;
+            drop-shadow-color: #1C191426;
+
+            // swallow veil clicks under the card
+            TouchArea {}
+
+            settings-card := VerticalLayout {
+                padding: Tokens.sp4;
+                padding-top: 18px;
+                spacing: Tokens.sp3;
+
+                Text {
+                    text: "Settings";
+                    color: Tokens.text;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+
+                // --- appearance ---
+                HorizontalLayout {
+                    spacing: Tokens.sp3;
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: "Dark mode";
+                            color: Tokens.text;
+                            font-size: 13px;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        TouchArea {
+                            width: 42px;
+                            height: 24px;
+                            clicked => { root.toggle-theme(); }
+                            Rectangle {
+                                border-radius: 12px;
+                                background: Tokens.dark ? Tokens.accent : Tokens.border-strong;
+                                Rectangle {
+                                    width: 18px;
+                                    height: 18px;
+                                    border-radius: 9px;
+                                    background: #FFFFFF;
+                                    x: Tokens.dark ? parent.width - self.width - 3px : 3px;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // --- updates ---
+                HorizontalLayout {
+                    spacing: Tokens.sp3;
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: "Check for updates on launch";
+                            color: Tokens.text;
+                            font-size: 13px;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        TouchArea {
+                            width: 42px;
+                            height: 24px;
+                            clicked => { root.set-update-check(!root.update-check-enabled); }
+                            Rectangle {
+                                border-radius: 12px;
+                                background: root.update-check-enabled ? Tokens.accent : Tokens.border-strong;
+                                Rectangle {
+                                    width: 18px;
+                                    height: 18px;
+                                    border-radius: 9px;
+                                    background: #FFFFFF;
+                                    x: root.update-check-enabled ? parent.width - self.width - 3px : 3px;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // --- done ---
+                HorizontalLayout {
+                    alignment: end;
+                    PrimaryButton {
+                        text: "Done";
+                        clicked => { root.settings-open = false; }
+                    }
                 }
             }
         }
