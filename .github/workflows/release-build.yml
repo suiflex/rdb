@@ -6,6 +6,13 @@ name: release-build
 on:
   release:
     types: [published]
+  # manual re-run for a tag whose original run hung/was cancelled (e.g. the
+  # macos-13 scarcity that blocked v0.10.0), without cutting a new tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to (re)build, e.g. v0.10.0
+        required: true
 
 permissions:
   contents: write
@@ -16,19 +23,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-14 # Apple Silicon
             target: aarch64-apple-darwin
             ext: tar.gz
-          - os: macos-13
+          - os: macos-14 # cross-compile Intel on Apple Silicon (no scarce macos-13)
             target: x86_64-apple-darwin
             ext: tar.gz
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             ext: tar.gz
+          - os: ubuntu-24.04-arm # native GitHub arm64 linux runner
+            target: aarch64-unknown-linux-gnu
+            ext: tar.gz
+            experimental: true
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             ext: zip
+          - os: windows-11-arm # native GitHub arm64 windows runner
+            target: aarch64-pc-windows-msvc
+            ext: zip
+            experimental: true
     runs-on: ${{ matrix.os }}
+    # experimental arm legs are best-effort: a failure must not fail the `build`
+    # job (publish-* depend on it) so the release still gets published.
+    continue-on-error: ${{ matrix.experimental || false }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -68,7 +86,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          gh release upload "${{ github.event.release.tag_name }}" \
+          gh release upload "${{ github.event.release.tag_name || inputs.tag }}" \
             "rdbs-${{ matrix.target }}.${{ matrix.ext }}" --clobber
 
   # ---- publish jobs: siblings, both need `build`, neither needs the other ----
@@ -83,7 +101,7 @@ jobs:
       - name: Render formula and push to tap
         env:
           GH_TOKEN: ${{ secrets.TAP_PUBLISH_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -124,7 +142,7 @@ jobs:
       - name: Render manifest and push to bucket
         env:
           GH_TOKEN: ${{ secrets.TAP_PUBLISH_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
