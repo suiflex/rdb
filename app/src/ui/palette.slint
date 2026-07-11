@@ -38,7 +38,8 @@ export component ListModal inherits Rectangle {
         width: root.card-width;
         x: (parent.width - self.width) / 2;
         y: 96px;
-        height: card.preferred-height;
+        // cap to the window so the footer buttons never fall off-screen
+        height: min(card.preferred-height, parent.height - self.y - 24px);
         border-radius: Tokens.modal-radius;
         background: Tokens.card;
         border-width: 1px;
@@ -74,7 +75,10 @@ export component ListModal inherits Rectangle {
             }
 
             Rectangle {
-                height: min(list.preferred-height, 500px);
+                // flex: absorb the space left between the search row and footer
+                // (capped) so the footer stays put when the modal is height-limited
+                vertical-stretch: 1;
+                max-height: min(list.preferred-height, 500px);
                 clip: true;
                 Flickable {
                     viewport-height: list.preferred-height;
