@@ -398,6 +398,7 @@ export component FilterField inherits Rectangle {
     in property <string> trailing-cap: "";
     callback edited(string);
     callback submitted;
+    public function focus-input() { input.focus(); }
     height: 30px;
     border-radius: Tokens.radius;
     border-width: 1px;

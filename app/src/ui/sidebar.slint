@@ -28,6 +28,9 @@ export component Sidebar inherits Rectangle {
     callback filter-tree(string);
     callback mode-changed(int);
     callback add-item();
+    // bumped by ⌘P (app-window) to focus the filter field
+    in property <int> focus-tick;
+    changed focus-tick => { fld.focus-input(); }
 
     background: Tokens.sidebar;
 
@@ -72,7 +75,7 @@ export component Sidebar inherits Rectangle {
             padding-left: Tokens.sp3;
             padding-right: Tokens.sp3;
             padding-bottom: Tokens.sp3;
-            FilterField {
+            fld := FilterField {
                 height: 28px;
                 placeholder: root.mode == 1 ? "Filter queries..." : "Filter items...";
                 trailing-cap: root.mode == 0 ? "⌘P" : "";

@@ -277,6 +277,9 @@ in-out property <string> rename-text;
     property <length> sidebar-w: Tokens.sidebar-w;
 
     // ----- keyboard shortcuts -----
+    // bumped by ⌘P to ask the sidebar (which lives under `if connected`) to focus
+    // its filter field; Sidebar watches this via a `changed` handler.
+    in-out property <int> focus-filter-tick: 0;
     FocusScope {
         key-pressed(e) => {
             if (e.text == Key.Escape) {
@@ -302,7 +305,12 @@ in-out property <string> rename-text;
                     return accept;
                 }
                 if (e.text == "p") {
-                    root.toggle-palette();
+                    // focus the sidebar filter (the ⌘P hint lives in Items mode).
+                    // sb is inside `if root.connected`, so nudge it via a tick the
+                    // Sidebar watches rather than referencing its id from here.
+                    root.sidebar-mode = 0;
+                    root.sidebar-mode-changed(0);
+                    root.focus-filter-tick += 1;
                     return accept;
                 }
                 if (e.text == Key.Return) {
@@ -572,7 +580,8 @@ in-out property <string> rename-text;
             HorizontalLayout {
                 spacing: 0px;
 
-                Sidebar {
+                sb := Sidebar {
+                    focus-tick: root.focus-filter-tick;
                     // preferred (not fixed) width so the window can auto-shrink the
                     // sidebar instead of treating sidebar-w as a hard min floor
                     horizontal-stretch: 0;
