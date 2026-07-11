@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.10.0](https://github.com/suiflex/rdb/compare/v0.9.0...v0.10.0) (2026-07-11)
+
+
+### Features
+
+* add app settings store (theme, UI state, prefs) ([be03685](https://github.com/suiflex/rdb/commit/be03685c06981a8253adbe0bbeac076d50d2cdc4))
+* add settings modal (theme + update-check) ([54ea34b](https://github.com/suiflex/rdb/commit/54ea34bd959236d0796fdad0d8fe545879ca37c0))
+* **app:** check for updates and show install-aware reminder ([4b4fd8d](https://github.com/suiflex/rdb/commit/4b4fd8dd5699b93b8b95b5b7a5bd7f5babb8dcf6))
+* **app:** collapse Functions category by default ([1d78b19](https://github.com/suiflex/rdb/commit/1d78b198dd683beba373a0e660859ca8bd94af26))
+* **app:** expand table columns on single-click, open on double-click ([0a011f7](https://github.com/suiflex/rdb/commit/0a011f76416784b63f78da9eab5098f07984904c))
+* **app:** persist and restore theme and collapsed groups ([0fe20e9](https://github.com/suiflex/rdb/commit/0fe20e9197a634101315e764a7e62523e75e4c85))
+* **app:** wire settings modal update-check toggle ([188a920](https://github.com/suiflex/rdb/commit/188a92006dd60ec37b8d77427372d3287c2b4b86))
+* check for updates with install-aware reminder ([a838e2e](https://github.com/suiflex/rdb/commit/a838e2e4e7ce0c3f69161e86ce90b36b6bed160e))
+* **ui:** add pencil icon asset and register in AppIcon ([7b4525f](https://github.com/suiflex/rdb/commit/7b4525f1edef291d473b8ef88fec97e68da34f81))
+* **ui:** add settings modal with theme and update-check toggles ([68bc4aa](https://github.com/suiflex/rdb/commit/68bc4aae46ae02972f524bbc8c640d139d4ac977))
+* **ui:** add star icon asset and register in AppIcon ([f7e5dd3](https://github.com/suiflex/rdb/commit/f7e5dd39b8fc10a8e07a1b05f61bcecfff5442b1))
+* **ui:** add update-reminder banner ([b22ff60](https://github.com/suiflex/rdb/commit/b22ff6091b374b1e63199e95f8980da7a0cf177d))
+* **ui:** caret state indicator and dedicated saved/recent query icons ([6189b2a](https://github.com/suiflex/rdb/commit/6189b2af34df04f592c60c389e8652623a136480))
+* **ui:** distinct pencil icon for connection settings button ([babe3ab](https://github.com/suiflex/rdb/commit/babe3abe1ce7452668d9c7b65929d4ea01b4d2f1))
+* **ui:** focus sidebar filter with Cmd-P ([cadb112](https://github.com/suiflex/rdb/commit/cadb112e4399b06a10bd8ed07ef168c6fa938d31))
+* **ui:** sidebar column expand, dedicated icons, palette & toolbar fixes ([82b25e3](https://github.com/suiflex/rdb/commit/82b25e3db9d9bbc01fa94f9562199e64d7df030e))
+
+
+### Bug Fixes
+
+* **app:** collapse Functions on initial connect and schema switch ([25e73fa](https://github.com/suiflex/rdb/commit/25e73faca8cdb8b5a9a32a6c2a416df3937826ad))
+* **ui:** cap command palette height so footer stays visible ([4557cdf](https://github.com/suiflex/rdb/commit/4557cdfa407021e6a9a7ef48e4b3774e78e14ce3))
+* **ui:** even spacing across toolbar action icons ([627e063](https://github.com/suiflex/rdb/commit/627e063ef6afc327452c682f26ed6126a773258c))
+* **ui:** keep Limit label next to its stepper buttons ([39624dd](https://github.com/suiflex/rdb/commit/39624ddcc3ad7192a1222e8d9201e3b7410860ba))
+
 ## [0.9.0](https://github.com/suiflex/rdb/compare/v0.8.0...v0.9.0) (2026-07-10)
 
 
