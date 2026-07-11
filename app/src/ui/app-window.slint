@@ -73,6 +73,7 @@ in-out property <int> rename-target: -1;
 in-out property <string> rename-text;
     callback toggle-group(string);
     callback open-table(string, string);   // (database, container)
+    callback toggle-fields(string, string); // (database, table) — expand columns inline
     callback toggle-schema-node(string);
     callback select-schema(string);
     callback filter-tree(string);
@@ -600,6 +601,9 @@ in-out property <string> rename-text;
                     }
                     open-table(db, t) => {
                         root.open-table(db, t);
+                    }
+                    toggle-fields(db, t) => {
+                        root.toggle-fields(db, t);
                     }
                     toggle-node(t) => {
                         root.toggle-schema-node(t);

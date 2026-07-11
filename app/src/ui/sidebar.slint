@@ -19,6 +19,7 @@ export component Sidebar inherits Rectangle {
     in property <[TreeNode]> query-tree;
     callback disconnect();
     callback open-table(string, string);   // (database, container)
+    callback toggle-fields(string, string); // (database, table) — expand columns inline
     callback open-function(string);
     callback open-query(string, int);      // (label, index in its section)
     callback toggle-node(string);
@@ -115,15 +116,22 @@ export component Sidebar inherits Rectangle {
 
                     row-ta := TouchArea {
                         enabled: !is-hint && !is-field;
+                        // single-click a table = expand its columns inline;
+                        // double-click = open the table's data (see below).
                         clicked => {
                             if (is-category || is-database) {
                                 root.toggle-node(node.label);
                             } else if (is-container) {
-                                root.open-table(node.db, node.label);
+                                root.toggle-fields(node.db, node.label);
                             } else if (is-function) {
                                 root.open-function(node.label);
                             } else if (is-query) {
                                 root.open-query(node.label, node.count);
+                            }
+                        }
+                        double-clicked => {
+                            if (is-container) {
+                                root.open-table(node.db, node.label);
                             }
                         }
                     }

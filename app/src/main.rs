@@ -3905,6 +3905,52 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ----- expand a table's columns inline (single-click) -----
+    {
+        let weak = window.as_weak();
+        let raw_nodes = raw_nodes.clone();
+        let expanded_tables = expanded_tables.clone();
+        let loaded_dbs = loaded_dbs.clone();
+        let collapsed_categories = collapsed_categories.clone();
+        let cur_engine = cur_engine.clone();
+        let sidebar_filter = sidebar_filter.clone();
+        window.on_toggle_fields(move |db, label| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let engine = *cur_engine.borrow();
+            // ponytail: only SQL tables carry inline fields. Mongo/Redis/Cassandra
+            // leaves have none, so single-click keeps opening them — delegate to the
+            // existing open-table handler instead of duplicating its browse setup.
+            if !matches!(
+                engine,
+                Some(rdbs_connstore::Engine::Postgres)
+                    | Some(rdbs_connstore::Engine::MySql)
+                    | Some(rdbs_connstore::Engine::Sqlite)
+            ) {
+                w.invoke_open_table(db, label);
+                return;
+            }
+            let label = label.to_string();
+            {
+                let mut e = expanded_tables.lock().unwrap();
+                if !e.remove(&label) {
+                    e.insert(label);
+                }
+            }
+            let nodes = raw_nodes.lock().unwrap();
+            let rows = schema_display_rows(
+                &nodes,
+                &expanded_tables.lock().unwrap(),
+                &collapsed_categories.borrow(),
+                &loaded_dbs.lock().unwrap(),
+                engine,
+                &sidebar_filter.lock().unwrap(),
+            );
+            w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
+        });
+    }
+
     // ----- sidebar tree filter -----
     {
         let weak = window.as_weak();
