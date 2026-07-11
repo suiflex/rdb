@@ -4,6 +4,7 @@
 import { Tokens } from "tokens.slint";
 import { TreeNode } from "structs.slint";
 import { FilterField, KeyCap } from "components.slint";
+import { AppIcon } from "icons.slint";
 import { ScrollView } from "std-widgets.slint";
 
 export component Sidebar inherits Rectangle {
@@ -145,6 +146,19 @@ export component Sidebar inherits Rectangle {
                         if is-category: HorizontalLayout {
                             spacing: Tokens.sp2;
                             alignment: start;
+                            Rectangle {
+                                width: 13px;
+                                VerticalLayout {
+                                    alignment: center;
+                                    AppIcon {
+                                        name: "caret";
+                                        size: 12px;
+                                        color: Tokens.text-dim;
+                                        // down when expanded, right when collapsed
+                                        transform-rotation: node.expanded ? 0deg : -90deg;
+                                    }
+                                }
+                            }
                             Text {
                                 text: node.label.to-uppercase();
                                 color: Tokens.text-dim;
@@ -171,6 +185,20 @@ export component Sidebar inherits Rectangle {
                             vertical-alignment: center;
                             horizontal-alignment: center;
                         }
+                        // expandable SQL tables get a caret hinting single-click
+                        // reveals their columns (Mongo/Redis leaves don't).
+                        if node.kind == "table": Rectangle {
+                            width: 13px;
+                            VerticalLayout {
+                                alignment: center;
+                                AppIcon {
+                                    name: "caret";
+                                    size: 11px;
+                                    color: is-active ? Tokens.on-tint : Tokens.text-faint;
+                                    transform-rotation: node.expanded ? 0deg : -90deg;
+                                }
+                            }
+                        }
                         if is-container || is-database: Rectangle {
                             width: 13px;
                             VerticalLayout {
@@ -183,13 +211,16 @@ export component Sidebar inherits Rectangle {
                                 }
                             }
                         }
-                        if is-query: Text {
-                            text: node.kind == "recent" ? "◷" : ">_";
-                            color: is-active ? Tokens.on-tint : Tokens.text-faint;
-                            font-size: node.kind == "recent" ? 12px : 9px;
+                        if is-query: Rectangle {
                             width: 16px;
-                            font-family: node.kind == "recent" ? "" : Tokens.mono;
-                            vertical-alignment: center;
+                            VerticalLayout {
+                                alignment: center;
+                                AppIcon {
+                                    name: node.kind == "recent" ? "clock" : "star";
+                                    size: 13px;
+                                    color: is-active ? Tokens.on-tint : Tokens.text-faint;
+                                }
+                            }
                         }
 
                         // label
