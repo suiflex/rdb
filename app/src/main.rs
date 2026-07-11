@@ -2156,7 +2156,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let rows = schema_display_rows(
                     &nodes,
                     &HashSet::new(),
-                    &HashSet::new(),
+                    &default_collapsed_cats(),
                     &HashSet::new(),
                     Some(engine),
                     "",
@@ -3056,11 +3056,13 @@ fn main() -> Result<(), slint::PlatformError> {
                         let nodes = model::to_tree_model(&schema);
                         let fields = model::to_structure_model(&schema);
                         // Stash raw nodes for later expand/collapse rebuilds, and
-                        // render the initial view (categories open, fields hidden).
+                        // render the initial view (Functions collapsed, Tables open,
+                        // fields hidden). Matches the reseed done on connect above;
+                        // collapsed_categories itself is !Send so can't cross here.
                         let rows = schema_display_rows(
                             &nodes,
                             &HashSet::new(),
-                            &HashSet::new(),
+                            &default_collapsed_cats(),
                             &HashSet::new(),
                             Some(engine),
                             "",
