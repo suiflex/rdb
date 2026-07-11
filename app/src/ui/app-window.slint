@@ -497,19 +497,20 @@ in-out property <string> rename-text;
                         activated => { root.toggle-palette(); }
                     }
                 }
-                // app settings (always available, in and out of a connection)
-                VerticalLayout {
-                    alignment: center;
-                    GlyphButton {
-                        glyph: "⚙";
-                        clicked => { root.settings-open = true; }
+                // aux icon cluster: app settings (always) + connection tools
+                // (when connected). One row so all four icons share even spacing.
+                HorizontalLayout {
+                    spacing: Tokens.sp1;
+                    VerticalLayout {
+                        alignment: center;
+                        GlyphButton {
+                            glyph: "⚙";
+                            clicked => { root.settings-open = true; }
+                        }
                     }
-                }
-                if root.connected: VerticalLayout {
-                    alignment: center;
-                    HorizontalLayout {
-                        spacing: Tokens.sp1;
-                        // history: jump the sidebar to the History tab
+                    // history: jump the sidebar to the History tab
+                    if root.connected: VerticalLayout {
+                        alignment: center;
                         IconButton {
                             icon: "clock";
                             clicked => {
@@ -517,12 +518,18 @@ in-out property <string> rename-text;
                                 root.sidebar-mode-changed(2);
                             }
                         }
-                        // theme toggle: sun in dark mode, moon in light
+                    }
+                    // theme toggle: sun in dark mode, moon in light
+                    if root.connected: VerticalLayout {
+                        alignment: center;
                         IconButton {
                             icon: Tokens.dark ? "sun" : "moon";
                             clicked => { root.toggle-theme(); }
                         }
-                        // edit the current connection (distinct from the app ⚙)
+                    }
+                    // edit the current connection (distinct from the app ⚙)
+                    if root.connected: VerticalLayout {
+                        alignment: center;
                         IconButton {
                             icon: "pencil";
                             clicked => {
