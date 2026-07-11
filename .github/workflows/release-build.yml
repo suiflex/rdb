@@ -6,6 +6,13 @@ name: release-build
 on:
   release:
     types: [published]
+  # manual re-run for a tag whose original run hung/was cancelled (e.g. the
+  # macos-13 scarcity that blocked v0.10.0), without cutting a new tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to (re)build, e.g. v0.10.0
+        required: true
 
 permissions:
   contents: write
@@ -79,7 +86,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          gh release upload "${{ github.event.release.tag_name }}" \
+          gh release upload "${{ github.event.release.tag_name || inputs.tag }}" \
             "rdbs-${{ matrix.target }}.${{ matrix.ext }}" --clobber
 
   # ---- publish jobs: siblings, both need `build`, neither needs the other ----
@@ -94,7 +101,7 @@ jobs:
       - name: Render formula and push to tap
         env:
           GH_TOKEN: ${{ secrets.TAP_PUBLISH_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -135,7 +142,7 @@ jobs:
       - name: Render manifest and push to bucket
         env:
           GH_TOKEN: ${{ secrets.TAP_PUBLISH_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
