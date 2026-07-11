@@ -1195,10 +1195,12 @@ fn main() -> Result<(), slint::PlatformError> {
         },
     ));
 
-    // Apply the saved theme before the first paint.
+    // Apply the saved theme before the first paint, and seed the settings modal
+    // toggles from the persisted values.
     window
         .global::<Theme>()
         .set_dark(settings.borrow().get().theme.is_dark());
+    window.set_update_check_enabled(settings.borrow().get().update_check);
 
     // Fixed window size for the screenshot loop: RDBS_WIN=WxH (logical px).
     if let Ok(spec) = std::env::var("RDBS_WIN") {
@@ -4639,6 +4641,18 @@ fn main() -> Result<(), slint::PlatformError> {
                 let _ = settings
                     .borrow_mut()
                     .update(|s| s.theme = rdbs_connstore::ThemeMode::from_dark(!now));
+            }
+        });
+    }
+
+    // ----- settings: check-for-updates toggle -----
+    {
+        let weak = window.as_weak();
+        let settings = settings.clone();
+        window.on_set_update_check(move |v| {
+            let _ = settings.borrow_mut().update(|s| s.update_check = v);
+            if let Some(w) = weak.upgrade() {
+                w.set_update_check_enabled(v);
             }
         });
     }
