@@ -137,6 +137,12 @@ fn sidebar_categories(engine: Option<rdbs_connstore::Engine>) -> &'static [&'sta
 /// The current schema model only produces table-like containers, so every
 /// container lands under "Tables"; "Views"/"Functions" render as empty
 /// collapsible headers until schema introspection grows those kinds.
+/// Sidebar categories collapsed on a fresh connection / schema switch.
+/// Functions start closed so the tables list is what you land on.
+fn default_collapsed_cats() -> HashSet<String> {
+    HashSet::from(["Functions".to_string()])
+}
+
 fn schema_display_rows(
     nodes: &[model::VmTreeNode],
     expanded_tables: &HashSet<String>,
@@ -1250,7 +1256,8 @@ fn main() -> Result<(), slint::PlatformError> {
     let loaded_dbs: Arc<std::sync::Mutex<HashSet<String>>> =
         Arc::new(std::sync::Mutex::new(HashSet::new()));
     // Sidebar category headers the user has collapsed (Tables/Views/Functions).
-    let collapsed_categories: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
+    let collapsed_categories: Rc<RefCell<HashSet<String>>> =
+        Rc::new(RefCell::new(default_collapsed_cats()));
     // Sidebar tree filter text. Arc<Mutex> so lazy-load tasks can read it.
     let sidebar_filter: Arc<std::sync::Mutex<String>> =
         Arc::new(std::sync::Mutex::new(String::new()));
@@ -2128,7 +2135,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // drop expand/collapse state that referenced the old schema's tables.
             w.set_active_table(SharedString::default());
             expanded_tables.lock().unwrap().clear();
-            collapsed_categories.borrow_mut().clear();
+            *collapsed_categories.borrow_mut() = default_collapsed_cats();
             let engine = *cur_engine.borrow();
             let Some(engine) = engine else {
                 return;
@@ -2584,7 +2591,7 @@ fn main() -> Result<(), slint::PlatformError> {
             *cur_engine.borrow_mut() = None;
             expanded_tables.lock().unwrap().clear();
             loaded_dbs.lock().unwrap().clear();
-            collapsed_categories.borrow_mut().clear();
+            *collapsed_categories.borrow_mut() = default_collapsed_cats();
             raw_nodes.lock().unwrap().clear();
             let current = current.clone();
             rt.spawn(async move {
@@ -2994,7 +3001,7 @@ fn main() -> Result<(), slint::PlatformError> {
             *cur_engine.borrow_mut() = Some(sc.engine);
             expanded_tables.lock().unwrap().clear();
             loaded_dbs.lock().unwrap().clear();
-            collapsed_categories.borrow_mut().clear();
+            *collapsed_categories.borrow_mut() = default_collapsed_cats();
             let weak2 = weak.clone();
             let store_driver = current.clone();
             // Claim the driver slot synchronously, before any query/browse
