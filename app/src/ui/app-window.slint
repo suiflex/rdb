@@ -73,6 +73,7 @@ in-out property <int> rename-target: -1;
 in-out property <string> rename-text;
     callback toggle-group(string);
     callback open-table(string, string);   // (database, container)
+    callback toggle-fields(string, string); // (database, table) — expand columns inline
     callback toggle-schema-node(string);
     callback select-schema(string);
     callback filter-tree(string);
@@ -276,6 +277,9 @@ in-out property <string> rename-text;
     property <length> sidebar-w: Tokens.sidebar-w;
 
     // ----- keyboard shortcuts -----
+    // bumped by ⌘P to ask the sidebar (which lives under `if connected`) to focus
+    // its filter field; Sidebar watches this via a `changed` handler.
+    in-out property <int> focus-filter-tick: 0;
     FocusScope {
         key-pressed(e) => {
             if (e.text == Key.Escape) {
@@ -301,7 +305,12 @@ in-out property <string> rename-text;
                     return accept;
                 }
                 if (e.text == "p") {
-                    root.toggle-palette();
+                    // focus the sidebar filter (the ⌘P hint lives in Items mode).
+                    // sb is inside `if root.connected`, so nudge it via a tick the
+                    // Sidebar watches rather than referencing its id from here.
+                    root.sidebar-mode = 0;
+                    root.sidebar-mode-changed(0);
+                    root.focus-filter-tick += 1;
                     return accept;
                 }
                 if (e.text == Key.Return) {
@@ -488,19 +497,20 @@ in-out property <string> rename-text;
                         activated => { root.toggle-palette(); }
                     }
                 }
-                // app settings (always available, in and out of a connection)
-                VerticalLayout {
-                    alignment: center;
-                    GlyphButton {
-                        glyph: "⚙";
-                        clicked => { root.settings-open = true; }
+                // aux icon cluster: app settings (always) + connection tools
+                // (when connected). One row so all four icons share even spacing.
+                HorizontalLayout {
+                    spacing: Tokens.sp1;
+                    VerticalLayout {
+                        alignment: center;
+                        GlyphButton {
+                            glyph: "⚙";
+                            clicked => { root.settings-open = true; }
+                        }
                     }
-                }
-                if root.connected: VerticalLayout {
-                    alignment: center;
-                    HorizontalLayout {
-                        spacing: Tokens.sp1;
-                        // history: jump the sidebar to the History tab
+                    // history: jump the sidebar to the History tab
+                    if root.connected: VerticalLayout {
+                        alignment: center;
                         IconButton {
                             icon: "clock";
                             clicked => {
@@ -508,14 +518,20 @@ in-out property <string> rename-text;
                                 root.sidebar-mode-changed(2);
                             }
                         }
-                        // theme toggle: sun in dark mode, moon in light
+                    }
+                    // theme toggle: sun in dark mode, moon in light
+                    if root.connected: VerticalLayout {
+                        alignment: center;
                         IconButton {
                             icon: Tokens.dark ? "sun" : "moon";
                             clicked => { root.toggle-theme(); }
                         }
-                        // settings of the current connection (edit form)
-                        GlyphButton {
-                            glyph: "⚙";
+                    }
+                    // edit the current connection (distinct from the app ⚙)
+                    if root.connected: VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: "pencil";
                             clicked => {
                                 if (root.selected-conn >= 0) {
                                     root.open-edit-form(root.selected-conn);
@@ -571,7 +587,8 @@ in-out property <string> rename-text;
             HorizontalLayout {
                 spacing: 0px;
 
-                Sidebar {
+                sb := Sidebar {
+                    focus-tick: root.focus-filter-tick;
                     // preferred (not fixed) width so the window can auto-shrink the
                     // sidebar instead of treating sidebar-w as a hard min floor
                     horizontal-stretch: 0;
@@ -600,6 +617,9 @@ in-out property <string> rename-text;
                     }
                     open-table(db, t) => {
                         root.open-table(db, t);
+                    }
+                    toggle-fields(db, t) => {
+                        root.toggle-fields(db, t);
                     }
                     toggle-node(t) => {
                         root.toggle-schema-node(t);

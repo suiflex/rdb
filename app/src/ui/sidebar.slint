@@ -4,6 +4,7 @@
 import { Tokens } from "tokens.slint";
 import { TreeNode } from "structs.slint";
 import { FilterField, KeyCap } from "components.slint";
+import { AppIcon } from "icons.slint";
 import { ScrollView } from "std-widgets.slint";
 
 export component Sidebar inherits Rectangle {
@@ -19,6 +20,7 @@ export component Sidebar inherits Rectangle {
     in property <[TreeNode]> query-tree;
     callback disconnect();
     callback open-table(string, string);   // (database, container)
+    callback toggle-fields(string, string); // (database, table) — expand columns inline
     callback open-function(string);
     callback open-query(string, int);      // (label, index in its section)
     callback toggle-node(string);
@@ -26,6 +28,9 @@ export component Sidebar inherits Rectangle {
     callback filter-tree(string);
     callback mode-changed(int);
     callback add-item();
+    // bumped by ⌘P (app-window) to focus the filter field
+    in property <int> focus-tick;
+    changed focus-tick => { fld.focus-input(); }
 
     background: Tokens.sidebar;
 
@@ -70,7 +75,7 @@ export component Sidebar inherits Rectangle {
             padding-left: Tokens.sp3;
             padding-right: Tokens.sp3;
             padding-bottom: Tokens.sp3;
-            FilterField {
+            fld := FilterField {
                 height: 28px;
                 placeholder: root.mode == 1 ? "Filter queries..." : "Filter items...";
                 trailing-cap: root.mode == 0 ? "⌘P" : "";
@@ -115,15 +120,22 @@ export component Sidebar inherits Rectangle {
 
                     row-ta := TouchArea {
                         enabled: !is-hint && !is-field;
+                        // single-click a table = expand its columns inline;
+                        // double-click = open the table's data (see below).
                         clicked => {
                             if (is-category || is-database) {
                                 root.toggle-node(node.label);
                             } else if (is-container) {
-                                root.open-table(node.db, node.label);
+                                root.toggle-fields(node.db, node.label);
                             } else if (is-function) {
                                 root.open-function(node.label);
                             } else if (is-query) {
                                 root.open-query(node.label, node.count);
+                            }
+                        }
+                        double-clicked => {
+                            if (is-container) {
+                                root.open-table(node.db, node.label);
                             }
                         }
                     }
@@ -137,6 +149,19 @@ export component Sidebar inherits Rectangle {
                         if is-category: HorizontalLayout {
                             spacing: Tokens.sp2;
                             alignment: start;
+                            Rectangle {
+                                width: 13px;
+                                VerticalLayout {
+                                    alignment: center;
+                                    AppIcon {
+                                        name: "caret";
+                                        size: 12px;
+                                        color: Tokens.text-dim;
+                                        // down when expanded, right when collapsed
+                                        transform-rotation: node.expanded ? 0deg : -90deg;
+                                    }
+                                }
+                            }
                             Text {
                                 text: node.label.to-uppercase();
                                 color: Tokens.text-dim;
@@ -163,6 +188,20 @@ export component Sidebar inherits Rectangle {
                             vertical-alignment: center;
                             horizontal-alignment: center;
                         }
+                        // expandable SQL tables get a caret hinting single-click
+                        // reveals their columns (Mongo/Redis leaves don't).
+                        if node.kind == "table": Rectangle {
+                            width: 13px;
+                            VerticalLayout {
+                                alignment: center;
+                                AppIcon {
+                                    name: "caret";
+                                    size: 11px;
+                                    color: is-active ? Tokens.on-tint : Tokens.text-faint;
+                                    transform-rotation: node.expanded ? 0deg : -90deg;
+                                }
+                            }
+                        }
                         if is-container || is-database: Rectangle {
                             width: 13px;
                             VerticalLayout {
@@ -175,13 +214,16 @@ export component Sidebar inherits Rectangle {
                                 }
                             }
                         }
-                        if is-query: Text {
-                            text: node.kind == "recent" ? "◷" : ">_";
-                            color: is-active ? Tokens.on-tint : Tokens.text-faint;
-                            font-size: node.kind == "recent" ? 12px : 9px;
+                        if is-query: Rectangle {
                             width: 16px;
-                            font-family: node.kind == "recent" ? "" : Tokens.mono;
-                            vertical-alignment: center;
+                            VerticalLayout {
+                                alignment: center;
+                                AppIcon {
+                                    name: node.kind == "recent" ? "clock" : "star";
+                                    size: 13px;
+                                    color: is-active ? Tokens.on-tint : Tokens.text-faint;
+                                }
+                            }
                         }
 
                         // label
