@@ -29,6 +29,7 @@ async fn start_pg() -> (ContainerAsync<Postgres>, ConnConfig) {
         database: Some("postgres".into()),
         password: Some("postgres".into()),
         sslmode: SslMode::Disable,
+        params: None,
     };
     (container, cfg)
 }

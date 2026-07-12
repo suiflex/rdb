@@ -339,11 +339,11 @@ export component WorkArea inherits Rectangle {
                     VerticalLayout {
                         alignment: center;
                         HorizontalLayout {
+                            // pack the label + stepper tight against the right edge
+                            // instead of stretching them apart across the row.
+                            alignment: end;
                             spacing: Tokens.sp2;
                             Text {
-                                // no VerticalLayout wrapper: a nested layout defaults
-                                // to horizontal-stretch and would shove the buttons
-                                // away from the label.
                                 text: "Limit";
                                 color: Tokens.text-faint;
                                 font-size: Tokens.font-sm;

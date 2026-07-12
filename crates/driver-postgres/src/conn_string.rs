@@ -45,6 +45,7 @@ mod tests {
             database: Some("app".into()),
             password: Some("secret".into()),
             sslmode: SslMode::Prefer,
+            params: None,
         }
     }
 

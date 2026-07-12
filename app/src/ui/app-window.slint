@@ -257,6 +257,7 @@ in-out property <string> rename-text;
     in-out property <string> f-database;
     in-out property <string> f-password;
     in-out property <string> f-sslmode;
+    in-out property <string> f-params;
     in-out property <string> f-color;
     in-out property <string> f-import-url;
     in property <string> form-error;
@@ -456,6 +457,7 @@ in-out property <string> rename-text;
                         GlyphButton {
                             glyph: "⏏";
                             danger-hover: true;
+                            tooltip: "Disconnect";
                             clicked => { root.disconnect(); }
                         }
                     }
@@ -500,17 +502,6 @@ in-out property <string> rename-text;
                         GlyphButton {
                             glyph: "⚙";
                             clicked => { root.settings-open = true; }
-                        }
-                    }
-                    // history: jump the sidebar to the History tab
-                    if root.connected: VerticalLayout {
-                        alignment: center;
-                        IconButton {
-                            icon: "clock";
-                            clicked => {
-                                root.sidebar-mode = 2;
-                                root.sidebar-mode-changed(2);
-                            }
                         }
                     }
                     // theme toggle: sun in dark mode, moon in light
@@ -1076,6 +1067,7 @@ in-out property <string> rename-text;
         f-database <=> root.f-database;
         f-password <=> root.f-password;
         f-sslmode <=> root.f-sslmode;
+        f-params <=> root.f-params;
         f-color <=> root.f-color;
         f-import-url <=> root.f-import-url;
         form-error: root.form-error;

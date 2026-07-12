@@ -19,6 +19,7 @@ fn cfg() -> ConnConfig {
         database: None,
         password: None,
         sslmode: SslMode::Disable,
+        params: None,
     }
 }
 

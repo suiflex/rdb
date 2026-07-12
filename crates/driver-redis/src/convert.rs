@@ -107,6 +107,7 @@ mod tests {
             database: db.map(|s| s.to_string()),
             password: pw.map(|s| s.to_string()),
             sslmode: SslMode::Disable,
+            params: None,
         }
     }
 

@@ -357,6 +357,7 @@ export component GlyphButton inherits Rectangle {
     in property <string> glyph;
     in property <length> glyph-size: Tokens.font-md;
     in property <bool> danger-hover: false; // close button: red fill + white glyph
+    in property <string> tooltip;           // optional hover label
     callback clicked;
     width: 28px;
     height: 28px;
@@ -369,6 +370,22 @@ export component GlyphButton inherits Rectangle {
         font-size: root.glyph-size;
     }
     ta := TouchArea { clicked => { root.clicked(); } }
+    // absolute-positioned so it floats over siblings without shifting layout.
+    if root.tooltip != "" && ta.has-hover: Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: parent.height + 4px;
+        width: tip.preferred-width + 2 * Tokens.sp2;
+        height: tip.preferred-height + Tokens.sp1;
+        border-radius: Tokens.radius;
+        background: Tokens.chrome;
+        border-width: 1px;
+        border-color: Tokens.border;
+        tip := Text {
+            text: root.tooltip;
+            color: Tokens.text;
+            font-size: Tokens.font-xs;
+        }
+    }
 }
 
 // Like GlyphButton but draws a crisp SVG (AppIcon) instead of a font glyph —

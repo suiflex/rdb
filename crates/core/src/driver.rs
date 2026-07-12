@@ -121,6 +121,7 @@ mod tests {
             database: None,
             password: None,
             sslmode: Default::default(),
+            params: None,
         };
         let d = FakeDriver::connect(&cfg).await.unwrap();
         d.ping().await.unwrap();
