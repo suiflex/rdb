@@ -1,6 +1,9 @@
 use async_trait::async_trait;
 use futures::stream::TryStreamExt;
+use std::time::Duration;
+
 use mongodb::bson::{doc, Document};
+use mongodb::options::ClientOptions;
 use mongodb::{Client, Collection};
 
 use rdbs_core::conn::{ConnConfig, SslMode};
@@ -28,17 +31,39 @@ fn is_system_db(name: &str) -> bool {
 }
 
 fn build_uri(cfg: &ConnConfig) -> String {
+    // Full-URI override: paste a `mongodb://…` / `mongodb+srv://…` string into
+    // the connection's params and it is used verbatim (Atlas SRV, custom auth,
+    // replica sets — anything the host/port form can't express).
+    if let Some(p) = cfg.params.as_deref() {
+        let p = p.trim();
+        if p.starts_with("mongodb://") || p.starts_with("mongodb+srv://") {
+            return p.to_string();
+        }
+    }
+
     let auth = match &cfg.password {
         Some(pw) if !pw.is_empty() => format!("{}:{}@", cfg.user, pw),
         _ => String::new(),
     };
-    // TLS: Prefer/Require enable TLS with `tlsInsecure=true` (no cert/hostname
-    // validation) to match the other drivers; Disable stays plaintext.
-    let tls = match cfg.sslmode {
-        SslMode::Disable => "",
-        SslMode::Prefer | SslMode::Require => "?tls=true&tlsInsecure=true",
+    // Query is the merge of TLS (Prefer/Require -> tls with no cert/hostname
+    // validation, matching the other drivers) and any user-supplied options.
+    let mut query: Vec<String> = Vec::new();
+    if matches!(cfg.sslmode, SslMode::Prefer | SslMode::Require) {
+        query.push("tls=true".into());
+        query.push("tlsInsecure=true".into());
+    }
+    if let Some(p) = cfg.params.as_deref() {
+        let p = p.trim().trim_start_matches('?');
+        if !p.is_empty() {
+            query.push(p.to_string());
+        }
+    }
+    let q = if query.is_empty() {
+        String::new()
+    } else {
+        format!("?{}", query.join("&"))
     };
-    format!("mongodb://{auth}{}:{}{tls}", cfg.host, cfg.port)
+    format!("mongodb://{auth}{}:{}/{q}", cfg.host, cfg.port)
 }
 
 impl MongoDriver {
@@ -55,9 +80,15 @@ impl MongoDriver {
 #[async_trait]
 impl Driver for MongoDriver {
     async fn connect(cfg: &ConnConfig) -> Result<Self> {
-        let client = Client::with_uri_str(build_uri(cfg))
+        let mut options = ClientOptions::parse(build_uri(cfg))
             .await
             .map_err(|e| RdbsError::Connection(e.to_string()))?;
+        // Fail fast on an unreachable host/replica set instead of the 30s default
+        // server-selection hang.
+        options.server_selection_timeout = Some(Duration::from_secs(8));
+        options.connect_timeout = Some(Duration::from_secs(8));
+        let client =
+            Client::with_options(options).map_err(|e| RdbsError::Connection(e.to_string()))?;
         let default_db = cfg.database.clone().unwrap_or_else(|| "admin".to_string());
         Ok(MongoDriver { client, default_db })
     }
@@ -289,6 +320,53 @@ mod tests {
         assert_eq!(cell_to_bson(&Cell::Null), Bson::Null);
         assert_eq!(cell_to_bson(&Cell::Int(3)), Bson::Int64(3));
         assert_eq!(cell_to_bson(&Cell::Bool(true)), Bson::Boolean(true));
+    }
+
+    fn cfg(params: Option<&str>, ssl: SslMode) -> ConnConfig {
+        ConnConfig {
+            host: "db.internal".into(),
+            port: 27017,
+            user: "u".into(),
+            database: Some("app".into()),
+            password: Some("p".into()),
+            sslmode: ssl,
+            params: params.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn build_uri_plain_has_trailing_slash_no_query() {
+        assert_eq!(
+            build_uri(&cfg(None, SslMode::Disable)),
+            "mongodb://u:p@db.internal:27017/"
+        );
+    }
+
+    #[test]
+    fn build_uri_merges_tls_and_params() {
+        let uri = build_uri(&cfg(
+            Some("?replicaSet=rs0&authSource=admin"),
+            SslMode::Require,
+        ));
+        assert_eq!(
+            uri,
+            "mongodb://u:p@db.internal:27017/?tls=true&tlsInsecure=true&replicaSet=rs0&authSource=admin"
+        );
+    }
+
+    #[test]
+    fn build_uri_params_without_leading_question_mark() {
+        let uri = build_uri(&cfg(Some("directConnection=true"), SslMode::Disable));
+        assert_eq!(
+            uri,
+            "mongodb://u:p@db.internal:27017/?directConnection=true"
+        );
+    }
+
+    #[test]
+    fn build_uri_full_uri_override_is_verbatim() {
+        let srv = "mongodb+srv://user:pass@cluster0.abc.mongodb.net/app?retryWrites=true";
+        assert_eq!(build_uri(&cfg(Some(srv), SslMode::Require)), srv);
     }
 
     #[test]
