@@ -1,15 +1,92 @@
 //! SQL identifier autocomplete: given the text before the cursor and the
-//! in-memory schema tree (`VmTreeNode` list), suggest table or column names.
-//! Deliberately small — context is just "after a dot" (columns) or "after
-//! FROM/JOIN/… or a partial word" (tables). No keyword completion.
+//! in-memory schema tree (`VmTreeNode` list), suggest keywords, table names, or
+//! column names based on the SQL context. Columns resolve through a light
+//! `FROM tbl alias` alias map so `alias.` offers that table's columns.
 
 use crate::model::VmTreeNode;
+
+/// SQL keywords offered when the cursor is at a statement/clause boundary.
+const KEYWORDS: &[&str] = &[
+    "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES", "UPDATE", "SET", "DELETE", "JOIN",
+    "INNER", "LEFT", "RIGHT", "OUTER", "FULL", "ON", "AS", "GROUP", "ORDER", "BY", "HAVING",
+    "LIMIT", "OFFSET", "DISTINCT", "AND", "OR", "NOT", "NULL", "IS", "IN", "LIKE", "BETWEEN",
+    "ASC", "DESC", "COUNT", "CREATE", "TABLE", "ALTER", "DROP", "INDEX",
+];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Candidate {
     pub label: String,
-    pub kind: String, // "table" | "field"
+    pub kind: String, // "keyword" | "table" | "field"
     pub sub: String,  // owning table, for column hints
+}
+
+fn is_keyword(w: &str) -> bool {
+    let u = w.to_uppercase();
+    KEYWORDS.contains(&u.as_str())
+}
+
+/// Field nodes store `"name: type"` for the sidebar; completions insert the
+/// bare column name only.
+fn field_name(label: &str) -> &str {
+    label.split(':').next().unwrap_or(label).trim()
+}
+
+fn keywords() -> Vec<Candidate> {
+    KEYWORDS
+        .iter()
+        .map(|k| Candidate {
+            label: (*k).to_string(),
+            kind: "keyword".into(),
+            sub: String::new(),
+        })
+        .collect()
+}
+
+/// Every column across the schema (deduped by name), for SELECT/WHERE contexts
+/// where the owning table isn't yet known.
+fn all_columns(nodes: &[VmTreeNode]) -> Vec<Candidate> {
+    let mut seen = std::collections::HashSet::new();
+    nodes
+        .iter()
+        .filter(|n| n.kind == "field")
+        .filter_map(|n| {
+            let name = field_name(&n.label).to_string();
+            if seen.insert(name.to_lowercase()) {
+                Some(Candidate {
+                    label: name,
+                    kind: "field".into(),
+                    sub: String::new(),
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Map a table name or `FROM tbl alias` alias to its underlying table name.
+fn resolve_alias(stmt: &str, owner: &str) -> String {
+    let ol = owner.to_lowercase();
+    let words: Vec<&str> = stmt
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|w| !w.is_empty())
+        .collect();
+    for i in 0..words.len() {
+        let w = words[i].to_uppercase();
+        if (w == "FROM" || w == "JOIN") && i + 1 < words.len() {
+            let table = words[i + 1];
+            // `FROM tbl alias` — alias is the following non-keyword word.
+            if let Some(alias) = words.get(i + 2) {
+                if !is_keyword(alias) && alias.to_lowercase() == ol {
+                    return table.to_string();
+                }
+            }
+            if table.to_lowercase() == ol {
+                return table.to_string();
+            }
+        }
+    }
+    owner.to_string()
 }
 
 /// The trailing run of identifier chars at the end of `s` (ASCII identifier).
@@ -44,7 +121,7 @@ fn columns_of(nodes: &[VmTreeNode], owner: &str) -> Vec<Candidate> {
                 .iter()
                 .take_while(|f| f.kind == "field")
                 .map(|f| Candidate {
-                    label: f.label.clone(),
+                    label: field_name(&f.label).to_string(),
                     kind: "field".into(),
                     sub: owner.to_string(),
                 })
@@ -70,20 +147,37 @@ pub fn suggest(before_cursor: &str, nodes: &[VmTreeNode]) -> (usize, Vec<Candida
     let word = trailing_word(before_cursor);
     let head = before_cursor.strip_suffix(word).unwrap_or(before_cursor);
     let mut cands = if let Some(before_dot) = head.strip_suffix('.') {
-        columns_of(nodes, trailing_word(before_dot))
+        // `table.` / `alias.` → that table's columns.
+        let owner = resolve_alias(before_cursor, trailing_word(before_dot));
+        columns_of(nodes, &owner)
     } else {
         match last_keyword(before_cursor).as_deref() {
+            // table position
             Some("FROM") | Some("JOIN") | Some("INTO") | Some("UPDATE") | Some("TABLE") => {
                 tables(nodes)
             }
-            _ if !word.is_empty() => tables(nodes),
-            _ => return (word.chars().count(), Vec::new()),
+            // column position: offer columns (and tables, for `table.col`)
+            Some("SELECT") | Some("WHERE") | Some("AND") | Some("OR") | Some("ON")
+            | Some("HAVING") | Some("SET") | Some("BY") | Some("VALUES") => {
+                let mut c = all_columns(nodes);
+                c.extend(tables(nodes));
+                c
+            }
+            // statement start / no useful context: keywords + tables
+            _ => {
+                let mut c = keywords();
+                c.extend(tables(nodes));
+                c
+            }
         }
     };
     let wl = word.to_lowercase();
     if !wl.is_empty() {
         cands.retain(|c| c.label.to_lowercase().starts_with(&wl));
     }
+    // dedup by label (a column name may appear across tables), keep first.
+    let mut seen = std::collections::HashSet::new();
+    cands.retain(|c| seen.insert((c.kind.clone(), c.label.to_lowercase())));
     cands.truncate(20);
     (word.chars().count(), cands)
 }
@@ -127,9 +221,46 @@ mod tests {
     }
 
     #[test]
-    fn bare_word_without_context_is_empty() {
-        let (_, c) = suggest("sele", &nodes());
-        // "sele" is a partial word → tables filtered by prefix (none match)
-        assert!(c.is_empty());
+    fn bare_word_completes_keyword() {
+        let (n, c) = suggest("sele", &nodes());
+        assert_eq!(n, 4);
+        assert_eq!(
+            c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
+            ["SELECT"]
+        );
+    }
+
+    #[test]
+    fn select_context_offers_columns() {
+        let (_, c) = suggest("select ", &nodes());
+        let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+        assert!(labels.contains(&"config_id"));
+        assert!(labels.contains(&"name"));
+        assert!(labels.contains(&"id"));
+    }
+
+    #[test]
+    fn alias_dot_resolves_to_table_columns() {
+        let (_, c) = suggest("select * from step_config sc where sc.", &nodes());
+        assert_eq!(
+            c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
+            ["config_id", "name"]
+        );
+    }
+
+    #[test]
+    fn column_insert_strips_type_annotation() {
+        let typed = vec![
+            VmTreeNode {
+                label: "users".into(),
+                kind: "table".into(),
+            },
+            VmTreeNode {
+                label: "id: int4".into(),
+                kind: "field".into(),
+            },
+        ];
+        let (_, c) = suggest("select * from users where users.", &typed);
+        assert_eq!(c[0].label, "id");
     }
 }
