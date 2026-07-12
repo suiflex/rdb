@@ -503,17 +503,6 @@ in-out property <string> rename-text;
                             clicked => { root.settings-open = true; }
                         }
                     }
-                    // history: jump the sidebar to the History tab
-                    if root.connected: VerticalLayout {
-                        alignment: center;
-                        IconButton {
-                            icon: "clock";
-                            clicked => {
-                                root.sidebar-mode = 2;
-                                root.sidebar-mode-changed(2);
-                            }
-                        }
-                    }
                     // theme toggle: sun in dark mode, moon in light
                     if root.connected: VerticalLayout {
                         alignment: center;
