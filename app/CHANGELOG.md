@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.11.0](https://github.com/suiflex/rdb/compare/v0.10.0...v0.11.0) (2026-07-12)
+
+
+### Features
+
+* **app:** add Options/URI field to the connection form ([e5d9b34](https://github.com/suiflex/rdb/commit/e5d9b34d7091d532ae3648982302d0d68f967093))
+* **brand:** align RDB logo + README with suiflex org ([a88d56d](https://github.com/suiflex/rdb/commit/a88d56dfe84bc110976eec9e662ab6f0f98d5dc4))
+
+
+### Bug Fixes
+
+* **editor:** full SQL autocomplete with clean identifier insert ([e054a84](https://github.com/suiflex/rdb/commit/e054a84568c10ffbb5988d5822bf7bfb57d38637))
+* mongo connect, SQL autocomplete, and editor toolbar UX ([b984bf0](https://github.com/suiflex/rdb/commit/b984bf0ebfd635f52d54229dd2b94f0a1b877298))
+* **ui:** label the disconnect button with a hover tooltip ([95e73f3](https://github.com/suiflex/rdb/commit/95e73f344db599ed5bf7663b90b4013346f7497d))
+* **ui:** right-align the Limit stepper ([2f6a693](https://github.com/suiflex/rdb/commit/2f6a693d4b8f98f62734358d086961312d84b140))
+
 ## [0.10.0](https://github.com/suiflex/rdb/compare/v0.9.0...v0.10.0) (2026-07-11)
 
 
