@@ -21,6 +21,12 @@ pub struct ConnConfig {
     pub password: Option<String>,
     #[serde(default)]
     pub sslmode: SslMode,
+    /// Driver-specific connection options: either a query string
+    /// (`?replicaSet=rs0&authSource=admin&tls=true`) or a full URI override
+    /// (`mongodb+srv://…`). Currently consumed by the Mongo driver; other
+    /// drivers ignore it.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub params: Option<String>,
 }
 
 #[cfg(test)]
@@ -41,6 +47,7 @@ mod tests {
             database: Some("app".into()),
             password: None,
             sslmode: SslMode::Require,
+            params: None,
         };
         let json = serde_json::to_string(&cfg).unwrap();
         assert!(json.contains("\"host\":\"localhost\""));

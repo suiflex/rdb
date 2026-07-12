@@ -16,6 +16,7 @@ fn cfg(path: &str) -> ConnConfig {
         database: Some(path.to_string()),
         password: None,
         sslmode: SslMode::Disable,
+        params: None,
     }
 }
 

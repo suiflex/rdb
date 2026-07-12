@@ -44,6 +44,11 @@ pub struct SavedConnection {
     /// Free-form labels shown as chips in the connection detail panel.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Driver-specific connection options: a query string
+    /// (`?replicaSet=rs0&authSource=admin&tls=true`) or a full URI override
+    /// (`mongodb+srv://…`). Consumed by the Mongo driver; ignored by others.
+    #[serde(default)]
+    pub params: Option<String>,
 }
 
 impl SavedConnection {
@@ -68,6 +73,7 @@ impl SavedConnection {
             group: None,
             local: false,
             tags: Vec::new(),
+            params: None,
         }
     }
 
@@ -81,6 +87,7 @@ impl SavedConnection {
             database: self.database.clone(),
             password,
             sslmode: self.sslmode,
+            params: self.params.clone(),
         }
     }
 }
@@ -103,6 +110,7 @@ mod tests {
             group: Some("Local".into()),
             local: false,
             tags: Vec::new(),
+            params: None,
         }
     }
 
