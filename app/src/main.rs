@@ -4753,6 +4753,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_database(SharedString::default());
             w.set_f_password(SharedString::default());
             w.set_f_sslmode(SharedString::from("Prefer"));
+            w.set_f_params(SharedString::default());
             w.set_f_color(SharedString::from("#2c5fd8"));
             w.set_f_import_url(SharedString::default());
             w.set_form_error(SharedString::default());
@@ -4789,6 +4790,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 rdbs_core::conn::SslMode::Prefer => "Prefer",
                 rdbs_core::conn::SslMode::Require => "Require",
             }));
+            w.set_f_params(SharedString::from(sc.params.unwrap_or_default()));
             w.set_f_color(SharedString::from(
                 sc.color.unwrap_or_else(|| "#2c5fd8".into()),
             ));
@@ -4980,6 +4982,14 @@ fn main() -> Result<(), slint::PlatformError> {
                     Some(p)
                 }
             };
+            let params = {
+                let p = w.get_f_params().to_string();
+                if p.trim().is_empty() {
+                    None
+                } else {
+                    Some(p)
+                }
+            };
             let cfg = rdbs_core::conn::ConnConfig {
                 host,
                 port,
@@ -4987,6 +4997,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 database,
                 password,
                 sslmode,
+                params,
             };
 
             w.set_test_busy(true);
@@ -5070,6 +5081,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
             };
             let color = Some(w.get_f_color().to_string());
+            let params = {
+                let p = w.get_f_params().to_string();
+                if p.trim().is_empty() {
+                    None
+                } else {
+                    Some(p)
+                }
+            };
             let password = w.get_f_password().to_string();
             let id = editing_id.borrow().clone();
 
@@ -5086,6 +5105,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     sc.database = database;
                     sc.sslmode = sslmode;
                     sc.color = color;
+                    sc.params = params;
                     let cid = sc.id.clone();
                     st.add(sc)?;
                     cid
@@ -5102,6 +5122,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     sc.database = database;
                     sc.sslmode = sslmode;
                     sc.color = color;
+                    sc.params = params;
                     st.update(sc)?;
                     id.clone()
                 };
