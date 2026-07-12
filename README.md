@@ -1,6 +1,27 @@
-# RDBS
+# RDB — native database manager
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/logo-dark.svg">
+    <img src="assets/brand/logo-light.svg" alt="RDB" width="360">
+  </picture>
+</p>
+
+<p align="center">
+  <strong>Native cross-platform database manager.<br>PostgreSQL · MySQL · Redis · MongoDB · SQLite · Cassandra — one binary, no Electron.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/suiflex/rdb/actions/workflows/rdbs-app.yml"><img src="https://img.shields.io/github/actions/workflow/status/suiflex/rdb/rdbs-app.yml?branch=develop&style=for-the-badge" alt="Build status"></a>
+  <a href="https://github.com/suiflex/rdb/releases"><img src="https://img.shields.io/github/v/tag/suiflex/rdb?include_prereleases&style=for-the-badge&label=release" alt="Release"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-4ade80.svg?style=for-the-badge" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/platform-macOS_·_Linux_·_Windows-4ade80?style=for-the-badge" alt="Platforms">
+  <img src="https://img.shields.io/badge/built_with-Rust-4ade80?style=for-the-badge" alt="Built with Rust">
+</p>
 
 A native, lightweight, cross-platform database manager built with Rust and Slint — in the spirit of TablePlus but compiled from a single codebase for macOS and Linux.
+
+Install in one line via [suiflex/homebrew-tap](https://github.com/suiflex/homebrew-tap) (`brew install suiflex/tap/rdbs`) or [suiflex/scoop-bucket](https://github.com/suiflex/scoop-bucket) (`scoop install rdbs`). See [Install](#install).
 
 ## Features
 

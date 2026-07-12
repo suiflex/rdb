@@ -1,0 +1,18 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- squircle background, matching suiflex/suitest (#0a0a0a) -->
+  <rect x="16" y="16" width="480" height="480" rx="116" fill="#0a0a0a"/>
+  <rect x="16.5" y="16.5" width="479" height="479" rx="115.5" stroke="#FFFFFF" stroke-opacity="0.05"/>
+
+  <!-- connection node + cable (nod to suiflex circuit motif) -->
+  <path d="M356 172 H400" stroke="#4ade80" stroke-opacity="0.55" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="404" cy="172" r="15" fill="#4ade80"/>
+
+  <!-- database cylinder -->
+  <!-- body -->
+  <path d="M152 172 V340 A104 30 0 0 0 360 340 V172 Z" fill="#4ade80" fill-opacity="0.7"/>
+  <!-- top lid -->
+  <ellipse cx="256" cy="172" rx="104" ry="30" fill="#4ade80"/>
+  <!-- stacked-disk separators (front arcs) -->
+  <path d="M152 228 A104 30 0 0 0 360 228" stroke="#0a0a0a" stroke-opacity="0.6" stroke-width="9" fill="none"/>
+  <path d="M152 284 A104 30 0 0 0 360 284" stroke="#0a0a0a" stroke-opacity="0.6" stroke-width="9" fill="none"/>
+</svg>

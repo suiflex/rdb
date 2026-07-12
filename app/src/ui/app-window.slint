@@ -416,17 +416,11 @@ in-out property <string> rename-text;
                     alignment: start;
                     VerticalLayout {
                         alignment: center;
-                        Rectangle {
+                        Image {
+                            source: @image-url("../../assets/icon.png");
                             width: 26px;
                             height: 26px;
-                            border-radius: Tokens.radius;
-                            background: Tokens.accent;
-                            Text {
-                                text: "R";
-                                color: white;
-                                font-size: 14px;
-                                font-weight: 700;
-                            }
+                            image-fit: contain;
                         }
                     }
                     Text {
