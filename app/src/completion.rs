@@ -99,6 +99,15 @@ pub fn trailing_word(s: &str) -> &str {
     &s[i..]
 }
 
+/// Does `name` match a schema/database node in the tree? Used to treat
+/// `schema.` as "list that schema's tables" rather than a table's columns.
+fn is_database(nodes: &[VmTreeNode], name: &str) -> bool {
+    let nl = name.to_lowercase();
+    nodes
+        .iter()
+        .any(|n| n.kind == "database" && n.label.to_lowercase() == nl)
+}
+
 fn tables(nodes: &[VmTreeNode]) -> Vec<Candidate> {
     nodes
         .iter()
@@ -147,20 +156,29 @@ pub fn suggest(before_cursor: &str, nodes: &[VmTreeNode]) -> (usize, Vec<Candida
     let word = trailing_word(before_cursor);
     let head = before_cursor.strip_suffix(word).unwrap_or(before_cursor);
     let mut cands = if let Some(before_dot) = head.strip_suffix('.') {
-        // `table.` / `alias.` → that table's columns.
-        let owner = resolve_alias(before_cursor, trailing_word(before_dot));
-        columns_of(nodes, &owner)
+        // `table.` / `alias.` → that table's columns. When the name before the
+        // dot is a schema/database, offer that schema's tables instead.
+        let owner_word = trailing_word(before_dot);
+        let owner = resolve_alias(before_cursor, owner_word);
+        let cols = columns_of(nodes, &owner);
+        if cols.is_empty() && is_database(nodes, owner_word) {
+            tables(nodes)
+        } else {
+            cols
+        }
     } else {
         match last_keyword(before_cursor).as_deref() {
             // table position
             Some("FROM") | Some("JOIN") | Some("INTO") | Some("UPDATE") | Some("TABLE") => {
                 tables(nodes)
             }
-            // column position: offer columns (and tables, for `table.col`)
+            // column position: offer columns and tables, plus keywords so the
+            // next clause (FROM/WHERE/…) is always reachable, e.g. after `*`.
             Some("SELECT") | Some("WHERE") | Some("AND") | Some("OR") | Some("ON")
             | Some("HAVING") | Some("SET") | Some("BY") | Some("VALUES") => {
                 let mut c = all_columns(nodes);
                 c.extend(tables(nodes));
+                c.extend(keywords());
                 c
             }
             // statement start / no useful context: keywords + tables
@@ -245,6 +263,23 @@ mod tests {
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["config_id", "name"]
+        );
+    }
+
+    #[test]
+    fn star_context_offers_from_keyword() {
+        let (_, c) = suggest("select * f", &nodes());
+        let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+        assert!(labels.contains(&"FROM"));
+    }
+
+    #[test]
+    fn schema_dot_suggests_its_tables() {
+        let (n, c) = suggest("select * from public.", &nodes());
+        assert_eq!(n, 0);
+        assert_eq!(
+            c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
+            ["step_config", "users"]
         );
     }
 

@@ -4,6 +4,7 @@
 import { Tokens } from "tokens.slint";
 import { Span } from "structs.slint";
 import { PaletteItem } from "palette.slint";
+import { AppIcon } from "icons.slint";
 import { ScrollView } from "std-widgets.slint";
 
 export component CodeEditor inherits Rectangle {
@@ -213,11 +214,15 @@ export component CodeEditor inherits Rectangle {
                     padding-left: Tokens.sp2;
                     padding-right: Tokens.sp2;
                     spacing: Tokens.sp2;
-                    Text {
-                        text: it.kind == "field" ? "◇" : "▦";
-                        color: Tokens.text-faint;
-                        font-size: Tokens.font-sm;
-                        vertical-alignment: center;
+                    VerticalLayout {
+                        alignment: center;
+                        AppIcon {
+                            name: it.kind == "field" ? "field"
+                                : it.kind == "table" ? "table" : "keyword";
+                            size: 13px;
+                            color: it.kind == "table" ? Tokens.db-pg
+                                : it.kind == "field" ? Tokens.text-dim : Tokens.accent;
+                        }
                     }
                     Text {
                         text: it.label;

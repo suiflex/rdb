@@ -354,6 +354,9 @@ struct BrowseState {
     limit: u64,
     total: Option<u64>,
     pk_cols: Vec<String>,
+    /// Compass-style Mongo filter document (raw JSON, already validated). Empty
+    /// = browse all. Ignored for non-Mongo engines.
+    mongo_filter: String,
 }
 
 /// Default browse page size per engine. Mongo documents are fat, so a Mongo
@@ -512,6 +515,8 @@ fn browse_text(
     table: &rdbs_core::write::TableRef,
     page: u64,
     limit: u64,
+    // Mongo-only filter document (raw JSON, empty = all). Unused by SQL engines.
+    filter: &str,
 ) -> String {
     let offset = page * limit;
     match engine {
@@ -555,8 +560,12 @@ fn browse_text(
                 .as_deref()
                 .map(|d| format!("\"database\":\"{d}\","))
                 .unwrap_or_default();
+            let body = match filter.trim() {
+                "" => "{}",
+                f => f,
+            };
             format!(
-                "{{\"collection\":\"{}\",{db}\"op\":\"find\",\"body\":{{}},\"limit\":{limit},\"skip\":{offset}}}",
+                "{{\"collection\":\"{}\",{db}\"op\":\"find\",\"body\":{body},\"limit\":{limit},\"skip\":{offset}}}",
                 table.name
             )
         }
@@ -3287,8 +3296,12 @@ fn main() -> Result<(), slint::PlatformError> {
             let active_result = active_result.clone();
             // ⌘\ set this; consume it so the next plain run replaces again.
             let new_tab = result_new_tab.swap(false, std::sync::atomic::Ordering::SeqCst);
+            // Currently selected database (top dropdown). Mongo line queries with
+            // no `use(...)` run against it, matching what the user sees browsing.
+            let mut cur_db = String::new();
             if let Some(w) = weak.upgrade() {
                 w.set_query_running(true);
+                cur_db = w.get_schema_name().to_string();
             }
             rt.spawn(async move {
                 let guard = current.lock().await;
@@ -3314,7 +3327,16 @@ fn main() -> Result<(), slint::PlatformError> {
                         let mut out = Err(rdbs_core::error::RdbsError::Query("empty query".into()));
                         for (i, s) in stmts.iter().enumerate() {
                             out = match crate::query_parse::parse_query(*engine, s) {
-                                Ok(q) => driver.query(&q).await,
+                                Ok(mut q) => {
+                                    // Fill the selected database for a Mongo query
+                                    // that didn't name one via `use(...)`.
+                                    if let rdbs_core::query::Query::Mongo(op) = &mut q {
+                                        if op.database.is_none() && !cur_db.is_empty() {
+                                            op.database = Some(cur_db.clone());
+                                        }
+                                    }
+                                    driver.query(&q).await
+                                }
                                 Err(msg) => Err(rdbs_core::error::RdbsError::Query(msg)),
                             };
                             if let Err(e) = &out {
@@ -3598,7 +3620,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(table) = st.table else {
                 return;
             };
-            let text = browse_text(engine, &table, st.page, st.limit);
+            let text = browse_text(engine, &table, st.page, st.limit, &st.mongo_filter);
             w.set_query_text(SharedString::from(text.clone()));
             run_sql(text);
         })
@@ -3638,7 +3660,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 st.page = 0;
                 st.total = None;
                 st.pk_cols.clear();
+                st.mongo_filter.clear();
             }
+            w.set_mongo_filter(SharedString::default());
             {
                 let tabs = w.get_tabs();
                 let ti = w.get_active_tab().max(0) as usize;
@@ -3818,6 +3842,38 @@ fn main() -> Result<(), slint::PlatformError> {
                 st.page = 0;
             }
             echo(&w, l);
+            run_browse();
+        });
+    }
+
+    // ----- Mongo browse filter bar (Compass-style filter document) -----
+    {
+        let weak = window.as_weak();
+        let browse = browse.clone();
+        let run_browse = run_browse.clone();
+        let guard_pending = guard_pending.clone();
+        window.on_apply_mongo_filter(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if guard_pending(&w) {
+                return;
+            }
+            let raw = w.get_mongo_filter().to_string();
+            let trimmed = raw.trim();
+            // Empty clears the filter; otherwise it must be a JSON document.
+            if !trimmed.is_empty() {
+                if let Err(e) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                    w.set_status_error(true);
+                    w.set_result_status(SharedString::from(format!("invalid filter JSON: {e}")));
+                    return;
+                }
+            }
+            {
+                let mut st = browse.lock().unwrap();
+                st.mongo_filter = trimmed.to_string();
+                st.page = 0;
+            }
             run_browse();
         });
     }
@@ -4071,6 +4127,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let tab_titles = tab_titles.clone();
         let results = results.clone();
         let active_result = active_result.clone();
+        let ed_state = ed_state.clone();
+        let load_editor_text = load_editor_text.clone();
         window.on_new_tab(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -4079,7 +4137,7 @@ fn main() -> Result<(), slint::PlatformError> {
             {
                 let mut t = tab_texts.borrow_mut();
                 if let Some(slot) = t.get_mut(active) {
-                    *slot = w.get_query_text().to_string();
+                    *slot = ed_state.borrow().text();
                 }
                 t.push(String::new());
             }
@@ -4087,7 +4145,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let count = tab_texts.borrow().len();
             set_tab_titles(&w, &tab_titles.borrow());
             w.set_active_tab((count - 1) as i32);
-            w.set_query_text(SharedString::default());
+            load_editor_text("");
             // Fresh query tab starts with no result tabs.
             results.lock().unwrap().clear();
             *active_result.lock().unwrap() = 0;
@@ -4223,6 +4281,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let tab_texts = tab_texts.clone();
         let tab_titles = tab_titles.clone();
+        let load_editor_text = load_editor_text.clone();
         window.on_close_tab(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -4237,7 +4296,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 drop(t);
                 *tab_titles.borrow_mut() = vec![None];
                 set_tab_titles(&w, &tab_titles.borrow());
-                w.set_query_text(SharedString::default());
+                load_editor_text("");
                 clear_grid(&w);
                 return;
             }
@@ -4255,7 +4314,7 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             set_tab_titles(&w, &tab_titles.borrow());
             w.set_active_tab(new_active as i32);
-            w.set_query_text(SharedString::from(text));
+            load_editor_text(&text);
         });
     }
 
@@ -4294,6 +4353,8 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let tab_texts = tab_texts.clone();
+        let ed_state = ed_state.clone();
+        let load_editor_text = load_editor_text.clone();
         window.on_select_tab(move |idx| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -4305,12 +4366,12 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             let active = w.get_active_tab() as usize;
             if let Some(slot) = t.get_mut(active) {
-                *slot = w.get_query_text().to_string();
+                *slot = ed_state.borrow().text();
             }
             let text = t[i].clone();
             drop(t);
             w.set_active_tab(idx);
-            w.set_query_text(SharedString::from(text));
+            load_editor_text(&text);
         });
     }
 
@@ -5411,15 +5472,15 @@ mod tests {
             name: "users".into(),
         };
         assert_eq!(
-            browse_text(rdbs_connstore::Engine::Postgres, &t, 1, 300),
+            browse_text(rdbs_connstore::Engine::Postgres, &t, 1, 300, ""),
             "SELECT * FROM \"public\".\"users\" LIMIT 300 OFFSET 300"
         );
         assert_eq!(
-            browse_text(rdbs_connstore::Engine::MySql, &t, 0, 50),
+            browse_text(rdbs_connstore::Engine::MySql, &t, 0, 50, ""),
             "SELECT * FROM `users` LIMIT 50 OFFSET 0"
         );
         assert_eq!(
-            browse_text(rdbs_connstore::Engine::Redis, &t, 2, 100),
+            browse_text(rdbs_connstore::Engine::Redis, &t, 2, 100, ""),
             "BROWSE users 200 100"
         );
         let m = rdbs_core::write::TableRef {
@@ -5428,8 +5489,13 @@ mod tests {
             name: "orders".into(),
         };
         assert_eq!(
-            browse_text(rdbs_connstore::Engine::Mongo, &m, 1, 50),
+            browse_text(rdbs_connstore::Engine::Mongo, &m, 1, 50, ""),
             "{\"collection\":\"orders\",\"database\":\"shop\",\"op\":\"find\",\"body\":{},\"limit\":50,\"skip\":50}"
+        );
+        // A filter document lands in the find body.
+        assert_eq!(
+            browse_text(rdbs_connstore::Engine::Mongo, &m, 0, 20, r#"{"status":"A"}"#),
+            "{\"collection\":\"orders\",\"database\":\"shop\",\"op\":\"find\",\"body\":{\"status\":\"A\"},\"limit\":20,\"skip\":0}"
         );
     }
 

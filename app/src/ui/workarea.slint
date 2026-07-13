@@ -10,11 +10,14 @@ import {
     UnderlineSegment, SecondaryButton, PrimaryButton, TextButton, FilterField, KeyCap
 } from "components.slint";
 import { ScrollView, ComboBox } from "std-widgets.slint";
+import { AppIcon } from "icons.slint";
 
 export component WorkArea inherits Rectangle {
     // ----- editor / results state (wired 1:1 from MainWindow) -----
     // Collapse the SQL editor pane to give the results grid more room.
     property <bool> editor-collapsed: false;
+    // Reveal the query editor while browsing a table/collection (default closed).
+    property <bool> browse-editor-open: false;
     in-out property <string> query-text;
     in property <[GridColumn]> columns;
     in property <[GridCell]> cells;
@@ -38,6 +41,8 @@ export component WorkArea inherits Rectangle {
     in-out property <bool> show-structure: false;
     in property <[StructField]> structure-columns;
     in-out property <string> grid-filter;
+    in-out property <string> mongo-filter;   // Compass-style Mongo filter document
+    callback apply-mongo-filter();
     in property <string> active-table;
     in property <string> sort-text;      // e.g. "sort: id ↑"
     in property <int> grid-sort-col: -1; // client-side sort: display col + dir
@@ -180,6 +185,18 @@ export component WorkArea inherits Rectangle {
                         }
                     }
                 }
+                // Mongo filter document (server-side find filter). Enter runs it;
+                // gated on Documents result-kind like the Grid/Tree toggle.
+                if root.result-kind == 1: VerticalLayout {
+                    alignment: center;
+                    FilterField {
+                        width: 260px;
+                        height: 28px;
+                        placeholder: "Filter — { \"field\": value }";
+                        text <=> root.mongo-filter;
+                        submitted => { root.apply-mongo-filter(); }
+                    }
+                }
                 // sort text
                 Text {
                     text: root.sort-text;
@@ -189,6 +206,15 @@ export component WorkArea inherits Rectangle {
                     vertical-alignment: center;
                 }
                 Rectangle { horizontal-stretch: 1; }
+                // Reveal the query editor over the browse grid so you can run a
+                // line query (e.g. Mongo db.coll.find(...)) without a new tab.
+                VerticalLayout {
+                    alignment: center;
+                    TextButton {
+                        text: root.browse-editor-open ? "Query ▾" : "Query ▸";
+                        clicked => { root.browse-editor-open = !root.browse-editor-open; }
+                    }
+                }
                 // Mongo document view switch (grid table ⇄ JSON tree)
                 if root.result-kind == 1: VerticalLayout {
                     alignment: center;
@@ -248,10 +274,10 @@ export component WorkArea inherits Rectangle {
                         border-width: 1px;
                         border-color: Tokens.border-strong;
                         background: refresh-ta.has-hover ? Tokens.chrome : Tokens.card;
-                        Text {
-                            text: "⟳";
+                        AppIcon {
+                            name: "refresh";
+                            size: 14px;
                             color: Tokens.text-dim;
-                            font-size: 13px;
                         }
                         refresh-ta := TouchArea { clicked => { root.refresh-page(); } }
                     }
@@ -310,7 +336,8 @@ export component WorkArea inherits Rectangle {
 
         // ================= empty state (nothing open) =================
         // ================= SQL editor (non-browse tabs) =================
-        if !root.browse-mode && !root.fn-mode: Rectangle {
+        // Also shown over a browse grid when the user opens "Query ▸".
+        if (!root.browse-mode || root.browse-editor-open) && !root.fn-mode: Rectangle {
             height: root.editor-h;
             background: Tokens.canvas;
             VerticalLayout {
@@ -558,7 +585,7 @@ export component WorkArea inherits Rectangle {
         }
 
         // draggable splitter: grow/shrink the editor vs the results (SQL tabs)
-        if !root.browse-mode && !root.fn-mode: Rectangle {
+        if (!root.browse-mode || root.browse-editor-open) && !root.fn-mode: Rectangle {
             height: 6px;
             background: split-ta.has-hover || split-ta.pressed ? Tokens.accent : Tokens.chrome;
             split-ta := TouchArea {
