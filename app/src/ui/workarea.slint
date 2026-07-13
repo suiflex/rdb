@@ -10,6 +10,7 @@ import {
     UnderlineSegment, SecondaryButton, PrimaryButton, TextButton, FilterField, KeyCap
 } from "components.slint";
 import { ScrollView, ComboBox } from "std-widgets.slint";
+import { AppIcon } from "icons.slint";
 
 export component WorkArea inherits Rectangle {
     // ----- editor / results state (wired 1:1 from MainWindow) -----
@@ -273,10 +274,10 @@ export component WorkArea inherits Rectangle {
                         border-width: 1px;
                         border-color: Tokens.border-strong;
                         background: refresh-ta.has-hover ? Tokens.chrome : Tokens.card;
-                        Text {
-                            text: "⟳";
+                        AppIcon {
+                            name: "refresh";
+                            size: 14px;
                             color: Tokens.text-dim;
-                            font-size: 13px;
                         }
                         refresh-ta := TouchArea { clicked => { root.refresh-page(); } }
                     }
