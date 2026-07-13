@@ -45,10 +45,13 @@ fn build_uri(cfg: &ConnConfig) -> String {
         Some(pw) if !pw.is_empty() => format!("{}:{}@", cfg.user, pw),
         _ => String::new(),
     };
-    // Query is the merge of TLS (Prefer/Require -> tls with no cert/hostname
-    // validation, matching the other drivers) and any user-supplied options.
+    // TLS is opt-in for Mongo: only `Require` enforces it (with no cert/hostname
+    // validation, matching the other drivers). `Prefer` means opportunistic TLS,
+    // but the mongodb driver has no plaintext fallback, so forcing tls=true on
+    // Prefer resets every plaintext server. Treat Prefer as no-TLS; users who
+    // need mandatory TLS pick Require.
     let mut query: Vec<String> = Vec::new();
-    if matches!(cfg.sslmode, SslMode::Prefer | SslMode::Require) {
+    if matches!(cfg.sslmode, SslMode::Require) {
         query.push("tls=true".into());
         query.push("tlsInsecure=true".into());
     }
@@ -361,6 +364,15 @@ mod tests {
     fn build_uri_plain_has_trailing_slash_no_query() {
         assert_eq!(
             build_uri(&cfg(None, SslMode::Disable)),
+            "mongodb://u:p@db.internal:27017/?directConnection=true"
+        );
+    }
+
+    #[test]
+    fn build_uri_prefer_does_not_force_tls() {
+        // Prefer is opportunistic; Mongo has no fallback, so it must stay plaintext.
+        assert_eq!(
+            build_uri(&cfg(None, SslMode::Prefer)),
             "mongodb://u:p@db.internal:27017/?directConnection=true"
         );
     }
