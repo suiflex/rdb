@@ -45,10 +45,22 @@ pub struct DocNode {
     pub path: String,
 }
 
+/// A one-line, length-capped preview of a scalar value. Long strings (e.g. a
+/// multi-KB HTML `body`) are collapsed to a single line and truncated so the
+/// tree stays cheap to lay out and render.
 fn scalar_preview(v: &serde_json::Value) -> String {
-    match v {
+    const MAX: usize = 200;
+    let raw = match v {
         serde_json::Value::String(s) => s.clone(),
         other => other.to_string(),
+    };
+    let flat = raw.replace(['\n', '\r', '\t'], " ");
+    if flat.chars().count() <= MAX {
+        flat
+    } else {
+        let mut out: String = flat.chars().take(MAX).collect();
+        out.push('…');
+        out
     }
 }
 
