@@ -2130,6 +2130,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let cur_engine = cur_engine.clone();
         let expanded_tables = expanded_tables.clone();
         let collapsed_categories = collapsed_categories.clone();
+        let loaded_dbs = loaded_dbs.clone();
         window.on_schema_choose(move |idx| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -2154,6 +2155,8 @@ fn main() -> Result<(), slint::PlatformError> {
             let weak2 = weak.clone();
             let current = current.clone();
             let raw_nodes = raw_nodes.clone();
+            let expanded_tables = expanded_tables.clone();
+            let loaded_dbs = loaded_dbs.clone();
             rt.spawn(async move {
                 let guard = current.lock_owned().await;
                 let Some((_, driver)) = guard.as_ref() else {
@@ -2163,11 +2166,28 @@ fn main() -> Result<(), slint::PlatformError> {
                     return;
                 };
                 let nodes = model::to_tree_model(&schema);
+                // Nested engines (Mongo/Redis/Cassandra) now scope to the one
+                // chosen database; open it so its collections show at once.
+                let nested = matches!(
+                    engine,
+                    rdbs_connstore::Engine::Mongo
+                        | rdbs_connstore::Engine::Redis
+                        | rdbs_connstore::Engine::Cassandra
+                );
+                let (exp, loaded) = if nested {
+                    let mut e = expanded_tables.lock().unwrap();
+                    let mut l = loaded_dbs.lock().unwrap();
+                    e.insert(schema_name.clone());
+                    l.insert(schema_name.clone());
+                    (e.clone(), l.clone())
+                } else {
+                    (HashSet::new(), HashSet::new())
+                };
                 let rows = schema_display_rows(
                     &nodes,
-                    &HashSet::new(),
+                    &exp,
                     &default_collapsed_cats(),
-                    &HashSet::new(),
+                    &loaded,
                     Some(engine),
                     "",
                 );
