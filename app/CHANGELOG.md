@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.12.0](https://github.com/suiflex/rdb/compare/v0.11.0...v0.12.0) (2026-07-13)
+
+
+### Features
+
+* **app:** add a collapsible JSON tree model for Mongo documents ([61b3183](https://github.com/suiflex/rdb/commit/61b318332cdc627f1ce3a1f8655acd9eb8568d81))
+* **app:** filter the Mongo sidebar to the selected database ([3a85091](https://github.com/suiflex/rdb/commit/3a85091e9a24c66ad4de91b0c25cbe82ca39e72f))
+* **ui:** grid/tree toggle for Mongo documents ([44065cc](https://github.com/suiflex/rdb/commit/44065cc151cfa84d680f8f3fb91dc9557f1037b6))
+
+
+### Bug Fixes
+
+* **app:** default Mongo browse to 20 docs per page ([716493d](https://github.com/suiflex/rdb/commit/716493d30a1d8dbce603301dcc47566cbf2582a0))
+* **mongo:** connect fixes + document browsing UX ([42ef9b5](https://github.com/suiflex/rdb/commit/42ef9b55c92bed4d172d01f6d14273668ed5c371))
+* **ui:** make the app icon background transparent ([0a1e2cd](https://github.com/suiflex/rdb/commit/0a1e2cd68454496882275401e524e2342c206367))
+* **ui:** make the Mongo JSON tree usable ([4e832a0](https://github.com/suiflex/rdb/commit/4e832a08dd0696a80ca3ebc03026204b48e6515b))
+* **ui:** move the Grid/Tree toggle into the browse toolbar ([447e034](https://github.com/suiflex/rdb/commit/447e0349c28adfb66eb3856b2bfb194917b1834e))
+* **ui:** show button tooltips via a popup instead of a clipped rect ([318979c](https://github.com/suiflex/rdb/commit/318979cf53fb476806baeb69b0fa4be6f09d4689))
+
+
+### Performance Improvements
+
+* **app:** cap Mongo document tree scalar previews ([65270e7](https://github.com/suiflex/rdb/commit/65270e7effb20612101f08fd494009d9763e05c6))
+
 ## [0.11.0](https://github.com/suiflex/rdb/compare/v0.10.0...v0.11.0) (2026-07-12)
 
 
