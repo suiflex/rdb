@@ -24,6 +24,8 @@ pub struct MongoOp {
     pub limit: Option<i64>,
     /// Rows to skip before `limit` applies (pagination); `None` = 0.
     pub skip: Option<i64>,
+    /// Sort document for a `find` (e.g. `{ "_id": -1 }`); `None` = natural order.
+    pub sort: Option<Json>,
     pub kind: MongoKind,
 }
 
@@ -54,6 +56,7 @@ mod tests {
             database: None,
             limit: None,
             skip: None,
+            sort: None,
             kind: MongoKind::Find(serde_json::json!({ "age": { "$gt": 18 } })),
         };
         assert_eq!(op.collection, "users");

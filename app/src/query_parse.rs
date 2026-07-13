@@ -103,6 +103,7 @@ fn parse_mongo(text: &str) -> Result<Query, String> {
         database,
         limit,
         skip,
+        sort: None,
         kind,
     }))
 }

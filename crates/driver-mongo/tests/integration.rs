@@ -37,6 +37,7 @@ async fn connect_insert_find_aggregate_schema_against_real_mongo() {
                 database: None,
                 limit: None,
                 skip: None,
+                sort: None,
                 kind: MongoKind::Insert(serde_json::json!({ "name": name, "age": age })),
             }))
             .await
