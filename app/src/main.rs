@@ -356,6 +356,16 @@ struct BrowseState {
     pk_cols: Vec<String>,
 }
 
+/// Default browse page size per engine. Mongo documents are fat, so a Mongo
+/// collection opens 20 at a time (matching Compass) instead of the SQL default.
+/// ponytail: per-engine default only; the stepper + paging handle the rest.
+fn default_browse_limit(engine: rdbs_connstore::Engine) -> u64 {
+    match engine {
+        rdbs_connstore::Engine::Mongo => 20,
+        _ => 300,
+    }
+}
+
 /// One cached SQL result, shown as a result tab. ⌘⏎ replaces the active one;
 /// ⌘\ appends a new one.
 #[derive(Clone)]
@@ -2959,6 +2969,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let load_editor_text = load_editor_text.clone();
         let fn_defs = fn_defs.clone();
         let connect_handle = connect_handle.clone();
+        let browse = browse.clone();
         window.on_connect_clicked(move |idx| {
             let i = idx as usize;
             let (sc, cfg) = {
@@ -2996,9 +3007,14 @@ fn main() -> Result<(), slint::PlatformError> {
                     crate::query_parse::editor_hint(sc.engine)
                 }));
                 w.set_active_table(SharedString::default());
+                // Seed the browse page size from the engine default (Mongo = 20).
+                let dft_limit = default_browse_limit(sc.engine);
+                w.set_limit_value(dft_limit as i32);
+                w.set_limit_text(SharedString::from(dft_limit.to_string()));
             }
             // Fresh connection: nothing browsed, nothing expanded.
             *cur_engine.borrow_mut() = Some(sc.engine);
+            browse.lock().unwrap().limit = default_browse_limit(sc.engine);
             expanded_tables.lock().unwrap().clear();
             loaded_dbs.lock().unwrap().clear();
             *collapsed_categories.borrow_mut() = default_collapsed_cats();
@@ -5234,6 +5250,15 @@ fn main() -> Result<(), slint::PlatformError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mongo_browse_default_is_twenty() {
+        use rdbs_connstore::Engine;
+        assert_eq!(default_browse_limit(Engine::Mongo), 20);
+        assert_eq!(default_browse_limit(Engine::Postgres), 300);
+        assert_eq!(default_browse_limit(Engine::MySql), 300);
+        assert_eq!(default_browse_limit(Engine::Redis), 300);
+    }
 
     fn nodes() -> Vec<model::VmTreeNode> {
         vec![
