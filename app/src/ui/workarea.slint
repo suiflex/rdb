@@ -674,28 +674,31 @@ export component WorkArea inherits Rectangle {
                     alignment: start;
                     for row in root.doc-tree: Rectangle {
                         height: 22px;
+                        // Whole branch row is clickable to fold/unfold; leaves inert.
+                        background: row-ta.has-hover && row.expandable ? Tokens.card : transparent;
+                        row-ta := TouchArea {
+                            enabled: row.expandable;
+                            clicked => { root.toggle-doc-node(row.path); }
+                        }
                         HorizontalLayout {
                             padding-left: row.depth * 16px;
                             spacing: Tokens.sp1;
+                            alignment: start;
                             // fold caret (branches only)
-                            Rectangle {
+                            Text {
                                 width: 14px;
-                                Text {
-                                    text: row.expandable ? (row.expanded ? "▾" : "▸") : "";
-                                    color: caret-ta.has-hover ? Tokens.accent : Tokens.text-dim;
-                                    font-size: Tokens.font-xs;
-                                    vertical-alignment: center;
-                                }
-                                caret-ta := TouchArea {
-                                    enabled: row.expandable;
-                                    clicked => { root.toggle-doc-node(row.path); }
-                                }
+                                text: row.expandable ? (row.expanded ? "▾" : "▸") : "";
+                                color: Tokens.text-dim;
+                                font-size: Tokens.font-xs;
+                                vertical-alignment: center;
                             }
                             Text {
+                                width: 200px;
                                 text: row.key + ":";
                                 color: Tokens.accent;
                                 font-family: Tokens.mono;
                                 font-size: Tokens.font-sm;
+                                overflow: elide;
                                 vertical-alignment: center;
                             }
                             Text {
@@ -703,6 +706,7 @@ export component WorkArea inherits Rectangle {
                                 color: row.expandable ? Tokens.text-dim : Tokens.text;
                                 font-family: Tokens.mono;
                                 font-size: Tokens.font-sm;
+                                horizontal-alignment: left;
                                 overflow: elide;
                                 vertical-alignment: center;
                             }
@@ -715,13 +719,15 @@ export component WorkArea inherits Rectangle {
             if root.result-kind == 1: HorizontalLayout {
                 x: parent.width - self.preferred-width - Tokens.sp3;
                 y: Tokens.sp2;
-                spacing: 0;
-                SecondaryButton {
+                spacing: Tokens.sp3;
+                UnderlineSegment {
                     text: "Grid";
+                    active: root.doc-view == 0;
                     clicked => { root.doc-view = 0; }
                 }
-                SecondaryButton {
+                UnderlineSegment {
                     text: "Tree";
+                    active: root.doc-view == 1;
                     clicked => { root.doc-view = 1; }
                 }
             }
