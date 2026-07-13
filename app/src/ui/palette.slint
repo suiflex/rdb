@@ -3,6 +3,7 @@
 // References: design/4-modal-open-database.png, design/5-modal-open-connection.png.
 import { Tokens } from "tokens.slint";
 import { DbBadge, PrimaryButton, SecondaryButton, FilterField } from "components.slint";
+import { AppIcon } from "icons.slint";
 
 // `kind` picks the leading icon: "database" | "group" | engine badge keys
 // ("postgres"…) | "table" | "function" | "command". `sub` is the mono second
@@ -104,11 +105,30 @@ export component ListModal inherits Rectangle {
                                 // leading icon
                                 VerticalLayout {
                                     alignment: center;
-                                    if it.kind == "database" || it.kind == "table": Rectangle {
-                                        width: 15px;
-                                        height: 15px;
-                                        border-radius: 4px;
-                                        background: Tokens.db-pg.with-alpha(0.85);
+                                    if it.kind == "keyword": AppIcon {
+                                        name: "keyword";
+                                        size: 15px;
+                                        color: Tokens.accent;
+                                    }
+                                    if it.kind == "table": AppIcon {
+                                        name: "table";
+                                        size: 15px;
+                                        color: Tokens.db-pg;
+                                    }
+                                    if it.kind == "field": AppIcon {
+                                        name: "field";
+                                        size: 15px;
+                                        color: Tokens.text-dim;
+                                    }
+                                    if it.kind == "database": AppIcon {
+                                        name: "database";
+                                        size: 15px;
+                                        color: Tokens.db-pg;
+                                    }
+                                    if it.kind == "view": AppIcon {
+                                        name: "view";
+                                        size: 15px;
+                                        color: Tokens.text-dim;
                                     }
                                     if is-group: Rectangle {
                                         width: 20px;
@@ -116,23 +136,21 @@ export component ListModal inherits Rectangle {
                                         border-radius: 10px;
                                         border-width: 1.5px;
                                         border-color: Tokens.warn;
-                                        Text {
-                                            text: "▸";
+                                        AppIcon {
+                                            name: "caret";
+                                            size: 10px;
                                             color: Tokens.warn;
-                                            font-size: 8px;
                                         }
                                     }
-                                    if it.kind == "function": Text {
-                                        text: "ƒ";
+                                    if it.kind == "function": AppIcon {
+                                        name: "function";
+                                        size: 15px;
                                         color: Tokens.warn;
-                                        font-size: Tokens.font-md;
-                                        font-weight: 600;
                                     }
-                                    if it.kind == "command": Text {
-                                        text: "›_";
+                                    if it.kind == "command": AppIcon {
+                                        name: "terminal";
+                                        size: 15px;
                                         color: Tokens.text-faint;
-                                        font-size: 10px;
-                                        font-family: Tokens.mono;
                                     }
                                     if it.kind == "postgres" || it.kind == "mysql" || it.kind == "redis" || it.kind == "mongo" || it.kind == "sqlite" || it.kind == "cassandra": DbBadge {
                                         engine: it.kind;
