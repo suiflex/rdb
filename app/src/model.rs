@@ -32,6 +32,104 @@ pub struct DocModel {
     pub grid: GridModel,
 }
 
+/// One node of the collapsible JSON tree. `path` is a stable id (e.g.
+/// `0.headers.host`) used as the collapse key; `expandable` marks objects/arrays.
+#[derive(Debug, Clone)]
+pub struct DocNode {
+    pub depth: usize,
+    pub key: String,
+    pub preview: String,
+    pub expandable: bool,
+    pub path: String,
+}
+
+fn scalar_preview(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+fn push_doc_node(out: &mut Vec<DocNode>, depth: usize, key: &str, path: &str, v: &serde_json::Value) {
+    match v {
+        serde_json::Value::Object(m) => {
+            out.push(DocNode {
+                depth,
+                key: key.into(),
+                preview: format!("{{ {} fields }}", m.len()),
+                expandable: !m.is_empty(),
+                path: path.into(),
+            });
+            for (k, val) in m {
+                push_doc_node(out, depth + 1, k, &format!("{path}.{k}"), val);
+            }
+        }
+        serde_json::Value::Array(a) => {
+            out.push(DocNode {
+                depth,
+                key: key.into(),
+                preview: format!("[ {} ]", a.len()),
+                expandable: !a.is_empty(),
+                path: path.into(),
+            });
+            for (j, val) in a.iter().enumerate() {
+                push_doc_node(out, depth + 1, &format!("[{j}]"), &format!("{path}[{j}]"), val);
+            }
+        }
+        scalar => out.push(DocNode {
+            depth,
+            key: key.into(),
+            preview: scalar_preview(scalar),
+            expandable: false,
+            path: path.into(),
+        }),
+    }
+}
+
+/// Flatten the documents into a fully-expanded depth-first node list for the
+/// collapsible JSON tree view.
+pub fn to_doc_tree(docs: &[serde_json::Value]) -> Vec<DocNode> {
+    let mut out = Vec::new();
+    for (i, doc) in docs.iter().enumerate() {
+        push_doc_node(&mut out, 0, &format!("[{i}]"), &i.to_string(), doc);
+    }
+    out
+}
+
+/// Branches to collapse initially: everything below the top-level documents, so
+/// each document shows its own keys but nested objects/arrays start folded.
+pub fn default_doc_collapsed(full: &[DocNode]) -> std::collections::HashSet<String> {
+    full.iter()
+        .filter(|n| n.expandable && n.depth >= 1)
+        .map(|n| n.path.clone())
+        .collect()
+}
+
+/// The rows currently visible given the collapsed set, in display order. Returns
+/// each node with whether it is currently expanded. A node hidden under a
+/// collapsed ancestor is skipped.
+pub fn visible_doc_rows<'a>(
+    full: &'a [DocNode],
+    collapsed: &std::collections::HashSet<String>,
+) -> Vec<(&'a DocNode, bool)> {
+    let mut out = Vec::new();
+    let mut skip_below: Option<usize> = None;
+    for n in full {
+        if let Some(d) = skip_below {
+            if n.depth > d {
+                continue;
+            }
+            skip_below = None;
+        }
+        let expanded = n.expandable && !collapsed.contains(&n.path);
+        out.push((n, expanded));
+        if n.expandable && !expanded {
+            skip_below = Some(n.depth);
+        }
+    }
+    out
+}
+
 /// Presentation-ready view of a `ResultSet`, one arm per data shape. Redis
 /// key/value results flatten into `Table` so every row-bearing view shares the
 /// grid's selection/filter/edit machinery.
@@ -303,6 +401,33 @@ mod tests {
     use super::*;
     use rdbs_core::result::{Cell, Column, RedisValue, ResultSet};
     use rdbs_core::schema::{Container, ContainerKind, Database, Field, Schema};
+
+    #[test]
+    fn doc_tree_folds_nested_and_toggles() {
+        let docs = vec![serde_json::json!({
+            "_id": "abc",
+            "headers": { "host": "h", "port": 8080 }
+        })];
+        let full = to_doc_tree(&docs);
+        // doc + _id + headers + host + port
+        assert_eq!(full.len(), 5);
+        let headers = full.iter().find(|n| n.key == "headers").unwrap();
+        assert!(headers.expandable);
+        assert_eq!(headers.path, "0.headers");
+
+        // Default: doc open, nested `headers` folded -> host/port hidden.
+        let collapsed = default_doc_collapsed(&full);
+        let vis = visible_doc_rows(&full, &collapsed);
+        assert_eq!(vis.len(), 3); // [0], _id, headers
+        assert!(vis.iter().all(|(n, _)| n.key != "host"));
+
+        // Expand headers -> host/port appear.
+        let mut open = collapsed.clone();
+        open.remove("0.headers");
+        let vis = visible_doc_rows(&full, &open);
+        assert_eq!(vis.len(), 5);
+        assert!(vis.iter().any(|(n, _)| n.key == "host"));
+    }
 
     #[test]
     fn chart_data_picks_label_and_numeric_columns() {
