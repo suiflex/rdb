@@ -58,6 +58,15 @@ fn build_uri(cfg: &ConnConfig) -> String {
             query.push(p.to_string());
         }
     }
+    // The host/port form is always a single literal host, so default to a direct
+    // connection (matching Compass): without it the driver runs topology
+    // discovery, and a single RS member behind a NodePort/port-forward advertises
+    // internal addresses that are unreachable from outside → server-selection
+    // hang. Skip when the user already controls topology.
+    let params_lower = cfg.params.as_deref().unwrap_or("").to_ascii_lowercase();
+    if !params_lower.contains("directconnection") && !params_lower.contains("replicaset") {
+        query.push("directConnection=true".into());
+    }
     let q = if query.is_empty() {
         String::new()
     } else {
@@ -352,7 +361,16 @@ mod tests {
     fn build_uri_plain_has_trailing_slash_no_query() {
         assert_eq!(
             build_uri(&cfg(None, SslMode::Disable)),
-            "mongodb://u:p@db.internal:27017/"
+            "mongodb://u:p@db.internal:27017/?directConnection=true"
+        );
+    }
+
+    #[test]
+    fn build_uri_only_authsource_still_gets_direct_connection() {
+        let uri = build_uri(&cfg(Some("authSource=admin"), SslMode::Disable));
+        assert_eq!(
+            uri,
+            "mongodb://u:p@db.internal:27017/?authSource=admin&directConnection=true"
         );
     }
 
