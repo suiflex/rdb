@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.12.0](https://github.com/suiflex/rdb/compare/v0.11.0...v0.12.0) (2026-07-13)
+
+
+### Features
+
+* **app:** add a collapsible JSON tree model for Mongo documents ([61b3183](https://github.com/suiflex/rdb/commit/61b318332cdc627f1ce3a1f8655acd9eb8568d81))
+* **app:** filter the Mongo sidebar to the selected database ([3a85091](https://github.com/suiflex/rdb/commit/3a85091e9a24c66ad4de91b0c25cbe82ca39e72f))
+* **app:** parse mongosh line syntax in the Mongo editor ([9c83c92](https://github.com/suiflex/rdb/commit/9c83c925ce2ceed5636937da6ef8340c4298ea0e))
+* **app:** suggest clause keywords and schema tables in autocomplete ([cfa93d6](https://github.com/suiflex/rdb/commit/cfa93d6298e79aa8551b71df7d13fb6f346190e6))
+* **core:** add sort field to MongoOp ([fe64f0f](https://github.com/suiflex/rdb/commit/fe64f0f60f2a4b5d079f6a89685a5dd8472d5389))
+* mongosh query UX for Mongo + autocomplete/schema fixes ([16d945f](https://github.com/suiflex/rdb/commit/16d945fac5562ceca65a9d3fa0e5701703b1e7cb))
+* **ui:** add keyword and field autocomplete icons ([a43d9cd](https://github.com/suiflex/rdb/commit/a43d9cd67510e9e97dd4eee4a471629cae7613b8))
+* **ui:** Compass-style filter bar for Mongo browse ([6555d5d](https://github.com/suiflex/rdb/commit/6555d5df59528545787ce6b350f82a2e603d36f8))
+* **ui:** grid/tree toggle for Mongo documents ([44065cc](https://github.com/suiflex/rdb/commit/44065cc151cfa84d680f8f3fb91dc9557f1037b6))
+
+
+### Bug Fixes
+
+* **app:** accept relaxed mongosh JSON and use() in the Mongo editor ([16456ae](https://github.com/suiflex/rdb/commit/16456ae519f245bd2960c9015dc86de2b02173c8))
+* **app:** default Mongo browse to 20 docs per page ([716493d](https://github.com/suiflex/rdb/commit/716493d30a1d8dbce603301dcc47566cbf2582a0))
+* **app:** isolate the query buffer per tab ([9b44d9f](https://github.com/suiflex/rdb/commit/9b44d9f60550cd5a815a420ea7c475bc46025071))
+* **app:** run Mongo editor queries against the selected database ([ea87014](https://github.com/suiflex/rdb/commit/ea870141e2768bcffd5c7dcf734eb6b7823ffc42))
+* **mongo:** connect fixes + document browsing UX ([42ef9b5](https://github.com/suiflex/rdb/commit/42ef9b55c92bed4d172d01f6d14273668ed5c371))
+* **ui:** keep the query editor available while browsing ([8bf79db](https://github.com/suiflex/rdb/commit/8bf79db4b56f97872dab83bdd77b440956046842))
+* **ui:** make the app icon background transparent ([0a1e2cd](https://github.com/suiflex/rdb/commit/0a1e2cd68454496882275401e524e2342c206367))
+* **ui:** make the Mongo JSON tree usable ([4e832a0](https://github.com/suiflex/rdb/commit/4e832a08dd0696a80ca3ebc03026204b48e6515b))
+* **ui:** move the Grid/Tree toggle into the browse toolbar ([447e034](https://github.com/suiflex/rdb/commit/447e0349c28adfb66eb3856b2bfb194917b1834e))
+* **ui:** render autocomplete suggestion icons as SVGs ([9f69f13](https://github.com/suiflex/rdb/commit/9f69f1350f3821998af3b3e20fa787e2bb87363f))
+* **ui:** render inline autocomplete icons as SVGs ([3f6eedd](https://github.com/suiflex/rdb/commit/3f6eedd1810739ea4e9005c7d5018e59a8871306))
+* **ui:** render the browse refresh button as an SVG icon ([22c000e](https://github.com/suiflex/rdb/commit/22c000efe52ba93b15dea11a6cb26d29ab3e0766))
+* **ui:** show button tooltips via a popup instead of a clipped rect ([318979c](https://github.com/suiflex/rdb/commit/318979cf53fb476806baeb69b0fa4be6f09d4689))
+
+
+### Performance Improvements
+
+* **app:** cap Mongo document tree scalar previews ([65270e7](https://github.com/suiflex/rdb/commit/65270e7effb20612101f08fd494009d9763e05c6))
+
 ## [0.11.0](https://github.com/suiflex/rdb/compare/v0.10.0...v0.11.0) (2026-07-12)
 
 
