@@ -163,6 +163,8 @@ in-out property <string> rename-text;
     in property <string> query-label;
     in property <string> results-meta;
     in-out property <int> sidebar-mode: 0;
+    in-out property <bool> sidebar-visible: true;
+    in-out property <bool> results-visible: true;
     callback editor-key(string, bool, bool, bool) -> bool;
     callback editor-press(int, int);
     callback editor-drag(int, int);
@@ -456,6 +458,7 @@ in-out property <string> rename-text;
                             text: root.bc-conn;
                             show-dot: true;
                             mono: true;
+                            clicked => { root.open-conn-modal(); }
                         }
                     }
                     // disconnect: drop the driver and return to the picker
@@ -487,13 +490,18 @@ in-out property <string> rename-text;
                     }
                     if root.bc-schema != "": VerticalLayout {
                         alignment: center;
-                        BreadcrumbChip { text: root.bc-schema; caret: true; mono: true; }
+                        BreadcrumbChip {
+                            text: root.bc-schema;
+                            caret: true;
+                            mono: true;
+                            clicked => { root.select-schema(root.schema-name); }
+                        }
                     }
                 }
 
                 Rectangle { horizontal-stretch: 1; }
 
-                // --- right: ⌘K pill + aux buttons + window controls ---
+                // --- center: ⌘K pill (flanked by stretch spacers) ---
                 VerticalLayout {
                     alignment: center;
                     SearchCommandPill {
@@ -501,23 +509,27 @@ in-out property <string> rename-text;
                         activated => { root.toggle-palette(); }
                     }
                 }
-                // aux icon cluster: app settings (always) + connection tools
-                // (when connected). One row so all four icons share even spacing.
+
+                Rectangle { horizontal-stretch: 1; }
+
+                // aux icon cluster (left→right): panel toggles, pencil, theme,
+                // settings. One row so all icons share even spacing.
                 HorizontalLayout {
                     spacing: Tokens.sp1;
-                    VerticalLayout {
-                        alignment: center;
-                        GlyphButton {
-                            glyph: "⚙";
-                            clicked => { root.settings-open = true; }
-                        }
-                    }
-                    // theme toggle: sun in dark mode, moon in light
+                    // hide/show the left sidebar
                     if root.connected: VerticalLayout {
                         alignment: center;
                         IconButton {
-                            icon: Tokens.dark ? "sun" : "moon";
-                            clicked => { root.toggle-theme(); }
+                            icon: "columns";
+                            clicked => { root.sidebar-visible = !root.sidebar-visible; }
+                        }
+                    }
+                    // hide/show the results panel (editor takes the space)
+                    if root.connected: VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: "rows";
+                            clicked => { root.results-visible = !root.results-visible; }
                         }
                     }
                     // edit the current connection (distinct from the app ⚙)
@@ -530,6 +542,21 @@ in-out property <string> rename-text;
                                     root.open-edit-form(root.selected-conn);
                                 }
                             }
+                        }
+                    }
+                    // theme toggle: sun in dark mode, moon in light
+                    if root.connected: VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: Tokens.dark ? "sun" : "moon";
+                            clicked => { root.toggle-theme(); }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        GlyphButton {
+                            glyph: "⚙";
+                            clicked => { root.settings-open = true; }
                         }
                     }
                 }
@@ -580,7 +607,7 @@ in-out property <string> rename-text;
             HorizontalLayout {
                 spacing: 0px;
 
-                sb := Sidebar {
+                if root.sidebar-visible: Sidebar {
                     focus-tick: root.focus-filter-tick;
                     // preferred (not fixed) width so the window can auto-shrink the
                     // sidebar instead of treating sidebar-w as a hard min floor
@@ -629,7 +656,7 @@ in-out property <string> rename-text;
                 }
 
                 // draggable vertical splitter (sidebar width)
-                Rectangle {
+                if root.sidebar-visible: Rectangle {
                     width: 1px;
                     background: split-h-area.has-hover || split-h-area.pressed ? Tokens.accent : Tokens.border;
                     split-h-area := TouchArea {
@@ -766,6 +793,7 @@ in-out property <string> rename-text;
 
                     WorkArea {
                         vertical-stretch: 1;
+                        results-visible: root.results-visible;
                         query-text <=> root.query-text;
                         columns: root.grid-columns;
                         cells: root.grid-cells;
