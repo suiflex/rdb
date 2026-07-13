@@ -423,6 +423,39 @@ pub fn to_tree_model(schema: &Schema) -> Vec<VmTreeNode> {
     out
 }
 
+/// Flat node list for SQL autocomplete, labelling the database node with
+/// `schema_name` instead of the driver's `db.name` (Postgres reports
+/// `current_database()` for every namespace, so the real schema name has to
+/// come from the caller). Functions are omitted — completion only needs tables
+/// and columns. Concatenating this across schemas gives a cross-schema tree
+/// where `schema.table` resolves.
+pub fn to_completion_nodes(schema_name: &str, schema: &Schema) -> Vec<VmTreeNode> {
+    let mut out = vec![VmTreeNode {
+        label: schema_name.to_string(),
+        kind: "database".into(),
+    }];
+    for db in &schema.databases {
+        for c in &db.containers {
+            let kind = match c.kind {
+                ContainerKind::Table => "table",
+                ContainerKind::Collection => "collection",
+                ContainerKind::Keyspace => "keyspace",
+            };
+            out.push(VmTreeNode {
+                label: c.name.clone(),
+                kind: kind.into(),
+            });
+            for f in &c.fields {
+                out.push(VmTreeNode {
+                    label: format!("{}: {}", f.name, f.type_name),
+                    kind: "field".into(),
+                });
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1295,6 +1295,11 @@ fn main() -> Result<(), slint::PlatformError> {
     // connect task can fill it) + the set of expanded table labels.
     let raw_nodes: Arc<std::sync::Mutex<Vec<model::VmTreeNode>>> =
         Arc::new(std::sync::Mutex::new(Vec::new()));
+    // Cross-schema completion tree: every schema (labelled by schema name) with
+    // its tables/columns, so `schema.table` autocompletes across namespaces.
+    // Separate from `raw_nodes` (which stays scoped to the sidebar's one schema).
+    let completion_nodes: Arc<std::sync::Mutex<Vec<model::VmTreeNode>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
     // Expanded sidebar nodes. For Mongo this is the set of OPEN databases
     // (default closed → collections load lazily on expand). Arc<Mutex> so the
     // lazy-load task can read it off the UI thread.
@@ -1478,14 +1483,16 @@ fn main() -> Result<(), slint::PlatformError> {
     let refresh_completion: Rc<dyn Fn()> = {
         let weak = window.as_weak();
         let ed_state = ed_state.clone();
-        let raw_nodes = raw_nodes.clone();
+        let completion_nodes = completion_nodes.clone();
         let completion_ctx = completion_ctx.clone();
         Rc::new(move || {
             let Some(w) = weak.upgrade() else {
                 return;
             };
             let before = ed_state.borrow().before_cursor().to_string();
-            let (word_len, cands) = completion::suggest(&before, &raw_nodes.lock().unwrap());
+            let schema = w.get_schema_name().to_string();
+            let (word_len, cands) =
+                completion::suggest(&before, &completion_nodes.lock().unwrap(), &schema);
             if cands.is_empty() {
                 w.set_completion_visible(false);
                 *completion_ctx.borrow_mut() = (0, Vec::new());
@@ -3018,6 +3025,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let rt = rt.clone();
         let store = store.clone();
+        let completion_nodes = completion_nodes.clone();
         let current = current.clone();
         let raw_nodes = raw_nodes.clone();
         let expanded_tables = expanded_tables.clone();
@@ -3084,6 +3092,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let claimed = current.clone().try_lock_owned().ok();
             let engine = sc.engine;
             let raw_nodes = raw_nodes.clone();
+            let completion_nodes = completion_nodes.clone();
             let fn_defs = fn_defs.clone();
             let handle = rt.spawn(async move {
                 let mut slot = match claimed {
@@ -3176,6 +3185,12 @@ fn main() -> Result<(), slint::PlatformError> {
                                 | rdbs_connstore::Engine::Cassandra
                         );
                         *raw_nodes.lock().unwrap() = nodes;
+                        // Seed autocomplete with the active schema right away; the
+                        // remaining schemas load in the background below.
+                        *completion_nodes.lock().unwrap() =
+                            model::to_completion_nodes(schema_current.as_str(), &schema);
+                        let all_schema_names: Vec<String> =
+                            schema_names.iter().map(|s| s.to_string()).collect();
                         {
                             let mut defs = fn_defs.lock().unwrap();
                             defs.clear();
@@ -3211,6 +3226,28 @@ fn main() -> Result<(), slint::PlatformError> {
                                 w.set_connected(true);
                             }
                         });
+                        // Load every other schema's tables so cross-schema
+                        // `schema.table` autocompletes. Runs after the sidebar
+                        // (active schema) already rendered; the popup just gains
+                        // more names as this fills.
+                        // ponytail: sequential N+1 fetch, fine for typical schema
+                        // counts; make it concurrent if a wide DB feels laggy.
+                        if matches!(engine, rdbs_connstore::Engine::Postgres)
+                            && all_schema_names.len() > 1
+                        {
+                            let guard = store_driver.lock_owned().await;
+                            if let Some((_, driver)) = guard.as_ref() {
+                                let mut all = Vec::new();
+                                for name in &all_schema_names {
+                                    if let Ok(s) = driver.schema_for(name).await {
+                                        all.extend(model::to_completion_nodes(name, &s));
+                                    }
+                                }
+                                if !all.is_empty() {
+                                    *completion_nodes.lock().unwrap() = all;
+                                }
+                            }
+                        }
                     }
                     Err(e) => {
                         eprintln!("connect failed: {e}");

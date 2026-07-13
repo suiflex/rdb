@@ -108,6 +108,28 @@ fn is_database(nodes: &[VmTreeNode], name: &str) -> bool {
         .any(|n| n.kind == "database" && n.label.to_lowercase() == nl)
 }
 
+/// The nodes belonging to `schema`: from its `database` node up to the next
+/// `database` node (the tree is flat, parent-then-children). An empty schema or
+/// no match falls back to the whole tree so completion still works.
+fn schema_scope<'a>(nodes: &'a [VmTreeNode], schema: &str) -> &'a [VmTreeNode] {
+    if schema.is_empty() {
+        return nodes;
+    }
+    let sl = schema.to_lowercase();
+    let Some(start) = nodes
+        .iter()
+        .position(|n| n.kind == "database" && n.label.to_lowercase() == sl)
+    else {
+        return nodes;
+    };
+    let body = &nodes[start + 1..];
+    let end = body
+        .iter()
+        .position(|n| n.kind == "database")
+        .unwrap_or(body.len());
+    &body[..end]
+}
+
 fn tables(nodes: &[VmTreeNode]) -> Vec<Candidate> {
     nodes
         .iter()
@@ -115,6 +137,20 @@ fn tables(nodes: &[VmTreeNode]) -> Vec<Candidate> {
         .map(|n| Candidate {
             label: n.label.clone(),
             kind: "table".into(),
+            sub: String::new(),
+        })
+        .collect()
+}
+
+/// Schema/database names, offered in table position so a cross-schema
+/// `schema.table` name can be started (their tables aren't in the active scope).
+fn schemas(nodes: &[VmTreeNode]) -> Vec<Candidate> {
+    nodes
+        .iter()
+        .filter(|n| n.kind == "database")
+        .map(|n| Candidate {
+            label: n.label.clone(),
+            kind: "database".into(),
             sub: String::new(),
         })
         .collect()
@@ -152,39 +188,50 @@ fn last_keyword(line: &str) -> Option<String> {
 /// Suggest completions for the text before the cursor. Returns the char length
 /// of the partial word to replace on accept, plus the (prefix-filtered, capped)
 /// candidates. An empty list means "no popup".
-pub fn suggest(before_cursor: &str, nodes: &[VmTreeNode]) -> (usize, Vec<Candidate>) {
+pub fn suggest(
+    before_cursor: &str,
+    nodes: &[VmTreeNode],
+    active_schema: &str,
+) -> (usize, Vec<Candidate>) {
+    // Default table/column suggestions come from the active schema only, so the
+    // popup follows the connected schema without the user picking it first.
+    let scope = schema_scope(nodes, active_schema);
     let word = trailing_word(before_cursor);
     let head = before_cursor.strip_suffix(word).unwrap_or(before_cursor);
     let mut cands = if let Some(before_dot) = head.strip_suffix('.') {
         // `table.` / `alias.` → that table's columns. When the name before the
         // dot is a schema/database, offer that schema's tables instead.
+        // Explicit `schema.` uses the whole tree so other schemas stay reachable.
         let owner_word = trailing_word(before_dot);
         let owner = resolve_alias(before_cursor, owner_word);
         let cols = columns_of(nodes, &owner);
         if cols.is_empty() && is_database(nodes, owner_word) {
-            tables(nodes)
+            tables(schema_scope(nodes, owner_word))
         } else {
             cols
         }
     } else {
         match last_keyword(before_cursor).as_deref() {
-            // table position
+            // table position: active-schema tables plus every schema name, so a
+            // `schema.table` from another namespace can be started.
             Some("FROM") | Some("JOIN") | Some("INTO") | Some("UPDATE") | Some("TABLE") => {
-                tables(nodes)
+                let mut c = tables(scope);
+                c.extend(schemas(nodes));
+                c
             }
             // column position: offer columns and tables, plus keywords so the
             // next clause (FROM/WHERE/…) is always reachable, e.g. after `*`.
             Some("SELECT") | Some("WHERE") | Some("AND") | Some("OR") | Some("ON")
             | Some("HAVING") | Some("SET") | Some("BY") | Some("VALUES") => {
-                let mut c = all_columns(nodes);
-                c.extend(tables(nodes));
+                let mut c = all_columns(scope);
+                c.extend(tables(scope));
                 c.extend(keywords());
                 c
             }
             // statement start / no useful context: keywords + tables
             _ => {
                 let mut c = keywords();
-                c.extend(tables(nodes));
+                c.extend(tables(scope));
                 c
             }
         }
@@ -220,7 +267,7 @@ mod tests {
 
     #[test]
     fn from_prefix_suggests_matching_table() {
-        let (n, c) = suggest("select * from ste", &nodes());
+        let (n, c) = suggest("select * from ste", &nodes(), "public");
         assert_eq!(n, 3);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -230,7 +277,11 @@ mod tests {
 
     #[test]
     fn dot_suggests_that_tables_columns() {
-        let (n, c) = suggest("select * from step_config where step_config.", &nodes());
+        let (n, c) = suggest(
+            "select * from step_config where step_config.",
+            &nodes(),
+            "public",
+        );
         assert_eq!(n, 0);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -240,7 +291,7 @@ mod tests {
 
     #[test]
     fn bare_word_completes_keyword() {
-        let (n, c) = suggest("sele", &nodes());
+        let (n, c) = suggest("sele", &nodes(), "public");
         assert_eq!(n, 4);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -250,7 +301,7 @@ mod tests {
 
     #[test]
     fn select_context_offers_columns() {
-        let (_, c) = suggest("select ", &nodes());
+        let (_, c) = suggest("select ", &nodes(), "public");
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"config_id"));
         assert!(labels.contains(&"name"));
@@ -259,7 +310,7 @@ mod tests {
 
     #[test]
     fn alias_dot_resolves_to_table_columns() {
-        let (_, c) = suggest("select * from step_config sc where sc.", &nodes());
+        let (_, c) = suggest("select * from step_config sc where sc.", &nodes(), "public");
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["config_id", "name"]
@@ -268,14 +319,14 @@ mod tests {
 
     #[test]
     fn star_context_offers_from_keyword() {
-        let (_, c) = suggest("select * f", &nodes());
+        let (_, c) = suggest("select * f", &nodes(), "public");
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"FROM"));
     }
 
     #[test]
     fn schema_dot_suggests_its_tables() {
-        let (n, c) = suggest("select * from public.", &nodes());
+        let (n, c) = suggest("select * from public.", &nodes(), "public");
         assert_eq!(n, 0);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -295,7 +346,69 @@ mod tests {
                 kind: "field".into(),
             },
         ];
-        let (_, c) = suggest("select * from users where users.", &typed);
+        let (_, c) = suggest("select * from users where users.", &typed, "public");
         assert_eq!(c[0].label, "id");
+    }
+
+    /// Two schemas loaded: table suggestions follow the active schema only.
+    #[test]
+    fn scopes_tables_to_active_schema() {
+        let mk = |l: &str, k: &str| VmTreeNode {
+            label: l.into(),
+            kind: k.into(),
+        };
+        let two = vec![
+            mk("public", "database"),
+            mk("users", "table"),
+            mk("id", "field"),
+            mk("other", "database"),
+            mk("orders", "table"),
+            mk("oid", "field"),
+        ];
+        let (_, c) = suggest("select * from ", &two, "public");
+        let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+        assert!(labels.contains(&"users"));
+        assert!(!labels.contains(&"orders"));
+
+        let (_, c) = suggest("select * from ", &two, "other");
+        let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+        assert!(labels.contains(&"orders"));
+        assert!(!labels.contains(&"users"));
+    }
+
+    fn two_schema_nodes() -> Vec<VmTreeNode> {
+        let mk = |l: &str, k: &str| VmTreeNode {
+            label: l.into(),
+            kind: k.into(),
+        };
+        vec![
+            mk("public", "database"),
+            mk("users", "table"),
+            mk("id", "field"),
+            mk("analytics", "database"),
+            mk("step_config", "table"),
+            mk("cfg_id", "field"),
+        ]
+    }
+
+    /// In table position, every schema name is offered so a cross-schema
+    /// `schema.table` can be started even when it isn't the active schema.
+    #[test]
+    fn from_offers_schema_names() {
+        let (_, c) = suggest("select * from ", &two_schema_nodes(), "public");
+        let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+        assert!(labels.contains(&"analytics"));
+    }
+
+    /// `otherschema.` lists that schema's tables even while another schema is
+    /// active (all schemas live in the completion tree).
+    #[test]
+    fn dot_lists_non_active_schema_tables() {
+        let (n, c) = suggest("select * from analytics.", &two_schema_nodes(), "public");
+        assert_eq!(n, 0);
+        assert_eq!(
+            c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
+            ["step_config"]
+        );
     }
 }
