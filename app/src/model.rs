@@ -25,11 +25,13 @@ pub struct GridModel {
     pub rows: Vec<Vec<VmCell>>,
 }
 
-/// Mongo documents: the raw pretty JSON plus a flattened grid the UI toggles to.
+/// Mongo documents: the raw pretty JSON, a flattened grid, and the collapsible
+/// JSON tree the UI toggles between.
 #[derive(Debug, Default, Clone)]
 pub struct DocModel {
     pub json: String,
     pub grid: GridModel,
+    pub tree: Vec<DocNode>,
 }
 
 /// One node of the collapsible JSON tree. `path` is a stable id (e.g.
@@ -50,7 +52,13 @@ fn scalar_preview(v: &serde_json::Value) -> String {
     }
 }
 
-fn push_doc_node(out: &mut Vec<DocNode>, depth: usize, key: &str, path: &str, v: &serde_json::Value) {
+fn push_doc_node(
+    out: &mut Vec<DocNode>,
+    depth: usize,
+    key: &str,
+    path: &str,
+    v: &serde_json::Value,
+) {
     match v {
         serde_json::Value::Object(m) => {
             out.push(DocNode {
@@ -73,7 +81,13 @@ fn push_doc_node(out: &mut Vec<DocNode>, depth: usize, key: &str, path: &str, v:
                 path: path.into(),
             });
             for (j, val) in a.iter().enumerate() {
-                push_doc_node(out, depth + 1, &format!("[{j}]"), &format!("{path}[{j}]"), val);
+                push_doc_node(
+                    out,
+                    depth + 1,
+                    &format!("[{j}]"),
+                    &format!("{path}[{j}]"),
+                    val,
+                );
             }
         }
         scalar => out.push(DocNode {
@@ -355,6 +369,7 @@ pub fn to_result_view(rs: &ResultSet) -> ResultView {
             ResultView::Documents(DocModel {
                 json,
                 grid: GridModel { columns, rows },
+                tree: to_doc_tree(docs),
             })
         }
         ResultSet::Affected(n) => ResultView::Affected(format!("{} rows affected", n)),

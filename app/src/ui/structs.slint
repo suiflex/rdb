@@ -10,6 +10,9 @@ export struct GridCell { text: string, is-null: bool, state: int }
 // `count` is the number of (filter-matching) containers under a header row;
 // 0 hides the badge. Non-header rows always carry 0.
 export struct TreeNode { label: string, depth: int, kind: string, expanded: bool, db: string, count: int }
+// One row of the collapsible Mongo document (JSON) tree. `path` is the stable
+// collapse key; `expandable` shows a fold caret, `expanded` its state.
+export struct DocRow { depth: int, key: string, preview: string, expandable: bool, expanded: bool, path: string }
 // A sidebar row is either a group header (is-header=true, name holds the group
 // label, expanded holds its toggle state) or a connection. `index` is the
 // connection's index in the underlying store (-1 for headers) so connect/edit

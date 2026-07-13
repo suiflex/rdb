@@ -22,6 +22,7 @@ import {
     Span,
     ChartBar,
     IndexRow,
+    DocRow,
 } from "structs.slint";
 
 export component MainWindow inherits Window {
@@ -105,6 +106,11 @@ in-out property <string> rename-text;
     in property <[GridCell]> grid-cells;
     in property <int> grid-col-count;
     in property <string> doc-json;
+    // Mongo document view: collapsible JSON tree rows + which view is showing
+    // (0 = grid table, 1 = JSON tree). `toggle-doc-node` folds/unfolds a branch.
+    in property <[DocRow]> doc-tree;
+    in-out property <int> doc-view: 0;
+    callback toggle-doc-node(string);
     // result shape: 0 Table, 1 Documents, 2 KeyValue, 3 Affected
     in property <int> result-kind: 0;
     in property <bool> sql-capable: true;
@@ -764,6 +770,9 @@ in-out property <string> rename-text;
                         col-count: root.grid-col-count;
                         col-widths: root.grid-col-widths;
                         doc-json: root.doc-json;
+                        doc-tree: root.doc-tree;
+                        doc-view <=> root.doc-view;
+                        toggle-doc-node(p) => { root.toggle-doc-node(p); }
                         result-kind: root.result-kind;
                         sql-capable: root.sql-capable;
                         result-status: root.result-status;

@@ -964,9 +964,35 @@ fn compute_view(
         model::ResultView::Documents(d) => model::ResultView::Documents(model::DocModel {
             json: d.json.clone(),
             grid: g(&d.grid),
+            tree: d.tree.clone(),
         }),
         model::ResultView::Affected(a) => model::ResultView::Affected(a.clone()),
     }
+}
+
+thread_local! {
+    /// Full JSON-tree nodes + collapsed paths for the currently displayed Mongo
+    /// document result. The Slint event loop is single-threaded, so a
+    /// thread_local suffices; no cross-tab persistence is needed.
+    static DOC_TREE: std::cell::RefCell<(Vec<model::DocNode>, HashSet<String>)> =
+        std::cell::RefCell::new((Vec::new(), HashSet::new()));
+}
+
+/// Compute the visible JSON-tree rows for the current collapse state and push
+/// them to the window.
+fn push_doc_tree(w: &MainWindow, full: &[model::DocNode], collapsed: &HashSet<String>) {
+    let rows: Vec<DocRow> = model::visible_doc_rows(full, collapsed)
+        .into_iter()
+        .map(|(n, expanded)| DocRow {
+            depth: n.depth as i32,
+            key: SharedString::from(n.key.clone()),
+            preview: SharedString::from(n.preview.clone()),
+            expandable: n.expandable,
+            expanded,
+            path: SharedString::from(n.path.clone()),
+        })
+        .collect();
+    w.set_doc_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
 }
 
 /// Push a `ResultView` into the window, selecting the per-kind result region
@@ -987,6 +1013,9 @@ fn apply_result(w: &MainWindow, view: model::ResultView) {
                 "{} documents",
                 d.grid.rows.len()
             )));
+            let collapsed = model::default_doc_collapsed(&d.tree);
+            push_doc_tree(w, &d.tree, &collapsed);
+            DOC_TREE.with(|s| *s.borrow_mut() = (d.tree, collapsed));
         }
         model::ResultView::Affected(status) => {
             w.set_result_kind(3);
@@ -3790,6 +3819,25 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             echo(&w, l);
             run_browse();
+        });
+    }
+
+    // ----- Mongo JSON tree: fold/unfold a branch -----
+    {
+        let weak = window.as_weak();
+        window.on_toggle_doc_node(move |path| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            DOC_TREE.with(|s| {
+                let mut st = s.borrow_mut();
+                let (full, collapsed) = &mut *st;
+                let p = path.to_string();
+                if !collapsed.remove(&p) {
+                    collapsed.insert(p);
+                }
+                push_doc_tree(&w, full, collapsed);
+            });
         });
     }
 
