@@ -356,6 +356,16 @@ struct BrowseState {
     pk_cols: Vec<String>,
 }
 
+/// Default browse page size per engine. Mongo documents are fat, so a Mongo
+/// collection opens 20 at a time (matching Compass) instead of the SQL default.
+/// ponytail: per-engine default only; the stepper + paging handle the rest.
+fn default_browse_limit(engine: rdbs_connstore::Engine) -> u64 {
+    match engine {
+        rdbs_connstore::Engine::Mongo => 20,
+        _ => 300,
+    }
+}
+
 /// One cached SQL result, shown as a result tab. ⌘⏎ replaces the active one;
 /// ⌘\ appends a new one.
 #[derive(Clone)]
@@ -954,9 +964,35 @@ fn compute_view(
         model::ResultView::Documents(d) => model::ResultView::Documents(model::DocModel {
             json: d.json.clone(),
             grid: g(&d.grid),
+            tree: d.tree.clone(),
         }),
         model::ResultView::Affected(a) => model::ResultView::Affected(a.clone()),
     }
+}
+
+thread_local! {
+    /// Full JSON-tree nodes + collapsed paths for the currently displayed Mongo
+    /// document result. The Slint event loop is single-threaded, so a
+    /// thread_local suffices; no cross-tab persistence is needed.
+    static DOC_TREE: std::cell::RefCell<(Vec<model::DocNode>, HashSet<String>)> =
+        std::cell::RefCell::new((Vec::new(), HashSet::new()));
+}
+
+/// Compute the visible JSON-tree rows for the current collapse state and push
+/// them to the window.
+fn push_doc_tree(w: &MainWindow, full: &[model::DocNode], collapsed: &HashSet<String>) {
+    let rows: Vec<DocRow> = model::visible_doc_rows(full, collapsed)
+        .into_iter()
+        .map(|(n, expanded)| DocRow {
+            depth: n.depth as i32,
+            key: SharedString::from(n.key.clone()),
+            preview: SharedString::from(n.preview.clone()),
+            expandable: n.expandable,
+            expanded,
+            path: SharedString::from(n.path.clone()),
+        })
+        .collect();
+    w.set_doc_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
 }
 
 /// Push a `ResultView` into the window, selecting the per-kind result region
@@ -977,6 +1013,9 @@ fn apply_result(w: &MainWindow, view: model::ResultView) {
                 "{} documents",
                 d.grid.rows.len()
             )));
+            let collapsed = model::default_doc_collapsed(&d.tree);
+            push_doc_tree(w, &d.tree, &collapsed);
+            DOC_TREE.with(|s| *s.borrow_mut() = (d.tree, collapsed));
         }
         model::ResultView::Affected(status) => {
             w.set_result_kind(3);
@@ -2120,6 +2159,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let cur_engine = cur_engine.clone();
         let expanded_tables = expanded_tables.clone();
         let collapsed_categories = collapsed_categories.clone();
+        let loaded_dbs = loaded_dbs.clone();
         window.on_schema_choose(move |idx| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -2144,6 +2184,8 @@ fn main() -> Result<(), slint::PlatformError> {
             let weak2 = weak.clone();
             let current = current.clone();
             let raw_nodes = raw_nodes.clone();
+            let expanded_tables = expanded_tables.clone();
+            let loaded_dbs = loaded_dbs.clone();
             rt.spawn(async move {
                 let guard = current.lock_owned().await;
                 let Some((_, driver)) = guard.as_ref() else {
@@ -2153,11 +2195,28 @@ fn main() -> Result<(), slint::PlatformError> {
                     return;
                 };
                 let nodes = model::to_tree_model(&schema);
+                // Nested engines (Mongo/Redis/Cassandra) now scope to the one
+                // chosen database; open it so its collections show at once.
+                let nested = matches!(
+                    engine,
+                    rdbs_connstore::Engine::Mongo
+                        | rdbs_connstore::Engine::Redis
+                        | rdbs_connstore::Engine::Cassandra
+                );
+                let (exp, loaded) = if nested {
+                    let mut e = expanded_tables.lock().unwrap();
+                    let mut l = loaded_dbs.lock().unwrap();
+                    e.insert(schema_name.clone());
+                    l.insert(schema_name.clone());
+                    (e.clone(), l.clone())
+                } else {
+                    (HashSet::new(), HashSet::new())
+                };
                 let rows = schema_display_rows(
                     &nodes,
-                    &HashSet::new(),
+                    &exp,
                     &default_collapsed_cats(),
-                    &HashSet::new(),
+                    &loaded,
                     Some(engine),
                     "",
                 );
@@ -2959,6 +3018,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let load_editor_text = load_editor_text.clone();
         let fn_defs = fn_defs.clone();
         let connect_handle = connect_handle.clone();
+        let browse = browse.clone();
         window.on_connect_clicked(move |idx| {
             let i = idx as usize;
             let (sc, cfg) = {
@@ -2996,9 +3056,14 @@ fn main() -> Result<(), slint::PlatformError> {
                     crate::query_parse::editor_hint(sc.engine)
                 }));
                 w.set_active_table(SharedString::default());
+                // Seed the browse page size from the engine default (Mongo = 20).
+                let dft_limit = default_browse_limit(sc.engine);
+                w.set_limit_value(dft_limit as i32);
+                w.set_limit_text(SharedString::from(dft_limit.to_string()));
             }
             // Fresh connection: nothing browsed, nothing expanded.
             *cur_engine.borrow_mut() = Some(sc.engine);
+            browse.lock().unwrap().limit = default_browse_limit(sc.engine);
             expanded_tables.lock().unwrap().clear();
             loaded_dbs.lock().unwrap().clear();
             *collapsed_categories.borrow_mut() = default_collapsed_cats();
@@ -3754,6 +3819,25 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             echo(&w, l);
             run_browse();
+        });
+    }
+
+    // ----- Mongo JSON tree: fold/unfold a branch -----
+    {
+        let weak = window.as_weak();
+        window.on_toggle_doc_node(move |path| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            DOC_TREE.with(|s| {
+                let mut st = s.borrow_mut();
+                let (full, collapsed) = &mut *st;
+                let p = path.to_string();
+                if !collapsed.remove(&p) {
+                    collapsed.insert(p);
+                }
+                push_doc_tree(&w, full, collapsed);
+            });
         });
     }
 
@@ -5234,6 +5318,15 @@ fn main() -> Result<(), slint::PlatformError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mongo_browse_default_is_twenty() {
+        use rdbs_connstore::Engine;
+        assert_eq!(default_browse_limit(Engine::Mongo), 20);
+        assert_eq!(default_browse_limit(Engine::Postgres), 300);
+        assert_eq!(default_browse_limit(Engine::MySql), 300);
+        assert_eq!(default_browse_limit(Engine::Redis), 300);
+    }
 
     fn nodes() -> Vec<model::VmTreeNode> {
         vec![

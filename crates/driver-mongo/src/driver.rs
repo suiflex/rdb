@@ -45,10 +45,13 @@ fn build_uri(cfg: &ConnConfig) -> String {
         Some(pw) if !pw.is_empty() => format!("{}:{}@", cfg.user, pw),
         _ => String::new(),
     };
-    // Query is the merge of TLS (Prefer/Require -> tls with no cert/hostname
-    // validation, matching the other drivers) and any user-supplied options.
+    // TLS is opt-in for Mongo: only `Require` enforces it (with no cert/hostname
+    // validation, matching the other drivers). `Prefer` means opportunistic TLS,
+    // but the mongodb driver has no plaintext fallback, so forcing tls=true on
+    // Prefer resets every plaintext server. Treat Prefer as no-TLS; users who
+    // need mandatory TLS pick Require.
     let mut query: Vec<String> = Vec::new();
-    if matches!(cfg.sslmode, SslMode::Prefer | SslMode::Require) {
+    if matches!(cfg.sslmode, SslMode::Require) {
         query.push("tls=true".into());
         query.push("tlsInsecure=true".into());
     }
@@ -57,6 +60,15 @@ fn build_uri(cfg: &ConnConfig) -> String {
         if !p.is_empty() {
             query.push(p.to_string());
         }
+    }
+    // The host/port form is always a single literal host, so default to a direct
+    // connection (matching Compass): without it the driver runs topology
+    // discovery, and a single RS member behind a NodePort/port-forward advertises
+    // internal addresses that are unreachable from outside → server-selection
+    // hang. Skip when the user already controls topology.
+    let params_lower = cfg.params.as_deref().unwrap_or("").to_ascii_lowercase();
+    if !params_lower.contains("directconnection") && !params_lower.contains("replicaset") {
+        query.push("directConnection=true".into());
     }
     let q = if query.is_empty() {
         String::new()
@@ -121,6 +133,20 @@ impl Driver for MongoDriver {
             })
             .collect();
         Ok(Schema { databases })
+    }
+
+    /// Scope the sidebar to one database: return just that database with its
+    /// collections loaded, so picking it in the schema picker shows only its
+    /// collections instead of every database.
+    async fn schema_for(&self, database: &str) -> Result<Schema> {
+        let containers = self.containers(database).await?;
+        Ok(Schema {
+            databases: vec![Database {
+                name: database.to_string(),
+                containers,
+                functions: Vec::new(),
+            }],
+        })
     }
 
     /// Collections of one database, capped so a database with thousands of
@@ -338,7 +364,25 @@ mod tests {
     fn build_uri_plain_has_trailing_slash_no_query() {
         assert_eq!(
             build_uri(&cfg(None, SslMode::Disable)),
-            "mongodb://u:p@db.internal:27017/"
+            "mongodb://u:p@db.internal:27017/?directConnection=true"
+        );
+    }
+
+    #[test]
+    fn build_uri_prefer_does_not_force_tls() {
+        // Prefer is opportunistic; Mongo has no fallback, so it must stay plaintext.
+        assert_eq!(
+            build_uri(&cfg(None, SslMode::Prefer)),
+            "mongodb://u:p@db.internal:27017/?directConnection=true"
+        );
+    }
+
+    #[test]
+    fn build_uri_only_authsource_still_gets_direct_connection() {
+        let uri = build_uri(&cfg(Some("authSource=admin"), SslMode::Disable));
+        assert_eq!(
+            uri,
+            "mongodb://u:p@db.internal:27017/?authSource=admin&directConnection=true"
         );
     }
 
