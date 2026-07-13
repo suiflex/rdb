@@ -218,7 +218,8 @@ export component CodeEditor inherits Rectangle {
                         alignment: center;
                         AppIcon {
                             name: it.kind == "field" ? "field"
-                                : it.kind == "table" ? "table" : "keyword";
+                                : it.kind == "table" ? "table"
+                                : it.kind == "database" ? "database" : "keyword";
                             size: 13px;
                             color: it.kind == "table" ? Tokens.db-pg
                                 : it.kind == "field" ? Tokens.text-dim : Tokens.accent;

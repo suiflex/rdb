@@ -18,6 +18,8 @@ export component WorkArea inherits Rectangle {
     property <bool> editor-collapsed: false;
     // Reveal the query editor while browsing a table/collection (default closed).
     property <bool> browse-editor-open: false;
+    // Hide the results panel (editor takes the space) — header toggle.
+    in property <bool> results-visible: true;
     in-out property <string> query-text;
     in property <[GridColumn]> columns;
     in property <[GridCell]> cells;
@@ -338,7 +340,9 @@ export component WorkArea inherits Rectangle {
         // ================= SQL editor (non-browse tabs) =================
         // Also shown over a browse grid when the user opens "Query ▸".
         if (!root.browse-mode || root.browse-editor-open) && !root.fn-mode: Rectangle {
-            height: root.editor-h;
+            // when results are hidden the editor stretches to fill the work area
+            vertical-stretch: root.results-visible ? 0.0 : 1.0;
+            preferred-height: root.editor-h;
             background: Tokens.canvas;
             VerticalLayout {
                 width: 100%;
@@ -516,9 +520,9 @@ export component WorkArea inherits Rectangle {
                     drag-pos(l, c) => { root.editor-drag(l, c); }
                     select-word(l, c) => { root.editor-select-word(l, c); }
                 }
-                Rectangle { height: 1px; background: Tokens.border; }
+                if root.results-visible: Rectangle { height: 1px; background: Tokens.border; }
                 // results header strip
-                HorizontalLayout {
+                if root.results-visible: HorizontalLayout {
                     height: 34px;
                     padding-left: Tokens.sp3;
                     padding-right: Tokens.sp3;
@@ -545,7 +549,7 @@ export component WorkArea inherits Rectangle {
                     TextButton { text: "Chart"; clicked => { root.sql-view-mode = 2; } }
                 }
                 // result tabs — appear once ⌘\ has spawned a second result
-                if root.result-tabs.length > 1: HorizontalLayout {
+                if root.results-visible && root.result-tabs.length > 1: HorizontalLayout {
                     height: 30px;
                     padding-left: Tokens.sp3;
                     padding-right: Tokens.sp3;
@@ -585,7 +589,7 @@ export component WorkArea inherits Rectangle {
         }
 
         // draggable splitter: grow/shrink the editor vs the results (SQL tabs)
-        if (!root.browse-mode || root.browse-editor-open) && !root.fn-mode: Rectangle {
+        if (!root.browse-mode || root.browse-editor-open) && !root.fn-mode && root.results-visible: Rectangle {
             height: 6px;
             background: split-ta.has-hover || split-ta.pressed ? Tokens.accent : Tokens.chrome;
             split-ta := TouchArea {
@@ -602,7 +606,7 @@ export component WorkArea inherits Rectangle {
         // columns) and are toggled by `filter-open`; see the "Filter" button.
 
         // ================= result body =================
-        if !root.fn-mode: body := Rectangle {
+        if !root.fn-mode && root.results-visible: body := Rectangle {
             vertical-stretch: 1;
             background: Tokens.canvas;
 
