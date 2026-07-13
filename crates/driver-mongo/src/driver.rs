@@ -123,6 +123,20 @@ impl Driver for MongoDriver {
         Ok(Schema { databases })
     }
 
+    /// Scope the sidebar to one database: return just that database with its
+    /// collections loaded, so picking it in the schema picker shows only its
+    /// collections instead of every database.
+    async fn schema_for(&self, database: &str) -> Result<Schema> {
+        let containers = self.containers(database).await?;
+        Ok(Schema {
+            databases: vec![Database {
+                name: database.to_string(),
+                containers,
+                functions: Vec::new(),
+            }],
+        })
+    }
+
     /// Collections of one database, capped so a database with thousands of
     /// collections stays light. ponytail: fixed cap, add paging if it matters.
     async fn containers(&self, database: &str) -> Result<Vec<Container>> {
