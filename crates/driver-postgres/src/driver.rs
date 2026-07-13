@@ -78,12 +78,15 @@ impl Driver for PostgresDriver {
     }
 
     async fn list_schemas(&self) -> Result<Vec<String>> {
+        // pg_namespace lists every schema; information_schema.schemata is
+        // filtered to those the role has privileges on, so a restricted prod
+        // login would only see "public".
         let rows = self
             .client
             .query(
-                "SELECT schema_name FROM information_schema.schemata \
-                 WHERE schema_name NOT LIKE 'pg_%' \
-                 AND schema_name <> 'information_schema' ORDER BY 1",
+                "SELECT nspname FROM pg_catalog.pg_namespace \
+                 WHERE nspname NOT LIKE 'pg_%' \
+                 AND nspname <> 'information_schema' ORDER BY 1",
                 &[],
             )
             .await
