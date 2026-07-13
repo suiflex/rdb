@@ -34,7 +34,7 @@ pub fn editor_hint(engine: Engine) -> &'static str {
         Engine::Postgres | Engine::MySql | Engine::Sqlite => "SELECT * FROM table",
         Engine::Cassandra => "SELECT * FROM keyspace.table",
         Engine::Redis => "SET key value",
-        Engine::Mongo => r#"Mongo JSON — {"collection":"c","op":"find","body":{}}"#,
+        Engine::Mongo => r#"db.coll.find({ })  ·  or JSON envelope"#,
     }
 }
 
@@ -59,7 +59,144 @@ fn strip_comment_lines(engine: Engine, text: &str) -> String {
         .join("\n")
 }
 
+/// Mongo has two accepted editor forms: the mongosh line syntax people know
+/// (`db.coll.find({...}).limit(5).sort({...})`) and the original JSON envelope
+/// (`{"collection":"c","op":"find","body":{}}`). Anything starting with `db.`
+/// is the line form; everything else is the envelope.
 fn parse_mongo(text: &str) -> Result<Query, String> {
+    let trimmed = text.trim().trim_end_matches(';');
+    if trimmed.starts_with("db.") {
+        parse_mongo_line(trimmed)
+    } else {
+        parse_mongo_envelope(text)
+    }
+}
+
+/// Parse `db.<collection>.<op>(<json>)` with optional chained
+/// `.limit(n)` / `.skip(n)` / `.sort({...})`. Bodies are strict JSON (quoted
+/// keys, no `ObjectId(...)`); the database comes from the connection default.
+fn parse_mongo_line(s: &str) -> Result<Query, String> {
+    let rest = &s[3..]; // drop "db."
+    let dot = rest
+        .find('.')
+        .ok_or_else(|| "expected db.<collection>.<op>(...)".to_string())?;
+    let collection = rest[..dot].trim().to_string();
+    if collection.is_empty() {
+        return Err("missing collection in db.<collection>.<op>(...)".into());
+    }
+
+    let (method, arg, mut cursor) = next_call(&rest[dot..])?;
+    let kind = match method {
+        "find" => MongoKind::Find(parse_json_arg(arg, "find")?),
+        "insertOne" | "insert" => MongoKind::Insert(parse_json_arg(arg, method)?),
+        "aggregate" => {
+            let v = parse_json_arg(arg, "aggregate")?;
+            let arr = v
+                .as_array()
+                .ok_or_else(|| "aggregate([...]) needs an array of stages".to_string())?;
+            MongoKind::Aggregate(arr.clone())
+        }
+        other => {
+            return Err(format!(
+                "unknown Mongo method \"{other}\" (use find/aggregate/insertOne)"
+            ))
+        }
+    };
+
+    // Trailing chained modifiers, in any order.
+    let (mut limit, mut skip, mut sort) = (None, None, None);
+    cursor = cursor.trim();
+    while !cursor.is_empty() {
+        let (m, a, rest) = next_call(cursor)?;
+        match m {
+            "limit" => limit = Some(parse_int_arg(a, "limit")?),
+            "skip" => skip = Some(parse_int_arg(a, "skip")?),
+            "sort" => sort = Some(parse_json_arg(a, "sort")?),
+            other => {
+                return Err(format!(
+                    "unknown modifier \".{other}()\" (use limit/skip/sort)"
+                ))
+            }
+        }
+        cursor = rest.trim();
+    }
+
+    Ok(Query::Mongo(MongoOp {
+        collection,
+        database: None,
+        limit,
+        skip,
+        sort,
+        kind,
+    }))
+}
+
+/// Parse one `.name(arg)` at the start of `s`. Returns the method name, the raw
+/// text between its parens, and the remainder after the closing `)`.
+fn next_call(s: &str) -> Result<(&str, &str, &str), String> {
+    let s = s
+        .strip_prefix('.')
+        .ok_or_else(|| format!("expected '.method(...)' at \"{}\"", s.trim()))?;
+    let open = s
+        .find('(')
+        .ok_or_else(|| "expected '(' after method name".to_string())?;
+    let name = s[..open].trim();
+    let (inner, end) = extract_parens(s, open)?;
+    Ok((name, inner, &s[end..]))
+}
+
+/// Extract the balanced `(...)` whose opening paren is at byte index `open`,
+/// respecting JSON string literals so parens inside strings don't unbalance the
+/// scan. Returns the inner text and the byte index just past the closing `)`.
+/// Parens/quotes are ASCII, so all slice boundaries fall on char boundaries.
+fn extract_parens(s: &str, open: usize) -> Result<(&str, usize), String> {
+    let b = s.as_bytes();
+    let (mut depth, mut in_str, mut esc, mut i) = (0i32, false, false, open);
+    while i < b.len() {
+        let c = b[i];
+        if in_str {
+            if esc {
+                esc = false;
+            } else if c == b'\\' {
+                esc = true;
+            } else if c == b'"' {
+                in_str = false;
+            }
+        } else {
+            match c {
+                b'"' => in_str = true,
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Ok((&s[open + 1..i], i + 1));
+                    }
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    Err("unbalanced parentheses".into())
+}
+
+/// JSON argument for a call; an empty argument means an empty object (so
+/// `find()` browses all documents).
+fn parse_json_arg(arg: &str, ctx: &str) -> Result<serde_json::Value, String> {
+    let a = arg.trim();
+    if a.is_empty() {
+        return Ok(serde_json::Value::Object(Default::default()));
+    }
+    serde_json::from_str(a).map_err(|e| format!("invalid JSON in {ctx}(...): {e}"))
+}
+
+fn parse_int_arg(arg: &str, ctx: &str) -> Result<i64, String> {
+    arg.trim()
+        .parse::<i64>()
+        .map_err(|_| format!("{ctx}(...) expects an integer"))
+}
+
+fn parse_mongo_envelope(text: &str) -> Result<Query, String> {
     let v: serde_json::Value =
         serde_json::from_str(text).map_err(|e| format!("invalid Mongo JSON: {e}"))?;
     let collection = v
@@ -213,6 +350,89 @@ mod tests {
         }
         let bad = r#"{ "collection": "u", "op": "aggregate", "body": { "x": 1 } }"#;
         assert!(parse_query(Engine::Mongo, bad).is_err());
+    }
+
+    #[test]
+    fn mongo_line_find_with_filter() {
+        let text = r#"db.users.find({ "age": { "$gte": 18 } })"#;
+        match parse_query(Engine::Mongo, text).unwrap() {
+            Query::Mongo(op) => {
+                assert_eq!(op.collection, "users");
+                assert!(matches!(op.kind, MongoKind::Find(_)));
+                assert_eq!(op.database, None);
+            }
+            _ => panic!("expected Mongo"),
+        }
+    }
+
+    #[test]
+    fn mongo_line_empty_find_is_browse_all() {
+        match parse_query(Engine::Mongo, "db.c.find()").unwrap() {
+            Query::Mongo(op) => match op.kind {
+                MongoKind::Find(f) => assert_eq!(f, serde_json::json!({})),
+                _ => panic!("expected Find"),
+            },
+            _ => panic!("expected Mongo"),
+        }
+    }
+
+    #[test]
+    fn mongo_line_chained_limit_skip_sort() {
+        let text = r#"db.c.find({}).limit(5).skip(10).sort({ "_id": -1 });"#;
+        match parse_query(Engine::Mongo, text).unwrap() {
+            Query::Mongo(op) => {
+                assert_eq!(op.limit, Some(5));
+                assert_eq!(op.skip, Some(10));
+                assert_eq!(op.sort, Some(serde_json::json!({ "_id": -1 })));
+            }
+            _ => panic!("expected Mongo"),
+        }
+    }
+
+    #[test]
+    fn mongo_line_aggregate() {
+        let text = r#"db.u.aggregate([ { "$count": "n" } ])"#;
+        match parse_query(Engine::Mongo, text).unwrap() {
+            Query::Mongo(op) => assert!(matches!(op.kind, MongoKind::Aggregate(_))),
+            _ => panic!("expected Mongo"),
+        }
+    }
+
+    #[test]
+    fn mongo_line_insert_one() {
+        match parse_query(Engine::Mongo, r#"db.u.insertOne({ "name": "a" })"#).unwrap() {
+            Query::Mongo(op) => assert!(matches!(op.kind, MongoKind::Insert(_))),
+            _ => panic!("expected Mongo"),
+        }
+    }
+
+    #[test]
+    fn mongo_line_paren_inside_string_stays_balanced() {
+        // A ')' inside a JSON string must not close the call early.
+        let text = r#"db.c.find({ "note": "a)b" })"#;
+        match parse_query(Engine::Mongo, text).unwrap() {
+            Query::Mongo(op) => match op.kind {
+                MongoKind::Find(f) => assert_eq!(f["note"], serde_json::json!("a)b")),
+                _ => panic!("expected Find"),
+            },
+            _ => panic!("expected Mongo"),
+        }
+    }
+
+    #[test]
+    fn mongo_line_errors_are_readable() {
+        assert!(parse_query(Engine::Mongo, "db.c.find({ bad json })").is_err());
+        assert!(parse_query(Engine::Mongo, "db.c.drop()").is_err());
+        assert!(parse_query(Engine::Mongo, "db..find({})").is_err());
+    }
+
+    #[test]
+    fn mongo_non_db_text_still_parses_as_envelope() {
+        let text = r#"{ "collection": "c", "op": "find", "body": {} }"#;
+        match parse_query(Engine::Mongo, text).unwrap() {
+            Query::Mongo(op) => assert_eq!(op.collection, "c"),
+            _ => panic!("expected Mongo"),
+        }
     }
 
     #[test]
