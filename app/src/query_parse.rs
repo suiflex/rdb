@@ -64,18 +64,51 @@ fn strip_comment_lines(engine: Engine, text: &str) -> String {
 /// (`{"collection":"c","op":"find","body":{}}`). Anything starting with `db.`
 /// is the line form; everything else is the envelope.
 fn parse_mongo(text: &str) -> Result<Query, String> {
-    let trimmed = text.trim().trim_end_matches(';');
+    // An optional leading `use('db')` switches the target database, mongosh-style.
+    let (db_override, body) = strip_use(text.trim());
+    let trimmed = body.trim().trim_end_matches(';').trim_end();
     if trimmed.starts_with("db.") {
-        parse_mongo_line(trimmed)
+        parse_mongo_line(trimmed, db_override)
     } else {
         parse_mongo_envelope(text)
     }
 }
 
+/// Strip an optional leading `use('name')` / `use("name")` statement. Returns
+/// the database name (if any) and the remaining text after it.
+fn strip_use(s: &str) -> (Option<String>, &str) {
+    let t = s.trim_start();
+    let Some(rest) = t.strip_prefix("use") else {
+        return (None, s);
+    };
+    let Some(open) = rest.find('(') else {
+        return (None, s);
+    };
+    // Only whitespace may sit between `use` and `(`.
+    if !rest[..open].trim().is_empty() {
+        return (None, s);
+    }
+    let Some(rel_close) = rest[open..].find(')') else {
+        return (None, s);
+    };
+    let close = open + rel_close;
+    let name = rest[open + 1..close]
+        .trim()
+        .trim_matches(|c| c == '\'' || c == '"')
+        .to_string();
+    if name.is_empty() {
+        return (None, s);
+    }
+    let tail = rest[close + 1..].trim_start().trim_start_matches(';');
+    (Some(name), tail)
+}
+
 /// Parse `db.<collection>.<op>(<json>)` with optional chained
-/// `.limit(n)` / `.skip(n)` / `.sort({...})`. Bodies are strict JSON (quoted
-/// keys, no `ObjectId(...)`); the database comes from the connection default.
-fn parse_mongo_line(s: &str) -> Result<Query, String> {
+/// `.limit(n)` / `.skip(n)` / `.sort({...})`. Bodies are permissive JSON
+/// (json5: bare keys, single quotes) but not full mongosh — `ObjectId(...)`
+/// still errors. `database` overrides the connection default when a `use(...)`
+/// preceded the query.
+fn parse_mongo_line(s: &str, database: Option<String>) -> Result<Query, String> {
     let rest = &s[3..]; // drop "db."
     let dot = rest
         .find('.')
@@ -123,7 +156,7 @@ fn parse_mongo_line(s: &str) -> Result<Query, String> {
 
     Ok(Query::Mongo(Box::new(MongoOp {
         collection,
-        database: None,
+        database,
         limit,
         skip,
         sort,
@@ -187,7 +220,7 @@ fn parse_json_arg(arg: &str, ctx: &str) -> Result<serde_json::Value, String> {
     if a.is_empty() {
         return Ok(serde_json::Value::Object(Default::default()));
     }
-    serde_json::from_str(a).map_err(|e| format!("invalid JSON in {ctx}(...): {e}"))
+    json5::from_str(a).map_err(|e| format!("invalid JSON in {ctx}(...): {e}"))
 }
 
 fn parse_int_arg(arg: &str, ctx: &str) -> Result<i64, String> {
@@ -415,6 +448,34 @@ mod tests {
                 MongoKind::Find(f) => assert_eq!(f["note"], serde_json::json!("a)b")),
                 _ => panic!("expected Find"),
             },
+            _ => panic!("expected Mongo"),
+        }
+    }
+
+    #[test]
+    fn mongo_line_accepts_relaxed_json() {
+        // Real mongosh idiom: unquoted keys, single quotes, negative sort.
+        let text = r#"db.c.find({to_email:'a@b.com'}).sort({_id:-1})"#;
+        match parse_query(Engine::Mongo, text).unwrap() {
+            Query::Mongo(op) => {
+                match &op.kind {
+                    MongoKind::Find(f) => assert_eq!(f["to_email"], serde_json::json!("a@b.com")),
+                    _ => panic!("expected Find"),
+                }
+                assert_eq!(op.sort, Some(serde_json::json!({ "_id": -1 })));
+            }
+            _ => panic!("expected Mongo"),
+        }
+    }
+
+    #[test]
+    fn mongo_use_switches_database() {
+        let text = "use('shop');\ndb.orders.find({})";
+        match parse_query(Engine::Mongo, text).unwrap() {
+            Query::Mongo(op) => {
+                assert_eq!(op.database.as_deref(), Some("shop"));
+                assert_eq!(op.collection, "orders");
+            }
             _ => panic!("expected Mongo"),
         }
     }
