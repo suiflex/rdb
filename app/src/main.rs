@@ -3296,8 +3296,12 @@ fn main() -> Result<(), slint::PlatformError> {
             let active_result = active_result.clone();
             // ⌘\ set this; consume it so the next plain run replaces again.
             let new_tab = result_new_tab.swap(false, std::sync::atomic::Ordering::SeqCst);
+            // Currently selected database (top dropdown). Mongo line queries with
+            // no `use(...)` run against it, matching what the user sees browsing.
+            let mut cur_db = String::new();
             if let Some(w) = weak.upgrade() {
                 w.set_query_running(true);
+                cur_db = w.get_schema_name().to_string();
             }
             rt.spawn(async move {
                 let guard = current.lock().await;
@@ -3323,7 +3327,16 @@ fn main() -> Result<(), slint::PlatformError> {
                         let mut out = Err(rdbs_core::error::RdbsError::Query("empty query".into()));
                         for (i, s) in stmts.iter().enumerate() {
                             out = match crate::query_parse::parse_query(*engine, s) {
-                                Ok(q) => driver.query(&q).await,
+                                Ok(mut q) => {
+                                    // Fill the selected database for a Mongo query
+                                    // that didn't name one via `use(...)`.
+                                    if let rdbs_core::query::Query::Mongo(op) = &mut q {
+                                        if op.database.is_none() && !cur_db.is_empty() {
+                                            op.database = Some(cur_db.clone());
+                                        }
+                                    }
+                                    driver.query(&q).await
+                                }
                                 Err(msg) => Err(rdbs_core::error::RdbsError::Query(msg)),
                             };
                             if let Err(e) = &out {
