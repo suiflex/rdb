@@ -189,6 +189,23 @@ export component WorkArea inherits Rectangle {
                     vertical-alignment: center;
                 }
                 Rectangle { horizontal-stretch: 1; }
+                // Mongo document view switch (grid table ⇄ JSON tree)
+                if root.result-kind == 1: VerticalLayout {
+                    alignment: center;
+                    HorizontalLayout {
+                        spacing: Tokens.sp3;
+                        UnderlineSegment {
+                            text: "Grid";
+                            active: root.doc-view == 0;
+                            clicked => { root.doc-view = 0; }
+                        }
+                        UnderlineSegment {
+                            text: "Tree";
+                            active: root.doc-view == 1;
+                            clicked => { root.doc-view = 1; }
+                        }
+                    }
+                }
                 // search-in-table
                 VerticalLayout {
                     alignment: center;
@@ -712,23 +729,6 @@ export component WorkArea inherits Rectangle {
                             }
                         }
                     }
-                }
-            }
-
-            // Grid/Tree switch for Mongo documents (top-right of the result body).
-            if root.result-kind == 1: HorizontalLayout {
-                x: parent.width - self.preferred-width - Tokens.sp3;
-                y: Tokens.sp2;
-                spacing: Tokens.sp3;
-                UnderlineSegment {
-                    text: "Grid";
-                    active: root.doc-view == 0;
-                    clicked => { root.doc-view = 0; }
-                }
-                UnderlineSegment {
-                    text: "Tree";
-                    active: root.doc-view == 1;
-                    clicked => { root.doc-view = 1; }
                 }
             }
 
