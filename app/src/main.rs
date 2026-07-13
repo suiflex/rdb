@@ -4114,6 +4114,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let tab_titles = tab_titles.clone();
         let results = results.clone();
         let active_result = active_result.clone();
+        let ed_state = ed_state.clone();
+        let load_editor_text = load_editor_text.clone();
         window.on_new_tab(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -4122,7 +4124,7 @@ fn main() -> Result<(), slint::PlatformError> {
             {
                 let mut t = tab_texts.borrow_mut();
                 if let Some(slot) = t.get_mut(active) {
-                    *slot = w.get_query_text().to_string();
+                    *slot = ed_state.borrow().text();
                 }
                 t.push(String::new());
             }
@@ -4130,7 +4132,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let count = tab_texts.borrow().len();
             set_tab_titles(&w, &tab_titles.borrow());
             w.set_active_tab((count - 1) as i32);
-            w.set_query_text(SharedString::default());
+            load_editor_text("");
             // Fresh query tab starts with no result tabs.
             results.lock().unwrap().clear();
             *active_result.lock().unwrap() = 0;
@@ -4266,6 +4268,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let tab_texts = tab_texts.clone();
         let tab_titles = tab_titles.clone();
+        let load_editor_text = load_editor_text.clone();
         window.on_close_tab(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -4280,7 +4283,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 drop(t);
                 *tab_titles.borrow_mut() = vec![None];
                 set_tab_titles(&w, &tab_titles.borrow());
-                w.set_query_text(SharedString::default());
+                load_editor_text("");
                 clear_grid(&w);
                 return;
             }
@@ -4298,7 +4301,7 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             set_tab_titles(&w, &tab_titles.borrow());
             w.set_active_tab(new_active as i32);
-            w.set_query_text(SharedString::from(text));
+            load_editor_text(&text);
         });
     }
 
@@ -4337,6 +4340,8 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let tab_texts = tab_texts.clone();
+        let ed_state = ed_state.clone();
+        let load_editor_text = load_editor_text.clone();
         window.on_select_tab(move |idx| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -4348,12 +4353,12 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             let active = w.get_active_tab() as usize;
             if let Some(slot) = t.get_mut(active) {
-                *slot = w.get_query_text().to_string();
+                *slot = ed_state.borrow().text();
             }
             let text = t[i].clone();
             drop(t);
             w.set_active_tab(idx);
-            w.set_query_text(SharedString::from(text));
+            load_editor_text(&text);
         });
     }
 
