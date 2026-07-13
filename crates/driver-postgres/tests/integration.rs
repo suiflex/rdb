@@ -101,14 +101,14 @@ async fn non_sql_queries_are_unsupported() {
     assert!(matches!(cmd, Err(RdbsError::UnsupportedQuery)));
 
     let mongo = driver
-        .query(&Query::Mongo(MongoOp {
+        .query(&Query::Mongo(Box::new(MongoOp {
             collection: "c".into(),
             database: None,
             limit: None,
             skip: None,
             sort: None,
             kind: MongoKind::Find(serde_json::json!({})),
-        }))
+        })))
         .await;
     assert!(matches!(mongo, Err(RdbsError::UnsupportedQuery)));
 

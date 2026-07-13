@@ -121,14 +121,14 @@ fn parse_mongo_line(s: &str) -> Result<Query, String> {
         cursor = rest.trim();
     }
 
-    Ok(Query::Mongo(MongoOp {
+    Ok(Query::Mongo(Box::new(MongoOp {
         collection,
         database: None,
         limit,
         skip,
         sort,
         kind,
-    }))
+    })))
 }
 
 /// Parse one `.name(arg)` at the start of `s`. Returns the method name, the raw
@@ -235,14 +235,14 @@ fn parse_mongo_envelope(text: &str) -> Result<Query, String> {
             ))
         }
     };
-    Ok(Query::Mongo(MongoOp {
+    Ok(Query::Mongo(Box::new(MongoOp {
         collection,
         database,
         limit,
         skip,
         sort: None,
         kind,
-    }))
+    })))
 }
 
 #[cfg(test)]

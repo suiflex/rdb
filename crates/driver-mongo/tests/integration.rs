@@ -32,27 +32,28 @@ async fn connect_insert_find_aggregate_schema_against_real_mongo() {
 
     for (name, age) in [("alice", 30), ("bob", 17)] {
         let inserted = driver
-            .query(&Query::Mongo(MongoOp {
+            .query(&Query::Mongo(Box::new(MongoOp {
                 collection: "users".into(),
                 database: None,
                 limit: None,
                 skip: None,
                 sort: None,
                 kind: MongoKind::Insert(serde_json::json!({ "name": name, "age": age })),
-            }))
+            })))
             .await
             .unwrap();
         assert!(matches!(inserted, ResultSet::Affected(1)));
     }
 
     let found = driver
-        .query(&Query::Mongo(MongoOp {
+        .query(&Query::Mongo(Box::new(MongoOp {
             collection: "users".into(),
             database: None,
             limit: None,
             skip: None,
+            sort: None,
             kind: MongoKind::Find(serde_json::json!({ "age": { "$gte": 18 } })),
-        }))
+        })))
         .await
         .unwrap();
     match found {
@@ -64,15 +65,16 @@ async fn connect_insert_find_aggregate_schema_against_real_mongo() {
     }
 
     let agg = driver
-        .query(&Query::Mongo(MongoOp {
+        .query(&Query::Mongo(Box::new(MongoOp {
             collection: "users".into(),
             database: None,
             limit: None,
             skip: None,
+            sort: None,
             kind: MongoKind::Aggregate(vec![
                 serde_json::json!({ "$group": { "_id": null, "total": { "$sum": 1 } } }),
             ]),
-        }))
+        })))
         .await
         .unwrap();
     match agg {

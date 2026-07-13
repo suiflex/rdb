@@ -10,8 +10,9 @@ pub enum Query {
     Sql(String),
     /// Raw command tokens — Redis, e.g. `["GET", "key"]`.
     Command(Vec<String>),
-    /// Structured Mongo operation.
-    Mongo(MongoOp),
+    /// Structured Mongo operation. Boxed so the fat Mongo variant doesn't
+    /// bloat every `Query` (the SQL path stays a bare `String`).
+    Mongo(Box<MongoOp>),
 }
 
 #[derive(Debug, Clone)]
