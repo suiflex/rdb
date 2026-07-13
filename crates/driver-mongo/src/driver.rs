@@ -188,6 +188,9 @@ impl Driver for MongoDriver {
                 if let Some(s) = op.skip {
                     find = find.skip(s.max(0) as u64);
                 }
+                if let Some(sort) = &op.sort {
+                    find = find.sort(json_to_document(sort)?);
+                }
                 let cursor = find.await.map_err(|e| RdbsError::Query(e.to_string()))?;
                 let docs: Vec<Document> = cursor
                     .try_collect()
