@@ -127,6 +127,7 @@ in-out property <string> rename-text;
     in-out property <bool> show-structure: false;
     in property <[StructField]> structure-columns;
     in-out property <string> grid-filter;
+    in-out property <string> mongo-filter;
     in property <[length]> grid-col-widths;
     callback run-query();
     callback run-selection();
@@ -143,6 +144,7 @@ in-out property <string> rename-text;
     in-out property <string> filter-op: "contains";
     in property <[IndexRow]> index-rows;
     callback apply-filter();
+    callback apply-mongo-filter();
     callback resize-grid-col(int, length);
 
     // ----- SQL editor (lexer-highlighted) -----
@@ -834,6 +836,7 @@ in-out property <string> rename-text;
                         show-structure <=> root.show-structure;
                         structure-columns: root.structure-columns;
                         grid-filter <=> root.grid-filter;
+                        mongo-filter <=> root.mongo-filter;
                         active-table: root.active-table;
                         page-start: root.page-start;
                         page-end: root.page-end;
@@ -866,6 +869,9 @@ in-out property <string> rename-text;
                         }
                         apply-filter() => {
                             root.apply-filter();
+                        }
+                        apply-mongo-filter() => {
+                            root.apply-mongo-filter();
                         }
                         toggle-sql() => {
                             self.sql-open = !self.sql-open;

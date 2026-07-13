@@ -38,6 +38,8 @@ export component WorkArea inherits Rectangle {
     in-out property <bool> show-structure: false;
     in property <[StructField]> structure-columns;
     in-out property <string> grid-filter;
+    in-out property <string> mongo-filter;   // Compass-style Mongo filter document
+    callback apply-mongo-filter();
     in property <string> active-table;
     in property <string> sort-text;      // e.g. "sort: id ↑"
     in property <int> grid-sort-col: -1; // client-side sort: display col + dir
@@ -178,6 +180,18 @@ export component WorkArea inherits Rectangle {
                         filter-ta := TouchArea {
                             clicked => { root.filter-open = !root.filter-open; }
                         }
+                    }
+                }
+                // Mongo filter document (server-side find filter). Enter runs it;
+                // gated on Documents result-kind like the Grid/Tree toggle.
+                if root.result-kind == 1: VerticalLayout {
+                    alignment: center;
+                    FilterField {
+                        width: 260px;
+                        height: 28px;
+                        placeholder: "Filter — { \"field\": value }";
+                        text <=> root.mongo-filter;
+                        submitted => { root.apply-mongo-filter(); }
                     }
                 }
                 // sort text

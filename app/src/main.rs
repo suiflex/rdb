@@ -354,6 +354,9 @@ struct BrowseState {
     limit: u64,
     total: Option<u64>,
     pk_cols: Vec<String>,
+    /// Compass-style Mongo filter document (raw JSON, already validated). Empty
+    /// = browse all. Ignored for non-Mongo engines.
+    mongo_filter: String,
 }
 
 /// Default browse page size per engine. Mongo documents are fat, so a Mongo
@@ -512,6 +515,8 @@ fn browse_text(
     table: &rdbs_core::write::TableRef,
     page: u64,
     limit: u64,
+    // Mongo-only filter document (raw JSON, empty = all). Unused by SQL engines.
+    filter: &str,
 ) -> String {
     let offset = page * limit;
     match engine {
@@ -555,8 +560,12 @@ fn browse_text(
                 .as_deref()
                 .map(|d| format!("\"database\":\"{d}\","))
                 .unwrap_or_default();
+            let body = match filter.trim() {
+                "" => "{}",
+                f => f,
+            };
             format!(
-                "{{\"collection\":\"{}\",{db}\"op\":\"find\",\"body\":{{}},\"limit\":{limit},\"skip\":{offset}}}",
+                "{{\"collection\":\"{}\",{db}\"op\":\"find\",\"body\":{body},\"limit\":{limit},\"skip\":{offset}}}",
                 table.name
             )
         }
@@ -3598,7 +3607,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(table) = st.table else {
                 return;
             };
-            let text = browse_text(engine, &table, st.page, st.limit);
+            let text = browse_text(engine, &table, st.page, st.limit, &st.mongo_filter);
             w.set_query_text(SharedString::from(text.clone()));
             run_sql(text);
         })
@@ -3638,7 +3647,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 st.page = 0;
                 st.total = None;
                 st.pk_cols.clear();
+                st.mongo_filter.clear();
             }
+            w.set_mongo_filter(SharedString::default());
             {
                 let tabs = w.get_tabs();
                 let ti = w.get_active_tab().max(0) as usize;
@@ -3818,6 +3829,38 @@ fn main() -> Result<(), slint::PlatformError> {
                 st.page = 0;
             }
             echo(&w, l);
+            run_browse();
+        });
+    }
+
+    // ----- Mongo browse filter bar (Compass-style filter document) -----
+    {
+        let weak = window.as_weak();
+        let browse = browse.clone();
+        let run_browse = run_browse.clone();
+        let guard_pending = guard_pending.clone();
+        window.on_apply_mongo_filter(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if guard_pending(&w) {
+                return;
+            }
+            let raw = w.get_mongo_filter().to_string();
+            let trimmed = raw.trim();
+            // Empty clears the filter; otherwise it must be a JSON document.
+            if !trimmed.is_empty() {
+                if let Err(e) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                    w.set_status_error(true);
+                    w.set_result_status(SharedString::from(format!("invalid filter JSON: {e}")));
+                    return;
+                }
+            }
+            {
+                let mut st = browse.lock().unwrap();
+                st.mongo_filter = trimmed.to_string();
+                st.page = 0;
+            }
             run_browse();
         });
     }
@@ -5411,15 +5454,15 @@ mod tests {
             name: "users".into(),
         };
         assert_eq!(
-            browse_text(rdbs_connstore::Engine::Postgres, &t, 1, 300),
+            browse_text(rdbs_connstore::Engine::Postgres, &t, 1, 300, ""),
             "SELECT * FROM \"public\".\"users\" LIMIT 300 OFFSET 300"
         );
         assert_eq!(
-            browse_text(rdbs_connstore::Engine::MySql, &t, 0, 50),
+            browse_text(rdbs_connstore::Engine::MySql, &t, 0, 50, ""),
             "SELECT * FROM `users` LIMIT 50 OFFSET 0"
         );
         assert_eq!(
-            browse_text(rdbs_connstore::Engine::Redis, &t, 2, 100),
+            browse_text(rdbs_connstore::Engine::Redis, &t, 2, 100, ""),
             "BROWSE users 200 100"
         );
         let m = rdbs_core::write::TableRef {
@@ -5428,8 +5471,13 @@ mod tests {
             name: "orders".into(),
         };
         assert_eq!(
-            browse_text(rdbs_connstore::Engine::Mongo, &m, 1, 50),
+            browse_text(rdbs_connstore::Engine::Mongo, &m, 1, 50, ""),
             "{\"collection\":\"orders\",\"database\":\"shop\",\"op\":\"find\",\"body\":{},\"limit\":50,\"skip\":50}"
+        );
+        // A filter document lands in the find body.
+        assert_eq!(
+            browse_text(rdbs_connstore::Engine::Mongo, &m, 0, 20, r#"{"status":"A"}"#),
+            "{\"collection\":\"orders\",\"database\":\"shop\",\"op\":\"find\",\"body\":{\"status\":\"A\"},\"limit\":20,\"skip\":0}"
         );
     }
 
