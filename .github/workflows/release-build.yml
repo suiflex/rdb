@@ -1,18 +1,11 @@
 name: release-build
 
-# Fires when release-please publishes the GitHub Release for a new tag.
+# Fires only when a version tag is pushed.
 # Builds per-platform binaries, attaches them to the Release, then updates the
 # Homebrew tap and Scoop bucket in two independent sibling jobs.
 on:
-  release:
-    types: [published]
-  # manual re-run for a tag whose original run hung/was cancelled (e.g. the
-  # macos-13 scarcity that blocked v0.10.0), without cutting a new tag.
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Release tag to (re)build, e.g. v0.10.0
-        required: true
+  push:
+    tags: ["v*"]
 
 permissions:
   contents: write
@@ -86,7 +79,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          gh release upload "${{ github.event.release.tag_name || inputs.tag }}" \
+          gh release upload "${{ github.ref_name }}" \
             "rdbs-${{ matrix.target }}.${{ matrix.ext }}" --clobber
 
   # ---- publish jobs: siblings, both need `build`, neither needs the other ----
@@ -101,7 +94,7 @@ jobs:
       - name: Render formula and push to tap
         env:
           GH_TOKEN: ${{ secrets.TAP_PUBLISH_TOKEN }}
-          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -142,7 +135,7 @@ jobs:
       - name: Render manifest and push to bucket
         env:
           GH_TOKEN: ${{ secrets.TAP_PUBLISH_TOKEN }}
-          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
