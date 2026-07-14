@@ -198,6 +198,12 @@ pub fn suggest(
     let scope = schema_scope(nodes, active_schema);
     let word = trailing_word(before_cursor);
     let head = before_cursor.strip_suffix(word).unwrap_or(before_cursor);
+    // Type-triggered: don't pop up on an empty line or right after whitespace —
+    // only once the user has typed at least one char of a word. `table.`/`alias.`
+    // is an explicit request for that table's columns, so it still fires.
+    if word.is_empty() && !head.ends_with('.') {
+        return (0, Vec::new());
+    }
     let mut cands = if let Some(before_dot) = head.strip_suffix('.') {
         // `table.` / `alias.` → that table's columns. When the name before the
         // dot is a schema/database, offer that schema's tables instead.
@@ -266,6 +272,14 @@ mod tests {
     }
 
     #[test]
+    fn empty_and_whitespace_context_suppress_popup() {
+        assert!(suggest("", &nodes(), "public").1.is_empty());
+        assert!(suggest("   ", &nodes(), "public").1.is_empty());
+        // trailing space after a keyword: wait for the user to start typing
+        assert!(suggest("select ", &nodes(), "public").1.is_empty());
+    }
+
+    #[test]
     fn from_prefix_suggests_matching_table() {
         let (n, c) = suggest("select * from ste", &nodes(), "public");
         assert_eq!(n, 3);
@@ -301,11 +315,10 @@ mod tests {
 
     #[test]
     fn select_context_offers_columns() {
-        let (_, c) = suggest("select ", &nodes(), "public");
+        // Type-triggered: a prefix is required before the popup appears.
+        let (_, c) = suggest("select n", &nodes(), "public");
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
-        assert!(labels.contains(&"config_id"));
         assert!(labels.contains(&"name"));
-        assert!(labels.contains(&"id"));
     }
 
     #[test]
@@ -359,21 +372,22 @@ mod tests {
         };
         let two = vec![
             mk("public", "database"),
-            mk("users", "table"),
+            mk("t_users", "table"),
             mk("id", "field"),
             mk("other", "database"),
-            mk("orders", "table"),
+            mk("t_orders", "table"),
             mk("oid", "field"),
         ];
-        let (_, c) = suggest("select * from ", &two, "public");
+        // Type-triggered: a prefix ("t") is required before the popup appears.
+        let (_, c) = suggest("select * from t", &two, "public");
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
-        assert!(labels.contains(&"users"));
-        assert!(!labels.contains(&"orders"));
+        assert!(labels.contains(&"t_users"));
+        assert!(!labels.contains(&"t_orders"));
 
-        let (_, c) = suggest("select * from ", &two, "other");
+        let (_, c) = suggest("select * from t", &two, "other");
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
-        assert!(labels.contains(&"orders"));
-        assert!(!labels.contains(&"users"));
+        assert!(labels.contains(&"t_orders"));
+        assert!(!labels.contains(&"t_users"));
     }
 
     fn two_schema_nodes() -> Vec<VmTreeNode> {
@@ -395,7 +409,8 @@ mod tests {
     /// `schema.table` can be started even when it isn't the active schema.
     #[test]
     fn from_offers_schema_names() {
-        let (_, c) = suggest("select * from ", &two_schema_nodes(), "public");
+        // Type-triggered: "a" narrows to the analytics schema name.
+        let (_, c) = suggest("select * from a", &two_schema_nodes(), "public");
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"analytics"));
     }
