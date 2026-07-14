@@ -572,6 +572,78 @@ fn record_recent(list: &RefCell<Vec<String>>, text: &str) {
     }
 }
 
+/// Minimal on-disk shape of a query tab: identity + SQL text only. Results,
+/// browse state and view are transient (and may hold DB data), so they are
+/// never persisted — only SQL scratch tabs survive a restart.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PersistedTab {
+    id: String,
+    title: String,
+    query_text: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct PersistedTabs {
+    tabs: Vec<PersistedTab>,
+    active: Option<String>,
+}
+
+/// Persist the SQL tabs (kind == "sql") and the active tab id. Best-effort;
+/// I/O errors are ignored. Skipped in mock mode.
+fn save_query_tabs(tabs: &[WorkspaceTab], active: Option<&str>) {
+    if mock::mock_mode() {
+        return;
+    }
+    let Ok(path) = rdbs_connstore::ConnStore::query_tabs_path() else {
+        return;
+    };
+    let sql: Vec<PersistedTab> = tabs
+        .iter()
+        .filter(|t| t.kind == "sql")
+        .map(|t| PersistedTab {
+            id: t.id.clone(),
+            title: t.title.clone(),
+            query_text: t.query_text.clone(),
+        })
+        .collect();
+    let active = active
+        .filter(|id| sql.iter().any(|t| t.id == *id))
+        .map(|s| s.to_string());
+    let payload = PersistedTabs { tabs: sql, active };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&payload) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+/// Load persisted SQL tabs into fresh `WorkspaceTab`s (empty results/browse).
+/// Returns the tabs and the active tab id (if it still exists).
+fn load_query_tabs() -> (Vec<WorkspaceTab>, Option<String>) {
+    let Ok(path) = rdbs_connstore::ConnStore::query_tabs_path() else {
+        return (Vec::new(), None);
+    };
+    let Some(payload): Option<PersistedTabs> = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+    else {
+        return (Vec::new(), None);
+    };
+    let tabs: Vec<WorkspaceTab> = payload
+        .tabs
+        .into_iter()
+        .map(|p| {
+            let mut t = WorkspaceTab::sql(p.id, 0);
+            t.title = p.title;
+            t.query_text = p.query_text;
+            t
+        })
+        .collect();
+    let active = payload.active.filter(|id| tabs.iter().any(|t| t.id == *id));
+    (tabs, active)
+}
+
 fn page_bounds(page: u64, limit: u64, total: Option<u64>, shown: u64) -> (u64, u64, bool, bool) {
     let start = if shown == 0 { 0 } else { page * limit + 1 };
     let end = page * limit + shown;
@@ -1477,8 +1549,10 @@ fn main() -> Result<(), slint::PlatformError> {
     // One-shot database override for the next connect: the database switcher sets
     // it, then re-invokes the connect path, which consumes it (take) so a plain
     // reconnect from the picker still uses the connection's saved database.
-    let db_override: Arc<std::sync::Mutex<Option<String>>> =
-        Arc::new(std::sync::Mutex::new(None));
+    let db_override: Arc<std::sync::Mutex<Option<String>>> = Arc::new(std::sync::Mutex::new(None));
+    // Restore persisted SQL tabs on the first connect of the session; later
+    // connects to a different connection start fresh.
+    let tabs_restored: Rc<std::cell::Cell<bool>> = Rc::new(std::cell::Cell::new(false));
     let query_number = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let query_console: Arc<std::sync::Mutex<Vec<String>>> =
         Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -2837,6 +2911,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     latency: w.get_status_latency().to_string(),
                 });
             }
+            // Persist SQL scratch tabs so they survive a restart. Cheap JSON
+            // write; fires on switch/new/close/run, which is when text changes.
+            save_query_tabs(&tabs, Some(&id));
         })
     };
 
@@ -3389,6 +3466,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let last_view = last_view.clone();
         let edit_buf = edit_buf.clone();
         let db_override = db_override.clone();
+        let tabs_restored = tabs_restored.clone();
         window.on_connect_clicked(move |idx| {
             let i = idx as usize;
             // One-shot: set by the database switcher, empty for a fresh picker
@@ -3408,8 +3486,18 @@ fn main() -> Result<(), slint::PlatformError> {
                 (sc, cfg)
             };
             *current_connection_id.lock().unwrap() = Some(sc.id.clone());
-            workspace_tabs.lock().unwrap().clear();
-            *active_tab_id.lock().unwrap() = None;
+            // First connect of the session (or a database switch) restores the
+            // persisted SQL scratch tabs; a later switch to another connection
+            // starts with a clean workspace.
+            let restore = !tabs_restored.get() || db_ovr.is_some();
+            tabs_restored.set(true);
+            let (init_tabs, init_active) = if restore {
+                load_query_tabs()
+            } else {
+                (Vec::new(), None)
+            };
+            *workspace_tabs.lock().unwrap() = init_tabs;
+            *active_tab_id.lock().unwrap() = init_active.clone();
             results.lock().unwrap().clear();
             *last_view.lock().unwrap() = None;
             edit_buf.lock().unwrap().clear();
@@ -3420,7 +3508,10 @@ fn main() -> Result<(), slint::PlatformError> {
             query_console.lock().unwrap().clear();
             // Reflect selection + accent immediately.
             if let Some(w) = weak.upgrade() {
-                set_workspace_tabs(&w, &[], None);
+                {
+                    let tabs = workspace_tabs.lock().unwrap();
+                    set_workspace_tabs(&w, &tabs, init_active.as_deref());
+                }
                 clear_grid(&w);
                 sync_query_console(&w, &query_console);
                 w.set_selected_conn(idx);
@@ -3432,7 +3523,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_status_conn(SharedString::from(sc.name.clone()));
                 w.set_bc_conn(SharedString::from(sc.name.clone()));
                 w.set_bc_db(SharedString::from(
-                    db_ovr.clone().or_else(|| sc.database.clone()).unwrap_or_default(),
+                    db_ovr
+                        .clone()
+                        .or_else(|| sc.database.clone())
+                        .unwrap_or_default(),
                 ));
                 w.set_bc_schema(SharedString::from(
                     if matches!(sc.engine, rdbs_connstore::Engine::Postgres) {
@@ -3441,9 +3535,20 @@ fn main() -> Result<(), slint::PlatformError> {
                         ""
                     },
                 ));
-                // Start empty; the engine hint shows as a ghost placeholder
-                // (rendered by CodeEditor) instead of seeded buffer text.
-                load_editor_text("");
+                // Load the restored active tab's SQL, else empty (the engine hint
+                // shows as a ghost placeholder rendered by CodeEditor).
+                let init_text = init_active
+                    .as_deref()
+                    .and_then(|id| {
+                        workspace_tabs
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .find(|t| t.id == id)
+                            .map(|t| t.query_text.clone())
+                    })
+                    .unwrap_or_default();
+                load_editor_text(&init_text);
                 w.set_editor_placeholder(SharedString::from(if mock::mock_mode() {
                     ""
                 } else {
@@ -4703,6 +4808,7 @@ fn main() -> Result<(), slint::PlatformError> {
             tabs.push(WorkspaceTab::sql(id.clone(), number));
             *active_tab_id.lock().unwrap() = Some(id.clone());
             set_workspace_tabs(&w, &tabs, Some(&id));
+            save_query_tabs(&tabs, Some(&id));
             drop(tabs);
             load_editor_text("");
             // Fresh query tab starts with no result tabs.
@@ -4909,6 +5015,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if tabs.is_empty() {
                 *active_tab_id.lock().unwrap() = None;
                 set_workspace_tabs(&w, &tabs, None);
+                save_query_tabs(&tabs, None);
                 drop(tabs);
                 load_editor_text("");
                 let limit = browse.lock().unwrap().limit;
@@ -4934,6 +5041,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 let active = active_tab_id.lock().unwrap().clone();
                 set_workspace_tabs(&w, &tabs, active.as_deref());
             }
+            save_query_tabs(
+                &workspace_tabs.lock().unwrap(),
+                active_tab_id.lock().unwrap().as_deref(),
+            );
         });
     }
 
@@ -4966,6 +5077,7 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             let active = active_tab_id.lock().unwrap().clone();
             set_workspace_tabs(&w, &tabs, active.as_deref());
+            save_query_tabs(&tabs, active.as_deref());
         });
     }
 
@@ -5999,12 +6111,40 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     shot::install(&window);
-    window.run()
+    let run_result = window.run();
+    // On exit, capture the active tab's latest text (edits made without a tab
+    // switch) and persist, so a plain type-then-quit is not lost.
+    save_active_tab(&window);
+    run_result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn persisted_tabs_round_trip() {
+        let payload = PersistedTabs {
+            tabs: vec![
+                PersistedTab {
+                    id: "query:c:1".into(),
+                    title: "Query 1".into(),
+                    query_text: "select * from users;".into(),
+                },
+                PersistedTab {
+                    id: "query:c:2".into(),
+                    title: "scratch".into(),
+                    query_text: String::new(),
+                },
+            ],
+            active: Some("query:c:2".into()),
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        let back: PersistedTabs = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.tabs.len(), 2);
+        assert_eq!(back.tabs[0].query_text, "select * from users;");
+        assert_eq!(back.active.as_deref(), Some("query:c:2"));
+    }
 
     #[test]
     fn mongo_browse_default_is_twenty() {
