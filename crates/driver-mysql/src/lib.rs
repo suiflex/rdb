@@ -2,7 +2,7 @@
 
 mod convert;
 mod schema;
-mod write_sql;
+pub mod write_sql;
 
 pub use driver::MysqlDriver;
 

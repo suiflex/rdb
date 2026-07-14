@@ -5,6 +5,6 @@
 //! inside `spawn_blocking` over an `Arc<Mutex<Connection>>`.
 
 mod driver;
-mod write_sql;
+pub mod write_sql;
 
 pub use driver::SqliteDriver;

@@ -3,6 +3,6 @@
 mod conn_string;
 mod driver;
 mod type_map;
-mod write_sql;
+pub mod write_sql;
 
 pub use driver::PostgresDriver;

@@ -189,10 +189,181 @@ impl AnyDriver {
     }
 }
 
+/// Statements executed by the table metadata path. Keep these beside concrete
+/// driver dispatch so the Slint layer never needs to know driver SQL builders.
+pub fn table_metadata_statements(engine: Engine, table: &TableRef) -> Vec<String> {
+    match engine {
+        Engine::Postgres => {
+            let schema = table.schema.as_deref().unwrap_or("public");
+            let esc = |s: &str| s.replace('\'', "''");
+            vec![
+                format!(
+                    "SELECT count(*) FROM {}",
+                    rdbs_driver_postgres::write_sql::table_name(table)
+                ),
+                format!(
+                    "SELECT a.attname FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid \
+                     JOIN pg_namespace n ON n.oid = c.relnamespace \
+                     JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(i.indkey) \
+                     WHERE i.indisprimary AND c.relname = $1 AND n.nspname = $2 \
+                     ORDER BY array_position(i.indkey, a.attnum)\n-- $1 = '{}', $2 = '{}'",
+                    table.name.replace('\'', "''"),
+                    schema.replace('\'', "''")
+                ),
+                format!(
+                    "SELECT indexname, indexdef FROM pg_indexes \
+                     WHERE tablename = '{}' AND schemaname = '{}' ORDER BY 1",
+                    esc(&table.name),
+                    esc(schema)
+                ),
+            ]
+        }
+        Engine::MySql => {
+            let esc = |s: &str| s.replace('\'', "''");
+            vec![
+                format!(
+                    "SELECT COUNT(*) FROM {}",
+                    rdbs_driver_mysql::write_sql::table_name(table)
+                ),
+                format!(
+                    "SELECT column_name FROM information_schema.key_column_usage \
+                     WHERE table_name = ? AND constraint_name = 'PRIMARY' \
+                     AND table_schema = COALESCE(?, DATABASE()) ORDER BY ordinal_position\n\
+                     -- params: '{}', '{}'",
+                    esc(&table.name),
+                    esc(table.database.as_deref().unwrap_or(""))
+                ),
+                format!(
+                    "SELECT index_name, GROUP_CONCAT(column_name ORDER BY seq_in_index \
+                     SEPARATOR ', ') FROM information_schema.statistics \
+                     WHERE table_name = '{}' AND table_schema = \
+                     COALESCE(NULLIF('{}', ''), DATABASE()) GROUP BY index_name ORDER BY 1",
+                    esc(&table.name),
+                    esc(table.database.as_deref().unwrap_or(""))
+                ),
+            ]
+        }
+        Engine::Sqlite => vec![
+            format!(
+                "SELECT count(*) FROM {}",
+                rdbs_driver_sqlite::write_sql::table_name(table)
+            ),
+            format!(
+                "PRAGMA table_info({})",
+                rdbs_driver_sqlite::write_sql::quote_ident(&table.name)
+            ),
+        ],
+        Engine::Cassandra => vec![
+            format!(
+                "SELECT count(*) FROM {}",
+                rdbs_driver_cassandra::write_cql::table_name(table)
+            ),
+            format!(
+                "SELECT column_name, kind, position FROM system_schema.columns \
+                 WHERE keyspace_name = ? AND table_name = ?\n-- params: '{}', '{}'",
+                table.database.as_deref().unwrap_or_default(),
+                table.name
+            ),
+        ],
+        Engine::Mongo => vec![format!(
+            "db.getSiblingDB('{}').getCollection('{}').countDocuments({{}})",
+            table.database.as_deref().unwrap_or_default(),
+            table.name
+        )],
+        Engine::Redis => vec![format!("TYPE {}", table.name)],
+    }
+}
+
+pub fn schema_statements(engine: Engine, schema: &str) -> Vec<String> {
+    match engine {
+        Engine::Postgres => vec![
+            "SELECT current_database()".into(),
+            format!(
+                "SELECT c.table_name, c.column_name, c.data_type, c.is_nullable \
+                 FROM information_schema.columns c JOIN information_schema.tables t \
+                 ON t.table_schema = c.table_schema AND t.table_name = c.table_name \
+                 WHERE c.table_schema = $1 AND t.table_type = 'BASE TABLE' \
+                 ORDER BY c.table_name, c.ordinal_position\n-- $1 = '{}'",
+                schema.replace('\'', "''")
+            ),
+            format!(
+                "SELECT p.proname, pg_catalog.pg_get_functiondef(p.oid) \
+                 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
+                 WHERE n.nspname = $1 AND p.prokind = 'f' ORDER BY p.proname\n-- $1 = '{}'",
+                schema.replace('\'', "''")
+            ),
+        ],
+        Engine::MySql => vec![
+            "SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE \
+             FROM INFORMATION_SCHEMA.COLUMNS \
+             WHERE TABLE_SCHEMA NOT IN ('mysql','information_schema','performance_schema','sys') \
+             ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION"
+                .into(),
+        ],
+        Engine::Sqlite => vec![
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                .into(),
+        ],
+        Engine::Cassandra => vec![
+            "SELECT keyspace_name FROM system_schema.keyspaces".into(),
+        ],
+        Engine::Mongo => vec!["listDatabases + listCollections".into()],
+        Engine::Redis => vec!["SCAN 0 MATCH *".into()],
+    }
+}
+
+/// Exact SQL/CQL text (or native command description) produced for buffered
+/// writes. SQL builders are the same functions used by each driver's commit.
+pub fn write_statements(engine: Engine, ops: &[WriteOp]) -> Vec<String> {
+    ops.iter()
+        .map(|op| match (engine, op) {
+            (Engine::Postgres, WriteOp::Update { table, pk, changes }) => {
+                rdbs_driver_postgres::write_sql::update_sql(table, pk, changes)
+            }
+            (Engine::Postgres, WriteOp::Insert { table, values }) => {
+                rdbs_driver_postgres::write_sql::insert_sql(table, values)
+            }
+            (Engine::Postgres, WriteOp::Delete { table, pk }) => {
+                rdbs_driver_postgres::write_sql::delete_sql(table, pk)
+            }
+            (Engine::MySql, WriteOp::Update { table, pk, changes }) => {
+                rdbs_driver_mysql::write_sql::update_sql(table, pk, changes).0
+            }
+            (Engine::MySql, WriteOp::Insert { table, values }) => {
+                rdbs_driver_mysql::write_sql::insert_sql(table, values).0
+            }
+            (Engine::MySql, WriteOp::Delete { table, pk }) => {
+                rdbs_driver_mysql::write_sql::delete_sql(table, pk).0
+            }
+            (Engine::Sqlite, WriteOp::Update { table, pk, changes }) => {
+                rdbs_driver_sqlite::write_sql::update_sql(table, pk, changes)
+            }
+            (Engine::Sqlite, WriteOp::Insert { table, values }) => {
+                rdbs_driver_sqlite::write_sql::insert_sql(table, values)
+            }
+            (Engine::Sqlite, WriteOp::Delete { table, pk }) => {
+                rdbs_driver_sqlite::write_sql::delete_sql(table, pk)
+            }
+            (Engine::Cassandra, WriteOp::Update { table, pk, changes }) => {
+                rdbs_driver_cassandra::write_cql::update_sql(table, pk, changes)
+            }
+            (Engine::Cassandra, WriteOp::Insert { table, values }) => {
+                rdbs_driver_cassandra::write_cql::insert_sql(table, values)
+            }
+            (Engine::Cassandra, WriteOp::Delete { table, pk }) => {
+                rdbs_driver_cassandra::write_cql::delete_sql(table, pk)
+            }
+            (Engine::Mongo, op) => format!("MongoDB write: {op:?}"),
+            (Engine::Redis, op) => format!("Redis write: {op:?}"),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rdbs_connstore::Engine;
+    use rdbs_core::result::Cell;
 
     #[test]
     fn engine_maps_to_human_label() {
@@ -204,5 +375,30 @@ mod tests {
     fn all_four_engines_labeled() {
         assert_eq!(AnyDriver::label(Engine::MySql), "MySQL");
         assert_eq!(AnyDriver::label(Engine::Mongo), "MongoDB");
+    }
+
+    #[test]
+    fn console_uses_the_same_postgres_write_builder_as_commit() {
+        let table = TableRef {
+            database: Some("app".into()),
+            schema: Some("public".into()),
+            name: "users".into(),
+        };
+        let ops = [WriteOp::Update {
+            table,
+            pk: vec![("id".into(), Cell::Int(7))],
+            changes: vec![("name".into(), Cell::Text("Ada".into()))],
+        }];
+        assert_eq!(
+            write_statements(Engine::Postgres, &ops),
+            vec!["UPDATE \"public\".\"users\" SET \"name\" = 'Ada' WHERE \"id\" = 7"]
+        );
+    }
+
+    #[test]
+    fn metadata_trace_contains_count_and_primary_key_lookup() {
+        let sql = table_metadata_statements(Engine::Postgres, &TableRef::named("users"));
+        assert!(sql[0].contains("SELECT count(*)"));
+        assert!(sql[1].contains("i.indisprimary"));
     }
 }

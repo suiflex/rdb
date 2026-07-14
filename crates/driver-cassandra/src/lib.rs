@@ -7,6 +7,6 @@
 
 mod driver;
 mod type_map;
-mod write_cql;
+pub mod write_cql;
 
 pub use driver::CassandraDriver;
