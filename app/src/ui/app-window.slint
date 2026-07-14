@@ -784,6 +784,24 @@ in-out property <string> rename-text;
                                     }
                                 }
                             }
+                            // new-tab (+) button, sits right after the last tab
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 28px;
+                                    height: 26px;
+                                    border-radius: Tokens.radius;
+                                    background: add-tab-ta.has-hover ? Tokens.card : transparent;
+                                    AppIcon {
+                                        name: "plus";
+                                        size: 13px;
+                                        color: add-tab-ta.has-hover ? Tokens.text : Tokens.text-dim;
+                                    }
+                                    add-tab-ta := TouchArea {
+                                        clicked => { root.new-tab(); }
+                                    }
+                                }
+                            }
                             // trailing filler: gives the tab bar an infinite max-width
                             // so the work column (and the window) can stretch full-width
                             Rectangle {
