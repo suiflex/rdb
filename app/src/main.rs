@@ -378,6 +378,101 @@ struct StoredResult {
     latency: String,
 }
 
+/// Rust-owned document state. Slint only renders this list; an empty list and
+/// `active_tab_id == None` are a real empty workspace, not a synthetic query.
+#[derive(Clone)]
+struct WorkspaceTab {
+    id: String,
+    title: String,
+    kind: String,
+    query_text: String,
+    table: Option<rdbs_core::write::TableRef>,
+    browse: BrowseState,
+    results: Vec<StoredResult>,
+    active_result: usize,
+    view: Option<StoredResult>,
+    indexes: Vec<(String, String)>,
+    loading: bool,
+    pinned: bool,
+}
+
+impl WorkspaceTab {
+    fn sql(id: String, number: usize) -> Self {
+        Self {
+            id,
+            title: format!("Query {number}"),
+            kind: "sql".into(),
+            query_text: String::new(),
+            table: None,
+            browse: BrowseState::default(),
+            results: Vec::new(),
+            active_result: 0,
+            view: None,
+            indexes: Vec::new(),
+            loading: false,
+            pinned: true,
+        }
+    }
+}
+
+fn table_tab_id(connection_id: &str, database: &str, schema: &str, table: &str) -> String {
+    format!("table:{connection_id}:{database}:{schema}:{table}")
+}
+
+fn workspace_tab_index(tabs: &[WorkspaceTab], active_id: Option<&str>) -> Option<usize> {
+    let id = active_id?;
+    tabs.iter().position(|tab| tab.id == id)
+}
+
+fn replaceable_table_tab_index(tabs: &[WorkspaceTab], active_id: Option<&str>) -> Option<usize> {
+    let index = workspace_tab_index(tabs, active_id)?;
+    let tab = &tabs[index];
+    (tab.kind == "table" && !tab.pinned).then_some(index)
+}
+
+fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&str>) {
+    let items: Vec<TabItem> = tabs
+        .iter()
+        .map(|tab| TabItem {
+            kind: tab.kind.clone().into(),
+            title: tab.title.clone().into(),
+        })
+        .collect();
+    w.set_tabs(ModelRc::from(Rc::new(VecModel::from(items))));
+    w.set_active_tab(
+        workspace_tab_index(tabs, active_id)
+            .map(|i| i as i32)
+            .unwrap_or(-1),
+    );
+}
+
+const QUERY_CONSOLE_CAP: usize = 200;
+
+fn append_query_console(log: &Arc<std::sync::Mutex<Vec<String>>>, sql: impl Into<String>) {
+    let sql = sql.into();
+    let sql = sql.trim();
+    if sql.is_empty() {
+        return;
+    }
+    let mut entries = log.lock().unwrap();
+    entries.push(sql.to_string());
+    let extra = entries.len().saturating_sub(QUERY_CONSOLE_CAP);
+    if extra > 0 {
+        entries.drain(..extra);
+    }
+}
+
+fn sync_query_console(w: &MainWindow, log: &Arc<std::sync::Mutex<Vec<String>>>) {
+    let entries: Vec<SharedString> = log
+        .lock()
+        .unwrap()
+        .iter()
+        .cloned()
+        .map(SharedString::from)
+        .collect();
+    w.set_query_console(ModelRc::from(Rc::new(VecModel::from(entries))));
+}
+
 /// 1-based display bounds of the current page window plus prev/next
 /// availability. `shown` is how many rows the page actually returned.
 /// Connect + ping, bounded to 8s so "Testing connection…" always resolves.
@@ -406,8 +501,11 @@ async fn try_connect(
 /// Kind of the active tab ("table" | "sql" | "function"), empty when none.
 fn active_tab_kind(w: &MainWindow) -> String {
     use slint::Model;
+    if w.get_active_tab() < 0 {
+        return String::new();
+    }
     let tabs = w.get_tabs();
-    let ti = w.get_active_tab().max(0) as usize;
+    let ti = w.get_active_tab() as usize;
     tabs.row_data(ti)
         .map(|t| t.kind.to_string())
         .unwrap_or_default()
@@ -573,23 +671,6 @@ fn browse_text(
             format!("BROWSE {} {offset} {limit}", table.name)
         }
     }
-}
-
-/// Rebuild the tab model. A `Some` title is a user rename; `None` falls back
-/// to the positional "Query N".
-fn set_tab_titles(w: &MainWindow, titles: &[Option<String>]) {
-    let items: Vec<TabItem> = titles
-        .iter()
-        .enumerate()
-        .map(|(i, t)| TabItem {
-            kind: "sql".into(),
-            title: t
-                .clone()
-                .unwrap_or_else(|| format!("Query {}", i + 1))
-                .into(),
-        })
-        .collect();
-    w.set_tabs(ModelRc::from(Rc::new(VecModel::from(items))));
 }
 
 /// Push a flat `GridModel` into the window's grid columns/cells properties.
@@ -1170,7 +1251,10 @@ fn group_thousands(n: u64) -> String {
 
 #[cfg(test)]
 mod fmt_tests {
-    use super::{group_thousands, parse_col_filter};
+    use super::{
+        group_thousands, parse_col_filter, replaceable_table_tab_index, table_tab_id,
+        workspace_tab_index, WorkspaceTab,
+    };
     #[test]
     fn col_filter_prefix_ops() {
         assert_eq!(parse_col_filter(""), None);
@@ -1190,6 +1274,42 @@ mod fmt_tests {
         assert_eq!(group_thousands(1000), "1.000");
         assert_eq!(group_thousands(10_000), "10.000");
         assert_eq!(group_thousands(1_234_567), "1.234.567");
+    }
+
+    #[test]
+    fn table_tab_identity_includes_connection_database_schema_and_table() {
+        assert_eq!(
+            table_tab_id("conn-1", "app", "public", "users"),
+            "table:conn-1:app:public:users"
+        );
+        assert_ne!(
+            table_tab_id("conn-1", "app", "public", "users"),
+            table_tab_id("conn-2", "app", "public", "users")
+        );
+    }
+
+    #[test]
+    fn empty_workspace_has_no_active_tab() {
+        assert_eq!(workspace_tab_index(&[], None), None);
+        let tabs = vec![WorkspaceTab::sql("query:c:1".into(), 1)];
+        assert_eq!(workspace_tab_index(&tabs, None), None);
+        assert_eq!(workspace_tab_index(&tabs, Some("query:c:1")), Some(0));
+        assert_eq!(workspace_tab_index(&tabs, Some("missing")), None);
+    }
+
+    #[test]
+    fn only_the_active_unpinned_table_tab_is_replaceable() {
+        let mut tab = WorkspaceTab::sql("table:c:db:public:users".into(), 1);
+        tab.kind = "table".into();
+        tab.pinned = false;
+        let mut tabs = vec![tab];
+
+        assert_eq!(
+            replaceable_table_tab_index(&tabs, Some(&tabs[0].id)),
+            Some(0)
+        );
+        tabs[0].pinned = true;
+        assert_eq!(replaceable_table_tab_index(&tabs, Some(&tabs[0].id)), None);
     }
 }
 
@@ -1345,6 +1465,29 @@ fn main() -> Result<(), slint::PlatformError> {
         Arc::new(std::sync::Mutex::new(Vec::new()));
     let active_result: Arc<std::sync::Mutex<usize>> = Arc::new(std::sync::Mutex::new(0));
     let result_new_tab = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // One Rust source of truth for document identity and state. The UI index is
+    // derived from `active_tab_id`; it is -1 while this Option is None.
+    let workspace_tabs: Arc<std::sync::Mutex<Vec<WorkspaceTab>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let active_tab_id: Arc<std::sync::Mutex<Option<String>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let current_connection_id: Arc<std::sync::Mutex<Option<String>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let query_number = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let query_console: Arc<std::sync::Mutex<Vec<String>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    set_workspace_tabs(&window, &[], None);
+    sync_query_console(&window, &query_console);
+    {
+        let weak = window.as_weak();
+        let query_console = query_console.clone();
+        window.on_clear_console(move || {
+            query_console.lock().unwrap().clear();
+            if let Some(w) = weak.upgrade() {
+                sync_query_console(&w, &query_console);
+            }
+        });
+    }
     // Engine of the live connection, kept on the UI thread so table clicks can
     // build an engine-appropriate "browse this table" query synchronously.
     let cur_engine: Rc<RefCell<Option<rdbs_connstore::Engine>>> = Rc::new(RefCell::new(None));
@@ -2009,6 +2152,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let recent = recent_queries.clone();
         let load_editor_text = load_editor_text.clone();
         let rebuild_query_tree = rebuild_query_tree.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
         window.on_open_query(move |label, idx| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -2021,6 +2166,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 } else {
                     return;
                 };
+            if active_tab_id.lock().unwrap().is_none() || active_tab_kind(&w) != "sql" {
+                w.invoke_new_tab();
+            }
             load_editor_text(&text);
             w.set_fn_mode(false);
             w.set_active_table(SharedString::default()); // editor mode
@@ -2029,16 +2177,14 @@ fn main() -> Result<(), slint::PlatformError> {
             } else {
                 "unsaved".to_string()
             }));
-            let tabs = w.get_tabs();
-            let ti = w.get_active_tab().max(0) as usize;
-            if ti < tabs.row_count() {
-                tabs.set_row_data(
-                    ti,
-                    TabItem {
-                        title: SharedString::from(title.clone()),
-                        kind: "sql".into(),
-                    },
-                );
+            if let Some(id) = active_tab_id.lock().unwrap().clone() {
+                let mut tabs = workspace_tabs.lock().unwrap();
+                if let Some(tab) = tabs.iter_mut().find(|tab| tab.id == id) {
+                    tab.title = title.clone();
+                    tab.kind = "sql".into();
+                    tab.query_text = text;
+                }
+                set_workspace_tabs(&w, &tabs, Some(&id));
             }
             rebuild_query_tree(&title);
         });
@@ -2050,6 +2196,9 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let fn_defs = fn_defs.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        let current_connection_id = current_connection_id.clone();
         window.on_open_function(move |name| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -2078,16 +2227,38 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_fn_name(name.clone());
             w.set_fn_mode(true);
             w.set_active_table(SharedString::default());
-            let tabs = w.get_tabs();
-            let ti = w.get_active_tab().max(0) as usize;
-            if ti < tabs.row_count() {
-                tabs.set_row_data(
-                    ti,
-                    TabItem {
-                        title: name,
-                        kind: "function".into(),
-                    },
-                );
+            let id = format!(
+                "function:{}:{}:{}",
+                current_connection_id
+                    .lock()
+                    .unwrap()
+                    .as_deref()
+                    .unwrap_or_default(),
+                w.get_schema_name(),
+                name
+            );
+            let mut tabs = workspace_tabs.lock().unwrap();
+            if let Some(i) = tabs.iter().position(|tab| tab.id == id) {
+                *active_tab_id.lock().unwrap() = Some(id.clone());
+                set_workspace_tabs(&w, &tabs, Some(&id));
+                w.set_active_tab(i as i32);
+            } else {
+                tabs.push(WorkspaceTab {
+                    id: id.clone(),
+                    title: name.to_string(),
+                    kind: "function".into(),
+                    query_text: String::new(),
+                    table: None,
+                    browse: BrowseState::default(),
+                    results: Vec::new(),
+                    active_result: 0,
+                    view: None,
+                    indexes: Vec::new(),
+                    loading: false,
+                    pinned: true,
+                });
+                *active_tab_id.lock().unwrap() = Some(id.clone());
+                set_workspace_tabs(&w, &tabs, Some(&id));
             }
         });
     }
@@ -2133,6 +2304,12 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let weak = window.as_weak();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        let browse = browse.clone();
+        let results = results.clone();
+        let displayed_grid = displayed_grid.clone();
+        let load_editor_text = load_editor_text.clone();
         window.on_db_choose(move |idx| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -2140,6 +2317,20 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(it) = w.get_db_items().row_data(idx.max(0) as usize) {
                 w.set_bc_db(it.label);
             }
+            workspace_tabs.lock().unwrap().clear();
+            *active_tab_id.lock().unwrap() = None;
+            let limit = browse.lock().unwrap().limit;
+            *browse.lock().unwrap() = BrowseState {
+                limit,
+                ..Default::default()
+            };
+            results.lock().unwrap().clear();
+            *displayed_grid.lock().unwrap() = None;
+            set_workspace_tabs(&w, &[], None);
+            load_editor_text("");
+            clear_grid(&w);
+            w.set_active_table(SharedString::default());
+            w.set_query_running(false);
             w.set_db_modal_open(false);
         });
     }
@@ -2176,6 +2367,13 @@ fn main() -> Result<(), slint::PlatformError> {
         let expanded_tables = expanded_tables.clone();
         let collapsed_categories = collapsed_categories.clone();
         let loaded_dbs = loaded_dbs.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        let browse = browse.clone();
+        let results = results.clone();
+        let displayed_grid = displayed_grid.clone();
+        let load_editor_text = load_editor_text.clone();
+        let query_console = query_console.clone();
         window.on_schema_choose(move |idx| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -2190,6 +2388,18 @@ fn main() -> Result<(), slint::PlatformError> {
             // Anything browsed belonged to the old schema; force a fresh pick and
             // drop expand/collapse state that referenced the old schema's tables.
             w.set_active_table(SharedString::default());
+            workspace_tabs.lock().unwrap().clear();
+            *active_tab_id.lock().unwrap() = None;
+            let limit = browse.lock().unwrap().limit;
+            *browse.lock().unwrap() = BrowseState {
+                limit,
+                ..Default::default()
+            };
+            results.lock().unwrap().clear();
+            *displayed_grid.lock().unwrap() = None;
+            set_workspace_tabs(&w, &[], None);
+            load_editor_text("");
+            clear_grid(&w);
             expanded_tables.lock().unwrap().clear();
             *collapsed_categories.borrow_mut() = default_collapsed_cats();
             let engine = *cur_engine.borrow();
@@ -2202,11 +2412,15 @@ fn main() -> Result<(), slint::PlatformError> {
             let raw_nodes = raw_nodes.clone();
             let expanded_tables = expanded_tables.clone();
             let loaded_dbs = loaded_dbs.clone();
+            let query_console = query_console.clone();
             rt.spawn(async move {
                 let guard = current.lock_owned().await;
                 let Some((_, driver)) = guard.as_ref() else {
                     return;
                 };
+                for statement in dispatch::schema_statements(engine, &schema_name) {
+                    append_query_console(&query_console, statement);
+                }
                 let Ok(schema) = driver.schema_for(&schema_name).await else {
                     return;
                 };
@@ -2240,6 +2454,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 *raw_nodes.lock().unwrap() = nodes;
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
+                        sync_query_console(&w, &query_console);
                         w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
                         let empty_cols: Vec<StructField> = Vec::new();
                         w.set_structure_columns(ModelRc::from(Rc::new(VecModel::from(empty_cols))));
@@ -2536,6 +2751,33 @@ fn main() -> Result<(), slint::PlatformError> {
                 Rc::new(|w| w.invoke_cell_advance(0, 3, "TABBED".into(), true)),
             );
         }
+        if screen == "workspace-sql" {
+            // Real UI transition: table browse → global SQL button. The fresh
+            // query tab must not inherit the table request's loading state.
+            when(
+                Rc::new(|w| w.get_active_table() == "emiten"),
+                Rc::new(|w| w.invoke_new_tab()),
+            );
+        }
+        if screen == "workspace-tabflow" {
+            when(
+                Rc::new(|w| w.get_active_table() == "emiten" && w.get_tabs().row_count() == 1),
+                Rc::new(|w| w.invoke_open_table("".into(), "referral_sources".into())),
+            );
+            when(
+                Rc::new(|w| {
+                    w.get_active_table() == "referral_sources" && w.get_tabs().row_count() == 1
+                }),
+                Rc::new(|w| {
+                    w.invoke_pin_table("".into(), "referral_sources".into());
+                    w.invoke_open_table("".into(), "sectors".into());
+                }),
+            );
+            when(
+                Rc::new(|w| w.get_active_table() == "sectors" && w.get_tabs().row_count() == 2),
+                Rc::new(|w| w.invoke_new_tab()),
+            );
+        }
         if screen == "sql-select" {
             // ⌘A select-all: the whole query gets the selection tint
             when(
@@ -2580,20 +2822,137 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     }
 
-    // Per-tab query text. MVP: switching tabs swaps the editor text.
-    let tab_texts: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(vec![String::new()]));
-    // Parallel to `tab_texts`: Some = user rename, None = default "Query N".
-    let tab_titles: Rc<RefCell<Vec<Option<String>>>> = Rc::new(RefCell::new(vec![None]));
-    window.set_tabs(ModelRc::from(Rc::new(VecModel::from(vec![TabItem {
-        title: "Query 1".into(),
-        kind: "sql".into(),
-    }]))));
-
     // Last result view kept in memory so the client-side filter (Feature C)
     // can re-derive the visible rows without re-querying. Arc<Mutex<>> (not Rc)
     // so it can cross into the Send event-loop closure from the query task.
     let last_view: Arc<std::sync::Mutex<Option<model::ResultView>>> =
         Arc::new(std::sync::Mutex::new(None));
+
+    let save_active_tab: Rc<dyn Fn(&MainWindow)> = {
+        let tabs = workspace_tabs.clone();
+        let active_id = active_tab_id.clone();
+        let ed_state = ed_state.clone();
+        let browse = browse.clone();
+        let results = results.clone();
+        let active_result = active_result.clone();
+        let last_view = last_view.clone();
+        Rc::new(move |w| {
+            let Some(id) = active_id.lock().unwrap().clone() else {
+                return;
+            };
+            let mut tabs = tabs.lock().unwrap();
+            let Some(tab) = tabs.iter_mut().find(|tab| tab.id == id) else {
+                return;
+            };
+            tab.query_text = ed_state.borrow().text();
+            tab.loading = w.get_query_running();
+            if tab.kind == "table" {
+                tab.browse = browse.lock().unwrap().clone();
+            } else if tab.kind == "sql" {
+                tab.results = results.lock().unwrap().clone();
+                tab.active_result = *active_result.lock().unwrap();
+            }
+            if tab.kind != "function" {
+                tab.view = last_view.lock().unwrap().clone().map(|view| StoredResult {
+                    view,
+                    meta: w.get_results_meta().to_string(),
+                    latency: w.get_status_latency().to_string(),
+                });
+            }
+        })
+    };
+
+    #[allow(clippy::type_complexity)]
+    let restore_tab: Rc<dyn Fn(&MainWindow, usize)> = {
+        let tabs = workspace_tabs.clone();
+        let active_id = active_tab_id.clone();
+        let load_editor_text = load_editor_text.clone();
+        let browse = browse.clone();
+        let results = results.clone();
+        let active_result = active_result.clone();
+        let last_view = last_view.clone();
+        let displayed_grid = displayed_grid.clone();
+        let hidden_cols = hidden_cols.clone();
+        let sort_state = sort_state.clone();
+        let col_order = col_order.clone();
+        let col_filters = col_filters.clone();
+        let edit_buf = edit_buf.clone();
+        Rc::new(move |w, index| {
+            let tab = {
+                let tabs = tabs.lock().unwrap();
+                let Some(tab) = tabs.get(index).cloned() else {
+                    return;
+                };
+                tab
+            };
+            *active_id.lock().unwrap() = Some(tab.id.clone());
+            let tabs_guard = tabs.lock().unwrap();
+            set_workspace_tabs(w, &tabs_guard, Some(&tab.id));
+            drop(tabs_guard);
+
+            load_editor_text(&tab.query_text);
+            w.set_fn_mode(tab.kind == "function");
+            w.set_query_running(tab.loading);
+            w.set_active_table(
+                tab.table
+                    .as_ref()
+                    .map(|table| SharedString::from(table.name.clone()))
+                    .unwrap_or_default(),
+            );
+            if tab.kind == "table" {
+                *browse.lock().unwrap() = tab.browse.clone();
+            } else {
+                let limit = browse.lock().unwrap().limit;
+                *browse.lock().unwrap() = BrowseState {
+                    limit,
+                    ..Default::default()
+                };
+            }
+            w.set_total_rows(tab.browse.total.map(|n| n as i32).unwrap_or(-1));
+            w.set_grid_read_only(tab.browse.pk_cols.is_empty());
+            let index_rows: Vec<IndexRow> = tab
+                .indexes
+                .iter()
+                .cloned()
+                .map(|(name, definition)| IndexRow {
+                    name: name.into(),
+                    definition: definition.into(),
+                })
+                .collect();
+            w.set_index_rows(ModelRc::from(Rc::new(VecModel::from(index_rows))));
+
+            *results.lock().unwrap() = tab.results.clone();
+            *active_result.lock().unwrap() = tab.active_result;
+            set_result_tabs(w, tab.results.len(), tab.active_result);
+            let selected = if tab.kind == "sql" {
+                tab.results.get(tab.active_result).cloned().or(tab.view)
+            } else {
+                tab.view
+            };
+            if let Some(stored) = selected {
+                present_view(
+                    w,
+                    stored.view,
+                    &stored.meta,
+                    &stored.latency,
+                    &last_view,
+                    &displayed_grid,
+                    &hidden_cols,
+                    &sort_state,
+                    &col_order,
+                    &col_filters,
+                    &edit_buf,
+                    &browse,
+                );
+            } else {
+                *last_view.lock().unwrap() = None;
+                *displayed_grid.lock().unwrap() = None;
+                clear_grid(w);
+                w.set_results_meta(SharedString::default());
+                w.set_result_status(SharedString::default());
+            }
+        })
+    };
 
     // ----- toggle a sidebar group's collapsed state (Feature A) -----
     {
@@ -2652,6 +3011,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let loaded_dbs = loaded_dbs.clone();
         let collapsed_categories = collapsed_categories.clone();
         let raw_nodes = raw_nodes.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        let current_connection_id = current_connection_id.clone();
         window.on_disconnect(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -2663,6 +3025,11 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_status_latency(SharedString::default());
             w.set_schema_tree(ModelRc::from(Rc::new(VecModel::<TreeNode>::default())));
             w.set_structure_columns(ModelRc::from(Rc::new(VecModel::<StructField>::default())));
+            workspace_tabs.lock().unwrap().clear();
+            *active_tab_id.lock().unwrap() = None;
+            *current_connection_id.lock().unwrap() = None;
+            set_workspace_tabs(&w, &[], None);
+            clear_grid(&w);
             *cur_engine.borrow_mut() = None;
             expanded_tables.lock().unwrap().clear();
             loaded_dbs.lock().unwrap().clear();
@@ -3036,6 +3403,13 @@ fn main() -> Result<(), slint::PlatformError> {
         let fn_defs = fn_defs.clone();
         let connect_handle = connect_handle.clone();
         let browse = browse.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        let current_connection_id = current_connection_id.clone();
+        let query_console = query_console.clone();
+        let results = results.clone();
+        let last_view = last_view.clone();
+        let edit_buf = edit_buf.clone();
         window.on_connect_clicked(move |idx| {
             let i = idx as usize;
             let (sc, cfg) = {
@@ -3046,8 +3420,30 @@ fn main() -> Result<(), slint::PlatformError> {
                 let cfg = st.conn_config_for(&sc.id);
                 (sc, cfg)
             };
+            *current_connection_id.lock().unwrap() = Some(sc.id.clone());
+            workspace_tabs.lock().unwrap().clear();
+            *active_tab_id.lock().unwrap() = None;
+            results.lock().unwrap().clear();
+            *last_view.lock().unwrap() = None;
+            edit_buf.lock().unwrap().clear();
+            *browse.lock().unwrap() = BrowseState {
+                limit: default_browse_limit(sc.engine),
+                ..Default::default()
+            };
+            query_console.lock().unwrap().clear();
+            let initial_schema = if matches!(sc.engine, rdbs_connstore::Engine::Postgres) {
+                "public"
+            } else {
+                sc.database.as_deref().unwrap_or_default()
+            };
+            for statement in dispatch::schema_statements(sc.engine, initial_schema) {
+                append_query_console(&query_console, statement);
+            }
             // Reflect selection + accent immediately.
             if let Some(w) = weak.upgrade() {
+                set_workspace_tabs(&w, &[], None);
+                clear_grid(&w);
+                sync_query_console(&w, &query_console);
                 w.set_selected_conn(idx);
                 // Show progress + clear any prior failure immediately.
                 w.set_connecting(true);
@@ -3080,7 +3476,6 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             // Fresh connection: nothing browsed, nothing expanded.
             *cur_engine.borrow_mut() = Some(sc.engine);
-            browse.lock().unwrap().limit = default_browse_limit(sc.engine);
             expanded_tables.lock().unwrap().clear();
             loaded_dbs.lock().unwrap().clear();
             *collapsed_categories.borrow_mut() = default_collapsed_cats();
@@ -3318,7 +3713,22 @@ fn main() -> Result<(), slint::PlatformError> {
         let results = results.clone();
         let active_result = active_result.clone();
         let result_new_tab = result_new_tab.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        let query_console = query_console.clone();
         Rc::new(move |sql: String| {
+            let Some(target_id) = active_tab_id.lock().unwrap().clone() else {
+                return;
+            };
+            if let Some(tab) = workspace_tabs
+                .lock()
+                .unwrap()
+                .iter_mut()
+                .find(|tab| tab.id == target_id)
+            {
+                tab.loading = true;
+                tab.query_text = sql.clone();
+            }
             let weak2 = weak.clone();
             let current = current.clone();
             let last_view = last_view.clone();
@@ -3331,6 +3741,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let col_filters = col_filters.clone();
             let results = results.clone();
             let active_result = active_result.clone();
+            let workspace_tabs = workspace_tabs.clone();
+            let active_tab_id = active_tab_id.clone();
+            let query_console = query_console.clone();
             // ⌘\ set this; consume it so the next plain run replaces again.
             let new_tab = result_new_tab.swap(false, std::sync::atomic::Ordering::SeqCst);
             // Currently selected database (top dropdown). Mongo line queries with
@@ -3363,6 +3776,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         let n = stmts.len().max(1);
                         let mut out = Err(rdbs_core::error::RdbsError::Query("empty query".into()));
                         for (i, s) in stmts.iter().enumerate() {
+                            append_query_console(&query_console, s.clone());
                             out = match crate::query_parse::parse_query(*engine, s) {
                                 Ok(mut q) => {
                                     // Fill the selected database for a Mongo query
@@ -3401,7 +3815,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 let err = outcome.err();
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
-                        w.set_query_running(false);
+                        sync_query_console(&w, &query_console);
+                        let is_active =
+                            active_tab_id.lock().unwrap().as_deref() == Some(&target_id);
+                        if is_active {
+                            w.set_query_running(false);
+                        }
                         match (view, err) {
                             (Some(v), _) => {
                                 let shown = match &v {
@@ -3415,29 +3834,43 @@ fn main() -> Result<(), slint::PlatformError> {
                                     format!("{shown} rows · {elapsed_ms} ms")
                                 };
                                 let latency = format!("{elapsed_ms} ms");
-                                // Result tabs are for SQL runs; browse stays single.
-                                let is_browse = browse.lock().unwrap().table.is_some();
+                                let sr = StoredResult {
+                                    view: v.clone(),
+                                    meta: meta.clone(),
+                                    latency: latency.clone(),
+                                };
+                                let (tab_results, tab_active, is_browse) = {
+                                    let mut tabs = workspace_tabs.lock().unwrap();
+                                    let Some(tab) = tabs.iter_mut().find(|tab| tab.id == target_id)
+                                    else {
+                                        return;
+                                    };
+                                    tab.loading = false;
+                                    tab.view = Some(sr.clone());
+                                    let is_browse = tab.kind == "table";
+                                    if is_browse {
+                                        tab.results.clear();
+                                        tab.active_result = 0;
+                                    } else if new_tab || tab.results.is_empty() {
+                                        tab.results.push(sr);
+                                        tab.active_result = tab.results.len() - 1;
+                                    } else {
+                                        if tab.active_result >= tab.results.len() {
+                                            tab.active_result = 0;
+                                        }
+                                        tab.results[tab.active_result] = sr;
+                                    }
+                                    (tab.results.clone(), tab.active_result, is_browse)
+                                };
+                                if !is_active {
+                                    return;
+                                }
+                                *results.lock().unwrap() = tab_results;
+                                *active_result.lock().unwrap() = tab_active;
                                 if is_browse {
-                                    results.lock().unwrap().clear();
                                     set_result_tabs(&w, 0, 0);
                                 } else {
-                                    let mut rv = results.lock().unwrap();
-                                    let mut ar = active_result.lock().unwrap();
-                                    let sr = StoredResult {
-                                        view: v.clone(),
-                                        meta: meta.clone(),
-                                        latency: latency.clone(),
-                                    };
-                                    if new_tab || rv.is_empty() {
-                                        rv.push(sr);
-                                        *ar = rv.len() - 1;
-                                    } else {
-                                        if *ar >= rv.len() {
-                                            *ar = 0;
-                                        }
-                                        rv[*ar] = sr;
-                                    }
-                                    set_result_tabs(&w, rv.len(), *ar);
+                                    set_result_tabs(&w, results.lock().unwrap().len(), tab_active);
                                 }
                                 present_view(
                                     &w,
@@ -3455,6 +3888,17 @@ fn main() -> Result<(), slint::PlatformError> {
                                 );
                             }
                             (None, Some(e)) => {
+                                if let Some(tab) = workspace_tabs
+                                    .lock()
+                                    .unwrap()
+                                    .iter_mut()
+                                    .find(|tab| tab.id == target_id)
+                                {
+                                    tab.loading = false;
+                                }
+                                if !is_active {
+                                    return;
+                                }
                                 *last_view.lock().unwrap() = None;
                                 apply_result(
                                     &w,
@@ -3642,14 +4086,11 @@ fn main() -> Result<(), slint::PlatformError> {
     };
 
     let run_browse: Rc<dyn Fn()> = {
-        let weak = window.as_weak();
         let cur_engine = cur_engine.clone();
         let browse = browse.clone();
         let run_sql = run_sql.clone();
+        let load_editor_text = load_editor_text.clone();
         Rc::new(move || {
-            let Some(w) = weak.upgrade() else {
-                return;
-            };
             let Some(engine) = *cur_engine.borrow() else {
                 return;
             };
@@ -3658,7 +4099,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let text = browse_text(engine, &table, st.page, st.limit, &st.mongo_filter);
-            w.set_query_text(SharedString::from(text.clone()));
+            load_editor_text(&text);
             run_sql(text);
         })
     };
@@ -3672,6 +4113,15 @@ fn main() -> Result<(), slint::PlatformError> {
         let run_browse = run_browse.clone();
         let edit_buf = edit_buf.clone();
         let guard_pending = guard_pending.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        let current_connection_id = current_connection_id.clone();
+        let save_active_tab = save_active_tab.clone();
+        let restore_tab = restore_tab.clone();
+        let query_console = query_console.clone();
+        let last_view = last_view.clone();
+        let displayed_grid = displayed_grid.clone();
+        let results = results.clone();
         window.on_open_table(move |db, label| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -3684,12 +4134,39 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             let label = label.to_string();
             let db = db.to_string();
+            let database_name = if db.is_empty() {
+                w.get_bc_db().to_string()
+            } else {
+                db.clone()
+            };
+            let schema_name = if matches!(engine, rdbs_connstore::Engine::Postgres) {
+                w.get_schema_name().to_string()
+            } else {
+                String::new()
+            };
+            let connection_id = current_connection_id
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or_default();
+            let tab_id = table_tab_id(&connection_id, &database_name, &schema_name, &label);
+            if let Some(index) = workspace_tabs
+                .lock()
+                .unwrap()
+                .iter()
+                .position(|tab| tab.id == tab_id)
+            {
+                save_active_tab(&w);
+                restore_tab(&w, index);
+                return;
+            }
             let table = rdbs_core::write::TableRef {
                 database: (!db.is_empty()).then(|| db.clone()),
                 schema: matches!(engine, rdbs_connstore::Engine::Postgres)
                     .then(|| w.get_schema_name().to_string()),
                 name: label.clone(),
             };
+            save_active_tab(&w);
             // Fresh container: page 0, keep the user's limit, forget totals.
             {
                 let mut st = browse.lock().unwrap();
@@ -3699,26 +4176,43 @@ fn main() -> Result<(), slint::PlatformError> {
                 st.pk_cols.clear();
                 st.mongo_filter.clear();
             }
-            w.set_mongo_filter(SharedString::default());
             {
-                let tabs = w.get_tabs();
-                let ti = w.get_active_tab().max(0) as usize;
-                if ti < tabs.row_count() {
-                    tabs.set_row_data(
-                        ti,
-                        TabItem {
-                            title: SharedString::from(label.clone()),
-                            kind: "table".into(),
-                        },
-                    );
+                let tab = WorkspaceTab {
+                    id: tab_id.clone(),
+                    title: label.clone(),
+                    kind: "table".into(),
+                    query_text: String::new(),
+                    table: Some(table.clone()),
+                    browse: browse.lock().unwrap().clone(),
+                    results: Vec::new(),
+                    active_result: 0,
+                    view: None,
+                    indexes: Vec::new(),
+                    loading: true,
+                    pinned: false,
+                };
+                let active_id = active_tab_id.lock().unwrap().clone();
+                let mut tabs = workspace_tabs.lock().unwrap();
+                if let Some(index) = replaceable_table_tab_index(&tabs, active_id.as_deref()) {
+                    tabs[index] = tab;
+                } else {
+                    tabs.push(tab);
                 }
+                *active_tab_id.lock().unwrap() = Some(tab_id.clone());
+                set_workspace_tabs(&w, &tabs, Some(&tab_id));
             }
+            w.set_mongo_filter(SharedString::default());
             w.set_fn_mode(false);
             w.set_active_table(SharedString::from(label));
             w.set_show_structure(false);
             w.set_total_rows(-1);
             w.set_grid_read_only(true);
             w.set_index_rows(ModelRc::from(Rc::new(VecModel::<IndexRow>::default())));
+            *last_view.lock().unwrap() = None;
+            *displayed_grid.lock().unwrap() = None;
+            results.lock().unwrap().clear();
+            set_result_tabs(&w, 0, 0);
+            clear_grid(&w);
             run_browse();
 
             // Fetch total + primary key off-thread; footer updates when done.
@@ -3726,25 +4220,35 @@ fn main() -> Result<(), slint::PlatformError> {
             let current = current.clone();
             let browse = browse.clone();
             let edit_buf = edit_buf.clone();
+            let workspace_tabs = workspace_tabs.clone();
+            let active_tab_id = active_tab_id.clone();
+            let query_console = query_console.clone();
             rt.spawn(async move {
                 let guard = current.lock().await;
                 let Some((engine, driver)) = guard.as_ref() else {
                     return;
                 };
+                for statement in dispatch::table_metadata_statements(*engine, &table) {
+                    append_query_console(&query_console, statement);
+                }
                 let total = driver.count(&table).await.ok();
                 let pk = driver.primary_key(&table).await.unwrap_or_default();
                 let indexes = fetch_indexes(*engine, driver, &table).await;
                 let (page, limit) = {
-                    let mut st = browse.lock().unwrap();
-                    // Ignore a late reply if the user already opened another table.
-                    if st.table.as_ref() != Some(&table) {
+                    let mut tabs = workspace_tabs.lock().unwrap();
+                    let Some(tab) = tabs.iter_mut().find(|tab| tab.id == tab_id) else {
                         return;
-                    }
+                    };
+                    tab.browse.total = total;
+                    tab.browse.pk_cols = pk.clone();
+                    tab.indexes = indexes.clone();
+                    (tab.browse.page, tab.browse.limit)
+                };
+                let is_active = active_tab_id.lock().unwrap().as_deref() == Some(&tab_id);
+                if is_active {
+                    let mut st = browse.lock().unwrap();
                     st.total = total;
                     st.pk_cols = pk.clone();
-                    (st.page, st.limit)
-                };
-                {
                     // The page result usually lands before this reply and
                     // re-anchors the buffer with empty pk_cols — top it up.
                     let mut b = edit_buf.lock().unwrap();
@@ -3753,6 +4257,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
+                        sync_query_console(&w, &query_console);
+                        if active_tab_id.lock().unwrap().as_deref() != Some(&tab_id) {
+                            return;
+                        }
                         let rows: Vec<IndexRow> = indexes
                             .into_iter()
                             .map(|(name, definition)| IndexRow {
@@ -3778,6 +4286,24 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 });
             });
+        });
+    }
+
+    {
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        window.on_pin_table(move |_db, label| {
+            let Some(id) = active_tab_id.lock().unwrap().clone() else {
+                return;
+            };
+            if let Some(tab) = workspace_tabs
+                .lock()
+                .unwrap()
+                .iter_mut()
+                .find(|tab| tab.id == id && tab.table.as_ref().is_some_and(|t| label == t.name))
+            {
+                tab.pinned = true;
+            }
         });
     }
 
@@ -4160,34 +4686,49 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- new tab -----
     {
         let weak = window.as_weak();
-        let tab_texts = tab_texts.clone();
-        let tab_titles = tab_titles.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        let current_connection_id = current_connection_id.clone();
+        let query_number = query_number.clone();
+        let save_active_tab = save_active_tab.clone();
         let results = results.clone();
         let active_result = active_result.clone();
-        let ed_state = ed_state.clone();
+        let browse = browse.clone();
+        let last_view = last_view.clone();
         let load_editor_text = load_editor_text.clone();
         window.on_new_tab(move || {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let active = w.get_active_tab() as usize;
-            {
-                let mut t = tab_texts.borrow_mut();
-                if let Some(slot) = t.get_mut(active) {
-                    *slot = ed_state.borrow().text();
-                }
-                t.push(String::new());
-            }
-            tab_titles.borrow_mut().push(None);
-            let count = tab_texts.borrow().len();
-            set_tab_titles(&w, &tab_titles.borrow());
-            w.set_active_tab((count - 1) as i32);
+            save_active_tab(&w);
+            let number = query_number.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            let connection = current_connection_id
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or_default();
+            let id = format!("query:{connection}:{number}");
+            let mut tabs = workspace_tabs.lock().unwrap();
+            tabs.push(WorkspaceTab::sql(id.clone(), number));
+            *active_tab_id.lock().unwrap() = Some(id.clone());
+            set_workspace_tabs(&w, &tabs, Some(&id));
+            drop(tabs);
             load_editor_text("");
             // Fresh query tab starts with no result tabs.
             results.lock().unwrap().clear();
             *active_result.lock().unwrap() = 0;
+            let limit = browse.lock().unwrap().limit;
+            *browse.lock().unwrap() = BrowseState {
+                limit,
+                ..Default::default()
+            };
+            *last_view.lock().unwrap() = None;
             set_result_tabs(&w, 0, 0);
             clear_grid(&w);
+            w.set_active_table(SharedString::default());
+            w.set_fn_mode(false);
+            w.set_query_running(false);
+            w.set_results_meta(SharedString::default());
         });
     }
 
@@ -4233,6 +4774,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let col_filters = col_filters.clone();
         let edit_buf = edit_buf.clone();
         let browse = browse.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
         window.on_select_result_tab(move |i| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -4243,6 +4786,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             *active_result.lock().unwrap() = i;
+            if let Some(id) = active_tab_id.lock().unwrap().clone() {
+                if let Some(tab) = workspace_tabs
+                    .lock()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|tab| tab.id == id)
+                {
+                    tab.active_result = i;
+                }
+            }
             w.set_active_result(i as i32);
             present_view(
                 &w,
@@ -4272,6 +4825,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let col_filters = col_filters.clone();
         let edit_buf = edit_buf.clone();
         let browse = browse.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
         window.on_close_result_tab(move |i| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -4290,6 +4845,17 @@ fn main() -> Result<(), slint::PlatformError> {
                 (rv.len(), *ar, rv.get(*ar).cloned())
             };
             set_result_tabs(&w, count, active);
+            if let Some(id) = active_tab_id.lock().unwrap().clone() {
+                if let Some(tab) = workspace_tabs
+                    .lock()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|tab| tab.id == id)
+                {
+                    tab.results = results.lock().unwrap().clone();
+                    tab.active_result = active;
+                }
+            }
             match sr {
                 Some(sr) => present_view(
                     &w,
@@ -4316,42 +4882,67 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- close tab -----
     {
         let weak = window.as_weak();
-        let tab_texts = tab_texts.clone();
-        let tab_titles = tab_titles.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        let save_active_tab = save_active_tab.clone();
+        let restore_tab = restore_tab.clone();
         let load_editor_text = load_editor_text.clone();
-        window.on_close_tab(move || {
+        let browse = browse.clone();
+        let results = results.clone();
+        let last_view = last_view.clone();
+        let displayed_grid = displayed_grid.clone();
+        let guard_pending = guard_pending.clone();
+        window.on_close_tab(move |requested| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let mut t = tab_texts.borrow_mut();
-            if t.len() <= 1 {
-                // Only tab: nothing to remove, so reset it to a blank slate
-                // instead of silently no-op'ing (which read as "close broken").
-                if let Some(slot) = t.get_mut(0) {
-                    slot.clear();
-                }
-                drop(t);
-                *tab_titles.borrow_mut() = vec![None];
-                set_tab_titles(&w, &tab_titles.borrow());
-                load_editor_text("");
-                clear_grid(&w);
+            if guard_pending(&w) {
                 return;
             }
-            let active = w.get_active_tab() as usize;
-            let remove_at = active.min(t.len() - 1);
-            t.remove(remove_at);
-            let new_active = active.saturating_sub(1).min(t.len() - 1);
-            let text = t[new_active].clone();
-            drop(t);
-            {
-                let mut titles = tab_titles.borrow_mut();
-                if remove_at < titles.len() {
-                    titles.remove(remove_at);
-                }
+            save_active_tab(&w);
+            let mut tabs = workspace_tabs.lock().unwrap();
+            if tabs.is_empty() {
+                return;
             }
-            set_tab_titles(&w, &tab_titles.borrow());
-            w.set_active_tab(new_active as i32);
-            load_editor_text(&text);
+            let remove_at = if requested >= 0 {
+                requested as usize
+            } else {
+                workspace_tab_index(&tabs, active_tab_id.lock().unwrap().as_deref()).unwrap_or(0)
+            };
+            if remove_at >= tabs.len() {
+                return;
+            }
+            let removed_active =
+                active_tab_id.lock().unwrap().as_deref() == Some(&tabs[remove_at].id);
+            tabs.remove(remove_at);
+            if tabs.is_empty() {
+                *active_tab_id.lock().unwrap() = None;
+                set_workspace_tabs(&w, &tabs, None);
+                drop(tabs);
+                load_editor_text("");
+                let limit = browse.lock().unwrap().limit;
+                *browse.lock().unwrap() = BrowseState {
+                    limit,
+                    ..Default::default()
+                };
+                results.lock().unwrap().clear();
+                *last_view.lock().unwrap() = None;
+                *displayed_grid.lock().unwrap() = None;
+                clear_grid(&w);
+                w.set_active_table(SharedString::default());
+                w.set_fn_mode(false);
+                w.set_query_running(false);
+                w.set_results_meta(SharedString::default());
+                return;
+            }
+            if removed_active {
+                let next = remove_at.min(tabs.len() - 1);
+                drop(tabs);
+                restore_tab(&w, next);
+            } else {
+                let active = active_tab_id.lock().unwrap().clone();
+                set_workspace_tabs(&w, &tabs, active.as_deref());
+            }
         });
     }
 
@@ -4368,47 +4959,44 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let weak = window.as_weak();
-        let tab_titles = tab_titles.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
         window.on_rename_commit(move || {
             let Some(w) = weak.upgrade() else {
                 return;
             };
             let i = w.get_rename_target().max(0) as usize;
             let name = w.get_rename_text().trim().to_string();
-            {
-                let mut titles = tab_titles.borrow_mut();
-                if let Some(slot) = titles.get_mut(i) {
-                    // Empty name reverts to the default "Query N".
-                    *slot = if name.is_empty() { None } else { Some(name) };
+            let mut tabs = workspace_tabs.lock().unwrap();
+            if let Some(tab) = tabs.get_mut(i) {
+                if !name.is_empty() {
+                    tab.title = name;
                 }
             }
-            set_tab_titles(&w, &tab_titles.borrow());
+            let active = active_tab_id.lock().unwrap().clone();
+            set_workspace_tabs(&w, &tabs, active.as_deref());
         });
     }
 
     // ----- select tab -----
     {
         let weak = window.as_weak();
-        let tab_texts = tab_texts.clone();
-        let ed_state = ed_state.clone();
-        let load_editor_text = load_editor_text.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let save_active_tab = save_active_tab.clone();
+        let restore_tab = restore_tab.clone();
+        let guard_pending = guard_pending.clone();
         window.on_select_tab(move |idx| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let i = idx as usize;
-            let mut t = tab_texts.borrow_mut();
-            if i >= t.len() {
+            if idx < 0 || idx as usize >= workspace_tabs.lock().unwrap().len() {
                 return;
             }
-            let active = w.get_active_tab() as usize;
-            if let Some(slot) = t.get_mut(active) {
-                *slot = ed_state.borrow().text();
+            if guard_pending(&w) {
+                return;
             }
-            let text = t[i].clone();
-            drop(t);
-            w.set_active_tab(idx);
-            load_editor_text(&text);
+            save_active_tab(&w);
+            restore_tab(&w, idx as usize);
         });
     }
 
@@ -4712,6 +5300,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let current = current.clone();
         let rt = rt.clone();
         let commit_buf = edit_buf.clone();
+        let cur_engine = cur_engine.clone();
+        let query_console = query_console.clone();
         window.on_commit_edits(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -4739,6 +5329,13 @@ fn main() -> Result<(), slint::PlatformError> {
             let weak2 = weak.clone();
             let current = current.clone();
             let commit_buf = commit_buf.clone();
+            if let Some(engine) = *cur_engine.borrow() {
+                for statement in dispatch::write_statements(engine, &ops) {
+                    append_query_console(&query_console, statement);
+                }
+                sync_query_console(&w, &query_console);
+            }
+            let query_console = query_console.clone();
             if let Some(w) = weak.upgrade() {
                 w.set_status_error(false);
                 w.set_result_status(SharedString::from("saving…"));
@@ -4757,6 +5354,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let Some(w) = weak2.upgrade() else {
                         return;
                     };
+                    sync_query_console(&w, &query_console);
                     match outcome {
                         Ok(n) => {
                             // Written: drop the buffer BEFORE the refresh so

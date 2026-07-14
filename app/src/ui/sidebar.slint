@@ -20,6 +20,7 @@ export component Sidebar inherits Rectangle {
     in property <[TreeNode]> query-tree;
     callback disconnect();
     callback open-table(string, string);   // (database, container)
+    callback pin-table(string, string);    // double-click keeps this object tab
     callback toggle-fields(string, string); // (database, table) — expand columns inline
     callback open-function(string);
     callback open-query(string, int);      // (label, index in its section)
@@ -39,26 +40,27 @@ export component Sidebar inherits Rectangle {
 
         // ----- Items | Queries | History -----
         Rectangle {
-            height: 40px;
+            height: 38px;
             HorizontalLayout {
-                padding-left: Tokens.sp4;
-                spacing: Tokens.sp4;
+                padding-left: Tokens.sp2;
+                padding-right: Tokens.sp2;
+                spacing: Tokens.sp1;
                 alignment: start;
                 for label[m] in ["Items", "Queries", "History"]: Rectangle {
-                    width: t.preferred-width;
+                    width: t.preferred-width + 20px;
+                    height: 24px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 5px;
+                    background: root.mode == m ? Tokens.border-strong
+                        : (mt.has-hover ? Tokens.border : transparent);
                     t := Text {
                         text: label;
                         color: root.mode == m ? Tokens.text
                             : (mt.has-hover ? Tokens.text-dim : Tokens.text-faint);
                         font-size: Tokens.font-md;
-                        font-weight: root.mode == m ? Tokens.weight-emphasis : 500;
+                        font-weight: root.mode == m ? Tokens.weight-emphasis : 400;
+                        horizontal-alignment: center;
                         vertical-alignment: center;
-                    }
-                    if root.mode == m: Rectangle {
-                        y: parent.height - 2px;
-                        height: 2px;
-                        width: parent.width;
-                        background: Tokens.accent;
                     }
                     mt := TouchArea {
                         clicked => {
@@ -72,9 +74,9 @@ export component Sidebar inherits Rectangle {
 
         // ----- filter -----
         HorizontalLayout {
-            padding-left: Tokens.sp3;
-            padding-right: Tokens.sp3;
-            padding-bottom: Tokens.sp3;
+            padding-left: Tokens.sp2;
+            padding-right: Tokens.sp2;
+            padding-bottom: Tokens.sp2;
             fld := FilterField {
                 height: 28px;
                 placeholder: root.mode == 1 ? "Filter queries..." : "Filter items...";
@@ -103,7 +105,7 @@ export component Sidebar inherits Rectangle {
                     property <bool> is-hint: node.kind == "hint";
                     property <bool> is-active: (is-container && node.label == root.active-table)
                         || (is-query && node.expanded);
-                    height: is-category ? 30px : 26px;
+                    height: is-category ? 28px : 26px;
                     border-radius: Tokens.radius;
                     background: is-active ? Tokens.accent-tint
                         : (row-ta.has-hover && !is-category && !is-field && !is-hint
@@ -120,13 +122,11 @@ export component Sidebar inherits Rectangle {
 
                     row-ta := TouchArea {
                         enabled: !is-hint && !is-field;
-                        // single-click a table = expand its columns inline;
-                        // double-click = open the table's data (see below).
                         clicked => {
                             if (is-category || is-database) {
                                 root.toggle-node(node.label);
                             } else if (is-container) {
-                                root.toggle-fields(node.db, node.label);
+                                root.open-table(node.db, node.label);
                             } else if (is-function) {
                                 root.open-function(node.label);
                             } else if (is-query) {
@@ -136,6 +136,7 @@ export component Sidebar inherits Rectangle {
                         double-clicked => {
                             if (is-container) {
                                 root.open-table(node.db, node.label);
+                                root.pin-table(node.db, node.label);
                             }
                         }
                     }
@@ -145,7 +146,7 @@ export component Sidebar inherits Rectangle {
                         padding-right: Tokens.sp2;
                         spacing: Tokens.sp2;
 
-                        // category: "FUNCTIONS · 10"
+                        // Compact native section heading: "Functions  10"
                         if is-category: HorizontalLayout {
                             spacing: Tokens.sp2;
                             alignment: start;
@@ -163,11 +164,10 @@ export component Sidebar inherits Rectangle {
                                 }
                             }
                             Text {
-                                text: node.label.to-uppercase();
-                                color: Tokens.text-dim;
-                                font-size: Tokens.font-xs;
-                                font-weight: 700;
-                                letter-spacing: 0.7px;
+                                text: node.label;
+                                color: Tokens.text;
+                                font-size: Tokens.font-sm;
+                                font-weight: Tokens.weight-emphasis;
                                 vertical-alignment: center;
                             }
                             if node.count > 0: Text {
@@ -179,14 +179,16 @@ export component Sidebar inherits Rectangle {
                         }
 
                         // leading glyph per row type
-                        if is-function: Text {
-                            text: "ƒ";
-                            color: Tokens.warn;
-                            font-size: Tokens.font-md;
-                            font-weight: 600;
+                        if is-function: Rectangle {
                             width: 13px;
-                            vertical-alignment: center;
-                            horizontal-alignment: center;
+                            VerticalLayout {
+                                alignment: center;
+                                AppIcon {
+                                    name: "function";
+                                    size: 13px;
+                                    color: Tokens.warn;
+                                }
+                            }
                         }
                         // expandable SQL tables get a caret hinting single-click
                         // reveals their columns (Mongo/Redis leaves don't).
@@ -206,11 +208,10 @@ export component Sidebar inherits Rectangle {
                             width: 13px;
                             VerticalLayout {
                                 alignment: center;
-                                Rectangle {
-                                    width: 9px;
-                                    height: 9px;
-                                    border-radius: 2px;
-                                    background: is-active ? Tokens.accent : Tokens.db-pg.with-alpha(0.85);
+                                AppIcon {
+                                    name: is-database ? "database" : (node.kind == "view" ? "view" : "table");
+                                    size: 13px;
+                                    color: is-active ? Tokens.accent : Tokens.db-pg;
                                 }
                             }
                         }

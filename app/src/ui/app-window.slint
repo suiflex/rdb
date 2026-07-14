@@ -3,7 +3,7 @@ export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
-    SearchCommandPill, BreadcrumbChip, GlyphButton, IconButton, PrimaryButton, SecondaryButton
+    SearchCommandPill, BreadcrumbChip, GlyphButton, IconButton, PrimaryButton, SecondaryButton, TextButton
 } from "components.slint";
 import { Sidebar } from "sidebar.slint";
 import { ConnPicker } from "picker.slint";
@@ -11,6 +11,7 @@ import { WorkArea } from "workarea.slint";
 import { CommandPalette, ListModal, PaletteItem } from "palette.slint";
 import { ConnForm } from "conn-form.slint";
 import { AppIcon } from "icons.slint";
+import { ScrollView } from "std-widgets.slint";
 import {
     GridColumn,
     GridCell,
@@ -28,10 +29,10 @@ import {
 export component MainWindow inherits Window {
     title: "RDB";
     icon: @image-url("../../assets/icon.png");
-    preferred-width: 1102px;
-    preferred-height: 702px;
-    min-width: 400px;
-    min-height: 320px;
+    preferred-width: 1240px;
+    preferred-height: 780px;
+    min-width: 760px;
+    min-height: 500px;
     background: Tokens.chrome;
     default-font-size: 13px;
 
@@ -74,6 +75,7 @@ in-out property <int> rename-target: -1;
 in-out property <string> rename-text;
     callback toggle-group(string);
     callback open-table(string, string);   // (database, container)
+    callback pin-table(string, string);    // double-click pins the object tab
     callback toggle-fields(string, string); // (database, table) — expand columns inline
     callback toggle-schema-node(string);
     callback select-schema(string);
@@ -162,6 +164,9 @@ in-out property <string> rename-text;
     callback completion-choose(int);
     in property <string> query-label;
     in property <string> results-meta;
+    in property <[string]> query-console;
+    in-out property <bool> console-open: true;
+    callback clear-console();
     in-out property <int> sidebar-mode: 0;
     in-out property <bool> sidebar-visible: true;
     in-out property <bool> results-visible: true;
@@ -227,7 +232,7 @@ in-out property <string> rename-text;
 
     // ----- tabs + palette -----
     in property <[TabItem]> tabs;
-    in-out property <int> active-tab: 0;
+    in-out property <int> active-tab: -1;
     in property <bool> palette-open;
     in property <[PaletteItem]> palette-items;
     callback new-tab();
@@ -236,7 +241,7 @@ in-out property <string> rename-text;
     in property <int> active-result;
     callback select-result-tab(int);
     callback close-result-tab(int);
-    callback close-tab();
+    callback close-tab(int);
     callback select-tab(int);
     callback toggle-palette();
     callback palette-filter(string);
@@ -349,7 +354,7 @@ in-out property <string> rename-text;
                     return accept;
                 }
                 if (e.text == "w") {
-                    root.close-tab();
+                    root.close-tab(root.active-tab);
                     return accept;
                 }
                 if (e.text == "1") {
@@ -497,6 +502,14 @@ in-out property <string> rename-text;
                             clicked => { root.select-schema(root.schema-name); }
                         }
                     }
+                    VerticalLayout {
+                        alignment: center;
+                        SecondaryButton {
+                            text: "SQL";
+                            height: 28px;
+                            clicked => { root.new-tab(); }
+                        }
+                    }
                 }
 
                 Rectangle { horizontal-stretch: 1; }
@@ -601,20 +614,25 @@ in-out property <string> rename-text;
 
         // ===== workspace (shown once connected) =====
         if root.connected: VerticalLayout {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            max-width: 100000px;
             spacing: 0px;
 
             // ----- main row: sidebar | work column -----
             HorizontalLayout {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                max-width: 100000px;
                 spacing: 0px;
 
                 if root.sidebar-visible: Sidebar {
                     focus-tick: root.focus-filter-tick;
-                    // preferred (not fixed) width so the window can auto-shrink the
-                    // sidebar instead of treating sidebar-w as a hard min floor
+                    // Keep navigation compact: the old preferred-only sizing let
+                    // the layout stretch this panel to 480px and crush the work area.
                     horizontal-stretch: 0;
-                    min-width: 150px;
-                    max-width: 480px;
-                    preferred-width: root.sidebar-w;
+                    min-width: root.sidebar-w;
+                    max-width: root.sidebar-w;
                     tree: root.schema-tree;
                     conn-name: root.status-conn;
                     active-table: root.active-table;
@@ -637,6 +655,9 @@ in-out property <string> rename-text;
                     }
                     open-table(db, t) => {
                         root.open-table(db, t);
+                    }
+                    pin-table(db, t) => {
+                        root.pin-table(db, t);
                     }
                     toggle-fields(db, t) => {
                         root.toggle-fields(db, t);
@@ -662,7 +683,7 @@ in-out property <string> rename-text;
                     split-h-area := TouchArea {
                         mouse-cursor: col-resize;
                         moved => {
-                            root.sidebar-w = clamp(root.sidebar-w + (self.mouse-x - self.pressed-x), 150px, 480px);
+                            root.sidebar-w = clamp(root.sidebar-w + (self.mouse-x - self.pressed-x), 184px, 360px);
                         }
                     }
                 }
@@ -670,9 +691,11 @@ in-out property <string> rename-text;
                 // work column: tab bar + work area (takes all remaining width)
                 VerticalLayout {
                     horizontal-stretch: 1;
+                    min-width: 340px;
+                    max-width: 100000px;
                     spacing: 0px;
                     // ----- doc-tab row (36px, tabs h30, active = card + accent top inset) -----
-                    tabbar := Rectangle {
+                    if root.tabs.length > 0: tabbar := Rectangle {
                         height: Tokens.doc-tab-row-h;
                         background: Tokens.chrome;
                         HorizontalLayout {
@@ -747,7 +770,7 @@ in-out property <string> rename-text;
                                         visible: i == root.active-tab || tab-ta.has-hover;
                                         close-ta := TouchArea {
                                             clicked => {
-                                                root.close-tab();
+                                                root.close-tab(i);
                                             }
                                         }
 
@@ -759,25 +782,6 @@ in-out property <string> rename-text;
                                     }
                                 }
                             }
-                            // new-tab button
-                            Rectangle {
-                                width: 30px;
-                                y: (parent.height - self.height) / 2;
-                                height: 26px;
-                                border-radius: Tokens.radius;
-                                background: add-ta.has-hover ? Tokens.border : transparent;
-                                add-ta := TouchArea {
-                                    clicked => {
-                                        root.new-tab();
-                                    }
-                                }
-
-                                AppIcon {
-                                    name: "plus";
-                                    size: Tokens.icon-sm;
-                                    color: Tokens.text-dim;
-                                }
-                            }
                             // trailing filler: gives the tab bar an infinite max-width
                             // so the work column (and the window) can stretch full-width
                             Rectangle {
@@ -786,12 +790,12 @@ in-out property <string> rename-text;
                         }
                     }
 
-                    Rectangle {
+                    if root.tabs.length > 0: Rectangle {
                         height: 1px;
                         background: Tokens.border;
                     }
 
-                    WorkArea {
+                    if root.tabs.length > 0: WorkArea {
                         vertical-stretch: 1;
                         results-visible: root.results-visible;
                         query-text <=> root.query-text;
@@ -945,6 +949,126 @@ in-out property <string> rename-text;
                         }
                         discard-edits() => {
                             root.discard-edits();
+                        }
+                    }
+
+                    if root.tabs.length == 0: Rectangle {
+                        vertical-stretch: 1;
+                        horizontal-stretch: 1;
+                        max-width: 100000px;
+                        background: Tokens.canvas;
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: Tokens.sp1;
+                            HorizontalLayout {
+                                height: 220px;
+                                Rectangle { horizontal-stretch: 1; }
+                                Image {
+                                    source: @image-url("../../assets/empty-workspace.png");
+                                    width: 340px;
+                                    height: 220px;
+                                    image-fit: contain;
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                            }
+                            Text {
+                                text: "Your workspace is clear";
+                                color: Tokens.text;
+                                font-size: 15px;
+                                font-weight: Tokens.weight-emphasis;
+                                horizontal-alignment: center;
+                            }
+                            Text {
+                                text: "Choose a table, or press ⌘T to start a query";
+                                color: Tokens.text-dim;
+                                font-size: Tokens.font-sm;
+                                horizontal-alignment: center;
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        max-width: 100000px;
+                        height: root.console-open ? 190px : 33px;
+                        background: Tokens.canvas;
+                        VerticalLayout {
+                            spacing: 0;
+                            HorizontalLayout {
+                                height: 33px;
+                                padding-left: Tokens.sp3;
+                                padding-right: Tokens.sp3;
+                                spacing: Tokens.sp2;
+                                AppIcon {
+                                    name: "terminal";
+                                    size: 13px;
+                                    color: Tokens.text-dim;
+                                }
+                                Text {
+                                    text: "SQL Console";
+                                    color: Tokens.text;
+                                    font-size: Tokens.font-sm;
+                                    font-weight: Tokens.weight-emphasis;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: root.query-console.length == 0 ? "" : "\{root.query-console.length} statements";
+                                    color: Tokens.text-faint;
+                                    font-size: Tokens.font-xs;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                                TextButton {
+                                    text: "Clear";
+                                    clicked => { root.clear-console(); }
+                                }
+                                TextButton {
+                                    text: root.console-open ? "Collapse" : "Expand";
+                                    clicked => { root.console-open = !root.console-open; }
+                                }
+                            }
+                            if root.console-open: Rectangle {
+                                height: 1px;
+                                background: Tokens.border;
+                            }
+                            if root.console-open: ScrollView {
+                                vertical-stretch: 1;
+                                VerticalLayout {
+                                    width: parent.visible-width;
+                                    padding-top: Tokens.sp3;
+                                    padding-bottom: Tokens.sp3;
+                                    padding-right: Tokens.sp4;
+                                    spacing: Tokens.sp3;
+                                    alignment: start;
+                                    if root.query-console.length == 0: Text {
+                                        x: Tokens.sp4;
+                                        text: "Executed statements will appear here";
+                                        color: Tokens.text-faint;
+                                        font-family: Tokens.mono;
+                                        font-size: Tokens.font-sm;
+                                    }
+                                    for statement[i] in root.query-console: HorizontalLayout {
+                                        width: parent.width;
+                                        spacing: Tokens.sp3;
+                                        Text {
+                                            width: 36px;
+                                            text: "\{i + 1}";
+                                            color: Tokens.text-faint;
+                                            font-family: Tokens.mono;
+                                            font-size: Tokens.font-xs;
+                                            horizontal-alignment: right;
+                                        }
+                                        Text {
+                                            horizontal-stretch: 1;
+                                            text: statement;
+                                            color: Tokens.text;
+                                            font-family: Tokens.mono;
+                                            font-size: Tokens.font-sm;
+                                            wrap: word-wrap;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
