@@ -11,7 +11,7 @@ keyring = "3"
 directories = "5"
 thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 rand = "0.8"
 
 [dev-dependencies]
