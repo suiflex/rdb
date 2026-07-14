@@ -263,6 +263,8 @@ in-out property <string> rename-text;
     in-out property <bool> db-modal-open: false;
     in-out property <bool> conn-modal-open: false;
     in property <[PaletteItem]> db-items;
+    // Databases the current connection can switch to; empty hides the switcher.
+    in property <[string]> db-list;
     in property <[PaletteItem]> conn-items;
     callback db-choose(int);
     callback conn-choose(int);
@@ -562,7 +564,16 @@ in-out property <string> rename-text;
                     }
                     if root.bc-db != "": VerticalLayout {
                         alignment: center;
-                        BreadcrumbChip { text: root.bc-db; mono: true; }
+                        // Caret + click to switch database only when the engine
+                        // enumerated more than one; otherwise a plain label.
+                        BreadcrumbChip {
+                            text: root.bc-db;
+                            mono: true;
+                            caret: root.db-list.length > 0;
+                            clicked => {
+                                if (root.db-list.length > 0) { root.open-db-modal(); }
+                            }
+                        }
                     }
                     if root.bc-schema != "": Text {
                         text: "›";

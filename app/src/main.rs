@@ -1474,6 +1474,11 @@ fn main() -> Result<(), slint::PlatformError> {
         Arc::new(std::sync::Mutex::new(None));
     let current_connection_id: Arc<std::sync::Mutex<Option<String>>> =
         Arc::new(std::sync::Mutex::new(None));
+    // One-shot database override for the next connect: the database switcher sets
+    // it, then re-invokes the connect path, which consumes it (take) so a plain
+    // reconnect from the picker still uses the connection's saved database.
+    let db_override: Arc<std::sync::Mutex<Option<String>>> =
+        Arc::new(std::sync::Mutex::new(None));
     let query_number = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let query_console: Arc<std::sync::Mutex<Vec<String>>> =
         Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -2272,67 +2277,42 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            // Mock database catalogue matching the reference; real listing
-            // arrives with multi-database introspection.
-            let dbs = [
-                "ai_bot_fintech",
-                "jdih_bkpm_2025",
-                "oss_rba_master",
-                "portfolio",
-                "pos",
-                "postgres",
-                "primbon",
-                "profin",
-                "rtmanagement",
-                "suitest",
-                "suitest_m1d_9fabae77c4a44d51aedc4ffebf39eb71",
-                "suitest_test",
-                "template0",
-                "template1",
-            ];
-            let items: Vec<PaletteItem> = dbs
+            // Real databases enumerated on connect and cached in `db-list`. Empty
+            // for engines that can't switch (single/implicit database).
+            let items: Vec<PaletteItem> = w
+                .get_db_list()
                 .iter()
                 .map(|d| PaletteItem {
-                    label: (*d).into(),
+                    label: d,
                     kind: "database".into(),
                     sub: SharedString::default(),
                     local: false,
                 })
                 .collect();
+            if items.is_empty() {
+                return;
+            }
             w.set_db_items(ModelRc::from(Rc::new(VecModel::from(items))));
             w.set_db_modal_open(true);
         });
     }
     {
         let weak = window.as_weak();
-        let workspace_tabs = workspace_tabs.clone();
-        let active_tab_id = active_tab_id.clone();
-        let browse = browse.clone();
-        let results = results.clone();
-        let displayed_grid = displayed_grid.clone();
-        let load_editor_text = load_editor_text.clone();
+        let db_override = db_override.clone();
         window.on_db_choose(move |idx| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            if let Some(it) = w.get_db_items().row_data(idx.max(0) as usize) {
-                w.set_bc_db(it.label);
-            }
-            workspace_tabs.lock().unwrap().clear();
-            *active_tab_id.lock().unwrap() = None;
-            let limit = browse.lock().unwrap().limit;
-            *browse.lock().unwrap() = BrowseState {
-                limit,
-                ..Default::default()
+            let Some(it) = w.get_db_items().row_data(idx.max(0) as usize) else {
+                return;
             };
-            results.lock().unwrap().clear();
-            *displayed_grid.lock().unwrap() = None;
-            set_workspace_tabs(&w, &[], None);
-            load_editor_text("");
-            clear_grid(&w);
-            w.set_active_table(SharedString::default());
-            w.set_query_running(false);
             w.set_db_modal_open(false);
+            // Switching database means reconnecting with a new dbname (a pg
+            // connection is bound to one database). Stash the target and re-run
+            // the connect path for the current connection; it resets tabs/schema
+            // and reloads the tree against the new database.
+            *db_override.lock().unwrap() = Some(it.label.to_string());
+            w.invoke_connect_clicked(w.get_selected_conn());
         });
     }
     // ----- schema switcher: sidebar "schema: …" selector -----
@@ -3408,14 +3388,23 @@ fn main() -> Result<(), slint::PlatformError> {
         let results = results.clone();
         let last_view = last_view.clone();
         let edit_buf = edit_buf.clone();
+        let db_override = db_override.clone();
         window.on_connect_clicked(move |idx| {
             let i = idx as usize;
+            // One-shot: set by the database switcher, empty for a fresh picker
+            // connect (which then uses the connection's saved database).
+            let db_ovr = db_override.lock().unwrap().take();
             let (sc, cfg) = {
                 let st = store.borrow();
                 let Some(sc) = st.list().get(i).cloned() else {
                     return;
                 };
-                let cfg = st.conn_config_for(&sc.id);
+                let cfg = st.conn_config_for(&sc.id).map(|mut c| {
+                    if let Some(db) = db_ovr.clone() {
+                        c.database = Some(db);
+                    }
+                    c
+                });
                 (sc, cfg)
             };
             *current_connection_id.lock().unwrap() = Some(sc.id.clone());
@@ -3442,7 +3431,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     .set_accent(theme::accent_or_default(sc.color.as_deref().unwrap_or("")));
                 w.set_status_conn(SharedString::from(sc.name.clone()));
                 w.set_bc_conn(SharedString::from(sc.name.clone()));
-                w.set_bc_db(SharedString::from(sc.database.clone().unwrap_or_default()));
+                w.set_bc_db(SharedString::from(
+                    db_ovr.clone().or_else(|| sc.database.clone()).unwrap_or_default(),
+                ));
                 w.set_bc_schema(SharedString::from(
                     if matches!(sc.engine, rdbs_connstore::Engine::Postgres) {
                         "public"
@@ -3519,6 +3510,15 @@ fn main() -> Result<(), slint::PlatformError> {
                             } else {
                                 Vec::new()
                             };
+                        // Databases on the server, backing the breadcrumb switcher.
+                        // Empty for engines that can't switch database.
+                        let db_names: Vec<SharedString> = driver
+                            .list_databases()
+                            .await
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(SharedString::from)
+                            .collect();
                         *slot = Some((engine, driver));
                         drop(slot);
                         let nodes = model::to_tree_model(&schema);
@@ -3593,6 +3593,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 w.set_schema_list(ModelRc::from(Rc::new(VecModel::from(
                                     schema_names,
                                 ))));
+                                w.set_db_list(ModelRc::from(Rc::new(VecModel::from(db_names))));
                                 let sfields: Vec<StructField> = fields
                                     .into_iter()
                                     .map(|f| StructField {
