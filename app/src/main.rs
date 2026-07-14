@@ -3752,6 +3752,8 @@ fn main() -> Result<(), slint::PlatformError> {
             let mut cur_db = String::new();
             if let Some(w) = weak.upgrade() {
                 w.set_query_running(true);
+                // Reveal the SQL console so the executed statements are visible.
+                w.set_console_open(true);
                 cur_db = w.get_schema_name().to_string();
             }
             rt.spawn(async move {
