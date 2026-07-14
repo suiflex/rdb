@@ -260,6 +260,7 @@ in-out property <string> rename-text;
     in-out property <bool> settings-open: false;
     in property <bool> update-check-enabled: true;
     callback set-update-check(bool);
+    in-out property <bool> shortcuts-open: false;
 
     // ----- connection form -----
     in property <bool> form-open;
@@ -299,9 +300,12 @@ in-out property <string> rename-text;
     FocusScope {
         key-pressed(e) => {
             if (e.text == Key.Escape) {
-                if (root.db-modal-open || root.conn-modal-open || root.palette-open) {
+                if (root.db-modal-open || root.conn-modal-open || root.palette-open
+                    || root.settings-open || root.shortcuts-open) {
                     root.db-modal-open = false;
                     root.conn-modal-open = false;
+                    root.settings-open = false;
+                    root.shortcuts-open = false;
                     if (root.palette-open) { root.toggle-palette(); }
                     return accept;
                 }
@@ -1442,12 +1446,100 @@ in-out property <string> rename-text;
                     }
                 }
 
+                // --- keyboard shortcuts ---
+                HorizontalLayout {
+                    SecondaryButton {
+                        text: "Keyboard Shortcuts";
+                        clicked => {
+                            root.settings-open = false;
+                            root.shortcuts-open = true;
+                        }
+                    }
+                }
+
                 // --- done ---
                 HorizontalLayout {
                     alignment: end;
                     PrimaryButton {
                         text: "Done";
                         clicked => { root.settings-open = false; }
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- keyboard shortcuts modal (veil + centered card) -----
+    if root.shortcuts-open: Rectangle {
+        background: Tokens.veil;
+        TouchArea {
+            clicked => { root.shortcuts-open = false; }
+        }
+
+        Rectangle {
+            width: 420px;
+            x: (parent.width - self.width) / 2;
+            y: 90px;
+            height: shortcuts-card.preferred-height;
+            border-radius: Tokens.modal-radius;
+            background: Tokens.card;
+            border-width: 1px;
+            border-color: Tokens.border;
+            drop-shadow-blur: 42px;
+            drop-shadow-offset-y: 12px;
+            drop-shadow-color: #1C191426;
+
+            TouchArea {}
+
+            shortcuts-card := VerticalLayout {
+                padding: Tokens.sp4;
+                padding-top: 18px;
+                spacing: Tokens.sp2;
+
+                Text {
+                    text: "Keyboard Shortcuts";
+                    color: Tokens.text;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+
+                for row in [
+                    { k: "⌘K", a: "Command palette" },
+                    { k: "⌘T", a: "New tab" },
+                    { k: "⌘W", a: "Close tab" },
+                    { k: "⌘1–9", a: "Switch to tab" },
+                    { k: "⌘↩", a: "Run query" },
+                    { k: "⌘\\", a: "Run in new tab" },
+                    { k: "⌘S", a: "Save / commit edits" },
+                    { k: "⌘R", a: "Refresh result" },
+                    { k: "⌘F", a: "Find" },
+                    { k: "⌘O", a: "Open connection" },
+                    { k: "⌘⇧O", a: "Open database" },
+                    { k: "⌘P", a: "Filter sidebar" },
+                    { k: "Esc", a: "Close dialog" },
+                ]: HorizontalLayout {
+                    spacing: Tokens.sp3;
+                    Text {
+                        width: 72px;
+                        text: row.k;
+                        color: Tokens.text;
+                        font-family: Tokens.mono;
+                        font-size: Tokens.font-sm;
+                    }
+                    Text {
+                        horizontal-stretch: 1;
+                        text: row.a;
+                        color: Tokens.text-dim;
+                        font-size: Tokens.font-sm;
+                    }
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+                    PrimaryButton {
+                        text: "Done";
+                        clicked => { root.shortcuts-open = false; }
                     }
                 }
             }
