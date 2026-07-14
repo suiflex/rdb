@@ -713,6 +713,16 @@ pub struct EditBuffer {
 }
 
 impl EditBuffer {
+    pub fn set_cell(&mut self, base_rows: usize, row: usize, col: usize, value: String) {
+        if row < base_rows {
+            self.changes.insert((row, col), value);
+        } else if let Some(insert) = self.inserts.get_mut(row - base_rows) {
+            if col < insert.len() {
+                insert[col] = value;
+            }
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.changes.is_empty() && self.deletes.is_empty() && self.inserts.is_empty()
     }
@@ -934,6 +944,16 @@ mod edit_tests {
             pk_cols: vec!["id".into()],
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn set_cell_routes_existing_and_inserted_rows() {
+        let mut b = buf();
+        b.inserts.push(vec![String::new(), String::new()]);
+        b.set_cell(2, 0, 1, "updated".into());
+        b.set_cell(2, 2, 1, "inserted".into());
+        assert_eq!(b.changes.get(&(0, 1)).map(String::as_str), Some("updated"));
+        assert_eq!(b.inserts[0][1], "inserted");
     }
 
     #[test]

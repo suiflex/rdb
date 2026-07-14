@@ -369,6 +369,83 @@ fn default_browse_limit(engine: rdbs_connstore::Engine) -> u64 {
     }
 }
 
+/// Operators exposed by the active engine. The filter itself is evaluated on
+/// the fetched page, but the vocabulary mirrors what that engine accepts.
+fn filter_operators(engine: rdbs_connstore::Engine) -> Vec<SharedString> {
+    use rdbs_connstore::Engine;
+    let ops: &[&str] = match engine {
+        Engine::Postgres => &[
+            "=",
+            "<>",
+            ">",
+            ">=",
+            "<",
+            "<=",
+            "LIKE",
+            "ILIKE",
+            "IN",
+            "IS NULL",
+            "IS NOT NULL",
+        ],
+        Engine::MySql | Engine::Sqlite => &[
+            "=",
+            "<>",
+            ">",
+            ">=",
+            "<",
+            "<=",
+            "LIKE",
+            "IN",
+            "IS NULL",
+            "IS NOT NULL",
+        ],
+        Engine::Cassandra => &[
+            "=",
+            "<>",
+            ">",
+            ">=",
+            "<",
+            "<=",
+            "IN",
+            "IS NULL",
+            "IS NOT NULL",
+        ],
+        Engine::Redis | Engine::Mongo => &[
+            "=",
+            "<>",
+            ">",
+            ">=",
+            "<",
+            "<=",
+            "IN",
+            "IS NULL",
+            "IS NOT NULL",
+        ],
+    };
+    ops.iter().copied().map(SharedString::from).collect()
+}
+
+#[cfg(target_os = "macos")]
+fn install_macos_app_icon() {
+    use objc2::{AllocAnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::NSData;
+
+    let Some(main_thread) = MainThreadMarker::new() else {
+        return;
+    };
+    let data = NSData::with_bytes(include_bytes!("../assets/icon@512.png"));
+    let Some(icon) = NSImage::initWithData(NSImage::alloc(), &data) else {
+        return;
+    };
+    let app = NSApplication::sharedApplication(main_thread);
+    // SAFETY: `icon` is a live NSImage and AppKit is called on the main thread.
+    unsafe { app.setApplicationIconImage(Some(&icon)) };
+}
+
+#[cfg(not(target_os = "macos"))]
+fn install_macos_app_icon() {}
+
 /// One cached SQL result, shown as a result tab. ⌘⏎ replaces the active one;
 /// ⌘\ appends a new one.
 #[derive(Clone)]
@@ -413,6 +490,10 @@ impl WorkspaceTab {
             pinned: true,
         }
     }
+
+    fn is_preview(&self) -> bool {
+        self.kind == "table" && !self.pinned
+    }
 }
 
 fn table_tab_id(connection_id: &str, database: &str, schema: &str, table: &str) -> String {
@@ -427,7 +508,7 @@ fn workspace_tab_index(tabs: &[WorkspaceTab], active_id: Option<&str>) -> Option
 fn replaceable_table_tab_index(tabs: &[WorkspaceTab], active_id: Option<&str>) -> Option<usize> {
     let index = workspace_tab_index(tabs, active_id)?;
     let tab = &tabs[index];
-    (tab.kind == "table" && !tab.pinned).then_some(index)
+    tab.is_preview().then_some(index)
 }
 
 fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&str>) {
@@ -436,6 +517,7 @@ fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&
         .map(|tab| TabItem {
             kind: tab.kind.clone().into(),
             title: tab.title.clone().into(),
+            preview: tab.is_preview(),
         })
         .collect();
     w.set_tabs(ModelRc::from(Rc::new(VecModel::from(items))));
@@ -832,6 +914,18 @@ fn view_grid(v: &model::ResultView) -> Option<model::GridModel> {
     }
 }
 
+fn guard_pending_edits(w: &MainWindow, edit_buf: &std::sync::Mutex<model::EditBuffer>) -> bool {
+    let n = edit_buf.lock().unwrap().pending_count();
+    if n == 0 {
+        return false;
+    }
+    w.set_status_error(true);
+    w.set_result_status(SharedString::from(format!(
+        "{n} pending change(s) — ⌘S to commit, or Discard"
+    )));
+    true
+}
+
 /// Clear the tabular grid properties (used by non-tabular result kinds).
 fn clear_grid(w: &MainWindow) {
     w.set_grid_col_count(0);
@@ -899,10 +993,10 @@ async fn fetch_indexes(
 fn cell_matches(cell: &model::VmCell, op: &str, needle: &str) -> bool {
     use std::cmp::Ordering;
     match op {
-        "is null" => cell.is_null,
-        "not null" => !cell.is_null,
+        "is null" | "IS NULL" => cell.is_null,
+        "not null" | "IS NOT NULL" => !cell.is_null,
         "=" => cell.text.to_lowercase() == needle,
-        "≠" | "!=" => cell.text.to_lowercase() != needle,
+        "≠" | "!=" | "<>" => cell.text.to_lowercase() != needle,
         ">" | "<" | ">=" | "<=" => {
             let ord = match (cell.text.parse::<f64>(), needle.parse::<f64>()) {
                 (Ok(a), Ok(b)) => a.partial_cmp(&b),
@@ -915,6 +1009,16 @@ fn cell_matches(cell: &model::VmCell, op: &str, needle: &str) -> bool {
                 None => false,
             }
         }
+        "IN" => needle
+            .trim()
+            .trim_matches(['(', ')'])
+            .split(',')
+            .map(|v| v.trim().trim_matches(['\'', '"']).to_lowercase())
+            .any(|v| v == cell.text.to_lowercase()),
+        "LIKE" | "ILIKE" => cell
+            .text
+            .to_lowercase()
+            .contains(needle.trim().trim_matches(['\'', '"']).trim_matches('%')),
         _ => cell.text.to_lowercase().contains(needle),
     }
 }
@@ -932,7 +1036,12 @@ fn filter_grid_cond(
     };
     // null checks ignore the value box; other operators with an empty value
     // keep every row (matches the plain filter's behavior)
-    if needle.is_empty() && op != "is null" && op != "not null" {
+    if needle.is_empty()
+        && op != "is null"
+        && op != "not null"
+        && op != "IS NULL"
+        && op != "IS NOT NULL"
+    {
         return g.clone();
     }
     model::GridModel {
@@ -1250,6 +1359,12 @@ fn present_view(
     let mut fcols: Vec<SharedString> = vec![SharedString::from("any column")];
     fcols.extend(colnames.iter().cloned());
     w.set_filter_columns(ModelRc::from(Rc::new(VecModel::from(fcols))));
+    w.set_filter_col(
+        colnames
+            .first()
+            .cloned()
+            .unwrap_or_else(|| SharedString::from("any column")),
+    );
     w.set_all_columns(ModelRc::from(Rc::new(VecModel::from(colnames))));
     *displayed_grid.lock().unwrap() = view_grid(&v);
     {
@@ -1307,25 +1422,11 @@ fn set_result_tabs(w: &MainWindow, count: usize, active: usize) {
     w.set_active_result(active as i32);
 }
 
-/// Format a number with `.` thousands separators (e.g. 1000 → "1.000").
-fn group_thousands(n: u64) -> String {
-    let s = n.to_string();
-    let bytes = s.as_bytes();
-    let mut out = String::with_capacity(s.len() + s.len() / 3);
-    for (i, b) in bytes.iter().enumerate() {
-        if i > 0 && (bytes.len() - i).is_multiple_of(3) {
-            out.push('.');
-        }
-        out.push(*b as char);
-    }
-    out
-}
-
 #[cfg(test)]
 mod fmt_tests {
     use super::{
-        group_thousands, parse_col_filter, replaceable_table_tab_index, table_tab_id,
-        workspace_tab_index, WorkspaceTab,
+        cell_matches, filter_operators, parse_col_filter, replaceable_table_tab_index,
+        table_tab_id, workspace_tab_index, WorkspaceTab,
     };
     #[test]
     fn col_filter_prefix_ops() {
@@ -1340,12 +1441,26 @@ mod fmt_tests {
         );
     }
     #[test]
-    fn groups_thousands_with_dots() {
-        assert_eq!(group_thousands(0), "0");
-        assert_eq!(group_thousands(999), "999");
-        assert_eq!(group_thousands(1000), "1.000");
-        assert_eq!(group_thousands(10_000), "10.000");
-        assert_eq!(group_thousands(1_234_567), "1.234.567");
+    fn ilike_is_postgres_only() {
+        use rdbs_connstore::Engine;
+        assert!(filter_operators(Engine::Postgres)
+            .iter()
+            .any(|op| op == "ILIKE"));
+        assert!(!filter_operators(Engine::MySql)
+            .iter()
+            .any(|op| op == "ILIKE"));
+    }
+
+    #[test]
+    fn table_filter_operators_match_values() {
+        let cell = crate::model::VmCell {
+            text: "Mitra Investindo".into(),
+            is_null: false,
+        };
+        assert!(cell_matches(&cell, "ILIKE", "mitra"));
+        assert!(cell_matches(&cell, "IN", "bank, mitra investindo"));
+        assert!(cell_matches(&cell, "<>", "other"));
+        assert!(!cell_matches(&cell, "=", "other"));
     }
 
     #[test]
@@ -2708,6 +2823,7 @@ fn main() -> Result<(), slint::PlatformError> {
         }
         if screen == "modal-db"
             || screen == "modal-conn"
+            || screen == "modal-add-mongo"
             || screen == "function"
             || screen == "palette"
         {
@@ -2722,6 +2838,12 @@ fn main() -> Result<(), slint::PlatformError> {
                         match which.as_str() {
                             "modal-db" => w.invoke_open_db_modal(),
                             "modal-conn" => w.invoke_open_conn_modal(),
+                            "modal-add-mongo" => {
+                                w.invoke_open_add_form();
+                                w.set_f_engine("MongoDB".into());
+                                w.set_f_port("27017".into());
+                                w.set_f_import_url("mongodb://root:secret@10.1.237.31:32343/admin?authMechanism=DEFAULT&replicaSet=production-rs".into());
+                            }
                             "palette" => w.invoke_toggle_palette(),
                             _ => w.invoke_open_function("uuid_generate_v3".into()),
                         }
@@ -2731,13 +2853,18 @@ fn main() -> Result<(), slint::PlatformError> {
         }
         if screen.starts_with("workspace") {
             let weak = window.as_weak();
+            let table = if screen.starts_with("workspace-users") {
+                "users"
+            } else {
+                "emiten"
+            };
             let t2 = Box::leak(Box::new(slint::Timer::default()));
             t2.start(
                 slint::TimerMode::SingleShot,
                 std::time::Duration::from_millis(1800),
                 move || {
                     if let Some(w) = weak.upgrade() {
-                        w.invoke_open_table("".into(), "emiten".into());
+                        w.invoke_open_table("".into(), table.into());
                     }
                 },
             );
@@ -2776,6 +2903,63 @@ fn main() -> Result<(), slint::PlatformError> {
             when(
                 grid_ready.clone(),
                 Rc::new(|w| w.invoke_cell_edited(0, 2, "Bayan EDITED".into())),
+            );
+        }
+        if screen == "workspace-active-commit" {
+            when(
+                grid_ready.clone(),
+                Rc::new(|w| {
+                    w.invoke_edit_cell(0, 2);
+                    w.set_editing_value("Bayan ACTIVE SAVE".into());
+                    w.invoke_commit_edits();
+                }),
+            );
+        }
+        if screen == "workspace-detail-commit" {
+            when(
+                grid_ready.clone(),
+                Rc::new(|w| {
+                    w.invoke_stage_cell(
+                        0,
+                        2,
+                        "Bayan Resources — long detail value saved from the right panel".into(),
+                    );
+                    w.invoke_commit_edits();
+                }),
+            );
+        }
+        if screen == "workspace-long-edit" {
+            when(
+                grid_ready.clone(),
+                Rc::new(|w| {
+                    w.invoke_cell_edited(
+                        0,
+                        2,
+                        "Bayan Resources — a deliberately long inline value remains visible while editing, wraps inside a bounded overlay, and still supports cursor navigation all the way to the final character."
+                            .into(),
+                    );
+                    w.invoke_edit_cell(0, 2);
+                }),
+            );
+        }
+        if screen == "workspace-pointer-edit" {
+            when(
+                grid_ready.clone(),
+                Rc::new(|w| {
+                    use slint::platform::{PointerEventButton, WindowEvent};
+                    let position = slint::LogicalPosition::new(650.0, 164.0);
+                    for _ in 0..2 {
+                        w.window().dispatch_event(WindowEvent::PointerPressed {
+                            position,
+                            button: PointerEventButton::Left,
+                        });
+                        w.window().dispatch_event(WindowEvent::PointerReleased {
+                            position,
+                            button: PointerEventButton::Left,
+                        });
+                    }
+                    assert_eq!((w.get_editing_row(), w.get_editing_col()), (0, 2));
+                }),
             );
         }
         if screen == "workspace-dirty" {
@@ -2828,6 +3012,38 @@ fn main() -> Result<(), slint::PlatformError> {
             when(
                 Rc::new(|w| w.get_active_table() == "sectors" && w.get_tabs().row_count() == 2),
                 Rc::new(|w| w.invoke_new_tab()),
+            );
+        }
+        if screen == "workspace-filter" {
+            when(
+                grid_ready.clone(),
+                Rc::new(|w| {
+                    w.set_data_filter_open(true);
+                    w.set_filter_col("name".into());
+                    w.set_filter_op("ILIKE".into());
+                    w.set_grid_filter("mitra".into());
+                    w.invoke_apply_filter();
+                }),
+            );
+        }
+        if screen == "workspace-limit" {
+            when(
+                grid_ready.clone(),
+                Rc::new(|w| w.invoke_set_limit("25".into())),
+            );
+        }
+        if screen == "workspace-insert" {
+            when(grid_ready.clone(), Rc::new(|w| w.invoke_add_row()));
+        }
+        if screen == "workspace-users-bool" || screen == "workspace-users-date" {
+            when(grid_ready.clone(), Rc::new(|w| w.invoke_add_row()));
+            let date = screen == "workspace-users-date";
+            when(
+                has_pending.clone(),
+                Rc::new(move |w| {
+                    let rows = w.get_grid_cells().row_count() / w.get_grid_col_count() as usize;
+                    w.invoke_edit_cell(rows.saturating_sub(1) as i32, if date { 4 } else { 3 });
+                }),
             );
         }
         if screen == "sql-select" {
@@ -3111,6 +3327,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            if guard_pending_edits(&w, &edit_buf) {
+                return;
+            }
             let needle = w.get_grid_filter().to_string().to_lowercase();
             let fcol = w.get_filter_col().to_string();
             let fop = w.get_filter_op().to_string();
@@ -3156,6 +3375,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            if guard_pending_edits(&w, &edit_buf) {
+                return;
+            }
             let hidden = hidden_cols.lock().unwrap().clone();
             let order = col_order.lock().unwrap().clone();
             let (scol, sasc) = *sort_state.lock().unwrap();
@@ -3218,6 +3440,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            if guard_pending_edits(&w, &edit_buf) {
+                return;
+            }
             let hidden = hidden_cols.lock().unwrap().clone();
             let order = col_order.lock().unwrap().clone();
             let cfilters = col_filters.lock().unwrap().clone();
@@ -3279,6 +3504,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            if guard_pending_edits(&w, &edit_buf) {
+                return;
+            }
             let from = from.max(0) as usize;
             let widths: Vec<f32> = w.get_grid_col_widths().iter().collect();
             if from >= widths.len() {
@@ -3379,6 +3607,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            if guard_pending_edits(&w, &edit_buf) {
+                return;
+            }
             let idx = i.max(0) as usize;
             let hidden = {
                 let mut h = hidden_cols.lock().unwrap();
@@ -3413,9 +3644,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_pending_count(0);
             w.set_editing_row(-1);
             w.set_editing_col(-1);
-            if !hidden.is_empty() {
-                w.set_grid_read_only(true);
-            }
+            w.set_grid_read_only(!hidden.is_empty() || edit_buf.lock().unwrap().pk_cols.is_empty());
             let cfilters = col_filters.lock().unwrap().clone();
             w.set_grid_col_filters(ModelRc::from(Rc::new(VecModel::from(display_col_filters(
                 &cfilters, &order, &hidden,
@@ -3557,8 +3786,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_active_table(SharedString::default());
                 // Seed the browse page size from the engine default (Mongo = 20).
                 let dft_limit = default_browse_limit(sc.engine);
-                w.set_limit_value(dft_limit as i32);
                 w.set_limit_text(SharedString::from(dft_limit.to_string()));
+                w.set_filter_operators(ModelRc::from(Rc::new(VecModel::from(filter_operators(
+                    sc.engine,
+                )))));
+                w.set_filter_op(SharedString::from("="));
             }
             // Fresh connection: nothing browsed, nothing expanded.
             *cur_engine.borrow_mut() = Some(sc.engine);
@@ -4171,17 +4403,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // silently drop them. Returns true (and says so) when edits are pending.
     let guard_pending: Rc<dyn Fn(&MainWindow) -> bool> = {
         let edit_buf = edit_buf.clone();
-        Rc::new(move |w: &MainWindow| {
-            let n = edit_buf.lock().unwrap().pending_count();
-            if n == 0 {
-                return false;
-            }
-            w.set_status_error(true);
-            w.set_result_status(SharedString::from(format!(
-                "{n} pending change(s) — ⌘S to commit, or Discard"
-            )));
-            true
-        })
+        Rc::new(move |w: &MainWindow| guard_pending_edits(w, &edit_buf))
     };
 
     let run_browse: Rc<dyn Fn()> = {
@@ -4249,12 +4471,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 .clone()
                 .unwrap_or_default();
             let tab_id = table_tab_id(&connection_id, &database_name, &schema_name, &label);
-            if let Some(index) = workspace_tabs
-                .lock()
-                .unwrap()
-                .iter()
-                .position(|tab| tab.id == tab_id)
-            {
+            // Drop the lookup guard before save/restore lock the same tab list.
+            let existing_index = {
+                let tabs = workspace_tabs.lock().unwrap();
+                workspace_tab_index(&tabs, Some(&tab_id))
+            };
+            if let Some(index) = existing_index {
                 save_active_tab(&w);
                 restore_tab(&w, index);
                 return;
@@ -4386,19 +4608,38 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     {
+        let weak = window.as_weak();
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
         window.on_pin_table(move |_db, label| {
             let Some(id) = active_tab_id.lock().unwrap().clone() else {
                 return;
             };
-            if let Some(tab) = workspace_tabs
-                .lock()
-                .unwrap()
+            let mut tabs = workspace_tabs.lock().unwrap();
+            if let Some(tab) = tabs
                 .iter_mut()
                 .find(|tab| tab.id == id && tab.table.as_ref().is_some_and(|t| label == t.name))
             {
                 tab.pinned = true;
+                if let Some(w) = weak.upgrade() {
+                    set_workspace_tabs(&w, &tabs, Some(&id));
+                }
+            }
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        window.on_pin_tab(move |index| {
+            let active = active_tab_id.lock().unwrap().clone();
+            let mut tabs = workspace_tabs.lock().unwrap();
+            if let Some(tab) = tabs.get_mut(index as usize) {
+                tab.pinned = true;
+                if let Some(w) = weak.upgrade() {
+                    set_workspace_tabs(&w, &tabs, active.as_deref());
+                }
             }
         });
     }
@@ -4478,12 +4719,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            // Echo the current limit into both the raw value (stepper math) and
-            // the dotted display, so the field always shows a clean number.
+            // Echo the validated limit so manual edits and paging stay in sync.
             let echo = |w: &MainWindow, l: u64| {
-                w.set_limit_value(l as i32);
                 w.set_limit_text(SharedString::from(l.to_string()));
-                w.set_limit_display(SharedString::from(group_thousands(l)));
             };
             if guard_pending(&w) {
                 echo(&w, browse.lock().unwrap().limit);
@@ -5129,28 +5367,6 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(w) = weak.upgrade() {
                 w.set_selected_row(r);
                 w.set_selected_col(c);
-                // Feed the bottom inspector: full cell value, pretty-printed
-                // when it parses as JSON so json/jsonb columns are readable.
-                let cols = w.get_grid_col_count();
-                let val = if cols > 0 && c >= 0 && r >= 0 {
-                    let idx = (r * cols + c) as usize;
-                    w.get_grid_cells().row_data(idx).map(|cell| {
-                        if cell.is_null {
-                            "NULL".to_string()
-                        } else {
-                            let t = cell.text.to_string();
-                            match serde_json::from_str::<serde_json::Value>(&t) {
-                                Ok(v) if v.is_object() || v.is_array() => {
-                                    serde_json::to_string_pretty(&v).unwrap_or(t)
-                                }
-                                _ => t,
-                            }
-                        }
-                    })
-                } else {
-                    None
-                };
-                w.set_selected_cell_value(SharedString::from(val.unwrap_or_default()));
             }
         });
     }
@@ -5169,9 +5385,51 @@ fn main() -> Result<(), slint::PlatformError> {
         })
     };
 
+    // Detail-panel edits join the same buffer as inline grid edits. Avoid a
+    // full-grid repaint per keystroke; selection and commit repaint naturally.
+    {
+        let weak = window.as_weak();
+        let edit_buf = edit_buf.clone();
+        let displayed_grid = displayed_grid.clone();
+        window.on_stage_cell(move |r, c, text| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if w.get_grid_read_only() || r < 0 || c < 0 {
+                return;
+            }
+            let base = displayed_grid
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|g| g.rows.len())
+                .unwrap_or(0);
+            let pending = {
+                let mut buf = edit_buf.lock().unwrap();
+                buf.set_cell(base, r as usize, c as usize, text.to_string());
+                buf.pending_count()
+            };
+            let cols = w.get_grid_col_count();
+            if cols > 0 {
+                let idx = (r * cols + c) as usize;
+                let cells = w.get_grid_cells();
+                if let Some(mut cell) = cells.row_data(idx) {
+                    cell.text = text;
+                    cell.is_null = false;
+                    if cell.state != 3 {
+                        cell.state = 1;
+                    }
+                    cells.set_row_data(idx, cell);
+                }
+            }
+            w.set_pending_count(pending as i32);
+        });
+    }
+
     // ----- inline editing: open editor on double-click -----
     {
         let weak = window.as_weak();
+        let displayed_grid = displayed_grid.clone();
         window.on_edit_cell(move |r, c| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -5190,8 +5448,28 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 return;
             }
+            let cols = w.get_grid_col_count();
+            let value = if r >= 0 && c >= 0 && cols > 0 {
+                w.get_grid_cells()
+                    .row_data((r * cols + c) as usize)
+                    .filter(|cell| !cell.is_null)
+                    .map(|cell| cell.text)
+                    .unwrap_or_default()
+            } else {
+                SharedString::default()
+            };
+            w.set_editing_value(value);
             w.set_editing_row(r);
             w.set_editing_col(c);
+            let base = displayed_grid
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|g| g.rows.len())
+                .unwrap_or(0);
+            if r >= base as i32 {
+                w.set_scroll_grid_tick(w.get_scroll_grid_tick() + 1);
+            }
         });
     }
 
@@ -5215,20 +5493,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 .unwrap_or(0);
             {
                 let mut buf = edit_buf.lock().unwrap();
-                let (r, c) = (r as usize, c as usize);
-                if r >= base {
-                    // rows below the fetched page are pending inserts
-                    let i = r - base;
-                    if let Some(row) = buf.inserts.get_mut(i) {
-                        if c < row.len() {
-                            row[c] = text.to_string();
-                        }
-                    }
-                } else {
-                    buf.changes.insert((r, c), text.to_string());
-                }
+                buf.set_cell(base, r as usize, c as usize, text.to_string());
             }
             repaint_edits(&w);
+            if r as usize >= base {
+                w.set_scroll_grid_tick(w.get_scroll_grid_tick() + 1);
+            }
         });
     }
 
@@ -5264,19 +5534,10 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             let nrows = base + edit_buf.lock().unwrap().inserts.len();
             {
-                // same buffer write as cell-edited
-                let mut buf = edit_buf.lock().unwrap();
-                let (r, c) = (r as usize, c as usize);
-                if r >= base {
-                    let i = r - base;
-                    if let Some(row) = buf.inserts.get_mut(i) {
-                        if c < row.len() {
-                            row[c] = text.to_string();
-                        }
-                    }
-                } else {
-                    buf.changes.insert((r, c), text.to_string());
-                }
+                edit_buf
+                    .lock()
+                    .unwrap()
+                    .set_cell(base, r as usize, c as usize, text.to_string());
             }
             // neighbour cell, wrapping across row ends (TablePlus-style)
             let (mut nr, mut nc) = (r, c);
@@ -5304,6 +5565,9 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_selected_col(nc);
             w.set_editing_row(nr);
             w.set_editing_col(nc);
+            if nr as usize >= base {
+                w.set_scroll_grid_tick(w.get_scroll_grid_tick() + 1);
+            }
         });
     }
 
@@ -5335,6 +5599,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_selected_row(row_idx as i32);
             w.set_editing_row(row_idx as i32);
             w.set_editing_col(0);
+            w.set_scroll_grid_tick(w.get_scroll_grid_tick() + 1);
         });
     }
 
@@ -5405,10 +5670,28 @@ fn main() -> Result<(), slint::PlatformError> {
         let commit_buf = edit_buf.clone();
         let cur_engine = cur_engine.clone();
         let query_console = query_console.clone();
+        let repaint_edits = repaint_edits.clone();
         window.on_commit_edits(move || {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            if w.get_editing_row() >= 0 && w.get_editing_col() >= 0 {
+                let base = displayed_grid
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .map(|g| g.rows.len())
+                    .unwrap_or(0);
+                edit_buf.lock().unwrap().set_cell(
+                    base,
+                    w.get_editing_row() as usize,
+                    w.get_editing_col() as usize,
+                    w.get_editing_value().to_string(),
+                );
+                w.set_editing_row(-1);
+                w.set_editing_col(-1);
+                repaint_edits(&w);
+            }
             let ops = {
                 let buf = edit_buf.lock().unwrap();
                 if buf.is_empty() {
@@ -6109,6 +6392,16 @@ fn main() -> Result<(), slint::PlatformError> {
             });
         }
     }
+
+    // AppKit replaces the process icon while Slint initializes its native
+    // window. Apply ours once the event loop has started so raw `cargo run`
+    // binaries get the same Dock icon as packaged builds.
+    let app_icon_timer = slint::Timer::default();
+    app_icon_timer.start(
+        slint::TimerMode::SingleShot,
+        std::time::Duration::from_millis(100),
+        install_macos_app_icon,
+    );
 
     shot::install(&window);
     let run_result = window.run();

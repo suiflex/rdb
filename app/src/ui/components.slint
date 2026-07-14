@@ -192,6 +192,7 @@ export component FormField inherits Rectangle {
     in property <InputType> input-type: InputType.text;
     callback accepted;
     height: 30px;
+    clip: true;
     border-radius: Tokens.radius;
     border-width: 1px;
     border-color: input.has-focus ? Tokens.accent : Tokens.border;
