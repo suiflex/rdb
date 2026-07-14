@@ -38,7 +38,7 @@ impl Driver for PostgresDriver {
         let (client, conn_task) = if matches!(cfg.sslmode, SslMode::Disable) {
             let (client, connection) = tokio_postgres::connect(&conn_str, NoTls)
                 .await
-                .map_err(|e| RdbsError::Connection(e.to_string()))?;
+                .map_err(|e| RdbsError::Connection(pg_err(&e)))?;
             let conn_task = tokio::spawn(async move {
                 let _ = connection.await;
             });
@@ -52,7 +52,7 @@ impl Driver for PostgresDriver {
             let connector = MakeTlsConnector::new(tls);
             let (client, connection) = tokio_postgres::connect(&conn_str, connector)
                 .await
-                .map_err(|e| RdbsError::Connection(e.to_string()))?;
+                .map_err(|e| RdbsError::Connection(pg_err(&e)))?;
             let conn_task = tokio::spawn(async move {
                 let _ = connection.await;
             });
@@ -65,7 +65,7 @@ impl Driver for PostgresDriver {
         self.client
             .query("SELECT 1", &[])
             .await
-            .map_err(|e| RdbsError::Connection(e.to_string()))?;
+            .map_err(|e| RdbsError::Connection(pg_err(&e)))?;
         Ok(())
     }
 
@@ -75,6 +75,22 @@ impl Driver for PostgresDriver {
 
     async fn schema_for(&self, schema: &str) -> Result<Schema> {
         schema_impl(&self.client, schema).await
+    }
+
+    async fn list_databases(&self) -> Result<Vec<String>> {
+        // Every connectable, non-template database on the server. Switching to
+        // one means reconnecting with that dbname (a pg connection is bound to a
+        // single database).
+        let rows = self
+            .client
+            .query(
+                "SELECT datname FROM pg_database \
+                 WHERE NOT datistemplate AND datallowconn ORDER BY 1",
+                &[],
+            )
+            .await
+            .map_err(|e| RdbsError::Schema(pg_err(&e)))?;
+        Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect())
     }
 
     async fn list_schemas(&self) -> Result<Vec<String>> {
@@ -90,7 +106,7 @@ impl Driver for PostgresDriver {
                 &[],
             )
             .await
-            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+            .map_err(|e| RdbsError::Schema(pg_err(&e)))?;
         Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect())
     }
 
@@ -113,7 +129,7 @@ impl Driver for PostgresDriver {
                 &[&table.name, &schema],
             )
             .await
-            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+            .map_err(|e| RdbsError::Schema(pg_err(&e)))?;
         Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect())
     }
 
@@ -123,7 +139,7 @@ impl Driver for PostgresDriver {
             .client
             .query_one(&sql, &[])
             .await
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+            .map_err(|e| RdbsError::Query(pg_err(&e)))?;
         let n: i64 = row.get(0);
         Ok(n as u64)
     }
@@ -136,12 +152,12 @@ impl Driver for PostgresDriver {
             self.client
                 .execute(&sql, &[])
                 .await
-                .map_err(|e| RdbsError::Query(e.to_string()))
+                .map_err(|e| RdbsError::Query(pg_err(&e)))
         };
         self.client
             .execute("BEGIN", &[])
             .await
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+            .map_err(|e| RdbsError::Query(pg_err(&e)))?;
         let mut affected = 0u64;
         for op in ops {
             let sql = match op {
@@ -160,7 +176,7 @@ impl Driver for PostgresDriver {
         self.client
             .execute("COMMIT", &[])
             .await
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+            .map_err(|e| RdbsError::Query(pg_err(&e)))?;
         Ok(affected)
     }
 
@@ -174,6 +190,28 @@ impl Driver for PostgresDriver {
     }
 }
 
+/// Turn a `tokio_postgres::Error` into a message worth showing. The error's own
+/// `Display` is just the generic kind ("db error"), so a failed query would
+/// otherwise surface as "query failed: db error". The real SQLSTATE + message
+/// live in `as_db_error()`; when absent (I/O, protocol) walk the `source` chain.
+fn pg_err(e: &tokio_postgres::Error) -> String {
+    use std::error::Error;
+    if let Some(db) = e.as_db_error() {
+        let mut msg = format!("{}: {}", db.code().code(), db.message());
+        if let Some(detail) = db.detail() {
+            msg.push_str(&format!(" — {detail}"));
+        }
+        if let Some(hint) = db.hint() {
+            msg.push_str(&format!(" (hint: {hint})"));
+        }
+        return msg;
+    }
+    match e.source() {
+        Some(src) => format!("{e}: {src}"),
+        None => e.to_string(),
+    }
+}
+
 async fn query_impl(client: &Client, q: &Query) -> Result<ResultSet> {
     let sql = match q {
         Query::Sql(s) => s,
@@ -184,7 +222,7 @@ async fn query_impl(client: &Client, q: &Query) -> Result<ResultSet> {
         let rows = client
             .query(sql, &[])
             .await
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+            .map_err(|e| RdbsError::Query(pg_err(&e)))?;
         let cols = column_meta(&rows);
         let mut out_rows: Vec<Row> = Vec::with_capacity(rows.len());
         for row in &rows {
@@ -202,7 +240,7 @@ async fn query_impl(client: &Client, q: &Query) -> Result<ResultSet> {
         let affected = client
             .execute(sql, &[])
             .await
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+            .map_err(|e| RdbsError::Query(pg_err(&e)))?;
         Ok(ResultSet::Affected(affected))
     }
 }
@@ -246,10 +284,10 @@ async fn schema_impl(client: &Client, schema: &str) -> Result<Schema> {
     let db_row = client
         .query_one("SELECT current_database()", &[])
         .await
-        .map_err(|e| RdbsError::Schema(e.to_string()))?;
+        .map_err(|e| RdbsError::Schema(pg_err(&e)))?;
     let db_name: String = db_row
         .try_get(0)
-        .map_err(|e| RdbsError::Schema(e.to_string()))?;
+        .map_err(|e| RdbsError::Schema(pg_err(&e)))?;
 
     // User tables + columns from information_schema, scoped to one schema.
     // Ordered so columns of the same table are contiguous for grouping.
@@ -264,7 +302,7 @@ async fn schema_impl(client: &Client, schema: &str) -> Result<Schema> {
             &[&schema],
         )
         .await
-        .map_err(|e| RdbsError::Schema(e.to_string()))?;
+        .map_err(|e| RdbsError::Schema(pg_err(&e)))?;
 
     let mut containers: Vec<Container> = Vec::new();
     for row in &rows {

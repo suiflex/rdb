@@ -128,6 +128,19 @@ impl AnyDriver {
         }
     }
 
+    #[allow(dead_code)]
+    pub async fn list_databases(&self) -> Result<Vec<String>> {
+        match self {
+            AnyDriver::Postgres(d) => d.list_databases().await,
+            AnyDriver::Mysql(d) => d.list_databases().await,
+            AnyDriver::Redis(d) => d.list_databases().await,
+            AnyDriver::Mongo(d) => d.list_databases().await,
+            AnyDriver::Sqlite(d) => d.list_databases().await,
+            AnyDriver::Cassandra(d) => d.list_databases().await,
+            AnyDriver::Mock(d) => d.list_databases().await,
+        }
+    }
+
     pub async fn containers(&self, database: &str) -> Result<Vec<Container>> {
         match self {
             AnyDriver::Postgres(d) => d.containers(database).await,

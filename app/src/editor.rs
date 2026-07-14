@@ -672,18 +672,28 @@ impl EditorState {
             }
             offset += l.chars().count() + 1; // +1 for the newline
         }
-        // split into statements on top-level semicolons
+        // Split into statements on top-level semicolons, ignoring `;` inside
+        // string literals and `-- line comments` (same rules as
+        // `split_statements`) — otherwise a `;` in a commented-out line would
+        // falsely cut the statement and Run would grab only the tail fragment.
         let mut segments: Vec<(usize, usize)> = Vec::new();
         let mut seg_start = 0;
         let mut in_str = false;
-        for (i, &c) in chars.iter().enumerate() {
+        let mut i = 0;
+        while i < chars.len() {
+            let c = chars[i];
             if c == '\'' {
                 in_str = !in_str;
-            }
-            if c == ';' && !in_str {
+            } else if !in_str && c == '-' && chars.get(i + 1) == Some(&'-') {
+                while i < chars.len() && chars[i] != '\n' {
+                    i += 1;
+                }
+                continue;
+            } else if c == ';' && !in_str {
                 segments.push((seg_start, i + 1));
                 seg_start = i + 1;
             }
+            i += 1;
         }
         if seg_start < chars.len() {
             segments.push((seg_start, chars.len()));
@@ -937,6 +947,17 @@ mod tests {
     fn statement_without_semicolons_is_whole_text() {
         let ed = EditorState::from_text("SELECT *\nFROM t");
         assert_eq!(ed.current_statement(), "SELECT *\nFROM t");
+    }
+
+    #[test]
+    fn statement_ignores_semicolon_in_comment() {
+        // A `;` inside a `-- comment` must not split the statement, else Run
+        // (cursor on the last line) would grab only the tail after that `;`.
+        let text = "SELECT a\nFROM t\nWHERE -- x = 1;\ny = 2";
+        let mut ed = EditorState::from_text(text);
+        ed.line = 3; // on `y = 2`, past the commented `;`
+        ed.col = 0;
+        assert_eq!(ed.current_statement(), text);
     }
 
     // ----- selection -----

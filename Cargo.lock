@@ -5464,6 +5464,7 @@ dependencies = [
  "rdbs-driver-redis",
  "rdbs-driver-sqlite",
  "semver",
+ "serde",
  "serde_json",
  "slint",
  "slint-build",
