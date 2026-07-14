@@ -4082,7 +4082,7 @@ dependencies = [
  "pem",
  "percent-encoding",
  "pin-project",
- "rand 0.8.6",
+ "rand 0.8.7",
  "serde",
  "serde_json",
  "socket2 0.5.10",
@@ -4117,7 +4117,7 @@ dependencies = [
  "mysql-common-derive",
  "num-bigint",
  "num-traits",
- "rand 0.8.6",
+ "rand 0.8.7",
  "regex",
  "rust_decimal",
  "saturating",
@@ -5442,9 +5442,9 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "rand"
-version = "0.8.6"
+version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
+checksum = "22f6172bdec972074665ed81ed53b71da00bfc44b65a753cfde883ec4c702a1a"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -5615,7 +5615,7 @@ dependencies = [
 
 [[package]]
 name = "rdbs"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "async-trait",
  "copypasta",
@@ -5644,7 +5644,7 @@ dependencies = [
  "aes-gcm",
  "directories",
  "keyring",
- "rand 0.8.6",
+ "rand 0.10.1",
  "rdbs-core",
  "serde",
  "serde_json",
@@ -6017,7 +6017,7 @@ dependencies = [
  "bytes",
  "num-traits",
  "postgres-types",
- "rand 0.8.6",
+ "rand 0.8.7",
  "rkyv",
  "serde",
  "serde_json",
@@ -7624,7 +7624,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
  "cfg-if",
- "rand 0.8.6",
+ "rand 0.8.7",
  "static_assertions",
 ]
 
