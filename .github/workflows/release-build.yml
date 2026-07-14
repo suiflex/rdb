@@ -19,22 +19,28 @@ jobs:
           - os: macos-14 # Apple Silicon
             target: aarch64-apple-darwin
             ext: tar.gz
+            native_asset: rdbs-aarch64-apple-darwin.dmg
           - os: macos-14 # cross-compile Intel on Apple Silicon (no scarce macos-13)
             target: x86_64-apple-darwin
             ext: tar.gz
+            native_asset: rdbs-x86_64-apple-darwin.dmg
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             ext: tar.gz
+            native_asset: rdbs-x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm # native GitHub arm64 linux runner
             target: aarch64-unknown-linux-gnu
             ext: tar.gz
+            native_asset: rdbs-aarch64-unknown-linux-gnu
             experimental: true
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             ext: zip
+            native_asset: rdbs-x86_64-pc-windows-msvc.exe
           - os: windows-11-arm # native GitHub arm64 windows runner
             target: aarch64-pc-windows-msvc
             ext: zip
+            native_asset: rdbs-aarch64-pc-windows-msvc.exe
             experimental: true
     runs-on: ${{ matrix.os }}
     # experimental arm legs are best-effort: a failure must not fail the `build`
@@ -62,15 +68,64 @@ jobs:
             libxkbcommon-dev
       - name: Build release binary
         run: cargo build --release -p rdbs --target ${{ matrix.target }}
-      - name: Package (unix)
+      # Keep the archives for Homebrew/Scoop, and also publish files users can
+      # launch directly from the GitHub Release page.
+      - name: Package archive (unix)
         if: runner.os != 'Windows'
         run: |
           tar -czf "rdbs-${{ matrix.target }}.tar.gz" \
             -C "target/${{ matrix.target }}/release" rdbs
-      - name: Package (windows)
+      - name: Package app (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          app="RDBS.app"
+          plist="$app/Contents/Info.plist"
+          iconset="$RUNNER_TEMP/RDBS.iconset"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$iconset"
+          cp "target/${{ matrix.target }}/release/rdbs" "$app/Contents/MacOS/rdbs"
+
+          icon="app/assets/icon@512.png"
+          sips -z 16 16 "$icon" --out "$iconset/icon_16x16.png"
+          sips -z 32 32 "$icon" --out "$iconset/icon_16x16@2x.png"
+          sips -z 32 32 "$icon" --out "$iconset/icon_32x32.png"
+          sips -z 64 64 "$icon" --out "$iconset/icon_32x32@2x.png"
+          sips -z 128 128 "$icon" --out "$iconset/icon_128x128.png"
+          sips -z 256 256 "$icon" --out "$iconset/icon_128x128@2x.png"
+          sips -z 256 256 "$icon" --out "$iconset/icon_256x256.png"
+          sips -z 512 512 "$icon" --out "$iconset/icon_256x256@2x.png"
+          sips -z 512 512 "$icon" --out "$iconset/icon_512x512.png"
+          iconutil -c icns "$iconset" -o "$app/Contents/Resources/RDBS.icns"
+
+          plutil -create xml1 "$plist"
+          plutil -insert CFBundleDisplayName -string RDBS "$plist"
+          plutil -insert CFBundleExecutable -string rdbs "$plist"
+          plutil -insert CFBundleIconFile -string RDBS.icns "$plist"
+          plutil -insert CFBundleIdentifier -string com.suiflex.rdbs "$plist"
+          plutil -insert CFBundleName -string RDBS "$plist"
+          plutil -insert CFBundlePackageType -string APPL "$plist"
+          plutil -insert CFBundleShortVersionString -string "${VERSION#v}" "$plist"
+          plutil -insert CFBundleVersion -string "${VERSION#v}" "$plist"
+          plutil -insert NSHighResolutionCapable -bool true "$plist"
+
+          codesign --force --deep --sign - "$app"
+          hdiutil create -volname RDBS -srcfolder "$app" -ov -format UDZO \
+            "${{ matrix.native_asset }}"
+      - name: Package executable (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          install -m 755 "target/${{ matrix.target }}/release/rdbs" \
+            "${{ matrix.native_asset }}"
+      - name: Package executables (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          Copy-Item `
+            -Path "target/${{ matrix.target }}/release/rdbs.exe" `
+            -Destination "${{ matrix.native_asset }}"
           Compress-Archive `
             -Path "target/${{ matrix.target }}/release/rdbs.exe" `
             -DestinationPath "rdbs-${{ matrix.target }}.zip"
@@ -80,7 +135,8 @@ jobs:
         shell: bash
         run: |
           gh release upload "${{ github.ref_name }}" \
-            "rdbs-${{ matrix.target }}.${{ matrix.ext }}" --clobber
+            "rdbs-${{ matrix.target }}.${{ matrix.ext }}" \
+            "${{ matrix.native_asset }}" --clobber
 
   # ---- publish jobs: siblings, both need `build`, neither needs the other ----
   # A failure in one does NOT cancel the other (GitHub only cancels a job's own
