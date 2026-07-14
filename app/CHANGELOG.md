@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0](https://github.com/suiflex/rdb/compare/v0.12.0...v0.13.0) (2026-07-14)
+
+
+### Features
+
+* **ui:** add TablePlus-style workspace tabs ([55987a1](https://github.com/suiflex/rdb/commit/55987a11305b4e0b2ba419b848e45e779954911b))
+* **ui:** add TablePlus-style workspace tabs ([7c98c15](https://github.com/suiflex/rdb/commit/7c98c15e2763991200876c1c99128bf9badfb582))
+
 ## [0.12.0](https://github.com/suiflex/rdb/compare/v0.11.0...v0.12.0) (2026-07-13)
 
 
