@@ -624,6 +624,16 @@ in-out property <string> rename-text;
                             clicked => { root.results-visible = !root.results-visible; }
                         }
                     }
+                    // divider: the two panel toggles above are a pair; the
+                    // pencil/theme/⚙ that follow are one-shot actions, not toggles.
+                    if root.connected: VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 1px;
+                            height: 16px;
+                            background: Tokens.border;
+                        }
+                    }
                     // edit the current connection (distinct from the app ⚙)
                     if root.connected: VerticalLayout {
                         alignment: center;
