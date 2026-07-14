@@ -41,7 +41,7 @@ jobs:
     # job (publish-* depend on it) so the release still gets published.
     continue-on-error: ${{ matrix.experimental || false }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -90,7 +90,7 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Render formula and push to tap
         env:
           GH_TOKEN: ${{ secrets.TAP_PUBLISH_TOKEN }}
@@ -131,7 +131,7 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Render manifest and push to bucket
         env:
           GH_TOKEN: ${{ secrets.TAP_PUBLISH_TOKEN }}
