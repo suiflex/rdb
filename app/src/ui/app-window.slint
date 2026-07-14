@@ -36,6 +36,76 @@ export component MainWindow inherits Window {
     background: Tokens.chrome;
     default-font-size: 13px;
 
+    // Native menu bar (renders as the macOS menu bar). Items are thin
+    // wrappers over callbacks/properties that already exist.
+    MenuBar {
+        Menu {
+            title: "File";
+            MenuItem {
+                title: "New Tab";
+                enabled: root.connected;
+                activated => { root.new-tab(); }
+            }
+            MenuItem {
+                title: "Close Tab";
+                enabled: root.connected && root.active-tab >= 0;
+                activated => { root.close-tab(root.active-tab); }
+            }
+            MenuSeparator {}
+            MenuItem {
+                title: "Settings…";
+                activated => { root.settings-open = true; }
+            }
+        }
+        Menu {
+            title: "Edit";
+            MenuItem {
+                title: "Format SQL";
+                enabled: root.connected && root.sql-capable;
+                activated => { root.format-sql(); }
+            }
+            MenuItem {
+                title: "Explain";
+                enabled: root.connected && root.sql-capable;
+                activated => { root.explain-query(); }
+            }
+            MenuItem {
+                title: "Find";
+                enabled: root.connected;
+                activated => { root.toggle-find(); }
+            }
+        }
+        Menu {
+            title: "View";
+            MenuItem {
+                title: "Toggle Sidebar";
+                enabled: root.connected;
+                activated => { root.sidebar-visible = !root.sidebar-visible; }
+            }
+            MenuItem {
+                title: "Toggle Results";
+                enabled: root.connected;
+                activated => { root.results-visible = !root.results-visible; }
+            }
+            MenuItem {
+                title: "Toggle SQL Console";
+                enabled: root.connected;
+                activated => { root.console-open = !root.console-open; }
+            }
+        }
+        Menu {
+            title: "Help";
+            MenuItem {
+                title: "Keyboard Shortcuts";
+                activated => { root.shortcuts-open = true; }
+            }
+            MenuItem {
+                title: "About RDBS";
+                activated => { root.about-open = true; }
+            }
+        }
+    }
+
     // ----- status bar text (fed from Rust) -----
     in property <string> status-conn: "no connection";
     in property <string> status-latency: "";
