@@ -2419,9 +2419,6 @@ fn main() -> Result<(), slint::PlatformError> {
                 let Some((_, driver)) = guard.as_ref() else {
                     return;
                 };
-                for statement in dispatch::schema_statements(engine, &schema_name) {
-                    append_query_console(&query_console, statement);
-                }
                 let Ok(schema) = driver.schema_for(&schema_name).await else {
                     return;
                 };
@@ -3432,14 +3429,6 @@ fn main() -> Result<(), slint::PlatformError> {
                 ..Default::default()
             };
             query_console.lock().unwrap().clear();
-            let initial_schema = if matches!(sc.engine, rdbs_connstore::Engine::Postgres) {
-                "public"
-            } else {
-                sc.database.as_deref().unwrap_or_default()
-            };
-            for statement in dispatch::schema_statements(sc.engine, initial_schema) {
-                append_query_console(&query_console, statement);
-            }
             // Reflect selection + accent immediately.
             if let Some(w) = weak.upgrade() {
                 set_workspace_tabs(&w, &[], None);
@@ -4231,9 +4220,6 @@ fn main() -> Result<(), slint::PlatformError> {
                 let Some((engine, driver)) = guard.as_ref() else {
                     return;
                 };
-                for statement in dispatch::table_metadata_statements(*engine, &table) {
-                    append_query_console(&query_console, statement);
-                }
                 let total = driver.count(&table).await.ok();
                 let pk = driver.primary_key(&table).await.unwrap_or_default();
                 let indexes = fetch_indexes(*engine, driver, &table).await;
