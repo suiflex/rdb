@@ -77,6 +77,22 @@ impl Driver for PostgresDriver {
         schema_impl(&self.client, schema).await
     }
 
+    async fn list_databases(&self) -> Result<Vec<String>> {
+        // Every connectable, non-template database on the server. Switching to
+        // one means reconnecting with that dbname (a pg connection is bound to a
+        // single database).
+        let rows = self
+            .client
+            .query(
+                "SELECT datname FROM pg_database \
+                 WHERE NOT datistemplate AND datallowconn ORDER BY 1",
+                &[],
+            )
+            .await
+            .map_err(|e| RdbsError::Schema(pg_err(&e)))?;
+        Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect())
+    }
+
     async fn list_schemas(&self) -> Result<Vec<String>> {
         // pg_namespace lists every schema; information_schema.schemata is
         // filtered to those the role has privileges on, so a restricted prod
