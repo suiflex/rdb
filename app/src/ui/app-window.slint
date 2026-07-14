@@ -165,7 +165,7 @@ in-out property <string> rename-text;
     in property <string> query-label;
     in property <string> results-meta;
     in property <[string]> query-console;
-    in-out property <bool> console-open: true;
+    in-out property <bool> console-open: false;
     callback clear-console();
     in-out property <int> sidebar-mode: 0;
     in-out property <bool> sidebar-visible: true;
@@ -838,6 +838,10 @@ in-out property <string> rename-text;
                     if root.tabs.length > 0: WorkArea {
                         vertical-stretch: 1;
                         results-visible: root.results-visible;
+                        console-open <=> root.console-open;
+                        console-count: root.query-console.length;
+                        toggle-console => { root.console-open = !root.console-open; }
+                        clear-console => { root.clear-console(); }
                         query-text <=> root.query-text;
                         columns: root.grid-columns;
                         cells: root.grid-cells;
@@ -1027,51 +1031,21 @@ in-out property <string> rename-text;
                         }
                     }
 
-                    Rectangle {
+                    // SQL console body: only shown when toggled open from the
+                    // footer. Collapsed by default; the footer terminal icon is
+                    // the toggle, Clear also lives in the footer.
+                    if root.console-open: Rectangle {
                         horizontal-stretch: 1;
                         max-width: 100000px;
-                        height: root.console-open ? 190px : 33px;
+                        height: 190px;
                         background: Tokens.canvas;
                         VerticalLayout {
                             spacing: 0;
-                            HorizontalLayout {
-                                height: 33px;
-                                padding-left: Tokens.sp3;
-                                padding-right: Tokens.sp3;
-                                spacing: Tokens.sp2;
-                                AppIcon {
-                                    name: "terminal";
-                                    size: 13px;
-                                    color: Tokens.text-dim;
-                                }
-                                Text {
-                                    text: "SQL Console";
-                                    color: Tokens.text;
-                                    font-size: Tokens.font-sm;
-                                    font-weight: Tokens.weight-emphasis;
-                                    vertical-alignment: center;
-                                }
-                                Text {
-                                    text: root.query-console.length == 0 ? "" : "\{root.query-console.length} statements";
-                                    color: Tokens.text-faint;
-                                    font-size: Tokens.font-xs;
-                                    vertical-alignment: center;
-                                }
-                                Rectangle { horizontal-stretch: 1; }
-                                TextButton {
-                                    text: "Clear";
-                                    clicked => { root.clear-console(); }
-                                }
-                                TextButton {
-                                    text: root.console-open ? "Collapse" : "Expand";
-                                    clicked => { root.console-open = !root.console-open; }
-                                }
-                            }
-                            if root.console-open: Rectangle {
+                            Rectangle {
                                 height: 1px;
                                 background: Tokens.border;
                             }
-                            if root.console-open: ScrollView {
+                            ScrollView {
                                 vertical-stretch: 1;
                                 VerticalLayout {
                                     width: parent.visible-width;

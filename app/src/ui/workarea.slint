@@ -7,7 +7,7 @@ import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "palette.slint";
 import {
-    UnderlineSegment, SecondaryButton, PrimaryButton, TextButton, FilterField, KeyCap
+    UnderlineSegment, SecondaryButton, PrimaryButton, TextButton, FilterField, KeyCap, IconButton
 } from "components.slint";
 import { ScrollView, ComboBox } from "std-widgets.slint";
 import { AppIcon } from "icons.slint";
@@ -20,6 +20,12 @@ export component WorkArea inherits Rectangle {
     property <bool> browse-editor-open: false;
     // Hide the results panel (editor takes the space) — header toggle.
     in property <bool> results-visible: true;
+    // SQL console (rendered by MainWindow below the work column); the footer
+    // holds the toggle + clear so it reads as one bottom bar.
+    in-out property <bool> console-open: false;
+    in property <int> console-count: 0;
+    callback toggle-console();
+    callback clear-console();
     in-out property <string> query-text;
     in property <[GridColumn]> columns;
     in property <[GridCell]> cells;
@@ -1039,6 +1045,26 @@ export component WorkArea inherits Rectangle {
                     VerticalLayout {
                         alignment: center;
                         SecondaryButton { text: "Export"; height: 24px; clicked => { root.export-csv(); } }
+                    }
+                }
+                // SQL console: toggle (terminal icon) + Clear when open
+                HorizontalLayout {
+                    spacing: Tokens.sp1;
+                    alignment: end;
+                    if root.console-open: VerticalLayout {
+                        alignment: center;
+                        TextButton {
+                            text: "Clear";
+                            clicked => { root.clear-console(); }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: "terminal";
+                            active: root.console-open;
+                            clicked => { root.toggle-console(); }
+                        }
                     }
                 }
                 // ● 12 ms
