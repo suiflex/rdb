@@ -31,5 +31,12 @@ ureq = "2"
 semver = "1"
 open = "5"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Set the Dock icon even for `cargo run`; macOS ignores a window icon on an
+# unbundled executable. These crates are already in Slint's winit dependency tree.
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSImage"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData"] }
+
 [build-dependencies]
 slint-build = "1.8"

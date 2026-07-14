@@ -7,7 +7,7 @@ import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "palette.slint";
 import {
-    UnderlineSegment, SecondaryButton, PrimaryButton, TextButton, FilterField, KeyCap, IconButton
+    UnderlineSegment, SecondaryButton, PrimaryButton, TextButton, FilterField, KeyCap
 } from "components.slint";
 import { ScrollView, ComboBox } from "std-widgets.slint";
 import { AppIcon } from "icons.slint";
@@ -18,13 +18,11 @@ export component WorkArea inherits Rectangle {
     property <bool> editor-collapsed: false;
     // Reveal the query editor while browsing a table/collection (default closed).
     property <bool> browse-editor-open: false;
-    // Hide the results panel (editor takes the space) — header toggle.
-    in property <bool> results-visible: true;
+    in-out property <bool> detail-visible: true;
     // SQL console (rendered by MainWindow below the work column); the footer
     // holds the toggle + clear so it reads as one bottom bar.
     in-out property <bool> console-open: false;
     in property <int> console-count: 0;
-    callback toggle-console();
     callback clear-console();
     in-out property <string> query-text;
     in property <[GridColumn]> columns;
@@ -43,7 +41,6 @@ export component WorkArea inherits Rectangle {
     in property <string> status-latency;
     in-out property <int> selected-row: 0;
     in-out property <int> selected-col: -1;
-    in property <string> selected-cell-value;   // full text of the selected cell (pretty JSON when it parses)
     in property <int> editing-row: -1;
     in property <int> editing-col: -1;
     in-out property <bool> show-structure: false;
@@ -107,9 +104,6 @@ export component WorkArea inherits Rectangle {
     in-out property <string> limit-text;
     // Draggable height of the SQL editor pane (session-local).
     in-out property <length> editor-h: 340px;
-    in property <int> limit-value;
-    in property <string> limit-display;
-
     // Browse chrome shows whenever a table is open in this tab.
     property <bool> browse-mode: root.active-table != "";
     // Footer view segments: 0 Data · 1 Structure · 2 Indexes
@@ -118,7 +112,10 @@ export component WorkArea inherits Rectangle {
     in-out property <bool> filter-open: false;
     in property <[string]> filter-columns;   // "any column" + real columns
     in-out property <string> filter-col: "any column";
-    in-out property <string> filter-op: "contains";
+    in property <[string]> filter-operators;
+    in-out property <string> filter-op: "=";
+    in property <int> focus-filter-tick;
+    in property <int> scroll-grid-tick;
 
     callback run();
     callback run-selection();
@@ -145,6 +142,8 @@ export component WorkArea inherits Rectangle {
     callback edit-cell(int, int);
     callback cell-edited(int, int, string);
     callback cell-advance(int, int, string, bool);
+    callback stage-cell(int, int, string);
+    in-out property <string> editing-value;
     callback edit-cancelled();
     callback prev-page();
     callback next-page();
@@ -240,17 +239,6 @@ export component WorkArea inherits Rectangle {
                         }
                     }
                 }
-                // search-in-table
-                VerticalLayout {
-                    alignment: center;
-                    FilterField {
-                        width: 200px;
-                        height: 28px;
-                        placeholder: "Search in " + root.active-table + "...";
-                        text <=> root.grid-filter;
-                        edited(t) => { root.apply-filter(); }
-                    }
-                }
                 VerticalLayout {
                     alignment: center;
                     SecondaryButton {
@@ -290,6 +278,48 @@ export component WorkArea inherits Rectangle {
                         refresh-ta := TouchArea { clicked => { root.refresh-page(); } }
                     }
                 }
+            }
+        }
+
+        // One TablePlus-style condition row. Apply and Enter share the same
+        // callback; the toolbar and footer no longer expose duplicate triggers.
+        if root.browse-mode && root.filter-open: Rectangle {
+            property <int> focus-tick: root.focus-filter-tick;
+            changed focus-tick => { filter-value.focus-input(); }
+            height: 38px;
+            background: Tokens.chrome;
+            border-width: 1px;
+            border-color: Tokens.border;
+            HorizontalLayout {
+                padding-left: Tokens.sp3;
+                padding-right: Tokens.sp3;
+                padding-top: 4px;
+                padding-bottom: 4px;
+                spacing: Tokens.sp2;
+                ComboBox {
+                    width: 180px;
+                    model: root.filter-columns;
+                    current-value <=> root.filter-col;
+                }
+                ComboBox {
+                    width: 120px;
+                    model: root.filter-operators;
+                    current-value <=> root.filter-op;
+                }
+                filter-value := FilterField {
+                    horizontal-stretch: 1;
+                    max-width: 420px;
+                    placeholder: root.filter-op == "IS NULL" || root.filter-op == "IS NOT NULL"
+                        ? "No value required" : "Value";
+                    text <=> root.grid-filter;
+                    submitted => { root.apply-filter(); }
+                }
+                PrimaryButton {
+                    text: "Apply";
+                    height: 28px;
+                    clicked => { root.apply-filter(); }
+                }
+                Rectangle { horizontal-stretch: 1; }
             }
         }
 
@@ -346,8 +376,7 @@ export component WorkArea inherits Rectangle {
         // ================= SQL editor (non-browse tabs) =================
         // Also shown over a browse grid when the user opens "Query ▸".
         if (!root.browse-mode || root.browse-editor-open) && !root.fn-mode: Rectangle {
-            // when results are hidden the editor stretches to fill the work area
-            vertical-stretch: root.results-visible ? 0.0 : 1.0;
+            vertical-stretch: 0.0;
             preferred-height: root.editor-h;
             background: Tokens.canvas;
             VerticalLayout {
@@ -392,52 +421,6 @@ export component WorkArea inherits Rectangle {
                         color: Tokens.text-faint;
                         font-size: Tokens.font-sm;
                         vertical-alignment: center;
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        HorizontalLayout {
-                            // pack the label + stepper tight against the right edge
-                            // instead of stretching them apart across the row.
-                            alignment: end;
-                            spacing: Tokens.sp2;
-                            Text {
-                                text: "Limit";
-                                color: Tokens.text-faint;
-                                font-size: Tokens.font-sm;
-                                vertical-alignment: center;
-                            }
-                            SecondaryButton {
-                                text: "−";
-                                height: 28px;
-                                clicked => { root.set-limit("\{root.limit-value - 100}"); }
-                            }
-                            // editable field; Rust reformats with dot separators
-                            Rectangle {
-                                width: 76px;
-                                height: 28px;
-                                border-radius: Tokens.radius;
-                                border-width: 1px;
-                                border-color: Tokens.border-strong;
-                                background: Tokens.card;
-                                limit-input := TextInput {
-                                    x: Tokens.sp2;
-                                    width: parent.width - 2 * Tokens.sp2;
-                                    vertical-alignment: center;
-                                    horizontal-alignment: right;
-                                    text: root.limit-display;
-                                    color: Tokens.text;
-                                    font-family: Tokens.mono;
-                                    font-size: Tokens.font-sm;
-                                    single-line: true;
-                                    accepted => { root.set-limit(self.text); }
-                                }
-                            }
-                            SecondaryButton {
-                                text: "+";
-                                height: 28px;
-                                clicked => { root.set-limit("\{root.limit-value + 100}"); }
-                            }
-                        }
                     }
                 }
                 // find bar (⌘F): input + match count + prev/next + close
@@ -526,9 +509,9 @@ export component WorkArea inherits Rectangle {
                     drag-pos(l, c) => { root.editor-drag(l, c); }
                     select-word(l, c) => { root.editor-select-word(l, c); }
                 }
-                if root.results-visible: Rectangle { height: 1px; background: Tokens.border; }
+                Rectangle { height: 1px; background: Tokens.border; }
                 // results header strip
-                if root.results-visible: HorizontalLayout {
+                HorizontalLayout {
                     height: 34px;
                     padding-left: Tokens.sp3;
                     padding-right: Tokens.sp3;
@@ -549,13 +532,13 @@ export component WorkArea inherits Rectangle {
                     }
                     Rectangle { horizontal-stretch: 1; }
                     TextButton { text: root.editor-collapsed ? "Editor ▸" : "Editor ▾"; clicked => { root.editor-collapsed = !root.editor-collapsed; } }
-                    TextButton { text: root.filter-open ? "Filter ▲" : "Filter ▼"; clicked => { root.filter-open = !root.filter-open; } }
+                    if !root.browse-mode: TextButton { text: root.filter-open ? "Filter ▲" : "Filter ▼"; clicked => { root.filter-open = !root.filter-open; } }
                     TextButton { text: "Copy"; clicked => { root.copy-results(); } }
                     TextButton { text: "Export CSV"; clicked => { root.export-csv(); } }
                     TextButton { text: "Chart"; clicked => { root.sql-view-mode = 2; } }
                 }
                 // result tabs — appear once ⌘\ has spawned a second result
-                if root.results-visible && root.result-tabs.length > 1: HorizontalLayout {
+                if root.result-tabs.length > 1: HorizontalLayout {
                     height: 30px;
                     padding-left: Tokens.sp3;
                     padding-right: Tokens.sp3;
@@ -595,7 +578,7 @@ export component WorkArea inherits Rectangle {
         }
 
         // draggable splitter: grow/shrink the editor vs the results (SQL tabs)
-        if (!root.browse-mode || root.browse-editor-open) && !root.fn-mode && root.results-visible: Rectangle {
+        if (!root.browse-mode || root.browse-editor-open) && !root.fn-mode: Rectangle {
             height: 6px;
             background: split-ta.has-hover || split-ta.pressed ? Tokens.accent : Tokens.chrome;
             split-ta := TouchArea {
@@ -612,13 +595,18 @@ export component WorkArea inherits Rectangle {
         // columns) and are toggled by `filter-open`; see the "Filter" button.
 
         // ================= result body =================
-        if !root.fn-mode && root.results-visible: body := Rectangle {
+        if !root.fn-mode: body := Rectangle {
+            property <bool> detail-shown: root.detail-visible && root.view-mode == 0
+                && root.result-kind == 0 && root.col-count > 0 && root.selected-row >= 0
+                && (root.selected-row + 1) * root.col-count <= root.cells.length;
+            property <length> detail-w: min(320px, max(240px, self.width * 0.32));
             vertical-stretch: 1;
             background: Tokens.canvas;
 
             // Data grid — SQL/KeyValue, and Mongo documents in grid view.
             if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0) && (root.result-kind == 0 || root.result-kind == 2 || (root.result-kind == 1 && root.doc-view == 0)): TabularGrid {
-                width: 100%;
+                x: 0;
+                width: body.detail-shown ? body.width - body.detail-w - 1px : body.width;
                 height: 100%;
                 columns: root.columns;
                 cells: root.cells;
@@ -628,58 +616,117 @@ export component WorkArea inherits Rectangle {
                 sort-asc: root.grid-sort-asc;
                 sort-col(i) => { root.sort-col(i); }
                 reorder-col(i, x) => { root.reorder-col(i, x); }
-                filter-open: root.filter-open;
+                filter-open: false;
                 col-filter-values: root.grid-col-filters;
                 set-col-filter(i, t) => { root.set-col-filter(i, t); }
                 selected-row <=> root.selected-row;
                 selected-col <=> root.selected-col;
                 editing-row: root.editing-row;
                 editing-col: root.editing-col;
+                editing-value <=> root.editing-value;
                 resize-col(i, d) => { root.resize-col(i, d); }
                 select-cell(r, c) => { root.select-cell(r, c); }
                 edit-cell(r, c) => { root.edit-cell(r, c); }
                 cell-edited(r, c, t) => { root.cell-edited(r, c, t); }
                 cell-advance(r, c, t, fwd) => { root.cell-advance(r, c, t, fwd); }
                 edit-cancelled() => { root.edit-cancelled(); }
+                scroll-grid-tick: root.scroll-grid-tick;
             }
 
-            // Selected-cell inspector: full value of the clicked cell (pretty
-            // JSON when it parses). Overlays the grid's bottom edge, only while
-            // a cell is selected — lets long/JSON cells stay single-line above.
-            // Drag the top edge to resize (row-resize like the column handles).
-            if root.result-kind == 0 && root.selected-col >= 0 && root.selected-cell-value != "": panel := Rectangle {
-                property <length> panel-h: 200px;
-                y: parent.height - self.height;
-                height: clamp(self.panel-h, 60px, body.height - 60px);
-                width: 100%;
+            if body.detail-shown: Rectangle {
+                x: body.width - body.detail-w;
+                width: body.detail-w;
+                height: 100%;
                 background: Tokens.card;
-                ScrollView {
-                    y: 5px;
-                    width: 100%;
-                    height: parent.height - 5px;
-                    VerticalLayout {
-                        padding: Tokens.sp3;
-                        Text {
-                            text: root.selected-cell-value;
-                            color: Tokens.text;
-                            font-family: Tokens.mono;
-                            font-size: Tokens.font-sm;
-                            wrap: word-wrap;
+                border-width: 1px;
+                border-color: Tokens.border;
+
+                VerticalLayout {
+                    spacing: 0;
+                    Rectangle {
+                        height: 40px;
+                        background: Tokens.chrome;
+                        HorizontalLayout {
+                            padding-left: Tokens.sp3;
+                            padding-right: Tokens.sp3;
+                            Text {
+                                text: "Details";
+                                color: Tokens.text;
+                                font-size: Tokens.font-sm;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            Text {
+                                text: "Row " + (root.selected-row + 1);
+                                color: Tokens.text-faint;
+                                font-family: Tokens.mono;
+                                font-size: Tokens.font-xs;
+                                vertical-alignment: center;
+                            }
                         }
                     }
-                }
-                // top drag handle: 5px grab strip; dragging up grows the panel.
-                Rectangle {
-                    height: 5px;
-                    y: 0;
-                    width: 100%;
-                    background: grip.has-hover || grip.pressed ? Tokens.accent : Tokens.border-strong;
-                    grip := TouchArea {
-                        mouse-cursor: row-resize;
-                        moved => {
-                            panel.panel-h = clamp(
-                                panel.height - (self.mouse-y - self.pressed-y),
-                                60px, body.height - 60px);
+                    Rectangle { height: 1px; background: Tokens.border; }
+                    ScrollView {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            padding: Tokens.sp3;
+                            spacing: Tokens.sp3;
+                            for c in root.col-count: Rectangle {
+                                property <GridCell> detail-cell: root.cells[root.selected-row * root.col-count + c];
+                                height: 96px;
+                                VerticalLayout {
+                                    spacing: Tokens.sp1;
+                                    HorizontalLayout {
+                                        Text {
+                                            text: root.columns[c].name;
+                                            color: Tokens.text-dim;
+                                            font-family: Tokens.mono;
+                                            font-size: Tokens.font-xs;
+                                            overflow: elide;
+                                        }
+                                        Rectangle { horizontal-stretch: 1; }
+                                        Text {
+                                            text: root.columns[c].type-name;
+                                            color: Tokens.text-faint;
+                                            font-family: Tokens.mono;
+                                            font-size: Tokens.font-xs;
+                                        }
+                                    }
+                                    Rectangle {
+                                        vertical-stretch: 1;
+                                        clip: true;
+                                        border-radius: Tokens.radius;
+                                        border-width: 1px;
+                                        border-color: detail-input.has-focus ? Tokens.accent : Tokens.border-strong;
+                                        background: Tokens.canvas;
+                                        detail-input := TextInput {
+                                            x: Tokens.sp2;
+                                            y: Tokens.sp2;
+                                            width: parent.width - 2 * Tokens.sp2;
+                                            height: parent.height - 2 * Tokens.sp2;
+                                            text: detail-cell.is-null ? "" : detail-cell.text;
+                                            enabled: !root.read-only;
+                                            single-line: false;
+                                            wrap: word-wrap;
+                                            vertical-alignment: top;
+                                            color: root.read-only ? Tokens.text-dim : Tokens.text;
+                                            font-family: Tokens.mono;
+                                            font-size: Tokens.font-sm;
+                                            edited => { root.stage-cell(root.selected-row, c, self.text); }
+                                        }
+                                        if detail-cell.is-null && detail-input.text == "": Text {
+                                            x: Tokens.sp2;
+                                            y: Tokens.sp2;
+                                            text: "NULL";
+                                            color: Tokens.text-ghost;
+                                            font-family: Tokens.mono;
+                                            font-size: Tokens.font-sm;
+                                            font-italic: true;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -971,6 +1018,32 @@ export component WorkArea inherits Rectangle {
                 if root.browse-mode: HorizontalLayout {
                     spacing: Tokens.sp2;
                     alignment: center;
+                    Text {
+                        text: "Limit";
+                        color: Tokens.text-faint;
+                        font-size: Tokens.font-sm;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        width: 58px;
+                        height: 24px;
+                        border-radius: Tokens.radius;
+                        border-width: 1px;
+                        border-color: Tokens.border-strong;
+                        background: Tokens.card;
+                        TextInput {
+                            x: 0;
+                            width: parent.width;
+                            text <=> root.limit-text;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            single-line: true;
+                            color: Tokens.text;
+                            font-family: Tokens.mono;
+                            font-size: Tokens.font-sm;
+                            accepted => { root.set-limit(self.text); }
+                        }
+                    }
                     Rectangle {
                         width: 22px;
                         height: 22px;
@@ -1028,10 +1101,6 @@ export component WorkArea inherits Rectangle {
                     alignment: end;
                     VerticalLayout {
                         alignment: center;
-                        SecondaryButton { text: "Filters"; height: 24px; clicked => { root.filter-open = !root.filter-open; } }
-                    }
-                    VerticalLayout {
-                        alignment: center;
                         SecondaryButton { text: "Columns"; height: 24px; clicked => { root.columns-open = !root.columns-open; } }
                     }
                     VerticalLayout {
@@ -1047,24 +1116,11 @@ export component WorkArea inherits Rectangle {
                         SecondaryButton { text: "Export"; height: 24px; clicked => { root.export-csv(); } }
                     }
                 }
-                // SQL console: toggle (terminal icon) + Clear when open
-                HorizontalLayout {
-                    spacing: Tokens.sp1;
-                    alignment: end;
-                    if root.console-open: VerticalLayout {
-                        alignment: center;
-                        TextButton {
-                            text: "Clear";
-                            clicked => { root.clear-console(); }
-                        }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        IconButton {
-                            icon: "view";
-                            active: root.console-open;
-                            clicked => { root.toggle-console(); }
-                        }
+                if root.console-open: VerticalLayout {
+                    alignment: center;
+                    TextButton {
+                        text: "Clear";
+                        clicked => { root.clear-console(); }
                     }
                 }
                 // ● 12 ms

@@ -485,6 +485,7 @@ impl MockDriver {
                     Cell::Int(i + 1),
                     Cell::Text(format!("user{:03}@fintech.id", i + 1)),
                     Cell::Text(if i % 3 == 0 { "admin" } else { "member" }.into()),
+                    Cell::Bool(i % 2 == 0),
                     Cell::Null,
                 ]
             })
@@ -496,6 +497,7 @@ impl MockDriver {
                     ("id", "int8"),
                     ("email", "varchar"),
                     ("role", "varchar"),
+                    ("is_active", "bool"),
                     ("deleted_at", "timestamptz"),
                 ],
                 user_rows,

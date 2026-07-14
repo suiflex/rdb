@@ -5615,11 +5615,14 @@ dependencies = [
 
 [[package]]
 name = "rdbs"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "async-trait",
  "copypasta",
  "json5",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
  "open",
  "rdbs-connstore",
  "rdbs-core",

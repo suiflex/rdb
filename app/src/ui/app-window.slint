@@ -51,6 +51,14 @@ export component MainWindow inherits Window {
                 enabled: root.connected && root.active-tab >= 0;
                 activated => { root.close-tab(root.active-tab); }
             }
+            MenuItem {
+                title: "Save Changes";
+                // Slint maps Control to the platform primary modifier:
+                // Command on macOS, Control on Windows/Linux.
+                shortcut: @keys(Control + S);
+                enabled: root.connected && (root.pending-count > 0 || root.editing-row >= 0);
+                activated => { root.commit-edits(); }
+            }
             MenuSeparator {}
             MenuItem {
                 title: "Settings…";
@@ -70,9 +78,17 @@ export component MainWindow inherits Window {
                 activated => { root.explain-query(); }
             }
             MenuItem {
-                title: "Find";
+                title: root.active-table != "" ? "Filter Rows" : "Find";
+                shortcut: @keys(Control + F);
                 enabled: root.connected;
-                activated => { root.toggle-find(); }
+                activated => {
+                    if (root.active-table != "") {
+                        root.data-filter-open = true;
+                        root.focus-data-filter-tick += 1;
+                    } else {
+                        root.toggle-find();
+                    }
+                }
             }
         }
         Menu {
@@ -83,9 +99,9 @@ export component MainWindow inherits Window {
                 activated => { root.sidebar-visible = !root.sidebar-visible; }
             }
             MenuItem {
-                title: "Toggle Results";
+                title: "Toggle Details";
                 enabled: root.connected;
-                activated => { root.results-visible = !root.results-visible; }
+                activated => { root.detail-visible = !root.detail-visible; }
             }
             MenuItem {
                 title: "Toggle SQL Console";
@@ -146,6 +162,7 @@ in-out property <string> rename-text;
     callback toggle-group(string);
     callback open-table(string, string);   // (database, container)
     callback pin-table(string, string);    // double-click pins the object tab
+    callback pin-tab(int);                 // double-click pins a preview tab
     callback toggle-fields(string, string); // (database, table) — expand columns inline
     callback toggle-schema-node(string);
     callback select-schema(string);
@@ -189,13 +206,14 @@ in-out property <string> rename-text;
     in property <string> result-status;
     in-out property <int> selected-row: 0;
     in-out property <int> selected-col: -1;
-    in property <string> selected-cell-value;
     in property <int> editing-row: -1;
     in property <int> editing-col: -1;
+    in-out property <string> editing-value;
     callback select-cell(int, int);
     callback edit-cell(int, int);
     callback cell-edited(int, int, string);
     callback edit-cancelled();
+    callback stage-cell(int, int, string);
     in-out property <bool> show-structure: false;
     in property <[StructField]> structure-columns;
     in-out property <string> grid-filter;
@@ -213,7 +231,11 @@ in-out property <string> rename-text;
     callback toggle-column(int);
     in property <[string]> filter-columns;
     in-out property <string> filter-col: "any column";
-    in-out property <string> filter-op: "contains";
+    in property <[string]> filter-operators;
+    in-out property <string> filter-op: "=";
+    in-out property <bool> data-filter-open: false;
+    in-out property <int> focus-data-filter-tick: 0;
+    in-out property <int> scroll-grid-tick: 0;
     in property <[IndexRow]> index-rows;
     callback apply-filter();
     callback apply-mongo-filter();
@@ -239,7 +261,7 @@ in-out property <string> rename-text;
     callback clear-console();
     in-out property <int> sidebar-mode: 0;
     in-out property <bool> sidebar-visible: true;
-    in-out property <bool> results-visible: true;
+    in-out property <bool> detail-visible: true;
     callback editor-key(string, bool, bool, bool) -> bool;
     callback editor-press(int, int);
     callback editor-drag(int, int);
@@ -285,8 +307,6 @@ in-out property <string> rename-text;
     in property <bool> status-error;
     in property <bool> query-running;
     in-out property <string> limit-text: "300";
-    in-out property <int> limit-value: 300;      // raw limit for stepper math
-    in-out property <string> limit-display: "300"; // dotted, e.g. "1.000"
     callback prev-page();
     callback next-page();
     callback refresh-page();
@@ -423,7 +443,12 @@ in-out property <string> rename-text;
                     return accept;
                 }
                 if (e.text == "f") {
-                    root.toggle-find();
+                    if (root.active-table != "") {
+                        root.data-filter-open = true;
+                        root.focus-data-filter-tick += 1;
+                    } else {
+                        root.toggle-find();
+                    }
                     return accept;
                 }
                 if (e.text == "t") {
@@ -615,13 +640,13 @@ in-out property <string> rename-text;
                             clicked => { root.sidebar-visible = !root.sidebar-visible; }
                         }
                     }
-                    // hide/show the results panel (editor takes the space)
+                    // hide/show the selected-row details panel
                     if root.connected: VerticalLayout {
                         alignment: center;
                         IconButton {
-                            icon: "rows";
-                            active: root.results-visible;
-                            clicked => { root.results-visible = !root.results-visible; }
+                            icon: "panel-right";
+                            active: root.detail-visible;
+                            clicked => { root.detail-visible = !root.detail-visible; }
                         }
                     }
                     // edit the current connection (distinct from the app ⚙)
@@ -649,6 +674,15 @@ in-out property <string> rename-text;
                         GlyphButton {
                             glyph: "⚙";
                             clicked => { root.settings-open = true; }
+                        }
+                    }
+                    // SQL log stays available without ever hiding the table.
+                    if root.connected: VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: "terminal";
+                            active: root.console-open;
+                            clicked => { root.console-open = !root.console-open; }
                         }
                     }
                 }
@@ -792,7 +826,7 @@ in-out property <string> rename-text;
                                         root.select-tab(i);
                                     }
                                     double-clicked => {
-                                        root.open-rename(i, tab.title);
+                                        root.pin-tab(i);
                                     }
                                 }
 
@@ -837,6 +871,7 @@ in-out property <string> rename-text;
                                         color: i == root.active-tab ? Tokens.text : Tokens.text-dim;
                                         font-size: Tokens.font-sm;
                                         font-weight: i == root.active-tab ? Tokens.weight-emphasis : 400;
+                                        font-italic: tab.preview;
                                         overflow: elide;
                                     }
                                     // rename affordance (active or hovered tab)
@@ -881,24 +916,6 @@ in-out property <string> rename-text;
                                     }
                                 }
                             }
-                            // new-tab (+) button, sits right after the last tab
-                            VerticalLayout {
-                                alignment: center;
-                                Rectangle {
-                                    width: 28px;
-                                    height: 26px;
-                                    border-radius: Tokens.radius;
-                                    background: add-tab-ta.has-hover ? Tokens.card : transparent;
-                                    AppIcon {
-                                        name: "plus";
-                                        size: 13px;
-                                        color: add-tab-ta.has-hover ? Tokens.text : Tokens.text-dim;
-                                    }
-                                    add-tab-ta := TouchArea {
-                                        clicked => { root.new-tab(); }
-                                    }
-                                }
-                            }
                             // trailing filler: gives the tab bar an infinite max-width
                             // so the work column (and the window) can stretch full-width
                             Rectangle {
@@ -914,10 +931,9 @@ in-out property <string> rename-text;
 
                     if root.tabs.length > 0: WorkArea {
                         vertical-stretch: 1;
-                        results-visible: root.results-visible;
+                        detail-visible <=> root.detail-visible;
                         console-open <=> root.console-open;
                         console-count: root.query-console.length;
-                        toggle-console => { root.console-open = !root.console-open; }
                         clear-console => { root.clear-console(); }
                         query-text <=> root.query-text;
                         columns: root.grid-columns;
@@ -968,7 +984,11 @@ in-out property <string> rename-text;
                         }
                         filter-columns: root.filter-columns;
                         filter-col <=> root.filter-col;
+                        filter-operators: root.filter-operators;
                         filter-op <=> root.filter-op;
+                        filter-open <=> root.data-filter-open;
+                        focus-filter-tick: root.focus-data-filter-tick;
+                        scroll-grid-tick: root.scroll-grid-tick;
                         index-rows: root.index-rows;
                         editor-key(t, cmd, alt, shift) => { root.editor-key(t, cmd, alt, shift) }
                         editor-press(l, c) => { root.editor-press(l, c); }
@@ -983,9 +1003,9 @@ in-out property <string> rename-text;
                         find-close() => { root.find-close(); }
                         selected-row: root.selected-row;
                         selected-col: root.selected-col;
-                        selected-cell-value: root.selected-cell-value;
                         editing-row: root.editing-row;
                         editing-col: root.editing-col;
+                        editing-value <=> root.editing-value;
                         show-structure <=> root.show-structure;
                         structure-columns: root.structure-columns;
                         grid-filter <=> root.grid-filter;
@@ -1000,8 +1020,6 @@ in-out property <string> rename-text;
                         read-only: root.grid-read-only;
                         query-running: root.query-running;
                         limit-text <=> root.limit-text;
-                        limit-value: root.limit-value;
-                        limit-display: root.limit-display;
                         run => {
                             root.run-query();
                         }
@@ -1043,6 +1061,9 @@ in-out property <string> rename-text;
                         }
                         cell-advance(r, c, t, fwd) => {
                             root.cell-advance(r, c, t, fwd);
+                        }
+                        stage-cell(r, c, t) => {
+                            root.stage-cell(r, c, t);
                         }
                         edit-cancelled() => {
                             root.edit-cancelled();
@@ -1108,9 +1129,7 @@ in-out property <string> rename-text;
                         }
                     }
 
-                    // SQL console body: only shown when toggled open from the
-                    // footer. Collapsed by default; the footer terminal icon is
-                    // the toggle, Clear also lives in the footer.
+                    // SQL console body: toggled from the header terminal icon.
                     if root.console-open: Rectangle {
                         horizontal-stretch: 1;
                         max-width: 100000px;

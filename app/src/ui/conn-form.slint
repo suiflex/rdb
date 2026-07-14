@@ -15,6 +15,14 @@ export global Swatches {
     ];
 }
 
+component FormLabel inherits Text {
+    width: 82px;
+    color: Tokens.text-dim;
+    font-size: Tokens.font-sm;
+    horizontal-alignment: right;
+    vertical-alignment: center;
+}
+
 export component ConnForm inherits Rectangle {
     in property <bool> open;
     in property <bool> edit-mode;
@@ -45,15 +53,13 @@ export component ConnForm inherits Rectangle {
     background: Tokens.veil;
 
     if root.open: Rectangle {
-        width: 460px;
-        // Hug the content height: a bare Rectangle fills its parent (the full
-        // overlay), which stretched every input. Binding to the layout's
-        // preferred height sizes the card to its rows — buttons stay inside and
-        // inputs keep their natural height.
+        width: min(520px, parent.width - 2 * Tokens.sp4);
+        // Hug the compact row layout; add scrolling only if future fields make
+        // the form taller than the window.
         // ponytail: wrap vbox in a ScrollView only if content ever exceeds the window.
         height: vbox.preferred-height;
         x: (parent.width - self.width) / 2;
-        y: 60px;
+        y: max(Tokens.sp4, (parent.height - self.height) / 2);
         border-radius: Tokens.radius-lg;
         background: Tokens.card;
         border-width: 1px;
@@ -66,130 +72,175 @@ export component ConnForm inherits Rectangle {
             spacing: Tokens.sp2;
 
             Text {
-                text: root.edit-mode ? "Edit Connection" : "New Connection";
+                text: (root.edit-mode ? "Edit " : "") + root.f-engine + " connection";
                 color: Tokens.text;
                 font-size: Tokens.font-md;
+                font-weight: Tokens.weight-emphasis;
+                horizontal-alignment: center;
             }
 
-            Text { text: "Import URL"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
             HorizontalLayout {
+                height: 30px;
                 spacing: Tokens.sp2;
+                FormLabel { text: "Name"; }
+                FormField { horizontal-stretch: 1; text <=> root.f-name; }
+            }
+
+            HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: "Engine"; }
+                SelectBox {
+                    horizontal-stretch: 1;
+                    model: ["PostgreSQL", "MySQL", "Redis", "MongoDB", "SQLite", "Cassandra"];
+                    current-value <=> root.f-engine;
+                    selected(v) => { root.engine-changed(v); }
+                }
+            }
+
+            HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: "Color"; }
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: Tokens.sp2;
+                    for col[i] in Swatches.colors: Rectangle {
+                        width: 22px;
+                        height: 22px;
+                        border-radius: 11px;
+                        background: col;
+                        border-width: Swatches.hexes[i] == root.f-color ? 2px : 0px;
+                        border-color: Tokens.text;
+                        TouchArea { clicked => { root.f-color = Swatches.hexes[i]; } }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+
+            import-row := HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: "URL"; }
                 FormField {
+                    horizontal-stretch: 1;
+                    min-width: 0px;
                     text <=> root.f-import-url;
                     placeholder: "postgresql://user:pass@host:5432/db?sslmode=require";
                     accepted => { root.import-url(); }
                 }
-                SecondaryButton { text: "Import"; height: 30px; clicked => { root.import-url(); } }
-            }
-
-            Text { text: "Name"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
-            FormField { text <=> root.f-name; }
-
-            Text { text: "Engine"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
-            SelectBox {
-                model: ["PostgreSQL", "MySQL", "Redis", "MongoDB", "SQLite", "Cassandra"];
-                current-value <=> root.f-engine;
-                selected(v) => { root.engine-changed(v); }
+                SecondaryButton {
+                    text: "Import";
+                    height: 30px;
+                    clicked => { root.import-url(); }
+                }
             }
 
             // SQLite is a local file: one path field, no host/port/user/ssl.
-            if root.f-engine == "SQLite": Text {
-                text: "File"; color: Tokens.text-dim; font-size: Tokens.font-sm;
-            }
-            if root.f-engine == "SQLite": FormField {
-                text <=> root.f-database;
-                placeholder: "/path/to/database.db";
+            if root.f-engine == "SQLite": HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: "File"; }
+                FormField {
+                    horizontal-stretch: 1;
+                    text <=> root.f-database;
+                    placeholder: "/path/to/database.db";
+                }
             }
 
             if root.f-engine != "SQLite": HorizontalLayout {
+                height: 30px;
                 spacing: Tokens.sp2;
-                VerticalLayout {
-                    Text { text: "Host"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
-                    FormField { text <=> root.f-host; }
+                FormLabel { text: "Host"; }
+                FormField { horizontal-stretch: 1; text <=> root.f-host; }
+                Text {
+                    width: 32px;
+                    text: "Port";
+                    color: Tokens.text-dim;
+                    font-size: Tokens.font-sm;
+                    vertical-alignment: center;
                 }
-                VerticalLayout {
-                    width: 110px;
-                    Text { text: "Port"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
-                    FormField { text <=> root.f-port; }
-                }
+                FormField { width: 94px; text <=> root.f-port; }
             }
 
             // Redis has no user/database concept — hide those for it (and SQLite).
             if root.f-engine != "Redis" && root.f-engine != "SQLite": HorizontalLayout {
+                height: 30px;
                 spacing: Tokens.sp2;
-                VerticalLayout {
-                    Text { text: "User"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
-                    FormField { text <=> root.f-user; }
+                FormLabel { text: "User"; }
+                FormField { horizontal-stretch: 1; text <=> root.f-user; }
+                Text {
+                    width: 56px;
+                    text: "Database";
+                    color: Tokens.text-dim;
+                    font-size: Tokens.font-sm;
+                    vertical-alignment: center;
                 }
-                VerticalLayout {
-                    Text { text: "Database"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
-                    FormField { text <=> root.f-database; }
-                }
+                FormField { horizontal-stretch: 1; text <=> root.f-database; }
             }
 
-            if root.f-engine != "SQLite": Text {
-                text: "Password"; color: Tokens.text-dim; font-size: Tokens.font-sm;
-            }
-            if root.f-engine != "SQLite": FormField {
-                text <=> root.f-password; input-type: InputType.password;
+            if root.f-engine != "SQLite": HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: "Password"; }
+                FormField {
+                    horizontal-stretch: 1;
+                    text <=> root.f-password;
+                    input-type: InputType.password;
+                }
             }
 
             // SSL mode only applies to the SQL engines.
-            if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL": Text {
-                text: "SSL"; color: Tokens.text-dim; font-size: Tokens.font-sm;
-            }
-            if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL": SelectBox {
-                model: ["Disable", "Prefer", "Require"];
-                current-value <=> root.f-sslmode;
+            if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL": HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: "SSL mode"; }
+                SelectBox {
+                    horizontal-stretch: 1;
+                    model: ["Disable", "Prefer", "Require"];
+                    current-value <=> root.f-sslmode;
+                }
             }
 
             // Mongo connection options: a query string merged into the URI, or a
             // full mongodb://…/mongodb+srv://… override for Atlas / replica sets.
-            if root.f-engine == "MongoDB": Text {
-                text: "Options / URI"; color: Tokens.text-dim; font-size: Tokens.font-sm;
-            }
-            if root.f-engine == "MongoDB": FormField {
-                text <=> root.f-params;
-                placeholder: "?replicaSet=rs0&authSource=admin  ·  or  mongodb+srv://…";
-            }
-
-            Text { text: "Color"; color: Tokens.text-dim; font-size: Tokens.font-sm; }
-            HorizontalLayout {
+            if root.f-engine == "MongoDB": HorizontalLayout {
+                height: 30px;
                 spacing: Tokens.sp2;
-                for col[i] in Swatches.colors: Rectangle {
-                    width: 22px;
-                    height: 22px;
-                    border-radius: 11px;
-                    background: col;
-                    border-width: Swatches.hexes[i] == root.f-color ? 2px : 0px;
-                    border-color: Tokens.text;
-                    TouchArea { clicked => { root.f-color = Swatches.hexes[i]; } }
+                FormLabel { text: "Options"; }
+                FormField {
+                    horizontal-stretch: 1;
+                    text <=> root.f-params;
+                    placeholder: "replicaSet=rs0&authSource=admin";
                 }
             }
 
-            Text {
+            if root.form-error != "": Text {
                 text: root.form-error;
                 color: Tokens.error;
                 font-size: Tokens.font-sm;
+                horizontal-alignment: center;
             }
 
-            Text {
+            if root.test-busy || root.test-result != "": Text {
                 text: root.test-busy ? "Testing connection…" : root.test-result;
                 color: root.test-ok ? Tokens.ok : Tokens.text-dim;
                 font-size: Tokens.font-sm;
+                horizontal-alignment: center;
             }
 
             HorizontalLayout {
+                height: 30px;
                 spacing: Tokens.sp2;
+                Rectangle { horizontal-stretch: 1; }
                 SecondaryButton {
-                    text: "Test Connection";
+                    text: "Test";
                     height: 30px;
                     enabled: !root.test-busy;
                     clicked => { root.test-conn(); }
                 }
                 PrimaryButton { text: "Save"; height: 30px; clicked => { root.save(); } }
                 SecondaryButton { text: "Cancel"; height: 30px; clicked => { root.cancel(); } }
-                Rectangle {}
                 if root.edit-mode: SecondaryButton { text: "Delete"; height: 30px; clicked => { root.delete-conn(); } }
             }
         }

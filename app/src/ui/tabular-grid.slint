@@ -3,7 +3,7 @@
 // Cells are flat row-major: row r, col c at r*col-count + c.
 import { Tokens } from "tokens.slint";
 import { GridColumn, GridCell } from "structs.slint";
-import { ScrollView } from "std-widgets.slint";
+import { ComboBox, DatePickerPopup, ScrollView } from "std-widgets.slint";
 
 export component TabularGrid inherits Rectangle {
     in property <[GridColumn]> columns;
@@ -22,14 +22,36 @@ export component TabularGrid inherits Rectangle {
     // inline edit overlay: row/col currently being edited, -1 = none
     in property <int> editing-row: -1;
     in property <int> editing-col: -1;
+    in-out property <string> editing-value;
     callback resize-col(int, length);      // (column index, drag delta)
     callback select-cell(int, int);        // (row, col)
     callback edit-cell(int, int);          // double-click → open inline editor
     callback cell-edited(int, int, string); // Enter in the inline editor
     callback cell-advance(int, int, string, bool); // Tab/Shift+Tab → commit + edit neighbour
     callback edit-cancelled();
+    in property <int> scroll-grid-tick;
+    property <int> date-row: -1;
+    property <int> date-col: -1;
+
+    pure function is-boolean(t: string) -> bool {
+        return t == "bool" || t == "boolean" || t == "BOOL" || t == "BOOLEAN"
+            || t == "MYSQL_TYPE_BIT";
+    }
+
+    pure function is-date(t: string) -> bool {
+        return t == "date" || t == "DATE" || t == "timestamp" || t == "TIMESTAMP"
+            || t == "timestamptz" || t == "TIMESTAMPTZ" || t == "datetime"
+            || t == "DATETIME" || t == "MYSQL_TYPE_DATE" || t == "MYSQL_TYPE_DATETIME"
+            || t == "MYSQL_TYPE_TIMESTAMP";
+    }
+
+    changed scroll-grid-tick => {
+        body.viewport-y = min(0px, body.visible-height - body.viewport-height);
+    }
 
     VerticalLayout {
+        width: 100%;
+        height: 100%;
         // ----- frozen header band: mirrors the body's horizontal scroll so the
         // headers stay put while rows scroll vertically -----
         Rectangle {
@@ -166,7 +188,11 @@ export component TabularGrid inherits Rectangle {
         for r in (root.col-count > 0 ? root.cells.length / root.col-count : 0): Rectangle {
             property <bool> row-deleted: root.cells[r * root.col-count].state == 2;
             property <bool> row-inserted: root.cells[r * root.col-count].state == 3;
-            height: Tokens.grid-row-h;
+            property <bool> expanded-editor: r == root.editing-row && root.editing-col >= 0
+                && root.editing-col < root.columns.length
+                && !root.is-boolean(root.columns[root.editing-col].type-name)
+                && !root.is-date(root.columns[root.editing-col].type-name);
+            height: self.expanded-editor ? 52px : Tokens.grid-row-h;
             background: row-deleted ? Tokens.error-tint
                 : row-inserted ? Tokens.ok-tint
                 : r == root.selected-row ? Tokens.accent-tint.with-alpha(0.55)
@@ -198,7 +224,7 @@ export component TabularGrid inherits Rectangle {
                         || root.columns[c].type-name == "int8"
                         || root.columns[c].type-name == "numeric";
                     width: root.col-widths.length > c ? root.col-widths[c] : 140px;
-                    clip: true;
+                    clip: !(r == root.editing-row && c == root.editing-col);
                     background: transparent;
                     cell-ta := TouchArea {
                         clicked => { root.select-cell(r, c); }
@@ -255,22 +281,89 @@ export component TabularGrid inherits Rectangle {
                     }
                     // inline editor overlay
                     if r == root.editing-row && c == root.editing-col: Rectangle {
+                        property <bool> compact-editor: root.is-boolean(root.columns[c].type-name)
+                            || root.is-date(root.columns[c].type-name);
+                        property <length> editor-w: self.compact-editor ? parent.width
+                            : max(parent.width, min(520px, root.width - 2 * Tokens.sp2));
+                        property <length> visible-x: parent.x + body.viewport-x;
+                        z: 100;
+                        x: self.compact-editor ? 0px
+                            : max(-self.visible-x, min(0px, root.width - self.visible-x - self.editor-w));
+                        width: self.editor-w;
+                        height: parent.height;
                         background: Tokens.card;
                         border-width: 2px;
                         border-color: Tokens.edit-outline;
-                        edit-input := TextInput {
+                        if root.is-boolean(root.columns[c].type-name): ComboBox {
+                            x: 1px;
+                            y: 1px;
+                            width: parent.width - 2px;
+                            height: parent.height - 2px;
+                            model: ["true", "false"];
+                            current-value: cell.is-null ? "" : cell.text;
+                            selected(value) => {
+                                root.editing-value = value;
+                                root.cell-edited(r, c, value);
+                            }
+                        }
+                        if root.is-date(root.columns[c].type-name): HorizontalLayout {
+                            padding-left: Tokens.sp2;
+                            padding-right: 2px;
+                            spacing: Tokens.sp1;
+                            date-input := TextInput {
+                                horizontal-stretch: 1;
+                                vertical-alignment: center;
+                                text: cell.is-null ? "" : cell.text;
+                                edited => { root.editing-value = self.text; }
+                                color: Tokens.text;
+                                font-family: Tokens.mono;
+                                font-size: Tokens.font-sm;
+                                single-line: true;
+                                accepted => { root.cell-edited(r, c, self.text); }
+                                key-pressed(e) => {
+                                    if (e.text == Key.Escape) { root.edit-cancelled(); return accept; }
+                                    return reject;
+                                }
+                                init => { self.focus(); self.select-all(); }
+                            }
+                            Rectangle {
+                                width: 22px;
+                                Text {
+                                    text: "▣";
+                                    color: Tokens.text-dim;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: center;
+                                }
+                                TouchArea {
+                                    clicked => {
+                                        root.date-row = r;
+                                        root.date-col = c;
+                                        date-picker.show();
+                                    }
+                                }
+                            }
+                        }
+                        if !root.is-boolean(root.columns[c].type-name) && !root.is-date(root.columns[c].type-name): edit-input := TextInput {
                             x: Tokens.sp2;
+                            y: Tokens.sp1;
                             width: parent.width - 2 * Tokens.sp2;
-                            vertical-alignment: center;
+                            height: parent.height - 2 * Tokens.sp1;
+                            vertical-alignment: top;
                             text: cell.is-null ? "" : cell.text;
+                            edited => { root.editing-value = self.text; }
                             color: Tokens.text;
                             font-family: Tokens.mono;
                             font-size: Tokens.font-sm;
-                            single-line: true;
+                            single-line: false;
+                            wrap: word-wrap;
                             accepted => { root.cell-edited(r, c, self.text); }
                             key-pressed(e) => {
                                 if (e.text == Key.Escape) {
                                     root.edit-cancelled();
+                                    return accept;
+                                }
+                                if (e.text == Key.Return) {
+                                    root.cell-edited(r, c, self.text);
                                     return accept;
                                 }
                                 if (e.text == Key.Tab || e.text == Key.Backtab) {
@@ -288,6 +381,17 @@ export component TabularGrid inherits Rectangle {
                 Rectangle { horizontal-stretch: 1; }
             }
         }
+            }
+        }
+    }
+
+    date-picker := DatePickerPopup {
+        title: "Select date";
+        accepted(d) => {
+            if (root.date-row >= 0 && root.date-col >= 0) {
+                root.cell-edited(root.date-row, root.date-col,
+                    "\{d.year}-" + (d.month < 10 ? "0" : "") + "\{d.month}-"
+                    + (d.day < 10 ? "0" : "") + "\{d.day}");
             }
         }
     }
