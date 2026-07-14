@@ -261,6 +261,8 @@ in-out property <string> rename-text;
     in property <bool> update-check-enabled: true;
     callback set-update-check(bool);
     in-out property <bool> shortcuts-open: false;
+    in-out property <bool> about-open: false;
+    in property <string> app-version;
 
     // ----- connection form -----
     in property <bool> form-open;
@@ -301,11 +303,12 @@ in-out property <string> rename-text;
         key-pressed(e) => {
             if (e.text == Key.Escape) {
                 if (root.db-modal-open || root.conn-modal-open || root.palette-open
-                    || root.settings-open || root.shortcuts-open) {
+                    || root.settings-open || root.shortcuts-open || root.about-open) {
                     root.db-modal-open = false;
                     root.conn-modal-open = false;
                     root.settings-open = false;
                     root.shortcuts-open = false;
+                    root.about-open = false;
                     if (root.palette-open) { root.toggle-palette(); }
                     return accept;
                 }
@@ -1457,6 +1460,17 @@ in-out property <string> rename-text;
                     }
                 }
 
+                // --- about ---
+                HorizontalLayout {
+                    SecondaryButton {
+                        text: "About RDBS";
+                        clicked => {
+                            root.settings-open = false;
+                            root.about-open = true;
+                        }
+                    }
+                }
+
                 // --- done ---
                 HorizontalLayout {
                     alignment: end;
@@ -1540,6 +1554,72 @@ in-out property <string> rename-text;
                     PrimaryButton {
                         text: "Done";
                         clicked => { root.shortcuts-open = false; }
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- about modal (veil + centered card) -----
+    if root.about-open: Rectangle {
+        background: Tokens.veil;
+        TouchArea {
+            clicked => { root.about-open = false; }
+        }
+
+        Rectangle {
+            width: 380px;
+            x: (parent.width - self.width) / 2;
+            y: 130px;
+            height: about-card.preferred-height;
+            border-radius: Tokens.modal-radius;
+            background: Tokens.card;
+            border-width: 1px;
+            border-color: Tokens.border;
+            drop-shadow-blur: 42px;
+            drop-shadow-offset-y: 12px;
+            drop-shadow-color: #1C191426;
+
+            TouchArea {}
+
+            about-card := VerticalLayout {
+                padding: Tokens.sp4;
+                padding-top: 22px;
+                spacing: Tokens.sp2;
+
+                Text {
+                    text: "RDBS";
+                    color: Tokens.text;
+                    font-size: 22px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "Version " + root.app-version;
+                    color: Tokens.text-dim;
+                    font-size: Tokens.font-sm;
+                    font-family: Tokens.mono;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "Native cross-platform database manager";
+                    color: Tokens.text-dim;
+                    font-size: Tokens.font-sm;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: "PostgreSQL · MySQL · Redis · MongoDB";
+                    color: Tokens.text-faint;
+                    font-size: Tokens.font-xs;
+                    horizontal-alignment: center;
+                }
+
+                HorizontalLayout {
+                    alignment: center;
+                    PrimaryButton {
+                        text: "Done";
+                        clicked => { root.about-open = false; }
                     }
                 }
             }

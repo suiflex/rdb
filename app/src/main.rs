@@ -1375,6 +1375,7 @@ fn main() -> Result<(), slint::PlatformError> {
         .global::<Theme>()
         .set_dark(settings.borrow().get().theme.is_dark());
     window.set_update_check_enabled(settings.borrow().get().update_check);
+    window.set_app_version(env!("CARGO_PKG_VERSION").into());
 
     // Fixed window size for the screenshot loop: RDBS_WIN=WxH (logical px).
     if let Ok(spec) = std::env::var("RDBS_WIN") {
