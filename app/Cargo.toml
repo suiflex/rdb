@@ -27,7 +27,7 @@ async-trait = "0.1"
 copypasta = "0.10"
 # update check: one blocking GitHub GET (ureq, no async/TLS-stack bloat) +
 # semver compare; `open` opens the release page cross-platform.
-ureq = "2"
+ureq = "3"
 semver = "1"
 open = "5"
 
