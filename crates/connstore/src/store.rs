@@ -56,6 +56,13 @@ impl ConnStore {
         Ok(dirs.config_dir().join("recent_queries.json"))
     }
 
+    /// Location of `query_tabs.json` in the same config dir — the persisted
+    /// open query tabs and their SQL text, restored on launch.
+    pub fn query_tabs_path() -> Result<PathBuf> {
+        let dirs = ProjectDirs::from("dev", "dbm", "dbm").ok_or(ConnStoreError::NoConfigDir)?;
+        Ok(dirs.config_dir().join("query_tabs.json"))
+    }
+
     /// Open the store at the platform default path with the runtime-selected
     /// secret backend (keychain, or encrypted-file fallback). Convenience
     /// wrapper over `default_path` + `secret::select_backend` + `load`.
