@@ -762,6 +762,26 @@ in-out property <string> rename-text;
                                         font-weight: i == root.active-tab ? Tokens.weight-emphasis : 400;
                                         overflow: elide;
                                     }
+                                    // rename affordance (active or hovered tab)
+                                    Rectangle {
+                                        width: 18px;
+                                        height: 18px;
+                                        y: (parent.height - self.height) / 2;
+                                        border-radius: 4px;
+                                        background: rename-ta.has-hover ? Tokens.card : transparent;
+                                        visible: i == root.active-tab || tab-ta.has-hover;
+                                        rename-ta := TouchArea {
+                                            clicked => {
+                                                root.open-rename(i, tab.title);
+                                            }
+                                        }
+
+                                        AppIcon {
+                                            name: "pencil";
+                                            size: 11px;
+                                            color: rename-ta.has-hover ? Tokens.text : Tokens.text-dim;
+                                        }
+                                    }
                                     // close affordance (active or hovered tab)
                                     Rectangle {
                                         width: 18px;
