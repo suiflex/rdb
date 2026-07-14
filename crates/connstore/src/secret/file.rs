@@ -9,9 +9,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use aes_gcm::aead::{Aead, KeyInit, OsRng};
+use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
-use rand::RngCore;
+use rand::{rngs::SysRng, TryRng};
 
 use crate::error::{ConnStoreError, Result};
 use crate::secret::SecretBackend;
@@ -46,7 +46,9 @@ impl EncryptedFileBackend {
             return Ok(());
         }
         let mut key = [0u8; 32];
-        OsRng.fill_bytes(&mut key);
+        SysRng
+            .try_fill_bytes(&mut key)
+            .map_err(|err| ConnStoreError::Secret(err.to_string()))?;
         std::fs::write(&self.key_path, key)?;
         self.restrict_perms(&self.key_path)?;
         Ok(())
@@ -73,8 +75,9 @@ impl EncryptedFileBackend {
         if bytes.len() != 32 {
             return Err(ConnStoreError::Secret("corrupt key file".into()));
         }
-        let key = Key::<Aes256Gcm>::from_slice(&bytes);
-        Ok(Aes256Gcm::new(key))
+        let key = Key::<Aes256Gcm>::try_from(bytes.as_slice())
+            .map_err(|_| ConnStoreError::Secret("corrupt key file".into()))?;
+        Ok(Aes256Gcm::new(&key))
     }
 
     fn load(&self) -> Result<HashMap<String, String>> {
@@ -86,10 +89,11 @@ impl EncryptedFileBackend {
             return Err(ConnStoreError::Secret("corrupt secrets file".into()));
         }
         let (nonce_bytes, ciphertext) = raw.split_at(NONCE_LEN);
-        let nonce = Nonce::from_slice(nonce_bytes);
+        let nonce = Nonce::try_from(nonce_bytes)
+            .map_err(|_| ConnStoreError::Secret("corrupt secrets file".into()))?;
         let plaintext = self
             .cipher()?
-            .decrypt(nonce, ciphertext)
+            .decrypt(&nonce, ciphertext)
             .map_err(|_| ConnStoreError::Secret("decryption failed".into()))?;
         let map = serde_json::from_slice(&plaintext)?;
         Ok(map)
@@ -98,11 +102,14 @@ impl EncryptedFileBackend {
     fn save(&self, map: &HashMap<String, String>) -> Result<()> {
         let plaintext = serde_json::to_vec(map)?;
         let mut nonce_bytes = [0u8; NONCE_LEN];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        SysRng
+            .try_fill_bytes(&mut nonce_bytes)
+            .map_err(|err| ConnStoreError::Secret(err.to_string()))?;
+        let nonce = Nonce::try_from(nonce_bytes.as_slice())
+            .map_err(|_| ConnStoreError::Secret("invalid nonce".into()))?;
         let ciphertext = self
             .cipher()?
-            .encrypt(nonce, plaintext.as_ref())
+            .encrypt(&nonce, plaintext.as_ref())
             .map_err(|_| ConnStoreError::Secret("encryption failed".into()))?;
         let mut out = Vec::with_capacity(NONCE_LEN + ciphertext.len());
         out.extend_from_slice(&nonce_bytes);
