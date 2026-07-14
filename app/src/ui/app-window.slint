@@ -534,6 +534,7 @@ in-out property <string> rename-text;
                         alignment: center;
                         IconButton {
                             icon: "columns";
+                            active: root.sidebar-visible;
                             clicked => { root.sidebar-visible = !root.sidebar-visible; }
                         }
                     }
@@ -542,6 +543,7 @@ in-out property <string> rename-text;
                         alignment: center;
                         IconButton {
                             icon: "rows";
+                            active: root.results-visible;
                             clicked => { root.results-visible = !root.results-visible; }
                         }
                     }
