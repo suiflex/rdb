@@ -406,16 +406,18 @@ export component GlyphButton inherits Rectangle {
 export component IconButton inherits Rectangle {
     in property <string> icon;
     in property <length> icon-size: Tokens.icon-sm;
+    in property <bool> active: false;
     callback clicked;
     width: 28px;
     height: 28px;
     border-radius: Tokens.radius;
-    background: ta.has-hover ? Tokens.border : transparent;
+    background: ta.has-hover ? Tokens.border
+        : root.active ? Tokens.accent-tint : transparent;
     animate background { duration: Tokens.fade; }
     AppIcon {
         name: root.icon;
         size: root.icon-size;
-        color: Tokens.text-dim;
+        color: root.active ? Tokens.accent : Tokens.text-dim;
     }
     ta := TouchArea { clicked => { root.clicked(); } }
 }

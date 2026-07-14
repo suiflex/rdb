@@ -1,0 +1,34 @@
+name: audit
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - "**/Cargo.toml"
+      - Cargo.lock
+      - .github/workflows/audit.yml
+  pull_request:
+    paths:
+      - "**/Cargo.toml"
+      - Cargo.lock
+      - .github/workflows/audit.yml
+  # New advisories land without any code change, so sweep weekly too.
+  schedule:
+    - cron: "0 6 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # quick-xml is a Linux-only, build-time transitive dep of
+          # wayland-scanner (winit/Slint stack) pinned at 0.39 upstream — not
+          # upgradable from here. Revisit when winit bumps it.
+          ignore: RUSTSEC-2026-0194,RUSTSEC-2026-0195

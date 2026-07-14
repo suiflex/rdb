@@ -36,6 +36,76 @@ export component MainWindow inherits Window {
     background: Tokens.chrome;
     default-font-size: 13px;
 
+    // Native menu bar (renders as the macOS menu bar). Items are thin
+    // wrappers over callbacks/properties that already exist.
+    MenuBar {
+        Menu {
+            title: "File";
+            MenuItem {
+                title: "New Tab";
+                enabled: root.connected;
+                activated => { root.new-tab(); }
+            }
+            MenuItem {
+                title: "Close Tab";
+                enabled: root.connected && root.active-tab >= 0;
+                activated => { root.close-tab(root.active-tab); }
+            }
+            MenuSeparator {}
+            MenuItem {
+                title: "Settings…";
+                activated => { root.settings-open = true; }
+            }
+        }
+        Menu {
+            title: "Edit";
+            MenuItem {
+                title: "Format SQL";
+                enabled: root.connected && root.sql-capable;
+                activated => { root.format-sql(); }
+            }
+            MenuItem {
+                title: "Explain";
+                enabled: root.connected && root.sql-capable;
+                activated => { root.explain-query(); }
+            }
+            MenuItem {
+                title: "Find";
+                enabled: root.connected;
+                activated => { root.toggle-find(); }
+            }
+        }
+        Menu {
+            title: "View";
+            MenuItem {
+                title: "Toggle Sidebar";
+                enabled: root.connected;
+                activated => { root.sidebar-visible = !root.sidebar-visible; }
+            }
+            MenuItem {
+                title: "Toggle Results";
+                enabled: root.connected;
+                activated => { root.results-visible = !root.results-visible; }
+            }
+            MenuItem {
+                title: "Toggle SQL Console";
+                enabled: root.connected;
+                activated => { root.console-open = !root.console-open; }
+            }
+        }
+        Menu {
+            title: "Help";
+            MenuItem {
+                title: "Keyboard Shortcuts";
+                activated => { root.shortcuts-open = true; }
+            }
+            MenuItem {
+                title: "About RDBS";
+                activated => { root.about-open = true; }
+            }
+        }
+    }
+
     // ----- status bar text (fed from Rust) -----
     in property <string> status-conn: "no connection";
     in property <string> status-latency: "";
@@ -165,7 +235,7 @@ in-out property <string> rename-text;
     in property <string> query-label;
     in property <string> results-meta;
     in property <[string]> query-console;
-    in-out property <bool> console-open: true;
+    in-out property <bool> console-open: false;
     callback clear-console();
     in-out property <int> sidebar-mode: 0;
     in-out property <bool> sidebar-visible: true;
@@ -260,6 +330,9 @@ in-out property <string> rename-text;
     in-out property <bool> settings-open: false;
     in property <bool> update-check-enabled: true;
     callback set-update-check(bool);
+    in-out property <bool> shortcuts-open: false;
+    in-out property <bool> about-open: false;
+    in property <string> app-version;
 
     // ----- connection form -----
     in property <bool> form-open;
@@ -299,9 +372,13 @@ in-out property <string> rename-text;
     FocusScope {
         key-pressed(e) => {
             if (e.text == Key.Escape) {
-                if (root.db-modal-open || root.conn-modal-open || root.palette-open) {
+                if (root.db-modal-open || root.conn-modal-open || root.palette-open
+                    || root.settings-open || root.shortcuts-open || root.about-open) {
                     root.db-modal-open = false;
                     root.conn-modal-open = false;
+                    root.settings-open = false;
+                    root.shortcuts-open = false;
+                    root.about-open = false;
                     if (root.palette-open) { root.toggle-palette(); }
                     return accept;
                 }
@@ -534,6 +611,7 @@ in-out property <string> rename-text;
                         alignment: center;
                         IconButton {
                             icon: "columns";
+                            active: root.sidebar-visible;
                             clicked => { root.sidebar-visible = !root.sidebar-visible; }
                         }
                     }
@@ -542,6 +620,7 @@ in-out property <string> rename-text;
                         alignment: center;
                         IconButton {
                             icon: "rows";
+                            active: root.results-visible;
                             clicked => { root.results-visible = !root.results-visible; }
                         }
                     }
@@ -760,6 +839,26 @@ in-out property <string> rename-text;
                                         font-weight: i == root.active-tab ? Tokens.weight-emphasis : 400;
                                         overflow: elide;
                                     }
+                                    // rename affordance (active or hovered tab)
+                                    Rectangle {
+                                        width: 18px;
+                                        height: 18px;
+                                        y: (parent.height - self.height) / 2;
+                                        border-radius: 4px;
+                                        background: rename-ta.has-hover ? Tokens.card : transparent;
+                                        visible: i == root.active-tab || tab-ta.has-hover;
+                                        rename-ta := TouchArea {
+                                            clicked => {
+                                                root.open-rename(i, tab.title);
+                                            }
+                                        }
+
+                                        AppIcon {
+                                            name: "pencil";
+                                            size: 11px;
+                                            color: rename-ta.has-hover ? Tokens.text : Tokens.text-dim;
+                                        }
+                                    }
                                     // close affordance (active or hovered tab)
                                     Rectangle {
                                         width: 18px;
@@ -782,6 +881,24 @@ in-out property <string> rename-text;
                                     }
                                 }
                             }
+                            // new-tab (+) button, sits right after the last tab
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 28px;
+                                    height: 26px;
+                                    border-radius: Tokens.radius;
+                                    background: add-tab-ta.has-hover ? Tokens.card : transparent;
+                                    AppIcon {
+                                        name: "plus";
+                                        size: 13px;
+                                        color: add-tab-ta.has-hover ? Tokens.text : Tokens.text-dim;
+                                    }
+                                    add-tab-ta := TouchArea {
+                                        clicked => { root.new-tab(); }
+                                    }
+                                }
+                            }
                             // trailing filler: gives the tab bar an infinite max-width
                             // so the work column (and the window) can stretch full-width
                             Rectangle {
@@ -798,6 +915,10 @@ in-out property <string> rename-text;
                     if root.tabs.length > 0: WorkArea {
                         vertical-stretch: 1;
                         results-visible: root.results-visible;
+                        console-open <=> root.console-open;
+                        console-count: root.query-console.length;
+                        toggle-console => { root.console-open = !root.console-open; }
+                        clear-console => { root.clear-console(); }
                         query-text <=> root.query-text;
                         columns: root.grid-columns;
                         cells: root.grid-cells;
@@ -987,51 +1108,21 @@ in-out property <string> rename-text;
                         }
                     }
 
-                    Rectangle {
+                    // SQL console body: only shown when toggled open from the
+                    // footer. Collapsed by default; the footer terminal icon is
+                    // the toggle, Clear also lives in the footer.
+                    if root.console-open: Rectangle {
                         horizontal-stretch: 1;
                         max-width: 100000px;
-                        height: root.console-open ? 190px : 33px;
+                        height: 190px;
                         background: Tokens.canvas;
                         VerticalLayout {
                             spacing: 0;
-                            HorizontalLayout {
-                                height: 33px;
-                                padding-left: Tokens.sp3;
-                                padding-right: Tokens.sp3;
-                                spacing: Tokens.sp2;
-                                AppIcon {
-                                    name: "terminal";
-                                    size: 13px;
-                                    color: Tokens.text-dim;
-                                }
-                                Text {
-                                    text: "SQL Console";
-                                    color: Tokens.text;
-                                    font-size: Tokens.font-sm;
-                                    font-weight: Tokens.weight-emphasis;
-                                    vertical-alignment: center;
-                                }
-                                Text {
-                                    text: root.query-console.length == 0 ? "" : "\{root.query-console.length} statements";
-                                    color: Tokens.text-faint;
-                                    font-size: Tokens.font-xs;
-                                    vertical-alignment: center;
-                                }
-                                Rectangle { horizontal-stretch: 1; }
-                                TextButton {
-                                    text: "Clear";
-                                    clicked => { root.clear-console(); }
-                                }
-                                TextButton {
-                                    text: root.console-open ? "Collapse" : "Expand";
-                                    clicked => { root.console-open = !root.console-open; }
-                                }
-                            }
-                            if root.console-open: Rectangle {
+                            Rectangle {
                                 height: 1px;
                                 background: Tokens.border;
                             }
-                            if root.console-open: ScrollView {
+                            ScrollView {
                                 vertical-stretch: 1;
                                 VerticalLayout {
                                     width: parent.visible-width;
@@ -1428,12 +1519,177 @@ in-out property <string> rename-text;
                     }
                 }
 
+                // --- keyboard shortcuts ---
+                HorizontalLayout {
+                    SecondaryButton {
+                        text: "Keyboard Shortcuts";
+                        clicked => {
+                            root.settings-open = false;
+                            root.shortcuts-open = true;
+                        }
+                    }
+                }
+
+                // --- about ---
+                HorizontalLayout {
+                    SecondaryButton {
+                        text: "About RDBS";
+                        clicked => {
+                            root.settings-open = false;
+                            root.about-open = true;
+                        }
+                    }
+                }
+
                 // --- done ---
                 HorizontalLayout {
                     alignment: end;
                     PrimaryButton {
                         text: "Done";
                         clicked => { root.settings-open = false; }
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- keyboard shortcuts modal (veil + centered card) -----
+    if root.shortcuts-open: Rectangle {
+        background: Tokens.veil;
+        TouchArea {
+            clicked => { root.shortcuts-open = false; }
+        }
+
+        Rectangle {
+            width: 420px;
+            x: (parent.width - self.width) / 2;
+            y: 90px;
+            height: shortcuts-card.preferred-height;
+            border-radius: Tokens.modal-radius;
+            background: Tokens.card;
+            border-width: 1px;
+            border-color: Tokens.border;
+            drop-shadow-blur: 42px;
+            drop-shadow-offset-y: 12px;
+            drop-shadow-color: #1C191426;
+
+            TouchArea {}
+
+            shortcuts-card := VerticalLayout {
+                padding: Tokens.sp4;
+                padding-top: 18px;
+                spacing: Tokens.sp2;
+
+                Text {
+                    text: "Keyboard Shortcuts";
+                    color: Tokens.text;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+
+                for row in [
+                    { k: "⌘K", a: "Command palette" },
+                    { k: "⌘T", a: "New tab" },
+                    { k: "⌘W", a: "Close tab" },
+                    { k: "⌘1–9", a: "Switch to tab" },
+                    { k: "⌘↩", a: "Run query" },
+                    { k: "⌘\\", a: "Run in new tab" },
+                    { k: "⌘S", a: "Save / commit edits" },
+                    { k: "⌘R", a: "Refresh result" },
+                    { k: "⌘F", a: "Find" },
+                    { k: "⌘O", a: "Open connection" },
+                    { k: "⌘⇧O", a: "Open database" },
+                    { k: "⌘P", a: "Filter sidebar" },
+                    { k: "Esc", a: "Close dialog" },
+                ]: HorizontalLayout {
+                    spacing: Tokens.sp3;
+                    Text {
+                        width: 72px;
+                        text: row.k;
+                        color: Tokens.text;
+                        font-family: Tokens.mono;
+                        font-size: Tokens.font-sm;
+                    }
+                    Text {
+                        horizontal-stretch: 1;
+                        text: row.a;
+                        color: Tokens.text-dim;
+                        font-size: Tokens.font-sm;
+                    }
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+                    PrimaryButton {
+                        text: "Done";
+                        clicked => { root.shortcuts-open = false; }
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- about modal (veil + centered card) -----
+    if root.about-open: Rectangle {
+        background: Tokens.veil;
+        TouchArea {
+            clicked => { root.about-open = false; }
+        }
+
+        Rectangle {
+            width: 380px;
+            x: (parent.width - self.width) / 2;
+            y: 130px;
+            height: about-card.preferred-height;
+            border-radius: Tokens.modal-radius;
+            background: Tokens.card;
+            border-width: 1px;
+            border-color: Tokens.border;
+            drop-shadow-blur: 42px;
+            drop-shadow-offset-y: 12px;
+            drop-shadow-color: #1C191426;
+
+            TouchArea {}
+
+            about-card := VerticalLayout {
+                padding: Tokens.sp4;
+                padding-top: 22px;
+                spacing: Tokens.sp2;
+
+                Text {
+                    text: "RDBS";
+                    color: Tokens.text;
+                    font-size: 22px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "Version " + root.app-version;
+                    color: Tokens.text-dim;
+                    font-size: Tokens.font-sm;
+                    font-family: Tokens.mono;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "Native cross-platform database manager";
+                    color: Tokens.text-dim;
+                    font-size: Tokens.font-sm;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: "PostgreSQL · MySQL · Redis · MongoDB";
+                    color: Tokens.text-faint;
+                    font-size: Tokens.font-xs;
+                    horizontal-alignment: center;
+                }
+
+                HorizontalLayout {
+                    alignment: center;
+                    PrimaryButton {
+                        text: "Done";
+                        clicked => { root.about-open = false; }
                     }
                 }
             }

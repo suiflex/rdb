@@ -203,9 +203,10 @@ export component CodeEditor inherits Rectangle {
         drop-shadow-blur: 12px;
         drop-shadow-color: Tokens.text.with-alpha(0.25);
         clip: true;
-        VerticalLayout {
-            padding: 4px;
-            for it[i] in root.completion-items: Rectangle {
+        ScrollView {
+            VerticalLayout {
+                padding: 4px;
+                for it[i] in root.completion-items: Rectangle {
                 height: 22px;
                 border-radius: Tokens.radius;
                 background: i == root.completion-selected ? Tokens.accent-tint
@@ -243,6 +244,7 @@ export component CodeEditor inherits Rectangle {
                     }
                 }
                 cta := TouchArea { clicked => { root.completion-choose(i); } }
+                }
             }
         }
     }
