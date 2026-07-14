@@ -324,18 +324,36 @@ pub fn chart_data(g: &GridModel) -> Vec<(String, String, f32)> {
         .collect()
 }
 
+/// Suffix repeated column names so a JOIN selecting same-named columns from two
+/// tables (e.g. `tnp.status`, `tpi.status`) renders every column. Grid cells map
+/// to columns by index, but name-keyed UI (the "Columns" show/hide panel,
+/// per-column filters) would collapse duplicates and hide the join's columns.
+/// First occurrence keeps its name; repeats become `name_2`, `name_3`, ...
+fn dedupe_column_names(mut cols: Vec<VmColumn>) -> Vec<VmColumn> {
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for c in &mut cols {
+        let n = seen.entry(c.name.clone()).or_insert(0);
+        *n += 1;
+        if *n > 1 {
+            c.name = format!("{}_{}", c.name, *n);
+        }
+    }
+    cols
+}
+
 /// Convert any ResultSet into its presentation-ready view. Each variant keeps
 /// its own shape instead of collapsing to a single grid.
 pub fn to_result_view(rs: &ResultSet) -> ResultView {
     match rs {
         ResultSet::Tabular { cols, rows } => ResultView::Table(GridModel {
-            columns: cols
-                .iter()
-                .map(|c| VmColumn {
-                    name: c.name.clone(),
-                    type_name: c.type_name.clone(),
-                })
-                .collect(),
+            columns: dedupe_column_names(
+                cols.iter()
+                    .map(|c| VmColumn {
+                        name: c.name.clone(),
+                        type_name: c.type_name.clone(),
+                    })
+                    .collect(),
+            ),
             rows: rows
                 .iter()
                 .map(|row| {
@@ -570,6 +588,24 @@ mod tests {
         assert!(!grid.rows[0][0].is_null);
         assert_eq!(grid.rows[1][0].text, "NULL");
         assert!(grid.rows[1][0].is_null);
+    }
+
+    #[test]
+    fn join_duplicate_column_names_are_disambiguated() {
+        let col = |n: &str| Column {
+            name: n.into(),
+            type_name: "text".into(),
+        };
+        let rs = ResultSet::Tabular {
+            cols: vec![col("status"), col("kd_resiko"), col("status")],
+            rows: vec![vec![Cell::Int(1), Cell::Int(2), Cell::Int(3)]],
+        };
+        let grid = expect_table(&rs);
+        let names: Vec<&str> = grid.columns.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["status", "kd_resiko", "status_2"]);
+        // rows untouched by the rename
+        assert_eq!(grid.rows[0].len(), 3);
+        assert_eq!(grid.rows[0][2].text, "3");
     }
 
     #[test]

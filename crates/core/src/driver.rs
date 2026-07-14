@@ -32,6 +32,13 @@ pub trait Driver: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Databases the connection can switch between (e.g. every DB on a Postgres
+    /// server). Default empty: the engine has a single/implicit database and the
+    /// UI shows its current database without a switcher.
+    async fn list_databases(&self) -> Result<Vec<String>> {
+        Ok(Vec::new())
+    }
+
     /// Schema tree scoped to one namespace (e.g. a specific Postgres schema).
     /// Default delegates to [`Driver::schema`] for engines without namespaces.
     async fn schema_for(&self, _schema: &str) -> Result<Schema> {

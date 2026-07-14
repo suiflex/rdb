@@ -192,10 +192,17 @@ export component CodeEditor inherits Rectangle {
 
     // ----- autocomplete popup (overlays the editor, under the caret) -----
     if root.completion-visible && root.completion-items.length > 0: Rectangle {
+        // y below the caret line by default; if that would run past the editor's
+        // bottom edge (deep in a long query / short results pane), flip it above
+        // the caret line so the list stays fully visible instead of clipped.
+        property <length> pop-h: min(root.completion-items.length * 22px + 8px, 200px);
+        property <length> below-y: (root.cursor-line + 1) * root.line-h + 6px;
         x: min(root.gutter-w + Tokens.sp3 + root.cursor-col * root.charw, root.width - self.width - Tokens.sp2);
-        y: (root.cursor-line + 1) * root.line-h + 6px;
+        y: below-y + self.pop-h > root.height && root.cursor-line * root.line-h - self.pop-h - 6px > 0
+            ? root.cursor-line * root.line-h - self.pop-h - 6px
+            : below-y;
         width: 260px;
-        height: min(root.completion-items.length * 22px + 8px, 200px);
+        height: pop-h;
         border-radius: Tokens.radius;
         border-width: 1px;
         border-color: Tokens.border-strong;

@@ -81,14 +81,15 @@ pub fn due_for_check(last_check: Option<i64>, now: i64) -> bool {
 /// Blocking GitHub API call returning the latest release tag. Returns `None` on
 /// any network/parse error — a failed check is silent, never fatal.
 pub fn fetch_latest_tag() -> Option<String> {
-    let body = ureq::get(RELEASES_LATEST)
-        .set("User-Agent", "rdbs-update-check")
-        .set("Accept", "application/vnd.github+json")
-        .timeout(std::time::Duration::from_secs(8))
+    let mut response = ureq::get(RELEASES_LATEST)
+        .header("User-Agent", "rdbs-update-check")
+        .header("Accept", "application/vnd.github+json")
+        .config()
+        .timeout_global(Some(std::time::Duration::from_secs(8)))
+        .build()
         .call()
-        .ok()?
-        .into_string()
         .ok()?;
+    let body = response.body_mut().read_to_string().ok()?;
     let json: serde_json::Value = serde_json::from_str(&body).ok()?;
     json.get("tag_name")?.as_str().map(str::to_string)
 }

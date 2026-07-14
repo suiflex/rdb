@@ -9,22 +9,26 @@ use rdbs_core::query::{MongoKind, MongoOp, Query};
 /// Returns a human-readable error string on malformed input (shown in the
 /// result-status line; no driver call is made).
 pub fn parse_query(engine: Engine, text: &str) -> Result<Query, String> {
-    // Drop whole-line comments (Cmd+/ toggles them) before interpreting, so a
-    // commented-out query stays inert in the buffer for every engine.
-    let cleaned = strip_comment_lines(engine, text);
-    let text = cleaned.as_str();
     match engine {
+        // SQL engines parse `--` comments (inline and whole-line) natively, so
+        // send the buffer verbatim — same as every other SQL editor. Stripping
+        // comment lines here re-joined the surrounding lines and could shift a
+        // clause onto the wrong statement (e.g. a `WHERE` whose only condition
+        // was commented, followed by the real predicate two lines down).
         Engine::Postgres | Engine::MySql | Engine::Sqlite | Engine::Cassandra => {
             Ok(Query::Sql(text.to_string()))
         }
+        // Redis/Mongo have no server-side line comments, so drop commented lines
+        // (Cmd+/ toggles them) before interpreting.
         Engine::Redis => {
-            let tokens: Vec<String> = text.split_whitespace().map(|s| s.to_string()).collect();
+            let cleaned = strip_comment_lines(engine, text);
+            let tokens: Vec<String> = cleaned.split_whitespace().map(|s| s.to_string()).collect();
             if tokens.is_empty() {
                 return Err("empty Redis command".into());
             }
             Ok(Query::Command(tokens))
         }
-        Engine::Mongo => parse_mongo(text),
+        Engine::Mongo => parse_mongo(&strip_comment_lines(engine, text)),
     }
 }
 
@@ -295,10 +299,25 @@ mod tests {
     }
 
     #[test]
-    fn sql_commented_lines_are_stripped() {
+    fn sql_is_sent_verbatim_comments_and_all() {
+        // SQL engines parse `--` natively; the buffer must reach them unchanged
+        // so comment lines can't reflow the surrounding SQL.
         let text = "-- keep this\nSELECT 1";
         match parse_query(Engine::Postgres, text).unwrap() {
-            Query::Sql(s) => assert_eq!(s, "SELECT 1"),
+            Query::Sql(s) => assert_eq!(s, text),
+            _ => panic!("expected Sql"),
+        }
+    }
+
+    #[test]
+    fn sql_commented_where_condition_keeps_real_predicate() {
+        // Regression: a WHERE whose only inline condition is commented, with the
+        // real predicate two lines below (past more comment lines). Stripping
+        // comment lines used to fuse `where` onto the wrong token; raw passthrough
+        // keeps it valid for Postgres to parse.
+        let text = "select a\nfrom t\nwhere -- x = 1\n-- y = 2\nb = 3";
+        match parse_query(Engine::Postgres, text).unwrap() {
+            Query::Sql(s) => assert_eq!(s, text),
             _ => panic!("expected Sql"),
         }
     }
