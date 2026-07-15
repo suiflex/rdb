@@ -1,17 +1,23 @@
 name: release-build
 
-# Fires only when a version tag is pushed.
-# Builds per-platform binaries, attaches them to the Release, then updates the
-# Homebrew tap and Scoop bucket in two independent sibling jobs.
+# A version-tag push builds the release and updates all distribution channels.
+# workflow_dispatch is an npm-only recovery path for an existing release tag.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish to npm
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
   build:
+    if: github.event_name == 'push'
     strategy:
       fail-fast: false
       matrix:
@@ -144,6 +150,7 @@ jobs:
   # dependents). Single shared PAT: secrets.TAP_PUBLISH_TOKEN.
 
   publish-homebrew:
+    if: github.event_name == 'push'
     needs: [build]
     runs-on: ubuntu-latest
     steps:
@@ -188,6 +195,7 @@ jobs:
   # matching release asset (already uploaded by `build`) at the user's install
   # time, so this job only ships the tiny installer, not the binaries.
   publish-npm:
+    if: github.event_name == 'push'
     needs: [build]
     runs-on: ubuntu-latest
     # OIDC Trusted Publishing: no NPM_TOKEN. The npm package trusts this repo +
@@ -215,7 +223,37 @@ jobs:
         working-directory: npm
         run: npm publish --access public
 
+  # Re-publishes only the npm installer for an existing release tag. This is
+  # intentionally separate from the tag path: release assets and package taps
+  # have already succeeded, so a retry must not rebuild or overwrite them.
+  recover-npm:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: Release
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - name: Upgrade npm for OIDC trusted publishing
+        run: npm install -g npm@11.5.2
+      - name: Set version from tag
+        working-directory: npm
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: npm version "${RELEASE_TAG#v}" --no-git-tag-version --allow-same-version
+      - name: Publish to npm
+        working-directory: npm
+        run: npm publish --access public
+
   publish-scoop:
+    if: github.event_name == 'push'
     needs: [build]
     runs-on: ubuntu-latest
     steps:
