@@ -1096,24 +1096,14 @@ export component WorkArea inherits Rectangle {
                 Rectangle { horizontal-stretch: 1; }
 
                 // right-side actions + latency
+                // Export lives in the results toolbar (top-right "Export CSV");
+                // the footer only keeps the browse-mode Columns toggle.
                 if root.browse-mode: HorizontalLayout {
                     spacing: Tokens.sp2;
                     alignment: end;
                     VerticalLayout {
                         alignment: center;
                         SecondaryButton { text: "Columns"; height: 24px; clicked => { root.columns-open = !root.columns-open; } }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        SecondaryButton { text: "Export"; height: 24px; clicked => { root.export-csv(); } }
-                    }
-                }
-                if !root.browse-mode: HorizontalLayout {
-                    spacing: Tokens.sp2;
-                    alignment: end;
-                    VerticalLayout {
-                        alignment: center;
-                        SecondaryButton { text: "Export"; height: 24px; clicked => { root.export-csv(); } }
                     }
                 }
                 if root.console-open: VerticalLayout {
