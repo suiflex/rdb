@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.0](https://github.com/suiflex/rdb/compare/v0.14.0...v0.15.0) (2026-07-15)
+
+
+### Features
+
+* **app:** native Save-As dialog for CSV export ([1b5878e](https://github.com/suiflex/rdb/commit/1b5878e488074e1c5d501f23333ad9a2160f415d))
+
+
+### Bug Fixes
+
+* **ui:** panel toggles eaten by tooltip; native Export Save-As ([3363eb5](https://github.com/suiflex/rdb/commit/3363eb5e9d64102f555d40b8cba0c6824c42a507))
+* **ui:** remove redundant footer Export buttons ([4c567a4](https://github.com/suiflex/rdb/commit/4c567a4242b858fcb5a21cfe3a6287053be6e371))
+* **ui:** stop tooltips from swallowing button clicks ([6c4c819](https://github.com/suiflex/rdb/commit/6c4c819b05b0bcf01feeee87e25d0bce06b908e4))
+
 ## [0.14.0](https://github.com/suiflex/rdb/compare/v0.13.0...v0.14.0) (2026-07-15)
 
 
