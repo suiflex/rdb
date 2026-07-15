@@ -1153,6 +1153,15 @@ in-out property <string> rename-text;
                                 font-size: Tokens.font-sm;
                                 horizontal-alignment: center;
                             }
+                            HorizontalLayout {
+                                padding-top: Tokens.sp2;
+                                Rectangle { horizontal-stretch: 1; }
+                                PrimaryButton {
+                                    text: "New Query";
+                                    clicked => { root.new-tab(); }
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                            }
                         }
                     }
 
