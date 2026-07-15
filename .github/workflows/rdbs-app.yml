@@ -50,7 +50,8 @@ jobs:
             libxcb-render0-dev \
             libxcb-shape0-dev \
             libxcb-xfixes0-dev \
-            libxkbcommon-dev
+            libxkbcommon-dev \
+            libgtk-3-dev
       - run: cargo fmt -p rdbs --check
       - run: cargo clippy -p rdbs --all-targets -- -D warnings
       - run: cargo build -p rdbs

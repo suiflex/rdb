@@ -65,7 +65,8 @@ jobs:
             libxcb-render0-dev \
             libxcb-shape0-dev \
             libxcb-xfixes0-dev \
-            libxkbcommon-dev
+            libxkbcommon-dev \
+            libgtk-3-dev
       - name: Build release binary
         run: cargo build --release -p rdbs --target ${{ matrix.target }}
       # Keep the archives for Homebrew/Scoop, and also publish files users can
