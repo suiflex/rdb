@@ -164,29 +164,22 @@ export component SecondaryButton inherits Rectangle {
     ta := TouchArea {
         enabled: root.enabled;
         clicked => { root.clicked(); }
-        changed has-hover => {
-            if (root.tooltip != "") {
-                if (self.has-hover) { tip-popup.show(); }
-                else { tip-popup.close(); }
-            }
-        }
     }
-    tip-popup := PopupWindow {
-        x: (root.width - (tip.preferred-width + 2 * Tokens.sp2)) / 2;
+    // Plain overlay tooltip (see IconButton): never grabs the click.
+    if root.tooltip != "": Rectangle {
+        x: (root.width - self.width) / 2;
         y: root.height + 4px;
-        close-policy: no-auto-close;
-        Rectangle {
-            width: tip.preferred-width + 2 * Tokens.sp2;
-            height: tip.preferred-height + Tokens.sp1;
-            border-radius: Tokens.radius;
-            background: Tokens.chrome;
-            border-width: 1px;
-            border-color: Tokens.border;
-            tip := Text {
-                text: root.tooltip;
-                color: Tokens.text;
-                font-size: Tokens.font-xs;
-            }
+        width: tip.preferred-width + 2 * Tokens.sp2;
+        height: tip.preferred-height + Tokens.sp1;
+        border-radius: Tokens.radius;
+        background: Tokens.chrome;
+        border-width: 1px;
+        border-color: Tokens.border;
+        visible: ta.has-hover;
+        tip := Text {
+            text: root.tooltip;
+            color: Tokens.text;
+            font-size: Tokens.font-xs;
         }
     }
 }
@@ -395,34 +388,23 @@ export component GlyphButton inherits Rectangle {
         color: ta.has-hover && root.danger-hover ? white : Tokens.text-dim;
         font-size: root.glyph-size;
     }
-    ta := TouchArea {
-        clicked => { root.clicked(); }
-        // A PopupWindow (not a child Rectangle) so the tooltip escapes the
-        // header's clip/z-order — a plain absolute rect got clipped and never
-        // showed. Toggled on hover; no-auto-close so it tracks has-hover.
-        changed has-hover => {
-            if (root.tooltip != "") {
-                if (self.has-hover) { tip-popup.show(); }
-                else { tip-popup.close(); }
-            }
-        }
-    }
-    tip-popup := PopupWindow {
-        x: (root.width - (tip.preferred-width + 2 * Tokens.sp2)) / 2;
+    ta := TouchArea { clicked => { root.clicked(); } }
+    // Plain overlay tooltip (see IconButton): a no-auto-close PopupWindow
+    // swallowed the following click, so the button never fired.
+    if root.tooltip != "": Rectangle {
+        x: (root.width - self.width) / 2;
         y: root.height + 4px;
-        close-policy: no-auto-close;
-        Rectangle {
-            width: tip.preferred-width + 2 * Tokens.sp2;
-            height: tip.preferred-height + Tokens.sp1;
-            border-radius: Tokens.radius;
-            background: Tokens.chrome;
-            border-width: 1px;
-            border-color: Tokens.border;
-            tip := Text {
-                text: root.tooltip;
-                color: Tokens.text;
-                font-size: Tokens.font-xs;
-            }
+        width: tip.preferred-width + 2 * Tokens.sp2;
+        height: tip.preferred-height + Tokens.sp1;
+        border-radius: Tokens.radius;
+        background: Tokens.chrome;
+        border-width: 1px;
+        border-color: Tokens.border;
+        visible: ta.has-hover;
+        tip := Text {
+            text: root.tooltip;
+            color: Tokens.text;
+            font-size: Tokens.font-xs;
         }
     }
 }
@@ -446,33 +428,24 @@ export component IconButton inherits Rectangle {
         size: root.icon-size;
         color: root.active ? Tokens.accent : Tokens.text-dim;
     }
-    ta := TouchArea {
-        clicked => { root.clicked(); }
-        // PopupWindow (not a child rect) so the tooltip escapes the header's
-        // clip/z-order; toggled on hover, no-auto-close to track has-hover.
-        changed has-hover => {
-            if (root.tooltip != "") {
-                if (self.has-hover) { tip-popup.show(); }
-                else { tip-popup.close(); }
-            }
-        }
-    }
-    tip-popup := PopupWindow {
-        x: (root.width - (tip.preferred-width + 2 * Tokens.sp2)) / 2;
+    ta := TouchArea { clicked => { root.clicked(); } }
+    // Tooltip as a plain overlay (no TouchArea) so it never grabs pointer
+    // input — a PopupWindow with no-auto-close swallowed the click that
+    // followed the hover, so the button never fired.
+    if root.tooltip != "": Rectangle {
+        x: (root.width - self.width) / 2;
         y: root.height + 4px;
-        close-policy: no-auto-close;
-        Rectangle {
-            width: tip.preferred-width + 2 * Tokens.sp2;
-            height: tip.preferred-height + Tokens.sp1;
-            border-radius: Tokens.radius;
-            background: Tokens.chrome;
-            border-width: 1px;
-            border-color: Tokens.border;
-            tip := Text {
-                text: root.tooltip;
-                color: Tokens.text;
-                font-size: Tokens.font-xs;
-            }
+        width: tip.preferred-width + 2 * Tokens.sp2;
+        height: tip.preferred-height + Tokens.sp1;
+        border-radius: Tokens.radius;
+        background: Tokens.chrome;
+        border-width: 1px;
+        border-color: Tokens.border;
+        visible: ta.has-hover;
+        tip := Text {
+            text: root.tooltip;
+            color: Tokens.text;
+            font-size: Tokens.font-xs;
         }
     }
 }
