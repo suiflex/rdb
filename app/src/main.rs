@@ -3907,12 +3907,25 @@ fn main() -> Result<(), slint::PlatformError> {
                                 | rdbs_connstore::Engine::Cassandra
                         );
                         *raw_nodes.lock().unwrap() = nodes;
-                        // Seed autocomplete with the active schema right away; the
-                        // remaining schemas load in the background below.
-                        *completion_nodes.lock().unwrap() =
-                            model::to_completion_nodes(schema_current.as_str(), &schema);
+                        // Seed autocomplete with the active schema's tables plus a
+                        // bare node for every other schema name, so `schema.`
+                        // autocompletes immediately. The remaining schemas' tables
+                        // and columns fill in from the background load below.
                         let all_schema_names: Vec<String> =
                             schema_names.iter().map(|s| s.to_string()).collect();
+                        {
+                            let mut seed =
+                                model::to_completion_nodes(schema_current.as_str(), &schema);
+                            for name in &all_schema_names {
+                                if name != schema_current.as_str() {
+                                    seed.push(model::VmTreeNode {
+                                        label: name.clone(),
+                                        kind: "database".into(),
+                                    });
+                                }
+                            }
+                            *completion_nodes.lock().unwrap() = seed;
+                        }
                         {
                             let mut defs = fn_defs.lock().unwrap();
                             defs.clear();
