@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.14.0](https://github.com/suiflex/rdb/compare/v0.13.0...v0.14.0) (2026-07-15)
+
+
+### Features
+
+* **app:** database switch dropdown ([dddc676](https://github.com/suiflex/rdb/commit/dddc6769e7fa7c602892b80ee1c7bbf79c8f6824))
+* **app:** gate autocomplete to typed prefix and flip popup when clipped ([4eeddc9](https://github.com/suiflex/rdb/commit/4eeddc9ac6a71404c16dded5db680e9e49a38acc))
+* **app:** persist query tabs and text across restarts ([23ac688](https://github.com/suiflex/rdb/commit/23ac688f4f7fc8a18a56dac802d9cedffee70f49))
+* autocomplete fixes, header/sidebar UX, Details panel, npm dist ([de692d1](https://github.com/suiflex/rdb/commit/de692d111f63cad17d0527ec3e8a0fe25b786432))
+* query UX fixes — db errors, join columns, db switch, tab persistence ([395001a](https://github.com/suiflex/rdb/commit/395001a02a07977dc23782346940aeb8eed1302b))
+* **ui:** add About RDBS dialog with version ([dbb2e99](https://github.com/suiflex/rdb/commit/dbb2e990bf6783f5e4eec3cf15c3d0a318b6cefd))
+* **ui:** add collapse and reveal buttons for the sidebar ([aa68a92](https://github.com/suiflex/rdb/commit/aa68a925bb6d383428455cc23e29c78bf4c19281))
+* **ui:** add native menu bar (File/Edit/View/Help) ([54e4317](https://github.com/suiflex/rdb/commit/54e43171bd964f9535dd6ab397e2ca478e590c68))
+* **ui:** add New Query button to the empty workspace ([3674f58](https://github.com/suiflex/rdb/commit/3674f586b5743afcae5947baef769cb1f3393309))
+* **ui:** add optional tooltip to IconButton and SecondaryButton ([2168220](https://github.com/suiflex/rdb/commit/2168220ed7f0e729a5fcba68d36189fffeece8fa))
+* **ui:** dedicated collapse/expand icons for the sidebar ([6e152ee](https://github.com/suiflex/rdb/commit/6e152ee78ebcd40dd43cc7c48a856f00aff9a441))
+* **ui:** improve data grid editing and details ([48e8968](https://github.com/suiflex/rdb/commit/48e896867636dd38ab1e9812987d1f34e49b9b49))
+* **ui:** improve data grid editing and native releases ([7e5d0c9](https://github.com/suiflex/rdb/commit/7e5d0c9995f651e4afc9fe57eb70722fae2db6a0))
+* **ui:** tab/console/menu polish + audit & dependabot CI ([b731c53](https://github.com/suiflex/rdb/commit/b731c53a103e929fe259666061a9ac97165a72eb))
+* **ui:** tooltips on header buttons with shortcut hint ([db103a7](https://github.com/suiflex/rdb/commit/db103a7846fffe37f9c482b9d1eda883a4e95fe0))
+
+
+### Bug Fixes
+
+* **app:** disambiguate duplicate result column names ([1642d0f](https://github.com/suiflex/rdb/commit/1642d0f378ed5c56071126a346813ba1fae506c5))
+* **app:** ignore semicolons in comments when running statement under cursor ([a7e53a7](https://github.com/suiflex/rdb/commit/a7e53a737cfa0a2ba93672b14f4e278068c53130))
+* **app:** offer all schema names in autocomplete immediately ([99e7cff](https://github.com/suiflex/rdb/commit/99e7cffb1286f0999d6e10952a14a10f390df530))
+* **app:** resolve schema-qualified table aliases in autocomplete ([d7bf873](https://github.com/suiflex/rdb/commit/d7bf873662ad15d53c341f493e19cf6c6c710ec5))
+* **app:** resolve table aliases across lines in autocomplete ([c5f6f90](https://github.com/suiflex/rdb/commit/c5f6f904e0ca6982b54828cb34af6fe70c9a5adf))
+* **app:** send SQL to the engine verbatim, don't strip comment lines ([eea1e59](https://github.com/suiflex/rdb/commit/eea1e59e61a25cc5879dde493273eb4d701a3e35))
+* **app:** stop force-opening query console on each run ([99662ce](https://github.com/suiflex/rdb/commit/99662ce6cb5f7fa652a07dc96f128fd6e7959ccd))
+* **ui:** auto-open SQL console on run and swap toggle icon ([048ba76](https://github.com/suiflex/rdb/commit/048ba766cde352070d4eee167f9bd40a88cfd75b))
+* **ui:** draw two rows in the rows icon, not three ([bb95d97](https://github.com/suiflex/rdb/commit/bb95d97365260b4ea50b37c145dbcf014d49809e))
+* **ui:** log only user queries in the SQL console ([1ea6fd3](https://github.com/suiflex/rdb/commit/1ea6fd38c09766e570b8b874ea928263072c510c))
+
 ## [0.13.0](https://github.com/suiflex/rdb/compare/v0.12.0...v0.13.0) (2026-07-14)
 
 
