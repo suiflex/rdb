@@ -189,12 +189,21 @@ jobs:
   publish-npm:
     needs: [build]
     runs-on: ubuntu-latest
+    # OIDC Trusted Publishing: no NPM_TOKEN. The npm package trusts this repo +
+    # workflow + `Release` environment; GitHub mints a short-lived OIDC token.
+    environment: Release
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm >= 11.5.1; node 20 ships npm 10.
+      - name: Upgrade npm for OIDC trusted publishing
+        run: npm install -g npm@latest
       # Pin the package version to the release tag so it can never drift from
       # the crate version (release-please's file sync can lag a release).
       - name: Set version from tag
@@ -202,8 +211,6 @@ jobs:
         run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
       - name: Publish to npm
         working-directory: npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public
 
   publish-scoop:

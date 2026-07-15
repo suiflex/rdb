@@ -21,8 +21,6 @@
 
 A native, lightweight, cross-platform database manager built with Rust and Slint — in the spirit of TablePlus but compiled from a single codebase for macOS and Linux.
 
-Install in one line via [suiflex/homebrew-tap](https://github.com/suiflex/homebrew-tap) (`brew install suiflex/tap/rdbs`) or [suiflex/scoop-bucket](https://github.com/suiflex/scoop-bucket) (`scoop install rdbs`). See [Install](#install).
-
 ## Features
 
 - **Multi-engine** — PostgreSQL, MySQL/MariaDB, Redis, MongoDB, SQLite, Cassandra in one app
@@ -95,6 +93,15 @@ pub enum ResultSet {
 ## Install
 
 Prebuilt installers are expected to be attached to GitHub Releases.
+
+### npm (all platforms)
+
+```bash
+npm i -g @suiflex/rdb
+```
+
+The postinstall step downloads the prebuilt `rdbs` binary for your platform from
+the matching GitHub Release, then `rdb` launches it.
 
 ### macOS / Linux
 
