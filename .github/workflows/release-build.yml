@@ -183,6 +183,24 @@ jobs:
           git commit -m "rdbs ${VERSION}" || { echo "no change"; exit 0; }
           git push
 
+  # Publishes @suiflex/rdb to npm. The package's postinstall downloads the
+  # matching release asset (already uploaded by `build`) at the user's install
+  # time, so this job only ships the tiny installer, not the binaries.
+  publish-npm:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - name: Publish to npm
+        working-directory: npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
+
   publish-scoop:
     needs: [build]
     runs-on: ubuntu-latest
