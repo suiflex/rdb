@@ -814,6 +814,22 @@ in-out property <string> rename-text;
                     add-item() => {
                         root.new-tab();
                     }
+                    collapse() => {
+                        root.sidebar-visible = false;
+                    }
+                }
+
+                // reveal strip when the sidebar is hidden
+                if !root.sidebar-visible: VerticalLayout {
+                    alignment: start;
+                    padding-top: Tokens.sp2;
+                    padding-left: Tokens.sp1;
+                    padding-right: Tokens.sp1;
+                    IconButton {
+                        icon: "columns";
+                        tooltip: "Show sidebar";
+                        clicked => { root.sidebar-visible = true; }
+                    }
                 }
 
                 // draggable vertical splitter (sidebar width)
