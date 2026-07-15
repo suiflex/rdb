@@ -4322,9 +4322,18 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let Some(grid) = displayed_grid.lock().unwrap().clone() else {
+                w.set_results_meta(SharedString::from("nothing to export"));
                 return;
             };
-            let path = export::export_path("rdbs-export", "csv");
+            // ponytail: blocking native dialog on the UI thread, fine for a
+            // one-shot; move to async if it ever janks.
+            let Some(path) = rfd::FileDialog::new()
+                .set_file_name("rdbs-export.csv")
+                .add_filter("CSV", &["csv"])
+                .save_file()
+            else {
+                return; // user cancelled
+            };
             let msg = match std::fs::write(&path, export::to_csv(&grid)) {
                 Ok(()) => format!("exported → {}", path.display()),
                 Err(e) => format!("export failed: {e}"),

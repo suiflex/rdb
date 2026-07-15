@@ -31,6 +31,9 @@ copypasta = "0.10"
 ureq = "3"
 semver = "1"
 open = "5"
+# native Save-As dialog for CSV export. gtk3 gives the blocking API on Linux
+# (needs libgtk-3-dev); macOS/Windows use their native panels.
+rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Set the Dock icon even for `cargo run`; macOS ignores a window icon on an
