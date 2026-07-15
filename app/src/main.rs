@@ -1827,7 +1827,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let before = ed_state.borrow().before_cursor().to_string();
+            let before = ed_state.borrow().before_cursor_doc();
             let schema = w.get_schema_name().to_string();
             let (word_len, cands) =
                 completion::suggest(&before, &completion_nodes.lock().unwrap(), &schema);

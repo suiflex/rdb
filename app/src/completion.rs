@@ -221,7 +221,10 @@ pub fn suggest(
             cols
         }
     } else {
-        match last_keyword(before_cursor).as_deref() {
+        // Keyword context comes from the current line; `before_cursor` may span
+        // several lines (alias resolution needs the whole statement).
+        let cur_line = before_cursor.rsplit('\n').next().unwrap_or(before_cursor);
+        match last_keyword(cur_line).as_deref() {
             // table position: active-schema tables plus every schema name, so a
             // `schema.table` from another namespace can be started.
             Some("FROM") | Some("JOIN") | Some("INTO") | Some("UPDATE") | Some("TABLE") => {
@@ -349,6 +352,18 @@ mod tests {
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["id"]
+        );
+    }
+
+    /// Alias declared on an earlier line still resolves when completing a
+    /// later line (before_cursor spans the whole statement).
+    #[test]
+    fn multiline_join_alias_resolves_columns() {
+        let sql = "select * from public.step_config a\nleft join public.users b on a.";
+        let (_, c) = suggest(sql, &nodes(), "public");
+        assert_eq!(
+            c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
+            ["config_id", "name"]
         );
     }
 
