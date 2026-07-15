@@ -203,8 +203,9 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org
       # Trusted publishing needs npm >= 11.5.1; node 20 ships npm 10.
+      # Keep this below npm 12, which no longer supports the Node 20 runner.
       - name: Upgrade npm for OIDC trusted publishing
-        run: npm install -g npm@latest
+        run: npm install -g npm@11.5.2
       # Pin the package version to the release tag so it can never drift from
       # the crate version (release-please's file sync can lag a release).
       - name: Set version from tag
