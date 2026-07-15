@@ -619,6 +619,7 @@ in-out property <string> rename-text;
                         alignment: center;
                         SecondaryButton {
                             text: "SQL";
+                            tooltip: "New query tab  ⌘T";
                             height: 28px;
                             clicked => { root.new-tab(); }
                         }
@@ -647,6 +648,7 @@ in-out property <string> rename-text;
                         alignment: center;
                         IconButton {
                             icon: "columns";
+                            tooltip: "Toggle sidebar";
                             active: root.sidebar-visible;
                             clicked => { root.sidebar-visible = !root.sidebar-visible; }
                         }
@@ -656,6 +658,7 @@ in-out property <string> rename-text;
                         alignment: center;
                         IconButton {
                             icon: "panel-right";
+                            tooltip: "Toggle details panel";
                             active: root.detail-visible;
                             clicked => { root.detail-visible = !root.detail-visible; }
                         }
@@ -675,6 +678,7 @@ in-out property <string> rename-text;
                         alignment: center;
                         IconButton {
                             icon: "pencil";
+                            tooltip: "Edit connection";
                             clicked => {
                                 if (root.selected-conn >= 0) {
                                     root.open-edit-form(root.selected-conn);
@@ -687,6 +691,7 @@ in-out property <string> rename-text;
                         alignment: center;
                         IconButton {
                             icon: Tokens.dark ? "sun" : "moon";
+                            tooltip: "Toggle theme";
                             clicked => { root.toggle-theme(); }
                         }
                     }
@@ -694,6 +699,7 @@ in-out property <string> rename-text;
                         alignment: center;
                         GlyphButton {
                             glyph: "⚙";
+                            tooltip: "Settings";
                             clicked => { root.settings-open = true; }
                         }
                     }
@@ -807,6 +813,22 @@ in-out property <string> rename-text;
                     }
                     add-item() => {
                         root.new-tab();
+                    }
+                    collapse() => {
+                        root.sidebar-visible = false;
+                    }
+                }
+
+                // reveal strip when the sidebar is hidden
+                if !root.sidebar-visible: VerticalLayout {
+                    alignment: start;
+                    padding-top: Tokens.sp2;
+                    padding-left: Tokens.sp1;
+                    padding-right: Tokens.sp1;
+                    IconButton {
+                        icon: "panel-expand";
+                        tooltip: "Show sidebar";
+                        clicked => { root.sidebar-visible = true; }
                     }
                 }
 
@@ -1146,6 +1168,15 @@ in-out property <string> rename-text;
                                 color: Tokens.text-dim;
                                 font-size: Tokens.font-sm;
                                 horizontal-alignment: center;
+                            }
+                            HorizontalLayout {
+                                padding-top: Tokens.sp2;
+                                Rectangle { horizontal-stretch: 1; }
+                                PrimaryButton {
+                                    text: "New Query";
+                                    clicked => { root.new-tab(); }
+                                }
+                                Rectangle { horizontal-stretch: 1; }
                             }
                         }
                     }

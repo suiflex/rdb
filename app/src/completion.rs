@@ -65,10 +65,12 @@ fn all_columns(nodes: &[VmTreeNode]) -> Vec<Candidate> {
 }
 
 /// Map a table name or `FROM tbl alias` alias to its underlying table name.
+/// `.` stays inside a token so a schema-qualified `schema.table alias` keeps the
+/// table reference whole and the alias is read as the next token.
 fn resolve_alias(stmt: &str, owner: &str) -> String {
     let ol = owner.to_lowercase();
     let words: Vec<&str> = stmt
-        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '.'))
         .filter(|w| !w.is_empty())
         .collect();
     for i in 0..words.len() {
@@ -159,7 +161,9 @@ fn schemas(nodes: &[VmTreeNode]) -> Vec<Candidate> {
 /// Columns are the `field` nodes that follow a matching table node in the flat
 /// tree (the sidebar stores parent-then-children order).
 fn columns_of(nodes: &[VmTreeNode], owner: &str) -> Vec<Candidate> {
-    let owner_l = owner.to_lowercase();
+    // Tree labels are bare table names; a schema-qualified owner
+    // (`schema.table`) matches on its last segment.
+    let owner_l = owner.rsplit('.').next().unwrap_or(owner).to_lowercase();
     for (i, n) in nodes.iter().enumerate() {
         if (n.kind == "table" || n.kind == "collection") && n.label.to_lowercase() == owner_l {
             return nodes[i + 1..]
@@ -217,7 +221,10 @@ pub fn suggest(
             cols
         }
     } else {
-        match last_keyword(before_cursor).as_deref() {
+        // Keyword context comes from the current line; `before_cursor` may span
+        // several lines (alias resolution needs the whole statement).
+        let cur_line = before_cursor.rsplit('\n').next().unwrap_or(before_cursor);
+        match last_keyword(cur_line).as_deref() {
             // table position: active-schema tables plus every schema name, so a
             // `schema.table` from another namespace can be started.
             Some("FROM") | Some("JOIN") | Some("INTO") | Some("UPDATE") | Some("TABLE") => {
@@ -324,6 +331,36 @@ mod tests {
     #[test]
     fn alias_dot_resolves_to_table_columns() {
         let (_, c) = suggest("select * from step_config sc where sc.", &nodes(), "public");
+        assert_eq!(
+            c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
+            ["config_id", "name"]
+        );
+    }
+
+    /// Schema-qualified table with an alias inside a JOIN: each alias resolves
+    /// to its own table's columns (regression for empty suggestions on joins).
+    #[test]
+    fn schema_qualified_alias_join_resolves_columns() {
+        let a = "select * from public.step_config a left join public.users b on a.";
+        let (_, c) = suggest(a, &nodes(), "public");
+        assert_eq!(
+            c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
+            ["config_id", "name"]
+        );
+        let b = "select * from public.step_config a left join public.users b on b.";
+        let (_, c) = suggest(b, &nodes(), "public");
+        assert_eq!(
+            c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
+            ["id"]
+        );
+    }
+
+    /// Alias declared on an earlier line still resolves when completing a
+    /// later line (before_cursor spans the whole statement).
+    #[test]
+    fn multiline_join_alias_resolves_columns() {
+        let sql = "select * from public.step_config a\nleft join public.users b on a.";
+        let (_, c) = suggest(sql, &nodes(), "public");
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["config_id", "name"]

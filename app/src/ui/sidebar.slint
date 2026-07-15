@@ -29,6 +29,7 @@ export component Sidebar inherits Rectangle {
     callback filter-tree(string);
     callback mode-changed(int);
     callback add-item();
+    callback collapse();                   // hide the sidebar
     // bumped by ⌘P (app-window) to focus the filter field
     in property <int> focus-tick;
     changed focus-tick => { fld.focus-input(); }
@@ -68,6 +69,22 @@ export component Sidebar inherits Rectangle {
                             root.mode-changed(m);
                         }
                     }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                // collapse the sidebar (un-hide via the header toggle or the
+                // reveal button that takes this panel's place)
+                Rectangle {
+                    width: 24px;
+                    height: 24px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 5px;
+                    background: collapse-ta.has-hover ? Tokens.border : transparent;
+                    AppIcon {
+                        name: "panel-collapse";
+                        size: Tokens.icon-sm;
+                        color: collapse-ta.has-hover ? Tokens.text : Tokens.text-faint;
+                    }
+                    collapse-ta := TouchArea { clicked => { root.collapse(); } }
                 }
             }
         }

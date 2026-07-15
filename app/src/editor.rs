@@ -290,8 +290,16 @@ impl EditorState {
     }
 
     /// Text on the current line up to the cursor — the autocomplete context.
-    pub fn before_cursor(&self) -> &str {
-        &self.lines[self.line][..self.byte_col()]
+    /// The whole document up to the cursor (all prior lines joined with `\n`
+    /// plus the current line's prefix). Autocomplete needs this so a table
+    /// alias declared on an earlier line resolves when completing a later one.
+    pub fn before_cursor_doc(&self) -> String {
+        let mut s = self.lines[..self.line].join("\n");
+        if self.line > 0 {
+            s.push('\n');
+        }
+        s.push_str(&self.lines[self.line][..self.byte_col()]);
+        s
     }
 
     fn byte_at(l: &str, col: usize) -> usize {

@@ -1,0 +1,24 @@
+{
+  "name": "@suiflex/rdb",
+  "version": "0.13.0",
+  "description": "RDB — native cross-platform database manager (PostgreSQL, MySQL, Redis, MongoDB)",
+  "homepage": "https://github.com/suiflex/rdb",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/suiflex/rdb.git"
+  },
+  "license": "MIT",
+  "bin": {
+    "rdb": "bin/rdb.js"
+  },
+  "files": [
+    "bin/rdb.js",
+    "install.js"
+  ],
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
