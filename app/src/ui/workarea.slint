@@ -101,6 +101,8 @@ export component WorkArea inherits Rectangle {
     in property <bool> can-next;
     in property <int> pending-count;
     in property <bool> read-only: true;
+    in property <bool> streaming;
+    callback cancel-stream();
     in-out property <string> limit-text;
     // Draggable height of the SQL editor pane (session-local).
     in-out property <length> editor-h: 340px;
@@ -413,6 +415,50 @@ export component WorkArea inherits Rectangle {
                             text: "Explain";
                             height: 28px;
                             clicked => { root.explain-query(); }
+                        }
+                    }
+                    // Row limit for manual queries: a number caps the result;
+                    // "No limit" streams the whole table in progressively.
+                    VerticalLayout {
+                        alignment: center;
+                        visible: root.sql-capable;
+                        HorizontalLayout {
+                            spacing: Tokens.sp1;
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: "Limit";
+                                    color: Tokens.text-faint;
+                                    font-size: Tokens.font-sm;
+                                }
+                            }
+                            Rectangle {
+                                width: 78px;
+                                height: 28px;
+                                border-radius: Tokens.radius;
+                                border-width: 1px;
+                                border-color: Tokens.border-strong;
+                                background: Tokens.card;
+                                TextInput {
+                                    width: parent.width;
+                                    text <=> root.limit-text;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    single-line: true;
+                                    color: Tokens.text;
+                                    font-family: Tokens.mono;
+                                    font-size: Tokens.font-sm;
+                                    accepted => { root.set-limit(self.text); }
+                                }
+                            }
+                        }
+                    }
+                    if root.streaming: VerticalLayout {
+                        alignment: center;
+                        SecondaryButton {
+                            text: "✕ Cancel";
+                            height: 28px;
+                            clicked => { root.cancel-stream(); }
                         }
                     }
                     Rectangle { horizontal-stretch: 1; }

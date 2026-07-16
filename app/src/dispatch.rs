@@ -165,6 +165,27 @@ impl AnyDriver {
         }
     }
 
+    /// Streaming read: Postgres pulls from a server cursor, every other engine
+    /// falls back to the trait default (one buffered `query`, chunked). Kept in
+    /// sync with the trait so the "No limit" path streams instead of freezing.
+    pub async fn query_stream(
+        &self,
+        q: &Query,
+        batch: usize,
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        sink: tokio::sync::mpsc::Sender<rdbs_core::result::StreamItem>,
+    ) -> Result<()> {
+        match self {
+            AnyDriver::Postgres(d) => d.query_stream(q, batch, cancel, sink).await,
+            AnyDriver::Mysql(d) => d.query_stream(q, batch, cancel, sink).await,
+            AnyDriver::Redis(d) => d.query_stream(q, batch, cancel, sink).await,
+            AnyDriver::Mongo(d) => d.query_stream(q, batch, cancel, sink).await,
+            AnyDriver::Sqlite(d) => d.query_stream(q, batch, cancel, sink).await,
+            AnyDriver::Cassandra(d) => d.query_stream(q, batch, cancel, sink).await,
+            AnyDriver::Mock(d) => d.query_stream(q, batch, cancel, sink).await,
+        }
+    }
+
     pub async fn primary_key(&self, table: &TableRef) -> Result<Vec<String>> {
         match self {
             AnyDriver::Postgres(d) => d.primary_key(table).await,

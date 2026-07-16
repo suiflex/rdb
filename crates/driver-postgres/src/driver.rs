@@ -114,6 +114,16 @@ impl Driver for PostgresDriver {
         query_impl(&self.client, q).await
     }
 
+    async fn query_stream(
+        &self,
+        q: &Query,
+        batch: usize,
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        sink: tokio::sync::mpsc::Sender<rdbs_core::result::StreamItem>,
+    ) -> Result<()> {
+        query_stream_impl(&self.client, q, batch.max(1), cancel, sink).await
+    }
+
     async fn primary_key(&self, table: &TableRef) -> Result<Vec<String>> {
         let schema = table.schema.as_deref().unwrap_or("public");
         let rows = self
@@ -243,6 +253,92 @@ async fn query_impl(client: &Client, q: &Query) -> Result<ResultSet> {
             .map_err(|e| RdbsError::Query(pg_err(&e)))?;
         Ok(ResultSet::Affected(affected))
     }
+}
+
+/// Stream a row-returning query from a server-side result: prepare the
+/// statement (columns known upfront), then pull rows lazily with `query_raw`
+/// and forward them in `batch`-sized chunks. Never buffers the full result —
+/// this is what lets a `SELECT * FROM huge_table` load progressively and stay
+/// cancelable. Non-SELECT text falls back to a single `execute` (no rows).
+async fn query_stream_impl(
+    client: &Client,
+    q: &Query,
+    batch: usize,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    sink: tokio::sync::mpsc::Sender<rdbs_core::result::StreamItem>,
+) -> Result<()> {
+    use futures_util::TryStreamExt;
+    use rdbs_core::result::StreamItem;
+
+    let sql = match q {
+        Query::Sql(s) => s,
+        Query::Command(_) | Query::Mongo(_) => return Err(RdbsError::UnsupportedQuery),
+    };
+    if !is_row_returning(sql) {
+        client
+            .execute(sql, &[])
+            .await
+            .map_err(|e| RdbsError::Query(pg_err(&e)))?;
+        let _ = sink.send(StreamItem::Meta(Vec::new())).await;
+        return Ok(());
+    }
+
+    let stmt = client
+        .prepare(sql)
+        .await
+        .map_err(|e| RdbsError::Query(pg_err(&e)))?;
+    let cols: Vec<Column> = stmt
+        .columns()
+        .iter()
+        .map(|c| Column {
+            name: c.name().to_string(),
+            type_name: c.type_().name().to_string(),
+        })
+        .collect();
+    let ncols = cols.len();
+    if sink.send(StreamItem::Meta(cols)).await.is_err() {
+        return Ok(()); // UI gone / cancelled before first row
+    }
+
+    // Empty bind params; `query_raw` streams rows instead of buffering them.
+    let no_params: [i32; 0] = [];
+    let row_stream = client
+        .query_raw(&stmt, no_params)
+        .await
+        .map_err(|e| RdbsError::Query(pg_err(&e)))?;
+    tokio::pin!(row_stream);
+
+    let mut buf: Vec<Row> = Vec::with_capacity(batch);
+    while !cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        match row_stream
+            .try_next()
+            .await
+            .map_err(|e| RdbsError::Query(pg_err(&e)))?
+        {
+            Some(row) => {
+                let mut cells: Row = Vec::with_capacity(ncols);
+                for idx in 0..ncols {
+                    cells.push(crate::type_map::extract_cell(&row, idx));
+                }
+                buf.push(cells);
+                if buf.len() >= batch {
+                    if sink
+                        .send(StreamItem::Batch(std::mem::take(&mut buf)))
+                        .await
+                        .is_err()
+                    {
+                        return Ok(());
+                    }
+                    buf = Vec::with_capacity(batch);
+                }
+            }
+            None => break,
+        }
+    }
+    if !buf.is_empty() {
+        let _ = sink.send(StreamItem::Batch(buf)).await;
+    }
+    Ok(())
 }
 
 /// Heuristic: does this statement return rows? Covers the common row-returning
