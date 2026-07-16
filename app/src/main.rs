@@ -827,6 +827,137 @@ fn browse_text(
     }
 }
 
+/// TablePlus-style row-limit guard for a manually-run statement: append
+/// `LIMIT n` to a bare `SELECT`/`WITH` read so `SELECT * FROM huge_table` can't
+/// buffer hundreds of thousands of rows into memory and freeze the grid. The
+/// SQL is returned UNCHANGED when a cap doesn't apply — a non-SQL engine, a
+/// write/DDL/EXPLAIN, a `SELECT ... INTO`, or a statement that already carries
+/// its own `LIMIT` (the browse path and hand-written limits stay intact).
+/// ponytail: word-scan, not a real SQL parser — a `limit`/`insert` inside a
+/// subquery just skips the cap (safe: no double-LIMIT, no corruption). Pulling
+/// the *full* millions is the streaming follow-up, not this guard.
+/// True when `sql` is a single bare `SELECT`/`WITH` read on a SQL engine that
+/// carries no row limit of its own — the shape it is safe to cap OR stream.
+/// Writes, DDL, `EXPLAIN`, `SELECT ... INTO`, an existing `LIMIT`, and non-SQL
+/// engines are all false (word-scan, not a real parser: a `limit`/`insert`
+/// inside a subquery conservatively returns false, so we never mangle it).
+fn is_bare_select(engine: rdbs_connstore::Engine, sql: &str) -> bool {
+    use rdbs_connstore::Engine;
+    if !matches!(
+        engine,
+        Engine::Postgres | Engine::MySql | Engine::Sqlite | Engine::Cassandra
+    ) {
+        return false;
+    }
+    let trimmed = sql.trim_end().trim_end_matches(';').trim_end();
+    let words: Vec<&str> = trimmed
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .filter(|w| !w.is_empty())
+        .collect();
+    let first = words.first().copied().unwrap_or("");
+    let is_read = first.eq_ignore_ascii_case("select") || first.eq_ignore_ascii_case("with");
+    let has_limit = words.iter().any(|w| w.eq_ignore_ascii_case("limit"));
+    let has_write = words.iter().any(|w| {
+        w.eq_ignore_ascii_case("insert")
+            || w.eq_ignore_ascii_case("update")
+            || w.eq_ignore_ascii_case("delete")
+            || w.eq_ignore_ascii_case("into")
+    });
+    is_read && !has_limit && !has_write
+}
+
+/// TablePlus-style row cap for a manually-run statement. `limit == 0` means
+/// "No limit" (the streaming path owns that case), so the SQL is left as-is.
+fn cap_select(engine: rdbs_connstore::Engine, sql: &str, limit: u64) -> String {
+    if limit == 0 || !is_bare_select(engine, sql) {
+        return sql.to_string();
+    }
+    let trimmed = sql.trim_end().trim_end_matches(';').trim_end();
+    format!("{trimmed} LIMIT {limit}")
+}
+
+#[cfg(test)]
+mod cap_select_tests {
+    use super::cap_select;
+    use rdbs_connstore::Engine;
+
+    #[test]
+    fn bare_select_gets_limit() {
+        assert_eq!(
+            cap_select(Engine::Postgres, "SELECT * from kelurahan_desa;", 300),
+            "SELECT * from kelurahan_desa LIMIT 300"
+        );
+    }
+
+    #[test]
+    fn existing_limit_is_left_alone() {
+        let sql = "SELECT * FROM t LIMIT 10";
+        assert_eq!(cap_select(Engine::Postgres, sql, 300), sql);
+    }
+
+    #[test]
+    fn writes_ddl_and_explain_untouched() {
+        for sql in [
+            "UPDATE t SET x = 1",
+            "INSERT INTO t VALUES (1)",
+            "DELETE FROM t",
+            "EXPLAIN SELECT * FROM t",
+            "SELECT * INTO backup FROM t",
+        ] {
+            assert_eq!(cap_select(Engine::Postgres, sql, 300), sql);
+        }
+    }
+
+    #[test]
+    fn cte_read_gets_limit_but_data_modifying_cte_does_not() {
+        assert_eq!(
+            cap_select(
+                Engine::Postgres,
+                "WITH x AS (SELECT 1) SELECT * FROM x",
+                500
+            ),
+            "WITH x AS (SELECT 1) SELECT * FROM x LIMIT 500"
+        );
+        let write_cte = "WITH x AS (DELETE FROM t RETURNING *) SELECT * FROM x";
+        assert_eq!(cap_select(Engine::Postgres, write_cte, 500), write_cte);
+    }
+
+    #[test]
+    fn non_sql_engines_untouched() {
+        let sql = "SELECT * FROM t";
+        assert_eq!(cap_select(Engine::Redis, sql, 300), sql);
+        assert_eq!(cap_select(Engine::Mongo, sql, 300), sql);
+    }
+
+    #[test]
+    fn no_limit_zero_leaves_sql_untouched() {
+        // 0 == "No limit" -> the streaming path handles it, SQL stays clean.
+        let sql = "SELECT * FROM kelurahan_desa";
+        assert_eq!(cap_select(Engine::Postgres, sql, 0), sql);
+        assert!(super::is_bare_select(Engine::Postgres, sql));
+        assert!(!super::is_bare_select(
+            Engine::Postgres,
+            "SELECT * FROM t LIMIT 5"
+        ));
+    }
+}
+
+/// Rows per streamed batch handed to the grid (`No limit` path).
+const STREAM_BATCH: usize = 2_000;
+/// Soft ceiling on streamed rows kept resident (R1 + soft-cap): once reached we
+/// stop pulling so a runaway `SELECT *` on a billion-row table can't exhaust
+/// RAM. Export handles the truly-complete set.
+const STREAM_SOFT_CAP: usize = 200_000;
+
+/// One message from the off-thread streaming producer to the UI-thread drain
+/// timer. Carries plain `Send` data only (no Slint types cross the boundary).
+enum StreamMsg {
+    Meta(Vec<model::VmColumn>),
+    Batch(Vec<rdbs_core::result::Row>),
+    Done { capped: bool, elapsed_ms: u64 },
+    Err(String),
+}
+
 /// Push a flat `GridModel` into the window's grid columns/cells properties.
 fn push_grid(w: &MainWindow, g: &model::GridModel) {
     let cols: Vec<GridColumn> = g
@@ -1627,6 +1758,13 @@ fn main() -> Result<(), slint::PlatformError> {
         limit: 300,
         ..Default::default()
     }));
+    // Streaming ("No limit") state, UI-thread only. `stream_cancel` is the flag
+    // the Cancel button (and a new run) flips to stop the producer; `stream_timer`
+    // is the UI-thread drain timer that appends batches to the grid.
+    let stream_cancel: Rc<std::cell::RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>> =
+        Rc::new(std::cell::RefCell::new(None));
+    let stream_timer: Rc<std::cell::RefCell<Option<slint::Timer>>> =
+        Rc::new(std::cell::RefCell::new(None));
     // Buffered, uncommitted grid edits (⌘S commits, Esc/Discard drops).
     let edit_buf: Arc<std::sync::Mutex<model::EditBuffer>> =
         Arc::new(std::sync::Mutex::new(model::EditBuffer::default()));
@@ -4118,10 +4256,16 @@ fn main() -> Result<(), slint::PlatformError> {
                             vec![sql.clone()]
                         };
                         let n = stmts.len().max(1);
+                        // Row-limit control (default 300): cap manual SELECTs so a
+                        // huge `SELECT * FROM table` can't stream millions of rows
+                        // in and freeze the grid. Browse text already carries its
+                        // own LIMIT, so cap_select leaves it untouched.
+                        let row_limit = browse.lock().unwrap().limit;
                         let mut out = Err(rdbs_core::error::RdbsError::Query("empty query".into()));
                         for (i, s) in stmts.iter().enumerate() {
+                            let s = cap_select(*engine, s, row_limit);
                             append_query_console(&query_console, s.clone());
-                            out = match crate::query_parse::parse_query(*engine, s) {
+                            out = match crate::query_parse::parse_query(*engine, &s) {
                                 Ok(mut q) => {
                                     // Fill the selected database for a Mongo query
                                     // that didn't name one via `use(...)`.
@@ -4257,10 +4401,313 @@ fn main() -> Result<(), slint::PlatformError> {
         })
     };
 
+    // ----- streaming run ("No limit"): pull rows from the driver in batches and
+    // append them to the grid live, so a `SELECT * FROM huge_table` shows up
+    // progressively and stays cancelable instead of freezing. The query text
+    // reaches the driver verbatim — clean log, no injected LIMIT. A UI-thread
+    // timer drains batches into the grid; an off-thread task does the fetch. -----
+    let run_stream: Rc<dyn Fn(String)> = {
+        let weak = window.as_weak();
+        let rt = rt.clone();
+        let current = current.clone();
+        let query_console = query_console.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        let results = results.clone();
+        let active_result = active_result.clone();
+        let last_view = last_view.clone();
+        let displayed_grid = displayed_grid.clone();
+        let hidden_cols = hidden_cols.clone();
+        let sort_state = sort_state.clone();
+        let col_order = col_order.clone();
+        let col_filters = col_filters.clone();
+        let edit_buf = edit_buf.clone();
+        let browse = browse.clone();
+        let stream_cancel = stream_cancel.clone();
+        let stream_timer = stream_timer.clone();
+        Rc::new(move |sql: String| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some(target_id) = active_tab_id.lock().unwrap().clone() else {
+                return;
+            };
+            // Stop any in-flight stream, then arm a fresh cancel flag.
+            if let Some(prev) = stream_cancel.borrow().as_ref() {
+                prev.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            *stream_cancel.borrow_mut() = Some(cancel.clone());
+
+            // Log the RAW sql (clean `SELECT * FROM t`, no injected LIMIT).
+            append_query_console(&query_console, sql.clone());
+            sync_query_console(&w, &query_console);
+            if let Some(tab) = workspace_tabs
+                .lock()
+                .unwrap()
+                .iter_mut()
+                .find(|t| t.id == target_id)
+            {
+                tab.loading = true;
+                tab.query_text = sql.clone();
+            }
+            w.set_query_running(true);
+            w.set_streaming(true);
+            w.set_grid_read_only(true);
+            clear_grid(&w);
+            w.set_result_status(SharedString::from("streaming…"));
+            w.set_results_meta(SharedString::default());
+
+            // UI-thread accumulator (for filter/sort/export after the stream) and
+            // the live cell model we push each batch into.
+            let (ui_tx, ui_rx) = std::sync::mpsc::channel::<StreamMsg>();
+            let accum: Rc<std::cell::RefCell<model::GridModel>> =
+                Rc::new(std::cell::RefCell::new(model::GridModel::default()));
+            let cells_model: Rc<std::cell::RefCell<Option<Rc<VecModel<GridCell>>>>> =
+                Rc::new(std::cell::RefCell::new(None));
+
+            // Drain timer: append whatever arrived this tick, on the UI thread.
+            let timer = slint::Timer::default();
+            {
+                let weak = weak.clone();
+                let accum = accum.clone();
+                let cells_model = cells_model.clone();
+                let last_view = last_view.clone();
+                let displayed_grid = displayed_grid.clone();
+                let hidden_cols = hidden_cols.clone();
+                let sort_state = sort_state.clone();
+                let col_order = col_order.clone();
+                let col_filters = col_filters.clone();
+                let edit_buf = edit_buf.clone();
+                let browse = browse.clone();
+                let workspace_tabs = workspace_tabs.clone();
+                let results = results.clone();
+                let active_result = active_result.clone();
+                let active_tab_id = active_tab_id.clone();
+                let stream_timer_stop = stream_timer.clone();
+                let target_id = target_id.clone();
+                timer.start(
+                    slint::TimerMode::Repeated,
+                    std::time::Duration::from_millis(50),
+                    move || {
+                        let Some(w) = weak.upgrade() else {
+                            return;
+                        };
+                        loop {
+                            match ui_rx.try_recv() {
+                                Ok(StreamMsg::Meta(cols)) => {
+                                    let gcols: Vec<GridColumn> = cols
+                                        .iter()
+                                        .map(|c| GridColumn {
+                                            name: c.name.clone().into(),
+                                            type_name: c.type_name.clone().into(),
+                                        })
+                                        .collect();
+                                    w.set_grid_col_count(gcols.len() as i32);
+                                    w.set_grid_columns(ModelRc::from(Rc::new(VecModel::from(
+                                        gcols,
+                                    ))));
+                                    let vm = Rc::new(VecModel::<GridCell>::default());
+                                    w.set_grid_cells(ModelRc::from(vm.clone()));
+                                    *cells_model.borrow_mut() = Some(vm);
+                                    *accum.borrow_mut() = model::GridModel {
+                                        columns: cols,
+                                        rows: Vec::new(),
+                                    };
+                                }
+                                Ok(StreamMsg::Batch(rows)) => {
+                                    if let Some(vm) = cells_model.borrow().as_ref() {
+                                        let mut acc = accum.borrow_mut();
+                                        for row in &rows {
+                                            let mut vmrow = Vec::with_capacity(row.len());
+                                            for cell in row {
+                                                let is_null =
+                                                    matches!(cell, rdbs_core::result::Cell::Null);
+                                                let text = cell.render();
+                                                vm.push(GridCell {
+                                                    text: text.clone().into(),
+                                                    is_null,
+                                                    state: 0,
+                                                });
+                                                vmrow.push(model::VmCell { text, is_null });
+                                            }
+                                            acc.rows.push(vmrow);
+                                        }
+                                        w.set_result_status(SharedString::from(format!(
+                                            "loaded {}",
+                                            acc.rows.len()
+                                        )));
+                                    }
+                                }
+                                Ok(StreamMsg::Done { capped, elapsed_ms }) => {
+                                    let g = accum.borrow().clone();
+                                    let n = g.rows.len();
+                                    let meta = format!(
+                                        "{n} rows{} · {elapsed_ms} ms",
+                                        if capped { " (capped)" } else { "" }
+                                    );
+                                    let latency = format!("{elapsed_ms} ms");
+                                    let view = model::ResultView::Table(g);
+                                    let sr = StoredResult {
+                                        view: view.clone(),
+                                        meta: meta.clone(),
+                                        latency: latency.clone(),
+                                    };
+                                    if let Some(tab) = workspace_tabs
+                                        .lock()
+                                        .unwrap()
+                                        .iter_mut()
+                                        .find(|t| t.id == target_id)
+                                    {
+                                        tab.loading = false;
+                                        tab.view = Some(sr.clone());
+                                        tab.results = vec![sr.clone()];
+                                        tab.active_result = 0;
+                                    }
+                                    if active_tab_id.lock().unwrap().as_deref() == Some(&target_id)
+                                    {
+                                        *results.lock().unwrap() = vec![sr];
+                                        *active_result.lock().unwrap() = 0;
+                                        set_result_tabs(&w, 1, 0);
+                                        present_view(
+                                            &w,
+                                            view,
+                                            &meta,
+                                            &latency,
+                                            &last_view,
+                                            &displayed_grid,
+                                            &hidden_cols,
+                                            &sort_state,
+                                            &col_order,
+                                            &col_filters,
+                                            &edit_buf,
+                                            &browse,
+                                        );
+                                        w.set_query_running(false);
+                                        w.set_streaming(false);
+                                    }
+                                    if let Some(t) = stream_timer_stop.borrow().as_ref() {
+                                        t.stop();
+                                    }
+                                    return;
+                                }
+                                Ok(StreamMsg::Err(e)) => {
+                                    if let Some(tab) = workspace_tabs
+                                        .lock()
+                                        .unwrap()
+                                        .iter_mut()
+                                        .find(|t| t.id == target_id)
+                                    {
+                                        tab.loading = false;
+                                    }
+                                    if active_tab_id.lock().unwrap().as_deref() == Some(&target_id)
+                                    {
+                                        apply_result(
+                                            &w,
+                                            model::ResultView::Affected(format!("error: {e}")),
+                                        );
+                                        w.set_query_running(false);
+                                        w.set_streaming(false);
+                                    }
+                                    if let Some(t) = stream_timer_stop.borrow().as_ref() {
+                                        t.stop();
+                                    }
+                                    return;
+                                }
+                                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                                    w.set_query_running(false);
+                                    w.set_streaming(false);
+                                    if let Some(t) = stream_timer_stop.borrow().as_ref() {
+                                        t.stop();
+                                    }
+                                    return;
+                                }
+                            }
+                        }
+                    },
+                );
+            }
+            *stream_timer.borrow_mut() = Some(timer);
+
+            // Producer task: stream from the driver, forward Send batches to the
+            // UI channel. Holds the driver lock for the whole stream (like a DB
+            // client cursor); Cancel or a new run stops it at the next batch.
+            let q = rdbs_core::query::Query::Sql(sql);
+            let current = current.clone();
+            rt.spawn(async move {
+                let t0 = std::time::Instant::now();
+                let guard = current.lock().await;
+                let (ctx, mut crx) = tokio::sync::mpsc::channel::<rdbs_core::result::StreamItem>(4);
+                let cancel_prod = cancel.clone();
+                let producer = async move {
+                    match guard.as_ref() {
+                        Some((_engine, driver)) => {
+                            driver
+                                .query_stream(&q, STREAM_BATCH, cancel_prod, ctx)
+                                .await
+                        }
+                        None => Err(rdbs_core::error::RdbsError::Connection(
+                            "not connected".into(),
+                        )),
+                    }
+                };
+                let ui_tx2 = ui_tx.clone();
+                let cancel_cons = cancel.clone();
+                let consumer = async move {
+                    let mut total = 0usize;
+                    let mut capped = false;
+                    while let Some(item) = crx.recv().await {
+                        match item {
+                            rdbs_core::result::StreamItem::Meta(cols) => {
+                                let vmcols: Vec<model::VmColumn> = cols
+                                    .iter()
+                                    .map(|c| model::VmColumn {
+                                        name: c.name.clone(),
+                                        type_name: c.type_name.clone(),
+                                    })
+                                    .collect();
+                                if ui_tx2.send(StreamMsg::Meta(vmcols)).is_err() {
+                                    cancel_cons.store(true, std::sync::atomic::Ordering::SeqCst);
+                                    break;
+                                }
+                            }
+                            rdbs_core::result::StreamItem::Batch(rows) => {
+                                total += rows.len();
+                                if ui_tx2.send(StreamMsg::Batch(rows)).is_err() {
+                                    cancel_cons.store(true, std::sync::atomic::Ordering::SeqCst);
+                                    break;
+                                }
+                                if total >= STREAM_SOFT_CAP {
+                                    capped = true;
+                                    cancel_cons.store(true, std::sync::atomic::Ordering::SeqCst);
+                                }
+                            }
+                        }
+                    }
+                    capped
+                };
+                let (pres, capped) = tokio::join!(producer, consumer);
+                let elapsed_ms = t0.elapsed().as_millis().max(1) as u64;
+                match pres {
+                    Ok(()) => {
+                        let _ = ui_tx.send(StreamMsg::Done { capped, elapsed_ms });
+                    }
+                    Err(e) => {
+                        let _ = ui_tx.send(StreamMsg::Err(e.to_string()));
+                    }
+                }
+            });
+        })
+    };
+
     // ----- run query (editor) -----
     {
         let weak = window.as_weak();
         let run_sql = run_sql.clone();
+        let run_stream = run_stream.clone();
+        let cur_engine = cur_engine.clone();
+        let browse = browse.clone();
         let ed_state = ed_state.clone();
         let recent_queries = recent_queries.clone();
         let rebuild_query_tree = rebuild_query_tree.clone();
@@ -4285,7 +4732,19 @@ fn main() -> Result<(), slint::PlatformError> {
                 if active_tab_kind(&w) != "table" {
                     w.set_grid_read_only(true);
                 }
-                run_sql(text);
+                // "No limit" (browse.limit == 0) on a bare SELECT streams the
+                // rows in progressively; everything else runs buffered (capped).
+                let stream = active_tab_kind(&w) != "table"
+                    && browse.lock().unwrap().limit == 0
+                    && cur_engine
+                        .borrow()
+                        .map(|e| is_bare_select(e, &text))
+                        .unwrap_or(false);
+                if stream {
+                    run_stream(text);
+                } else {
+                    run_sql(text);
+                }
                 if w.get_sidebar_mode() != 0 {
                     rebuild_query_tree("");
                 }
@@ -4346,6 +4805,9 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let run_sql = run_sql.clone();
+        let run_stream = run_stream.clone();
+        let cur_engine = cur_engine.clone();
+        let browse = browse.clone();
         let ed_state = ed_state.clone();
         let recent_queries = recent_queries.clone();
         window.on_run_selection(move || {
@@ -4357,13 +4819,38 @@ fn main() -> Result<(), slint::PlatformError> {
                     .unwrap_or_else(|| ed.current_statement())
             };
             if !stmt.is_empty() {
+                let mut stream = false;
                 if let Some(w) = weak.upgrade() {
                     if active_tab_kind(&w) != "table" {
                         w.set_grid_read_only(true);
                     }
+                    stream = active_tab_kind(&w) != "table"
+                        && browse.lock().unwrap().limit == 0
+                        && cur_engine
+                            .borrow()
+                            .map(|e| is_bare_select(e, &stmt))
+                            .unwrap_or(false);
                 }
                 record_recent(&recent_queries, &stmt);
-                run_sql(stmt);
+                if stream {
+                    run_stream(stmt);
+                } else {
+                    run_sql(stmt);
+                }
+            }
+        });
+    }
+
+    // ----- Cancel a running stream ("No limit" fetch) -----
+    {
+        let weak = window.as_weak();
+        let stream_cancel = stream_cancel.clone();
+        window.on_cancel_stream(move || {
+            if let Some(c) = stream_cancel.borrow().as_ref() {
+                c.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            if let Some(w) = weak.upgrade() {
+                w.set_streaming(false);
             }
         });
     }
@@ -4441,7 +4928,14 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(table) = st.table else {
                 return;
             };
-            let text = browse_text(engine, &table, st.page, st.limit, &st.mongo_filter);
+            // "No limit" (0) has no meaning for paged browse; fall back to the
+            // engine default page size so the footer nav still works.
+            let limit = if st.limit == 0 {
+                default_browse_limit(engine)
+            } else {
+                st.limit
+            };
+            let text = browse_text(engine, &table, st.page, limit, &st.mongo_filter);
             load_editor_text(&text);
             run_sql(text);
         })
@@ -4742,11 +5236,33 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             // Echo the validated limit so manual edits and paging stay in sync.
+            // 0 renders as "No limit" (the streaming sentinel).
             let echo = |w: &MainWindow, l: u64| {
-                w.set_limit_text(SharedString::from(l.to_string()));
+                w.set_limit_text(SharedString::from(if l == 0 {
+                    "No limit".to_string()
+                } else {
+                    l.to_string()
+                }));
             };
             if guard_pending(&w) {
                 echo(&w, browse.lock().unwrap().limit);
+                return;
+            }
+            // "No limit" / 0 / all / none -> stream the whole result (limit 0).
+            let lower = text.trim().to_ascii_lowercase();
+            if lower.is_empty()
+                || lower == "0"
+                || lower == "all"
+                || lower == "none"
+                || lower.contains("no limit")
+            {
+                {
+                    let mut st = browse.lock().unwrap();
+                    st.limit = 0;
+                    st.page = 0;
+                }
+                echo(&w, 0);
+                run_browse();
                 return;
             }
             // The manual field may contain dot separators — keep digits only.

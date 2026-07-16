@@ -308,6 +308,9 @@ in-out property <string> rename-text;
     in property <bool> grid-read-only: true;
     in property <bool> status-error;
     in property <bool> query-running;
+    // A "No limit" stream is loading rows progressively (shows the Cancel button).
+    in property <bool> streaming;
+    callback cancel-stream();
     in-out property <string> limit-text: "300";
     callback prev-page();
     callback next-page();
@@ -1062,6 +1065,8 @@ in-out property <string> rename-text;
                         pending-count: root.pending-count;
                         read-only: root.grid-read-only;
                         query-running: root.query-running;
+                        streaming: root.streaming;
+                        cancel-stream() => { root.cancel-stream(); }
                         limit-text <=> root.limit-text;
                         run => {
                             root.run-query();

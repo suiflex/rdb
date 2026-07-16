@@ -18,6 +18,16 @@ pub struct Column {
 
 pub type Row = Vec<Cell>;
 
+/// One message from a streaming query ([`crate::driver::Driver::query_stream`]).
+/// `Meta` (the column headers) always arrives first, then any number of
+/// `Batch`es of rows. Lets the UI render a huge result progressively instead of
+/// buffering every row before the first paint.
+#[derive(Debug, Clone)]
+pub enum StreamItem {
+    Meta(Vec<Column>),
+    Batch(Vec<Row>),
+}
+
 /// One grid cell. Engine-native types are normalized into this set.
 #[derive(Debug, Clone)]
 pub enum Cell {

@@ -55,6 +55,42 @@ pub trait Driver: Send + Sync {
     /// return `RdbsError::UnsupportedQuery` for the rest.
     async fn query(&self, q: &Query) -> Result<ResultSet>;
 
+    /// Stream a row-returning query in batches so a huge result never buffers
+    /// fully in memory or freezes the UI. Sends [`StreamItem::Meta`] (columns)
+    /// first, then [`StreamItem::Batch`]es of at most `batch` rows; stops early
+    /// when `cancel` flips true or the receiver is dropped.
+    ///
+    /// Default: run [`Driver::query`] once and chunk the buffered rows — correct
+    /// for every engine, but only engines that OVERRIDE this (e.g. Postgres via
+    /// a server cursor) actually stream from the server without buffering first.
+    async fn query_stream(
+        &self,
+        q: &Query,
+        batch: usize,
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        sink: tokio::sync::mpsc::Sender<crate::result::StreamItem>,
+    ) -> Result<()> {
+        use crate::result::StreamItem;
+        let batch = batch.max(1);
+        match self.query(q).await? {
+            ResultSet::Tabular { cols, rows } => {
+                if sink.send(StreamItem::Meta(cols)).await.is_err() {
+                    return Ok(());
+                }
+                for chunk in rows.chunks(batch) {
+                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        break;
+                    }
+                    if sink.send(StreamItem::Batch(chunk.to_vec())).await.is_err() {
+                        break;
+                    }
+                }
+                Ok(())
+            }
+            _ => Err(crate::error::RdbsError::UnsupportedQuery),
+        }
+    }
+
     /// Primary-key column names of `table` (row identity for editing). An
     /// empty vec means the container is not editable. Default: not editable.
     async fn primary_key(&self, _table: &TableRef) -> Result<Vec<String>> {

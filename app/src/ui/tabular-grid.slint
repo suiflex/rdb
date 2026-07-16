@@ -3,7 +3,7 @@
 // Cells are flat row-major: row r, col c at r*col-count + c.
 import { Tokens } from "tokens.slint";
 import { GridColumn, GridCell } from "structs.slint";
-import { ComboBox, DatePickerPopup, ScrollView } from "std-widgets.slint";
+import { ComboBox, DatePickerPopup, ListView, ScrollView } from "std-widgets.slint";
 
 export component TabularGrid inherits Rectangle {
     in property <[GridColumn]> columns;
@@ -46,20 +46,20 @@ export component TabularGrid inherits Rectangle {
     }
 
     changed scroll-grid-tick => {
-        body.viewport-y = min(0px, body.visible-height - body.viewport-height);
+        list.viewport-y = min(0px, list.visible-height - list.viewport-height);
     }
 
-    VerticalLayout {
+    // A horizontal ScrollView owns the whole grid so the header and rows pan
+    // together; the header sits above the ListView so it stays put while rows
+    // scroll vertically. The ListView virtualizes — only the on-screen rows are
+    // instantiated — so a hundred-thousand / million-row result renders as
+    // cheaply as a single screenful (no more freeze on `SELECT *`).
+    hscroll := ScrollView {
         width: 100%;
         height: 100%;
-        // ----- frozen header band: mirrors the body's horizontal scroll so the
-        // headers stay put while rows scroll vertically -----
-        Rectangle {
-            clip: true;
-            height: Tokens.grid-header-h + 1px + (root.filter-open ? 27px : 0px);
-            VerticalLayout {
-                x: body.viewport-x;
-                width: max(self.preferred-width, body.visible-width);
+        VerticalLayout {
+            width: max(self.preferred-width, hscroll.visible-width);
+            height: hscroll.visible-height;
 
         // ----- header (27px): "name" 600 + type dim, mono -----
         HorizontalLayout {
@@ -175,14 +175,9 @@ export component TabularGrid inherits Rectangle {
             Rectangle { horizontal-stretch: 1; background: Tokens.chrome; }
         }
         if root.filter-open: Rectangle { height: 1px; background: Tokens.border; }
-            }
-        }
-
-        // ----- rows: the only vertically-scrolling region -----
-        body := ScrollView {
+        // ----- rows: ListView virtualizes; only the visible rows are built -----
+        list := ListView {
             vertical-stretch: 1;
-            VerticalLayout {
-                width: max(self.preferred-width, body.visible-width);
 
         // ----- rows (24px) -----
         for r in (root.col-count > 0 ? root.cells.length / root.col-count : 0): Rectangle {
@@ -285,7 +280,7 @@ export component TabularGrid inherits Rectangle {
                             || root.is-date(root.columns[c].type-name);
                         property <length> editor-w: self.compact-editor ? parent.width
                             : max(parent.width, min(520px, root.width - 2 * Tokens.sp2));
-                        property <length> visible-x: parent.x + body.viewport-x;
+                        property <length> visible-x: parent.x + hscroll.viewport-x;
                         z: 100;
                         x: self.compact-editor ? 0px
                             : max(-self.visible-x, min(0px, root.width - self.visible-x - self.editor-w));
