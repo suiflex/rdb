@@ -121,19 +121,23 @@ export component ConnPicker inherits Rectangle {
 
                             // --- connection row --- (selected-conn = store index)
                             if !item.is-header: Rectangle {
+                                // per-engine brand tint on the row card; selection
+                                // & hover deepen the same tint so color stays.
+                                property <color> tint: Tokens.db-color(item.engine);
                                 border-radius: Tokens.radius-lg;
-                                background: item.index == root.selected-conn ? Tokens.accent-tint
-                                    : row-ta.has-hover ? Tokens.border : transparent;
+                                background: item.index == root.selected-conn ? tint.with-alpha(0.30)
+                                    : row-ta.has-hover ? tint.with-alpha(0.20)
+                                    : tint.with-alpha(0.12);
                                 border-width: item.index == root.selected-conn ? 1px : 0;
-                                border-color: Tokens.accent.with-alpha(0.35);
+                                border-color: tint.with-alpha(0.5);
                                 animate background { duration: Tokens.fade; }
 
-                                // selection = 2px accent left bar (never a pill)
+                                // selection = 2px brand-color left bar (never a pill)
                                 if item.index == root.selected-conn: Rectangle {
                                     x: 0;
                                     width: Tokens.selection-bar-w;
                                     height: parent.height;
-                                    background: Tokens.accent;
+                                    background: tint;
                                     border-radius: 1px;
                                 }
 
