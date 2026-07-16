@@ -28,7 +28,7 @@ pub enum AnyDriver {
     // Boxed: a scylla Session is far larger than the other drivers, so keep it
     // off the enum's inline footprint (clippy::large_enum_variant).
     Cassandra(Box<CassandraDriver>),
-    /// In-process demo driver (RDBS_MOCK=1); no network, seeded data.
+    /// In-process demo driver (RDB_MOCK=1); no network, seeded data.
     Mock(crate::mock::MockDriver),
 }
 

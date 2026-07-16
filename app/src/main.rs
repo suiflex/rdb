@@ -1,4 +1,4 @@
-//! rdbs-app: Slint desktop binary.
+//! rdb-app: Slint desktop binary.
 //!
 //! Async bridge pattern (canonical):
 //!   - A `tokio` multi-thread runtime (`Arc<Runtime>`) lives for the whole
@@ -1643,18 +1643,18 @@ fn main() -> Result<(), slint::PlatformError> {
     let window = MainWindow::new()?;
 
     // One store for the app lifetime; all CRUD + password ops go through it.
-    // RDBS_MOCK=1 swaps in a seeded temp store (never the user's real one).
+    // RDB_MOCK=1 swaps in a seeded temp store (never the user's real one).
     let store: Rc<RefCell<rdb_connstore::ConnStore>> = Rc::new(RefCell::new(
-        if let Ok(dir) = std::env::var("RDBS_STORE_DIR") {
+        if let Ok(dir) = std::env::var("RDB_STORE_DIR") {
             // Explicit store dir (e2e harness): file-backed, real drivers.
             let dir = std::path::PathBuf::from(dir);
             let backend = Box::new(
                 rdb_connstore::EncryptedFileBackend::new(&dir).expect("file secret backend"),
             );
             rdb_connstore::ConnStore::load(dir.join("connections.json"), backend)
-                .expect("load RDBS_STORE_DIR store")
+                .expect("load RDB_STORE_DIR store")
         } else if mock::mock_mode() {
-            mock::mock_store(std::env::temp_dir().join(format!("rdbs-mock-{}", std::process::id())))
+            mock::mock_store(std::env::temp_dir().join(format!("rdb-mock-{}", std::process::id())))
         } else {
             rdb_connstore::ConnStore::open_default().unwrap_or_else(|_| {
                 let dir = std::env::temp_dir().join("dbm");
@@ -1666,15 +1666,15 @@ fn main() -> Result<(), slint::PlatformError> {
     ));
 
     // App preferences (theme, update-check, UI state), persisted alongside the
-    // connection store. Follows the same RDBS_STORE_DIR / mock overrides so
+    // connection store. Follows the same RDB_STORE_DIR / mock overrides so
     // tests and the reference screenshots never touch the user's real file.
     let settings: Rc<RefCell<rdb_connstore::SettingsStore>> = Rc::new(RefCell::new(
-        if let Ok(dir) = std::env::var("RDBS_STORE_DIR") {
+        if let Ok(dir) = std::env::var("RDB_STORE_DIR") {
             let dir = std::path::PathBuf::from(dir);
             rdb_connstore::SettingsStore::load(dir.join("settings.json"))
-                .expect("load RDBS_STORE_DIR settings")
+                .expect("load RDB_STORE_DIR settings")
         } else if mock::mock_mode() {
-            let dir = std::env::temp_dir().join(format!("rdbs-mock-{}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!("rdb-mock-{}", std::process::id()));
             let _ = std::fs::create_dir_all(&dir);
             rdb_connstore::SettingsStore::load(dir.join("settings.json")).expect("mock settings")
         } else {
@@ -1695,8 +1695,8 @@ fn main() -> Result<(), slint::PlatformError> {
     window.set_update_check_enabled(settings.borrow().get().update_check);
     window.set_app_version(env!("CARGO_PKG_VERSION").into());
 
-    // Fixed window size for the screenshot loop: RDBS_WIN=WxH (logical px).
-    if let Ok(spec) = std::env::var("RDBS_WIN") {
+    // Fixed window size for the screenshot loop: RDB_WIN=WxH (logical px).
+    if let Ok(spec) = std::env::var("RDB_WIN") {
         if let Some((w, h)) = spec.split_once('x') {
             if let (Ok(w), Ok(h)) = (w.parse::<f32>(), h.parse::<f32>()) {
                 window.window().set_size(slint::LogicalSize::new(w, h));
@@ -2908,10 +2908,10 @@ fn main() -> Result<(), slint::PlatformError> {
         fill_detail(idx);
     }
 
-    // RDBS_SCREEN drives the app to a reference state for screenshots and the
+    // RDB_SCREEN drives the app to a reference state for screenshots and the
     // e2e harness: "workspace" connects + opens emiten; "sql" opens + runs the
     // saved query; the rest open a specific modal/view.
-    if let Ok(screen) = std::env::var("RDBS_SCREEN") {
+    if let Ok(screen) = std::env::var("RDB_SCREEN") {
         let idx = store
             .borrow()
             .list()
@@ -4787,7 +4787,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // ponytail: blocking native dialog on the UI thread, fine for a
             // one-shot; move to async if it ever janks.
             let Some(path) = rfd::FileDialog::new()
-                .set_file_name("rdbs-export.csv")
+                .set_file_name("rdb-export.csv")
                 .add_filter("CSV", &["csv"])
                 .save_file()
             else {
@@ -6595,7 +6595,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     return;
                 }
             };
-            let path = export::export_path("rdbs-connections", "json");
+            let path = export::export_path("rdb-connections", "json");
             w.set_sel_footer(SharedString::from(match std::fs::write(&path, json) {
                 Ok(()) => format!("backup → {}", path.display()),
                 Err(e) => format!("backup failed: {e}"),

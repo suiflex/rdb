@@ -1,4 +1,4 @@
-//! Demo seeding for design parity: `RDBS_MOCK=1` swaps the user's real
+//! Demo seeding for design parity: `RDB_MOCK=1` swaps the user's real
 //! connection store for an in-memory temp store matching the reference
 //! design, and (later) routes "connect" to the in-process MockDriver.
 
@@ -145,7 +145,7 @@ pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
 
 /// True when the app runs in design-mock mode.
 pub fn mock_mode() -> bool {
-    std::env::var("RDBS_MOCK").is_ok_and(|v| v == "1")
+    std::env::var("RDB_MOCK").is_ok_and(|v| v == "1")
 }
 
 // ===========================================================================

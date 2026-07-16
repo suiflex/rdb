@@ -1,4 +1,4 @@
-//! Pure conversion from rdbs-core result/schema types into flat view-model
+//! Pure conversion from rdb-core result/schema types into flat view-model
 //! structs the UI binds to. No Slint imports here so it stays unit-testable;
 //! `main.rs` maps these into the Slint-generated structs.
 

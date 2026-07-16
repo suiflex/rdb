@@ -44,8 +44,8 @@ impl InstallMethod {
     /// One-line upgrade instruction to show in the banner.
     pub fn upgrade_hint(self) -> &'static str {
         match self {
-            InstallMethod::Homebrew => "Run: brew upgrade rdbs",
-            InstallMethod::Scoop => "Run: scoop update rdbs",
+            InstallMethod::Homebrew => "Run: brew upgrade rdb",
+            InstallMethod::Scoop => "Run: scoop update rdb",
             InstallMethod::Other => "Open the download page",
         }
     }
@@ -82,7 +82,7 @@ pub fn due_for_check(last_check: Option<i64>, now: i64) -> bool {
 /// any network/parse error — a failed check is silent, never fatal.
 pub fn fetch_latest_tag() -> Option<String> {
     let mut response = ureq::get(RELEASES_LATEST)
-        .header("User-Agent", "rdbs-update-check")
+        .header("User-Agent", "rdb-update-check")
         .header("Accept", "application/vnd.github+json")
         .config()
         .timeout_global(Some(std::time::Duration::from_secs(8)))
@@ -101,17 +101,17 @@ mod tests {
 
     #[test]
     fn detects_homebrew_and_scoop_from_path() {
-        let brew = PathBuf::from("/opt/homebrew/Cellar/rdbs/1.0.0/bin/rdbs");
+        let brew = PathBuf::from("/opt/homebrew/Cellar/rdb/1.0.0/bin/rdb");
         assert_eq!(
             InstallMethod::from_exe_path(Some(&brew)),
             InstallMethod::Homebrew
         );
-        let scoop = PathBuf::from(r"C:\Users\me\scoop\apps\rdbs\current\rdbs.exe");
+        let scoop = PathBuf::from(r"C:\Users\me\scoop\apps\rdb\current\rdb.exe");
         assert_eq!(
             InstallMethod::from_exe_path(Some(&scoop)),
             InstallMethod::Scoop
         );
-        let other = PathBuf::from("/usr/local/bin/rdbs");
+        let other = PathBuf::from("/usr/local/bin/rdb");
         assert_eq!(
             InstallMethod::from_exe_path(Some(&other)),
             InstallMethod::Other

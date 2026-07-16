@@ -116,7 +116,7 @@ export component MainWindow inherits Window {
                 activated => { root.shortcuts-open = true; }
             }
             MenuItem {
-                title: "About RDBS";
+                title: "About RDB";
                 activated => { root.about-open = true; }
             }
         }
@@ -1608,7 +1608,7 @@ in-out property <string> rename-text;
                 // --- about ---
                 HorizontalLayout {
                     SecondaryButton {
-                        text: "About RDBS";
+                        text: "About RDB";
                         clicked => {
                             root.settings-open = false;
                             root.about-open = true;
@@ -1733,7 +1733,7 @@ in-out property <string> rename-text;
                 spacing: Tokens.sp2;
 
                 Text {
-                    text: "RDBS";
+                    text: "RDB";
                     color: Tokens.text;
                     font-size: 22px;
                     font-weight: 700;
