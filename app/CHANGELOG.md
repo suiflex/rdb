@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.16.0](https://github.com/suiflex/rdb/compare/v0.15.0...v0.16.0) (2026-07-16)
+
+
+### Features
+
+* **grid:** stream "No limit" results progressively with cancel ([c47ff28](https://github.com/suiflex/rdb/commit/c47ff28af639965567f9b6d9e7e082ac4cf3d680))
+
+
+### Bug Fixes
+
+* **grid:** cap manual SELECT rows and virtualize the result grid ([43f06e0](https://github.com/suiflex/rdb/commit/43f06e0778f8aa426d8200d3481e841606c7977d))
+* **grid:** fix SELECT * freeze — row cap, virtualized grid, streaming No-limit ([9fce5b5](https://github.com/suiflex/rdb/commit/9fce5b55f1cc5f73247550d4bf947c91071c9e60))
+
 ## [0.15.0](https://github.com/suiflex/rdb/compare/v0.14.0...v0.15.0) (2026-07-15)
 
 
