@@ -4776,7 +4776,7 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let displayed_grid = displayed_grid.clone();
-        window.on_export_csv(move || {
+        window.on_export_results(move |fmt| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
@@ -4784,20 +4784,42 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_results_meta(SharedString::from("nothing to export"));
                 return;
             };
-            // ponytail: blocking native dialog on the UI thread, fine for a
-            // one-shot; move to async if it ever janks.
-            let Some(path) = rfd::FileDialog::new()
-                .set_file_name("rdb-export.csv")
-                .add_filter("CSV", &["csv"])
-                .save_file()
-            else {
-                return; // user cancelled
+            // format: 0 CSV, 1 JSON, 2 TSV, 3 SQL INSERT, 4 Markdown
+            let (ext, filter, contents) = match fmt {
+                1 => ("json", "JSON", export::to_json(&grid)),
+                2 => ("tsv", "TSV", export::to_tsv(&grid)),
+                3 => {
+                    let table = w.get_active_table();
+                    let table = if table.is_empty() {
+                        "results"
+                    } else {
+                        table.as_str()
+                    };
+                    ("sql", "SQL", export::to_sql_insert(&grid, table))
+                }
+                4 => ("md", "Markdown", export::to_markdown(&grid)),
+                _ => ("csv", "CSV", export::to_csv(&grid)),
             };
-            let msg = match std::fs::write(&path, export::to_csv(&grid)) {
-                Ok(()) => format!("exported → {}", path.display()),
-                Err(e) => format!("export failed: {e}"),
-            };
-            w.set_results_meta(SharedString::from(msg));
+            // Native save dialog via rfd's async API + Slint's local executor:
+            // the sync dialog blocks the winit event loop and never surfaces.
+            let weak = w.as_weak();
+            let _ = slint::spawn_local(async move {
+                let Some(file) = rfd::AsyncFileDialog::new()
+                    .set_file_name(format!("rdb-export.{ext}"))
+                    .add_filter(filter, &[ext])
+                    .save_file()
+                    .await
+                else {
+                    return; // user cancelled
+                };
+                let msg = match std::fs::write(file.path(), contents) {
+                    Ok(()) => format!("exported → {}", file.path().display()),
+                    Err(e) => format!("export failed: {e}"),
+                };
+                if let Some(w) = weak.upgrade() {
+                    w.set_results_meta(SharedString::from(msg));
+                }
+            });
         });
     }
 
