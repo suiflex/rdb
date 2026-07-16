@@ -224,7 +224,7 @@ in-out property <string> rename-text;
     callback format-sql();
     callback explain-query();
     callback copy-results();
-    callback export-csv();
+    callback export-results(int);
     in property <[ChartBar]> chart-bars;
     in property <[string]> all-columns;
     in property <[bool]> col-hidden;
@@ -262,6 +262,7 @@ in-out property <string> rename-text;
     in-out property <int> sidebar-mode: 0;
     in-out property <bool> sidebar-visible: true;
     in-out property <bool> detail-visible: true;
+    in-out property <bool> results-collapsed: false;
     callback editor-key(string, bool, bool, bool) -> bool;
     callback editor-press(int, int);
     callback editor-drag(int, int);
@@ -666,7 +667,17 @@ in-out property <string> rename-text;
                             clicked => { root.detail-visible = !root.detail-visible; }
                         }
                     }
-                    // divider: the two panel toggles above are a pair; the
+                    // hide/show the results panel (grid/documents)
+                    if root.connected: VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: "rows";
+                            tooltip: "Toggle results";
+                            active: !root.results-collapsed;
+                            clicked => { root.results-collapsed = !root.results-collapsed; }
+                        }
+                    }
+                    // divider: the panel toggles above are a group; the
                     // pencil/theme/⚙ that follow are one-shot actions, not toggles.
                     if root.connected: VerticalLayout {
                         alignment: center;
@@ -713,6 +724,7 @@ in-out property <string> rename-text;
                         alignment: center;
                         IconButton {
                             icon: "terminal";
+                            tooltip: "Toggle SQL console";
                             active: root.console-open;
                             clicked => { root.console-open = !root.console-open; }
                         }
@@ -977,6 +989,7 @@ in-out property <string> rename-text;
                     if root.tabs.length > 0: WorkArea {
                         vertical-stretch: 1;
                         detail-visible <=> root.detail-visible;
+                        results-collapsed <=> root.results-collapsed;
                         console-open <=> root.console-open;
                         console-count: root.query-console.length;
                         clear-console => { root.clear-console(); }
@@ -1082,8 +1095,8 @@ in-out property <string> rename-text;
                         copy-results() => {
                             root.copy-results();
                         }
-                        export-csv() => {
-                            root.export-csv();
+                        export-results(fmt) => {
+                            root.export-results(fmt);
                         }
                         apply-filter() => {
                             root.apply-filter();
