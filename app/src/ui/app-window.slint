@@ -689,8 +689,10 @@ in-out property <string> rename-text;
                             }
                         }
                     }
-                    // theme toggle: sun in dark mode, moon in light
-                    if root.connected: VerticalLayout {
+                    // theme toggle: sun in dark mode, moon in light.
+                    // Always visible (connections screen + workspace) so the
+                    // control lives in the same header spot in both states.
+                    VerticalLayout {
                         alignment: center;
                         IconButton {
                             icon: Tokens.dark ? "sun" : "moon";
