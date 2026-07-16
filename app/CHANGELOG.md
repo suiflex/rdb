@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.17.0](https://github.com/suiflex/rdb/compare/v0.16.0...v0.17.0) (2026-07-16)
+
+
+### Features
+
+* **header:** show theme toggle on connections screen too ([d952ac0](https://github.com/suiflex/rdb/commit/d952ac0ec17c5f99955169de99a57dc9912b56be))
+* **picker:** add engine brand glyph assets + icon mappings ([4b8506c](https://github.com/suiflex/rdb/commit/4b8506cfb3d29ad92e9676f7fbbf55c72a839a01))
+* **picker:** engine-tinted connection cards, brand logos, header theme toggle ([5cd1a9d](https://github.com/suiflex/rdb/commit/5cd1a9dcc447b552baf0c6183900a59f29da18e3))
+* **picker:** show engine brand logo on connection badge ([e3c2269](https://github.com/suiflex/rdb/commit/e3c22690e25cd5a6a7ce8d3e974ab61aaf8b13a4))
+* **picker:** show RDB logo on empty connection panel ([d0ad469](https://github.com/suiflex/rdb/commit/d0ad4690aeff0d1a9c9b8b331a2a48c7936d430d))
+* **picker:** tint connection row card per engine color ([c8c523c](https://github.com/suiflex/rdb/commit/c8c523c52a2191350a8d9b9bb7af064d726e0784))
+* **ui:** add Tooltip global + shared overlay layer ([ccbe616](https://github.com/suiflex/rdb/commit/ccbe61675d9914f31ac8ec28376461d360e842bd))
+
 ## [0.16.0](https://github.com/suiflex/rdb/compare/v0.15.0...v0.16.0) (2026-07-16)
 
 
