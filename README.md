@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/suiflex/rdb/actions/workflows/rdbs-app.yml"><img src="https://img.shields.io/github/actions/workflow/status/suiflex/rdb/rdbs-app.yml?branch=develop&style=for-the-badge" alt="Build status"></a>
+  <a href="https://github.com/suiflex/rdb/actions/workflows/rdb-app.yml"><img src="https://img.shields.io/github/actions/workflow/status/suiflex/rdb/rdb-app.yml?branch=develop&style=for-the-badge" alt="Build status"></a>
   <a href="https://github.com/suiflex/rdb/releases"><img src="https://img.shields.io/github/v/tag/suiflex/rdb?include_prereleases&style=for-the-badge&label=release" alt="Release"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-4ade80.svg?style=for-the-badge" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/platform-macOS_·_Linux_·_Windows-4ade80?style=for-the-badge" alt="Platforms">
@@ -50,7 +50,7 @@ A native, lightweight, cross-platform database manager built with Rust and Slint
 
 ### Core design rule
 
-The UI (`app/`) depends only on `rdbs-core`. It never imports a concrete driver crate. Adding a new engine = a new `driver-*` crate that implements the `Driver` trait; the UI is untouched.
+The UI (`app/`) depends only on `rdb-core`. It never imports a concrete driver crate. Adding a new engine = a new `driver-*` crate that implements the `Driver` trait; the UI is untouched.
 
 ### Async bridge
 
@@ -100,7 +100,7 @@ Prebuilt installers are expected to be attached to GitHub Releases.
 npm i -g @suiflex/rdb
 ```
 
-The postinstall step downloads the prebuilt `rdbs` binary for your platform from
+The postinstall step downloads the prebuilt `rdb` binary for your platform from
 the matching GitHub Release, then `rdb` launches it.
 
 ### macOS / Linux
@@ -112,27 +112,27 @@ curl -fsSL https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install
 Optional:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install.sh | RDBS_VERSION=v0.1.0 INSTALL_DIR="$HOME/.local/bin" bash
+curl -fsSL https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install.sh | RDB_VERSION=v0.1.0 INSTALL_DIR="$HOME/.local/bin" bash
 ```
 
-The script installs `rdbs` into `/usr/local/bin` when writable, otherwise it falls back to `~/.local/bin`.
+The script installs `rdb` into `/usr/local/bin` when writable, otherwise it falls back to `~/.local/bin`.
 
 ### Homebrew (macOS / Linux)
 
 ```bash
-brew install suiflex/tap/rdbs
+brew install suiflex/tap/rdb
 ```
 
-Upgrade later with `brew upgrade rdbs`.
+Upgrade later with `brew upgrade rdb`.
 
 ### Scoop (Windows)
 
 ```powershell
 scoop bucket add suiflex https://github.com/suiflex/scoop-bucket
-scoop install rdbs
+scoop install rdb
 ```
 
-Upgrade later with `scoop update rdbs`.
+Upgrade later with `scoop update rdb`.
 
 ## Build from source
 
@@ -157,22 +157,22 @@ sudo dnf install libxkbcommon-devel fontconfig-devel mesa-libGL-devel
 
 ```bash
 # Development
-cargo build -p rdbs
+cargo build -p rdb
 
 # Optimized release (~smaller binary)
-cargo build --release -p rdbs
+cargo build --release -p rdb
 
 # Run directly
-cargo run -p rdbs
+cargo run -p rdb
 ```
 
-The release binary lands at `target/release/rdbs`.
+The release binary lands at `target/release/rdb`.
 
 ## Usage
 
 ### Add a connection
 
-1. Launch RDBS — connection picker opens.
+1. Launch RDB — connection picker opens.
 2. Click **+** → fill in host, port, credentials, database.
 3. Or paste a DSN URL into the **Import URL** field — fields auto-fill.
 4. Click **Test** to verify, then **Save**.
@@ -200,15 +200,15 @@ Active development. Ships 6 engines (PostgreSQL, MySQL, Redis, MongoDB, SQLite, 
 
 | Crate | Description |
 |-------|-------------|
-| `rdbs` | Desktop binary (app/) |
-| `rdbs-core` | `Driver` trait, `Query`, `ResultSet`, `Schema`, `RdbsError` |
-| `rdbs-connstore` | Saved connections — JSON on disk + OS keychain / AES-GCM file |
-| `rdbs-driver-postgres` | PostgreSQL driver via `tokio-postgres` |
-| `rdbs-driver-mysql` | MySQL/MariaDB driver via `mysql_async` |
-| `rdbs-driver-redis` | Redis driver via `redis` crate |
-| `rdbs-driver-mongo` | MongoDB driver via `mongodb` crate |
-| `rdbs-driver-sqlite` | SQLite driver via `rusqlite` |
-| `rdbs-driver-cassandra` | Cassandra driver via `scylla` |
+| `rdb` | Desktop binary (app/) |
+| `rdb-core` | `Driver` trait, `Query`, `ResultSet`, `Schema`, `RdbError` |
+| `rdb-connstore` | Saved connections — JSON on disk + OS keychain / AES-GCM file |
+| `rdb-driver-postgres` | PostgreSQL driver via `tokio-postgres` |
+| `rdb-driver-mysql` | MySQL/MariaDB driver via `mysql_async` |
+| `rdb-driver-redis` | Redis driver via `redis` crate |
+| `rdb-driver-mongo` | MongoDB driver via `mongodb` crate |
+| `rdb-driver-sqlite` | SQLite driver via `rusqlite` |
+| `rdb-driver-cassandra` | Cassandra driver via `scylla` |
 
 ## License
 

@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-RDBS is pre-1.0 and ships from a single tracked package (`rdbs`). Security
+RDB is pre-1.0 and ships from a single tracked package (`rdb`). Security
 fixes land on the latest release; there are no long-term support branches yet.
 
 | Version | Supported          |
@@ -44,8 +44,8 @@ Please include, where you can:
 
 ## Scope
 
-RDBS stores connection secrets in the OS keychain, falling back to AES-GCM
+RDB stores connection secrets in the OS keychain, falling back to AES-GCM
 encryption. Reports touching credential handling, secret storage, or the
 database driver connection paths are especially valued.
 
-Thank you for helping keep RDBS and its users safe.
+Thank you for helping keep RDB and its users safe.

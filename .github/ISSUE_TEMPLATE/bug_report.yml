@@ -46,8 +46,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: rdbs version
-      description: Output of `rdbs --version`, or the release/commit you are on.
+      label: rdb version
+      description: Output of `rdb --version`, or the release/commit you are on.
     validations:
       required: true
   - type: textarea
