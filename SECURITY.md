@@ -3,14 +3,17 @@
 ## Supported versions
 
 RDB is pre-1.0 and ships from a single tracked package (`rdb`). Security
-fixes land on the latest release; there are no long-term support branches yet.
+fixes land on the latest release only; there are no long-term support
+branches yet.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.8.x   | :white_check_mark: |
-| < 0.8   | :x:                |
+| Version              | Supported          |
+| -------------------- | ------------------ |
+| Latest `0.x` release | :white_check_mark: |
+| Any older release    | :x:                |
 
-Please upgrade to the latest release before reporting an issue where possible.
+The current release is on the
+[Releases page](https://github.com/suiflex/rdb/releases). Please upgrade to
+the latest release before reporting an issue where possible.
 
 ## Reporting a vulnerability
 
