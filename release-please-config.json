@@ -4,7 +4,7 @@
   "include-component-in-tag": false,
   "packages": {
     "app": {
-      "package-name": "rdbs",
+      "package-name": "rdb",
       "extra-files": [
         {
           "type": "json",

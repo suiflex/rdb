@@ -1,23 +1,23 @@
-name: rdbs-driver-mongo
+name: rdb-driver-postgres
 
 on:
   push:
     branches: [develop, main]
     paths:
-      - crates/driver-mongo/**
+      - crates/driver-postgres/**
       - crates/core/**
       - Cargo.toml
       - Cargo.lock
       - rust-toolchain.toml
-      - .github/workflows/rdbs-driver-mongo.yml
+      - .github/workflows/rdb-driver-postgres.yml
   pull_request:
     paths:
-      - crates/driver-mongo/**
+      - crates/driver-postgres/**
       - crates/core/**
       - Cargo.toml
       - Cargo.lock
       - rust-toolchain.toml
-      - .github/workflows/rdbs-driver-mongo.yml
+      - .github/workflows/rdb-driver-postgres.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -33,7 +33,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rdbs-driver-mongo
-      - run: cargo fmt -p rdbs-driver-mongo --check
-      - run: cargo clippy -p rdbs-driver-mongo --all-targets -- -D warnings
-      - run: cargo test -p rdbs-driver-mongo --lib
+          shared-key: rdb-driver-postgres
+      - run: cargo fmt -p rdb-driver-postgres --check
+      - run: cargo clippy -p rdb-driver-postgres --all-targets -- -D warnings
+      - run: cargo test -p rdb-driver-postgres --lib

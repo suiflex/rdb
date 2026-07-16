@@ -1,4 +1,4 @@
-name: rdbs-app
+name: rdb-app
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
       - Cargo.toml
       - Cargo.lock
       - rust-toolchain.toml
-      - .github/workflows/rdbs-app.yml
+      - .github/workflows/rdb-app.yml
   pull_request:
     paths:
       - app/**
@@ -17,7 +17,7 @@ on:
       - Cargo.toml
       - Cargo.lock
       - rust-toolchain.toml
-      - .github/workflows/rdbs-app.yml
+      - .github/workflows/rdb-app.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -37,7 +37,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rdbs-app
+          shared-key: rdb-app
       # ponytail: minimal system libs for Slint winit+femtovg build on Linux;
       # add more here if the build errors out demanding another lib.
       # macOS uses system frameworks, so no install step is needed there.
@@ -52,6 +52,6 @@ jobs:
             libxcb-xfixes0-dev \
             libxkbcommon-dev \
             libgtk-3-dev
-      - run: cargo fmt -p rdbs --check
-      - run: cargo clippy -p rdbs --all-targets -- -D warnings
-      - run: cargo build -p rdbs
+      - run: cargo fmt -p rdb --check
+      - run: cargo clippy -p rdb --all-targets -- -D warnings
+      - run: cargo build -p rdb

@@ -1,4 +1,4 @@
-name: rdbs-core
+name: rdb-core
 
 on:
   push:
@@ -8,14 +8,14 @@ on:
       - Cargo.toml
       - Cargo.lock
       - rust-toolchain.toml
-      - .github/workflows/rdbs-core.yml
+      - .github/workflows/rdb-core.yml
   pull_request:
     paths:
       - crates/core/**
       - Cargo.toml
       - Cargo.lock
       - rust-toolchain.toml
-      - .github/workflows/rdbs-core.yml
+      - .github/workflows/rdb-core.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -31,7 +31,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rdbs-core
-      - run: cargo fmt -p rdbs-core --check
-      - run: cargo clippy -p rdbs-core --all-targets -- -D warnings
-      - run: cargo test -p rdbs-core --lib
+          shared-key: rdb-core
+      - run: cargo fmt -p rdb-core --check
+      - run: cargo clippy -p rdb-core --all-targets -- -D warnings
+      - run: cargo test -p rdb-core --lib
