@@ -827,6 +827,97 @@ fn browse_text(
     }
 }
 
+/// TablePlus-style row-limit guard for a manually-run statement: append
+/// `LIMIT n` to a bare `SELECT`/`WITH` read so `SELECT * FROM huge_table` can't
+/// buffer hundreds of thousands of rows into memory and freeze the grid. The
+/// SQL is returned UNCHANGED when a cap doesn't apply — a non-SQL engine, a
+/// write/DDL/EXPLAIN, a `SELECT ... INTO`, or a statement that already carries
+/// its own `LIMIT` (the browse path and hand-written limits stay intact).
+/// ponytail: word-scan, not a real SQL parser — a `limit`/`insert` inside a
+/// subquery just skips the cap (safe: no double-LIMIT, no corruption). Pulling
+/// the *full* millions is the streaming follow-up, not this guard.
+fn cap_select(engine: rdbs_connstore::Engine, sql: &str, limit: u64) -> String {
+    use rdbs_connstore::Engine;
+    if !matches!(
+        engine,
+        Engine::Postgres | Engine::MySql | Engine::Sqlite | Engine::Cassandra
+    ) {
+        return sql.to_string();
+    }
+    let trimmed = sql.trim_end().trim_end_matches(';').trim_end();
+    let words: Vec<&str> = trimmed
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .filter(|w| !w.is_empty())
+        .collect();
+    let first = words.first().copied().unwrap_or("");
+    let is_read = first.eq_ignore_ascii_case("select") || first.eq_ignore_ascii_case("with");
+    let has_limit = words.iter().any(|w| w.eq_ignore_ascii_case("limit"));
+    let has_write = words.iter().any(|w| {
+        w.eq_ignore_ascii_case("insert")
+            || w.eq_ignore_ascii_case("update")
+            || w.eq_ignore_ascii_case("delete")
+            || w.eq_ignore_ascii_case("into")
+    });
+    if !is_read || has_limit || has_write {
+        return sql.to_string();
+    }
+    format!("{trimmed} LIMIT {limit}")
+}
+
+#[cfg(test)]
+mod cap_select_tests {
+    use super::cap_select;
+    use rdbs_connstore::Engine;
+
+    #[test]
+    fn bare_select_gets_limit() {
+        assert_eq!(
+            cap_select(Engine::Postgres, "SELECT * from kelurahan_desa;", 300),
+            "SELECT * from kelurahan_desa LIMIT 300"
+        );
+    }
+
+    #[test]
+    fn existing_limit_is_left_alone() {
+        let sql = "SELECT * FROM t LIMIT 10";
+        assert_eq!(cap_select(Engine::Postgres, sql, 300), sql);
+    }
+
+    #[test]
+    fn writes_ddl_and_explain_untouched() {
+        for sql in [
+            "UPDATE t SET x = 1",
+            "INSERT INTO t VALUES (1)",
+            "DELETE FROM t",
+            "EXPLAIN SELECT * FROM t",
+            "SELECT * INTO backup FROM t",
+        ] {
+            assert_eq!(cap_select(Engine::Postgres, sql, 300), sql);
+        }
+    }
+
+    #[test]
+    fn cte_read_gets_limit_but_data_modifying_cte_does_not() {
+        assert_eq!(
+            cap_select(
+                Engine::Postgres,
+                "WITH x AS (SELECT 1) SELECT * FROM x",
+                500
+            ),
+            "WITH x AS (SELECT 1) SELECT * FROM x LIMIT 500"
+        );
+        let write_cte = "WITH x AS (DELETE FROM t RETURNING *) SELECT * FROM x";
+        assert_eq!(cap_select(Engine::Postgres, write_cte, 500), write_cte);
+    }
+
+    #[test]
+    fn non_sql_engines_untouched() {
+        let sql = "SELECT * FROM t";
+        assert_eq!(cap_select(Engine::Redis, sql, 300), sql);
+        assert_eq!(cap_select(Engine::Mongo, sql, 300), sql);
+    }
+}
+
 /// Push a flat `GridModel` into the window's grid columns/cells properties.
 fn push_grid(w: &MainWindow, g: &model::GridModel) {
     let cols: Vec<GridColumn> = g
@@ -4118,10 +4209,16 @@ fn main() -> Result<(), slint::PlatformError> {
                             vec![sql.clone()]
                         };
                         let n = stmts.len().max(1);
+                        // Row-limit control (default 300): cap manual SELECTs so a
+                        // huge `SELECT * FROM table` can't stream millions of rows
+                        // in and freeze the grid. Browse text already carries its
+                        // own LIMIT, so cap_select leaves it untouched.
+                        let row_limit = browse.lock().unwrap().limit;
                         let mut out = Err(rdbs_core::error::RdbsError::Query("empty query".into()));
                         for (i, s) in stmts.iter().enumerate() {
+                            let s = cap_select(*engine, s, row_limit);
                             append_query_console(&query_console, s.clone());
-                            out = match crate::query_parse::parse_query(*engine, s) {
+                            out = match crate::query_parse::parse_query(*engine, &s) {
                                 Ok(mut q) => {
                                     // Fill the selected database for a Mongo query
                                     // that didn't name one via `use(...)`.
