@@ -2,8 +2,8 @@
 //! Postgres builder, minus schema qualification (SQLite has no schema
 //! namespace) and with SQLite literal spellings (`X'..'` blobs, 0/1 bools).
 
-use rdbs_core::result::Cell;
-use rdbs_core::write::TableRef;
+use rdb_core::result::Cell;
+use rdb_core::write::TableRef;
 
 /// `"ident"` with embedded double quotes doubled.
 pub fn quote_ident(ident: &str) -> String {

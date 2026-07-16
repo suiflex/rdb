@@ -2,7 +2,7 @@
 //! and the temporal/decimal types fall back to their debug string, which is
 //! always safe to display in the grid.
 
-use rdbs_core::result::Cell;
+use rdb_core::result::Cell;
 use scylla::value::CqlValue;
 
 /// One column of a row (`None` = NULL) into a `Cell`.

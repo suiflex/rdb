@@ -4,13 +4,13 @@ use postgres_native_tls::MakeTlsConnector;
 use tokio::task::JoinHandle;
 use tokio_postgres::{Client, NoTls};
 
-use rdbs_core::conn::{ConnConfig, SslMode};
-use rdbs_core::driver::Driver;
-use rdbs_core::error::{RdbsError, Result};
-use rdbs_core::query::Query;
-use rdbs_core::result::{Column, ResultSet, Row};
-use rdbs_core::schema::{Container, ContainerKind, Database, Field, Schema};
-use rdbs_core::write::{TableRef, WriteOp};
+use rdb_core::conn::{ConnConfig, SslMode};
+use rdb_core::driver::Driver;
+use rdb_core::error::{RdbsError, Result};
+use rdb_core::query::Query;
+use rdb_core::result::{Column, ResultSet, Row};
+use rdb_core::schema::{Container, ContainerKind, Database, Field, Schema};
+use rdb_core::write::{TableRef, WriteOp};
 
 use crate::conn_string::build_conn_string;
 use crate::write_sql;
@@ -119,7 +119,7 @@ impl Driver for PostgresDriver {
         q: &Query,
         batch: usize,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-        sink: tokio::sync::mpsc::Sender<rdbs_core::result::StreamItem>,
+        sink: tokio::sync::mpsc::Sender<rdb_core::result::StreamItem>,
     ) -> Result<()> {
         query_stream_impl(&self.client, q, batch.max(1), cancel, sink).await
     }
@@ -265,10 +265,10 @@ async fn query_stream_impl(
     q: &Query,
     batch: usize,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    sink: tokio::sync::mpsc::Sender<rdbs_core::result::StreamItem>,
+    sink: tokio::sync::mpsc::Sender<rdb_core::result::StreamItem>,
 ) -> Result<()> {
     use futures_util::TryStreamExt;
-    use rdbs_core::result::StreamItem;
+    use rdb_core::result::StreamItem;
 
     let sql = match q {
         Query::Sql(s) => s,
@@ -424,7 +424,7 @@ async fn schema_impl(client: &Client, schema: &str) -> Result<Schema> {
     // Stored functions (public schema): name + full CREATE source for the
     // function view. Per-row source failures (e.g. C-language internals that
     // pg_get_functiondef rejects) are skipped, never fatal.
-    let mut functions: Vec<rdbs_core::schema::Function> = Vec::new();
+    let mut functions: Vec<rdb_core::schema::Function> = Vec::new();
     if let Ok(rows) = client
         .query(
             "SELECT p.proname, pg_catalog.pg_get_functiondef(p.oid) \
@@ -439,7 +439,7 @@ async fn schema_impl(client: &Client, schema: &str) -> Result<Schema> {
         for row in &rows {
             let name: String = row.get(0);
             if let Ok(def) = row.try_get::<_, String>(1) {
-                functions.push(rdbs_core::schema::Function {
+                functions.push(rdb_core::schema::Function {
                     name,
                     definition: def,
                 });

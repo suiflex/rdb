@@ -5576,43 +5576,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "rdbs"
-version = "0.16.0"
-dependencies = [
- "async-trait",
- "copypasta",
- "json5",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "open",
- "rdbs-connstore",
- "rdbs-core",
- "rdbs-driver-cassandra",
- "rdbs-driver-mongo",
- "rdbs-driver-mysql",
- "rdbs-driver-postgres",
- "rdbs-driver-redis",
- "rdbs-driver-sqlite",
- "rfd",
- "semver",
- "serde",
- "serde_json",
- "slint",
- "slint-build",
- "tokio",
- "ureq",
-]
-
-[[package]]
-name = "rdbs-connstore"
+name = "rdb-connstore"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "directories",
  "keyring",
  "rand 0.10.1",
- "rdbs-core",
+ "rdb-core",
  "serde",
  "serde_json",
  "tempfile",
@@ -5621,7 +5592,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rdbs-core"
+name = "rdb-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
@@ -5632,23 +5603,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "rdbs-driver-cassandra"
+name = "rdb-driver-cassandra"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "rdbs-core",
+ "rdb-core",
  "scylla",
  "tokio",
 ]
 
 [[package]]
-name = "rdbs-driver-mongo"
+name = "rdb-driver-mongo"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "futures",
  "mongodb",
- "rdbs-core",
+ "rdb-core",
  "serde_json",
  "testcontainers",
  "testcontainers-modules",
@@ -5656,19 +5627,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "rdbs-driver-mysql"
+name = "rdb-driver-mysql"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "mysql_async",
- "rdbs-core",
+ "rdb-core",
  "testcontainers",
  "testcontainers-modules",
  "tokio",
 ]
 
 [[package]]
-name = "rdbs-driver-postgres"
+name = "rdb-driver-postgres"
 version = "0.1.0"
 dependencies = [
  "async-trait",
@@ -5676,7 +5647,7 @@ dependencies = [
  "futures-util",
  "native-tls",
  "postgres-native-tls",
- "rdbs-core",
+ "rdb-core",
  "rust_decimal",
  "serde_json",
  "testcontainers",
@@ -5687,11 +5658,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "rdbs-driver-redis"
+name = "rdb-driver-redis"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "rdbs-core",
+ "rdb-core",
  "redis",
  "testcontainers",
  "testcontainers-modules",
@@ -5699,13 +5670,42 @@ dependencies = [
 ]
 
 [[package]]
-name = "rdbs-driver-sqlite"
+name = "rdb-driver-sqlite"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "rdbs-core",
+ "rdb-core",
  "rusqlite",
  "tokio",
+]
+
+[[package]]
+name = "rdbs"
+version = "0.16.0"
+dependencies = [
+ "async-trait",
+ "copypasta",
+ "json5",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "open",
+ "rdb-connstore",
+ "rdb-core",
+ "rdb-driver-cassandra",
+ "rdb-driver-mongo",
+ "rdb-driver-mysql",
+ "rdb-driver-postgres",
+ "rdb-driver-redis",
+ "rdb-driver-sqlite",
+ "rfd",
+ "semver",
+ "serde",
+ "serde_json",
+ "slint",
+ "slint-build",
+ "tokio",
+ "ureq",
 ]
 
 [[package]]

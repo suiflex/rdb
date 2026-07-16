@@ -2,13 +2,13 @@ use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 use mysql_async::{OptsBuilder, Pool, Row, SslOpts};
 
-use rdbs_core::conn::{ConnConfig, SslMode};
-use rdbs_core::driver::Driver;
-use rdbs_core::error::{RdbsError, Result};
-use rdbs_core::query::Query;
-use rdbs_core::result::{Column, ResultSet};
-use rdbs_core::schema::Schema;
-use rdbs_core::write::{TableRef, WriteOp};
+use rdb_core::conn::{ConnConfig, SslMode};
+use rdb_core::driver::Driver;
+use rdb_core::error::{RdbsError, Result};
+use rdb_core::query::Query;
+use rdb_core::result::{Column, ResultSet};
+use rdb_core::schema::Schema;
+use rdb_core::write::{TableRef, WriteOp};
 
 use crate::convert::{column_type_name, value_to_cell};
 use crate::schema::{columns_query, fold_rows, SchemaRow};
@@ -145,7 +145,7 @@ impl Driver for MysqlDriver {
                 (0..r.len())
                     .map(|i| match r.as_ref(i) {
                         Some(v) => value_to_cell(v),
-                        None => rdbs_core::result::Cell::Null,
+                        None => rdb_core::result::Cell::Null,
                     })
                     .collect::<Vec<_>>()
             })

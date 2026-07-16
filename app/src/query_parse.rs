@@ -1,9 +1,9 @@
-//! Pure seam between the editor text box and a typed `rdbs_core::Query`.
+//! Pure seam between the editor text box and a typed `rdb_core::Query`.
 //! The connected `Engine` decides how the text is interpreted, so a single
 //! editor drives all four paradigms.
 
-use rdbs_connstore::Engine;
-use rdbs_core::query::{MongoKind, MongoOp, Query};
+use rdb_connstore::Engine;
+use rdb_core::query::{MongoKind, MongoOp, Query};
 
 /// Turn raw editor text into a typed `Query` for the connected engine.
 /// Returns a human-readable error string on malformed input (shown in the
@@ -285,8 +285,8 @@ fn parse_mongo_envelope(text: &str) -> Result<Query, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rdbs_connstore::Engine;
-    use rdbs_core::query::{MongoKind, Query};
+    use rdb_connstore::Engine;
+    use rdb_core::query::{MongoKind, Query};
 
     #[test]
     fn sql_engines_pass_text_through() {

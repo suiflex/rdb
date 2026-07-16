@@ -42,7 +42,7 @@ const UNGROUPED: &str = "Ungrouped";
 /// regardless of grouping or ordering. `collapsed` holds the set of group labels
 /// currently folded shut.
 fn build_conn_items(
-    store: &rdbs_connstore::ConnStore,
+    store: &rdb_connstore::ConnStore,
     collapsed: &HashSet<String>,
     filter: &str,
 ) -> Vec<ConnItem> {
@@ -119,10 +119,10 @@ fn build_conn_items(
 /// the toggle key, so `on_toggle_schema_node` can tell a category click from a
 /// table click. The first entry is the "primary" category that holds the
 /// engine's containers. ponytail: SQL keeps the Views/Functions placeholders.
-fn sidebar_categories(engine: Option<rdbs_connstore::Engine>) -> &'static [&'static str] {
+fn sidebar_categories(engine: Option<rdb_connstore::Engine>) -> &'static [&'static str] {
     match engine {
         // Mongo/Redis use the nested database→leaf path, not these categories.
-        Some(rdbs_connstore::Engine::Mongo) => &["Collections"],
+        Some(rdb_connstore::Engine::Mongo) => &["Collections"],
         _ => &["Functions", "Tables"],
     }
 }
@@ -148,21 +148,21 @@ fn schema_display_rows(
     expanded_tables: &HashSet<String>,
     collapsed_cats: &HashSet<String>,
     loaded_dbs: &HashSet<String>,
-    engine: Option<rdbs_connstore::Engine>,
+    engine: Option<rdb_connstore::Engine>,
     filter: &str,
 ) -> Vec<TreeNode> {
     // Mongo (database→collection) and Redis (database→key) both render as a
     // collapsible database header nesting its own lazily-loaded leaves.
     // `expanded_tables` is the set of OPEN databases (default closed).
     match engine {
-        Some(rdbs_connstore::Engine::Mongo) => {
+        Some(rdb_connstore::Engine::Mongo) => {
             return nested_display_rows(nodes, expanded_tables, loaded_dbs, "collection", filter);
         }
-        Some(rdbs_connstore::Engine::Redis) => {
+        Some(rdb_connstore::Engine::Redis) => {
             return nested_display_rows(nodes, expanded_tables, loaded_dbs, "key", filter);
         }
         // Cassandra nests keyspace→table like Mongo nests database→collection.
-        Some(rdbs_connstore::Engine::Cassandra) => {
+        Some(rdb_connstore::Engine::Cassandra) => {
             return nested_display_rows(nodes, expanded_tables, loaded_dbs, "table", filter);
         }
         _ => {}
@@ -349,7 +349,7 @@ fn nested_display_rows(
 /// sits. Shared (Arc<Mutex>) so async count/pk fetches can update it.
 #[derive(Default, Clone)]
 struct BrowseState {
-    table: Option<rdbs_core::write::TableRef>,
+    table: Option<rdb_core::write::TableRef>,
     page: u64,
     limit: u64,
     total: Option<u64>,
@@ -362,17 +362,17 @@ struct BrowseState {
 /// Default browse page size per engine. Mongo documents are fat, so a Mongo
 /// collection opens 20 at a time (matching Compass) instead of the SQL default.
 /// ponytail: per-engine default only; the stepper + paging handle the rest.
-fn default_browse_limit(engine: rdbs_connstore::Engine) -> u64 {
+fn default_browse_limit(engine: rdb_connstore::Engine) -> u64 {
     match engine {
-        rdbs_connstore::Engine::Mongo => 20,
+        rdb_connstore::Engine::Mongo => 20,
         _ => 300,
     }
 }
 
 /// Operators exposed by the active engine. The filter itself is evaluated on
 /// the fetched page, but the vocabulary mirrors what that engine accepts.
-fn filter_operators(engine: rdbs_connstore::Engine) -> Vec<SharedString> {
-    use rdbs_connstore::Engine;
+fn filter_operators(engine: rdb_connstore::Engine) -> Vec<SharedString> {
+    use rdb_connstore::Engine;
     let ops: &[&str] = match engine {
         Engine::Postgres => &[
             "=",
@@ -463,7 +463,7 @@ struct WorkspaceTab {
     title: String,
     kind: String,
     query_text: String,
-    table: Option<rdbs_core::write::TableRef>,
+    table: Option<rdb_core::write::TableRef>,
     browse: BrowseState,
     results: Vec<StoredResult>,
     active_result: usize,
@@ -562,19 +562,19 @@ fn sync_query_console(w: &MainWindow, log: &Arc<std::sync::Mutex<Vec<String>>>) 
 // ponytail: timeout-bounded, no hard abort; add CancellationToken if a true
 // cancel button is ever needed.
 async fn try_connect(
-    engine: rdbs_connstore::Engine,
-    cfg: rdbs_core::conn::ConnConfig,
-) -> Result<u64, rdbs_core::error::RdbsError> {
+    engine: rdb_connstore::Engine,
+    cfg: rdb_core::conn::ConnConfig,
+) -> Result<u64, rdb_core::error::RdbsError> {
     let t0 = std::time::Instant::now();
     let attempt = async {
         let driver = AnyDriver::connect(engine, &cfg).await?;
         driver.ping().await?;
-        Ok::<_, rdbs_core::error::RdbsError>(())
+        Ok::<_, rdb_core::error::RdbsError>(())
     };
     match tokio::time::timeout(std::time::Duration::from_secs(8), attempt).await {
         Ok(Ok(())) => Ok(t0.elapsed().as_millis().max(1) as u64),
         Ok(Err(e)) => Err(e),
-        Err(_) => Err(rdbs_core::error::RdbsError::Connection(
+        Err(_) => Err(rdb_core::error::RdbsError::Connection(
             "connection timed out".into(),
         )),
     }
@@ -616,7 +616,7 @@ const RECENT_CAP: usize = 50;
 
 /// Load persisted recent-query history; empty on a missing/unreadable file.
 fn load_recent() -> Vec<String> {
-    let Ok(path) = rdbs_connstore::ConnStore::recent_queries_path() else {
+    let Ok(path) = rdb_connstore::ConnStore::recent_queries_path() else {
         return Vec::new();
     };
     std::fs::read_to_string(path)
@@ -627,7 +627,7 @@ fn load_recent() -> Vec<String> {
 
 /// Persist the recent-query history (best-effort; I/O errors are ignored).
 fn save_recent(list: &[String]) {
-    let Ok(path) = rdbs_connstore::ConnStore::recent_queries_path() else {
+    let Ok(path) = rdb_connstore::ConnStore::recent_queries_path() else {
         return;
     };
     if let Some(dir) = path.parent() {
@@ -676,7 +676,7 @@ fn save_query_tabs(tabs: &[WorkspaceTab], active: Option<&str>) {
     if mock::mock_mode() {
         return;
     }
-    let Ok(path) = rdbs_connstore::ConnStore::query_tabs_path() else {
+    let Ok(path) = rdb_connstore::ConnStore::query_tabs_path() else {
         return;
     };
     let sql: Vec<PersistedTab> = tabs
@@ -703,7 +703,7 @@ fn save_query_tabs(tabs: &[WorkspaceTab], active: Option<&str>) {
 /// Load persisted SQL tabs into fresh `WorkspaceTab`s (empty results/browse).
 /// Returns the tabs and the active tab id (if it still exists).
 fn load_query_tabs() -> (Vec<WorkspaceTab>, Option<String>) {
-    let Ok(path) = rdbs_connstore::ConnStore::query_tabs_path() else {
+    let Ok(path) = rdb_connstore::ConnStore::query_tabs_path() else {
         return (Vec::new(), None);
     };
     let Some(payload): Option<PersistedTabs> = std::fs::read_to_string(path)
@@ -763,8 +763,8 @@ fn default_col_width(name: &str, type_name: &str) -> f32 {
 }
 
 fn browse_text(
-    engine: rdbs_connstore::Engine,
-    table: &rdbs_core::write::TableRef,
+    engine: rdb_connstore::Engine,
+    table: &rdb_core::write::TableRef,
     page: u64,
     limit: u64,
     // Mongo-only filter document (raw JSON, empty = all). Unused by SQL engines.
@@ -772,7 +772,7 @@ fn browse_text(
 ) -> String {
     let offset = page * limit;
     match engine {
-        rdbs_connstore::Engine::Postgres => {
+        rdb_connstore::Engine::Postgres => {
             let schema = table.schema.as_deref().unwrap_or("public");
             let q = |s: &str| s.replace('"', "\"\"");
             format!(
@@ -781,19 +781,19 @@ fn browse_text(
                 q(&table.name)
             )
         }
-        rdbs_connstore::Engine::MySql => {
+        rdb_connstore::Engine::MySql => {
             format!(
                 "SELECT * FROM `{}` LIMIT {limit} OFFSET {offset}",
                 table.name.replace('`', "``")
             )
         }
-        rdbs_connstore::Engine::Sqlite => {
+        rdb_connstore::Engine::Sqlite => {
             format!(
                 "SELECT * FROM \"{}\" LIMIT {limit} OFFSET {offset}",
                 table.name.replace('"', "\"\"")
             )
         }
-        rdbs_connstore::Engine::Cassandra => {
+        rdb_connstore::Engine::Cassandra => {
             // ponytail: CQL is LIMIT-only (no OFFSET); real paging state is a
             // follow-up. Keyspace travels in `database`.
             let q = |s: &str| s.replace('"', "\"\"");
@@ -806,7 +806,7 @@ fn browse_text(
                 _ => format!("SELECT * FROM \"{}\" LIMIT {limit}", q(&table.name)),
             }
         }
-        rdbs_connstore::Engine::Mongo => {
+        rdb_connstore::Engine::Mongo => {
             let db = table
                 .database
                 .as_deref()
@@ -821,7 +821,7 @@ fn browse_text(
                 table.name
             )
         }
-        rdbs_connstore::Engine::Redis => {
+        rdb_connstore::Engine::Redis => {
             format!("BROWSE {} {offset} {limit}", table.name)
         }
     }
@@ -841,8 +841,8 @@ fn browse_text(
 /// Writes, DDL, `EXPLAIN`, `SELECT ... INTO`, an existing `LIMIT`, and non-SQL
 /// engines are all false (word-scan, not a real parser: a `limit`/`insert`
 /// inside a subquery conservatively returns false, so we never mangle it).
-fn is_bare_select(engine: rdbs_connstore::Engine, sql: &str) -> bool {
-    use rdbs_connstore::Engine;
+fn is_bare_select(engine: rdb_connstore::Engine, sql: &str) -> bool {
+    use rdb_connstore::Engine;
     if !matches!(
         engine,
         Engine::Postgres | Engine::MySql | Engine::Sqlite | Engine::Cassandra
@@ -868,7 +868,7 @@ fn is_bare_select(engine: rdbs_connstore::Engine, sql: &str) -> bool {
 
 /// TablePlus-style row cap for a manually-run statement. `limit == 0` means
 /// "No limit" (the streaming path owns that case), so the SQL is left as-is.
-fn cap_select(engine: rdbs_connstore::Engine, sql: &str, limit: u64) -> String {
+fn cap_select(engine: rdb_connstore::Engine, sql: &str, limit: u64) -> String {
     if limit == 0 || !is_bare_select(engine, sql) {
         return sql.to_string();
     }
@@ -879,7 +879,7 @@ fn cap_select(engine: rdbs_connstore::Engine, sql: &str, limit: u64) -> String {
 #[cfg(test)]
 mod cap_select_tests {
     use super::cap_select;
-    use rdbs_connstore::Engine;
+    use rdb_connstore::Engine;
 
     #[test]
     fn bare_select_gets_limit() {
@@ -953,7 +953,7 @@ const STREAM_SOFT_CAP: usize = 200_000;
 /// timer. Carries plain `Send` data only (no Slint types cross the boundary).
 enum StreamMsg {
     Meta(Vec<model::VmColumn>),
-    Batch(Vec<rdbs_core::result::Row>),
+    Batch(Vec<rdb_core::result::Row>),
     Done { capped: bool, elapsed_ms: u64 },
     Err(String),
 }
@@ -1084,19 +1084,19 @@ fn filter_grid(g: &model::GridModel, needle: &str) -> model::GridModel {
 /// List a table's indexes as (name, definition) via the engine catalog.
 /// Empty for engines without one (Redis, Mongo) and on any query error.
 async fn fetch_indexes(
-    engine: rdbs_connstore::Engine,
+    engine: rdb_connstore::Engine,
     driver: &AnyDriver,
-    table: &rdbs_core::write::TableRef,
+    table: &rdb_core::write::TableRef,
 ) -> Vec<(String, String)> {
     let esc = |s: &str| s.replace('\'', "''");
     let sql = match engine {
-        rdbs_connstore::Engine::Postgres => format!(
+        rdb_connstore::Engine::Postgres => format!(
             "SELECT indexname, indexdef FROM pg_indexes \
              WHERE tablename = '{}' AND schemaname = '{}' ORDER BY 1",
             esc(&table.name),
             esc(table.schema.as_deref().unwrap_or("public")),
         ),
-        rdbs_connstore::Engine::MySql => format!(
+        rdb_connstore::Engine::MySql => format!(
             "SELECT index_name, GROUP_CONCAT(column_name ORDER BY seq_in_index \
              SEPARATOR ', ') FROM information_schema.statistics \
              WHERE table_name = '{}' AND table_schema = \
@@ -1106,8 +1106,8 @@ async fn fetch_indexes(
         ),
         _ => return Vec::new(),
     };
-    match driver.query(&rdbs_core::query::Query::Sql(sql)).await {
-        Ok(rdbs_core::result::ResultSet::Tabular { rows, .. }) => rows
+    match driver.query(&rdb_core::query::Query::Sql(sql)).await {
+        Ok(rdb_core::result::ResultSet::Tabular { rows, .. }) => rows
             .into_iter()
             .filter_map(|r| {
                 let mut it = r.into_iter();
@@ -1573,7 +1573,7 @@ mod fmt_tests {
     }
     #[test]
     fn ilike_is_postgres_only() {
-        use rdbs_connstore::Engine;
+        use rdb_connstore::Engine;
         assert!(filter_operators(Engine::Postgres)
             .iter()
             .any(|op| op == "ILIKE"));
@@ -1644,23 +1644,23 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // One store for the app lifetime; all CRUD + password ops go through it.
     // RDBS_MOCK=1 swaps in a seeded temp store (never the user's real one).
-    let store: Rc<RefCell<rdbs_connstore::ConnStore>> = Rc::new(RefCell::new(
+    let store: Rc<RefCell<rdb_connstore::ConnStore>> = Rc::new(RefCell::new(
         if let Ok(dir) = std::env::var("RDBS_STORE_DIR") {
             // Explicit store dir (e2e harness): file-backed, real drivers.
             let dir = std::path::PathBuf::from(dir);
             let backend = Box::new(
-                rdbs_connstore::EncryptedFileBackend::new(&dir).expect("file secret backend"),
+                rdb_connstore::EncryptedFileBackend::new(&dir).expect("file secret backend"),
             );
-            rdbs_connstore::ConnStore::load(dir.join("connections.json"), backend)
+            rdb_connstore::ConnStore::load(dir.join("connections.json"), backend)
                 .expect("load RDBS_STORE_DIR store")
         } else if mock::mock_mode() {
             mock::mock_store(std::env::temp_dir().join(format!("rdbs-mock-{}", std::process::id())))
         } else {
-            rdbs_connstore::ConnStore::open_default().unwrap_or_else(|_| {
+            rdb_connstore::ConnStore::open_default().unwrap_or_else(|_| {
                 let dir = std::env::temp_dir().join("dbm");
                 let _ = std::fs::create_dir_all(&dir);
-                let backend = rdbs_connstore::secret::select_backend(&dir).expect("secret backend");
-                rdbs_connstore::ConnStore::new(dir.join("connections.json"), backend)
+                let backend = rdb_connstore::secret::select_backend(&dir).expect("secret backend");
+                rdb_connstore::ConnStore::new(dir.join("connections.json"), backend)
             })
         },
     ));
@@ -1668,20 +1668,20 @@ fn main() -> Result<(), slint::PlatformError> {
     // App preferences (theme, update-check, UI state), persisted alongside the
     // connection store. Follows the same RDBS_STORE_DIR / mock overrides so
     // tests and the reference screenshots never touch the user's real file.
-    let settings: Rc<RefCell<rdbs_connstore::SettingsStore>> = Rc::new(RefCell::new(
+    let settings: Rc<RefCell<rdb_connstore::SettingsStore>> = Rc::new(RefCell::new(
         if let Ok(dir) = std::env::var("RDBS_STORE_DIR") {
             let dir = std::path::PathBuf::from(dir);
-            rdbs_connstore::SettingsStore::load(dir.join("settings.json"))
+            rdb_connstore::SettingsStore::load(dir.join("settings.json"))
                 .expect("load RDBS_STORE_DIR settings")
         } else if mock::mock_mode() {
             let dir = std::env::temp_dir().join(format!("rdbs-mock-{}", std::process::id()));
             let _ = std::fs::create_dir_all(&dir);
-            rdbs_connstore::SettingsStore::load(dir.join("settings.json")).expect("mock settings")
+            rdb_connstore::SettingsStore::load(dir.join("settings.json")).expect("mock settings")
         } else {
-            rdbs_connstore::SettingsStore::open_default().unwrap_or_else(|_| {
+            rdb_connstore::SettingsStore::open_default().unwrap_or_else(|_| {
                 let dir = std::env::temp_dir().join("dbm");
                 let _ = std::fs::create_dir_all(&dir);
-                rdbs_connstore::SettingsStore::load(dir.join("settings.json"))
+                rdb_connstore::SettingsStore::load(dir.join("settings.json"))
                     .expect("settings fallback")
             })
         },
@@ -1705,7 +1705,7 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     // (engine, driver) so run-query can parse text for the right paradigm.
-    let current: Arc<tokio::sync::Mutex<Option<(rdbs_connstore::Engine, AnyDriver)>>> =
+    let current: Arc<tokio::sync::Mutex<Option<(rdb_connstore::Engine, AnyDriver)>>> =
         Arc::new(tokio::sync::Mutex::new(None));
 
     // Set of group labels the user has collapsed in the sidebar.
@@ -1823,7 +1823,7 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     // Engine of the live connection, kept on the UI thread so table clicks can
     // build an engine-appropriate "browse this table" query synchronously.
-    let cur_engine: Rc<RefCell<Option<rdbs_connstore::Engine>>> = Rc::new(RefCell::new(None));
+    let cur_engine: Rc<RefCell<Option<rdb_connstore::Engine>>> = Rc::new(RefCell::new(None));
 
     // Reusable sidebar rebuild: buckets the store's list into grouped rows.
     let rebuild_sidebar = {
@@ -2144,7 +2144,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             // language; default to SQL when not yet connected.
                             let engine = cur_engine
                                 .borrow()
-                                .unwrap_or(rdbs_connstore::Engine::Postgres);
+                                .unwrap_or(rdb_connstore::Engine::Postgres);
                             ed.toggle_comment(crate::query_parse::comment_prefix(engine));
                             true
                         }
@@ -2734,9 +2734,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 // chosen database; open it so its collections show at once.
                 let nested = matches!(
                     engine,
-                    rdbs_connstore::Engine::Mongo
-                        | rdbs_connstore::Engine::Redis
-                        | rdbs_connstore::Engine::Cassandra
+                    rdb_connstore::Engine::Mongo
+                        | rdb_connstore::Engine::Redis
+                        | rdb_connstore::Engine::Cassandra
                 );
                 let (exp, loaded) = if nested {
                     let mut e = expanded_tables.lock().unwrap();
@@ -2847,9 +2847,9 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_sel_sub(sub.into());
             w.set_sel_local(s.local);
             let ssl = match s.sslmode {
-                rdbs_core::conn::SslMode::Disable => "disable",
-                rdbs_core::conn::SslMode::Prefer => "prefer",
-                rdbs_core::conn::SslMode::Require => "require",
+                rdb_core::conn::SslMode::Disable => "disable",
+                rdb_core::conn::SslMode::Prefer => "prefer",
+                rdb_core::conn::SslMode::Require => "require",
             };
             let mut rows = vec![
                 KvRow {
@@ -2875,7 +2875,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 k: "SSL".into(),
                 v: ssl.into(),
             });
-            if mock::mock_mode() && s.engine == rdbs_connstore::Engine::Postgres {
+            if mock::mock_mode() && s.engine == rdb_connstore::Engine::Postgres {
                 rows.push(KvRow {
                     k: "Server".into(),
                     v: "PostgreSQL 16.14".into(),
@@ -3896,7 +3896,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         .unwrap_or_default(),
                 ));
                 w.set_bc_schema(SharedString::from(
-                    if matches!(sc.engine, rdbs_connstore::Engine::Postgres) {
+                    if matches!(sc.engine, rdb_connstore::Engine::Postgres) {
                         "public"
                     } else {
                         ""
@@ -3955,15 +3955,15 @@ fn main() -> Result<(), slint::PlatformError> {
                 // the Cancel button aborts sooner.
                 let attempt = async {
                     let cfg =
-                        cfg.map_err(|e| rdbs_core::error::RdbsError::Connection(e.to_string()))?;
+                        cfg.map_err(|e| rdb_core::error::RdbsError::Connection(e.to_string()))?;
                     let driver = AnyDriver::connect(engine, &cfg).await?;
                     let schema = driver.schema().await?;
-                    Ok::<_, rdbs_core::error::RdbsError>((driver, schema))
+                    Ok::<_, rdb_core::error::RdbsError>((driver, schema))
                 };
                 let result =
                     match tokio::time::timeout(std::time::Duration::from_secs(15), attempt).await {
                         Ok(r) => r,
-                        Err(_) => Err(rdbs_core::error::RdbsError::Connection(
+                        Err(_) => Err(rdb_core::error::RdbsError::Connection(
                             "connection timed out".into(),
                         )),
                     };
@@ -3974,7 +3974,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         // switcher offers more than "public". Engine-specific SQL
                         // lives in the driver, not here.
                         let pg_schemas: Vec<SharedString> =
-                            if matches!(engine, rdbs_connstore::Engine::Postgres) {
+                            if matches!(engine, rdb_connstore::Engine::Postgres) {
                                 driver
                                     .list_schemas()
                                     .await
@@ -4014,7 +4014,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         // selector must say "public", never the db name (a
                         // `"dbname"."table"` query would fail).
                         let mut schema_names: Vec<SharedString> =
-                            if matches!(engine, rdbs_connstore::Engine::Postgres) {
+                            if matches!(engine, rdb_connstore::Engine::Postgres) {
                                 if pg_schemas.is_empty() {
                                     vec![SharedString::from("public")]
                                 } else {
@@ -4039,10 +4039,10 @@ fn main() -> Result<(), slint::PlatformError> {
                         // SQL editor only makes sense for the SQL engines.
                         let sql_capable = matches!(
                             engine,
-                            rdbs_connstore::Engine::Postgres
-                                | rdbs_connstore::Engine::MySql
-                                | rdbs_connstore::Engine::Sqlite
-                                | rdbs_connstore::Engine::Cassandra
+                            rdb_connstore::Engine::Postgres
+                                | rdb_connstore::Engine::MySql
+                                | rdb_connstore::Engine::Sqlite
+                                | rdb_connstore::Engine::Cassandra
                         );
                         *raw_nodes.lock().unwrap() = nodes;
                         // Seed autocomplete with the active schema's tables plus a
@@ -4106,7 +4106,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         // more names as this fills.
                         // ponytail: sequential N+1 fetch, fine for typical schema
                         // counts; make it concurrent if a wide DB feels laggy.
-                        if matches!(engine, rdbs_connstore::Engine::Postgres)
+                        if matches!(engine, rdb_connstore::Engine::Postgres)
                             && all_schema_names.len() > 1
                         {
                             let guard = store_driver.lock_owned().await;
@@ -4246,10 +4246,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     Some((engine, driver)) => {
                         let stmts = if matches!(
                             engine,
-                            rdbs_connstore::Engine::Postgres
-                                | rdbs_connstore::Engine::MySql
-                                | rdbs_connstore::Engine::Sqlite
-                                | rdbs_connstore::Engine::Cassandra
+                            rdb_connstore::Engine::Postgres
+                                | rdb_connstore::Engine::MySql
+                                | rdb_connstore::Engine::Sqlite
+                                | rdb_connstore::Engine::Cassandra
                         ) {
                             editor::split_statements(&sql)
                         } else {
@@ -4261,7 +4261,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         // in and freeze the grid. Browse text already carries its
                         // own LIMIT, so cap_select leaves it untouched.
                         let row_limit = browse.lock().unwrap().limit;
-                        let mut out = Err(rdbs_core::error::RdbsError::Query("empty query".into()));
+                        let mut out = Err(rdb_core::error::RdbsError::Query("empty query".into()));
                         for (i, s) in stmts.iter().enumerate() {
                             let s = cap_select(*engine, s, row_limit);
                             append_query_console(&query_console, s.clone());
@@ -4269,19 +4269,19 @@ fn main() -> Result<(), slint::PlatformError> {
                                 Ok(mut q) => {
                                     // Fill the selected database for a Mongo query
                                     // that didn't name one via `use(...)`.
-                                    if let rdbs_core::query::Query::Mongo(op) = &mut q {
+                                    if let rdb_core::query::Query::Mongo(op) = &mut q {
                                         if op.database.is_none() && !cur_db.is_empty() {
                                             op.database = Some(cur_db.clone());
                                         }
                                     }
                                     driver.query(&q).await
                                 }
-                                Err(msg) => Err(rdbs_core::error::RdbsError::Query(msg)),
+                                Err(msg) => Err(rdb_core::error::RdbsError::Query(msg)),
                             };
                             if let Err(e) = &out {
                                 // Point the user at the offending statement.
                                 if n > 1 {
-                                    out = Err(rdbs_core::error::RdbsError::Query(format!(
+                                    out = Err(rdb_core::error::RdbsError::Query(format!(
                                         "statement {}/{n}: {e}",
                                         i + 1
                                     )));
@@ -4292,7 +4292,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         (out, n)
                     }
                     None => (
-                        Err(rdbs_core::error::RdbsError::Connection(
+                        Err(rdb_core::error::RdbsError::Connection(
                             "not connected".into(),
                         )),
                         1,
@@ -4522,7 +4522,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                             let mut vmrow = Vec::with_capacity(row.len());
                                             for cell in row {
                                                 let is_null =
-                                                    matches!(cell, rdbs_core::result::Cell::Null);
+                                                    matches!(cell, rdb_core::result::Cell::Null);
                                                 let text = cell.render();
                                                 vm.push(GridCell {
                                                     text: text.clone().into(),
@@ -4633,12 +4633,12 @@ fn main() -> Result<(), slint::PlatformError> {
             // Producer task: stream from the driver, forward Send batches to the
             // UI channel. Holds the driver lock for the whole stream (like a DB
             // client cursor); Cancel or a new run stops it at the next batch.
-            let q = rdbs_core::query::Query::Sql(sql);
+            let q = rdb_core::query::Query::Sql(sql);
             let current = current.clone();
             rt.spawn(async move {
                 let t0 = std::time::Instant::now();
                 let guard = current.lock().await;
-                let (ctx, mut crx) = tokio::sync::mpsc::channel::<rdbs_core::result::StreamItem>(4);
+                let (ctx, mut crx) = tokio::sync::mpsc::channel::<rdb_core::result::StreamItem>(4);
                 let cancel_prod = cancel.clone();
                 let producer = async move {
                     match guard.as_ref() {
@@ -4647,7 +4647,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 .query_stream(&q, STREAM_BATCH, cancel_prod, ctx)
                                 .await
                         }
-                        None => Err(rdbs_core::error::RdbsError::Connection(
+                        None => Err(rdb_core::error::RdbsError::Connection(
                             "not connected".into(),
                         )),
                     }
@@ -4659,7 +4659,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let mut capped = false;
                     while let Some(item) = crx.recv().await {
                         match item {
-                            rdbs_core::result::StreamItem::Meta(cols) => {
+                            rdb_core::result::StreamItem::Meta(cols) => {
                                 let vmcols: Vec<model::VmColumn> = cols
                                     .iter()
                                     .map(|c| model::VmColumn {
@@ -4672,7 +4672,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                     break;
                                 }
                             }
-                            rdbs_core::result::StreamItem::Batch(rows) => {
+                            rdb_core::result::StreamItem::Batch(rows) => {
                                 total += rows.len();
                                 if ui_tx2.send(StreamMsg::Batch(rows)).is_err() {
                                     cancel_cons.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -4976,7 +4976,7 @@ fn main() -> Result<(), slint::PlatformError> {
             } else {
                 db.clone()
             };
-            let schema_name = if matches!(engine, rdbs_connstore::Engine::Postgres) {
+            let schema_name = if matches!(engine, rdb_connstore::Engine::Postgres) {
                 w.get_schema_name().to_string()
             } else {
                 String::new()
@@ -4997,9 +4997,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 restore_tab(&w, index);
                 return;
             }
-            let table = rdbs_core::write::TableRef {
+            let table = rdb_core::write::TableRef {
                 database: (!db.is_empty()).then(|| db.clone()),
-                schema: matches!(engine, rdbs_connstore::Engine::Postgres)
+                schema: matches!(engine, rdb_connstore::Engine::Postgres)
                     .then(|| w.get_schema_name().to_string()),
                 name: label.clone(),
             };
@@ -5371,13 +5371,13 @@ fn main() -> Result<(), slint::PlatformError> {
             // keys / tables) lazily on first expand.
             if matches!(
                 engine,
-                Some(rdbs_connstore::Engine::Mongo)
-                    | Some(rdbs_connstore::Engine::Redis)
-                    | Some(rdbs_connstore::Engine::Cassandra)
+                Some(rdb_connstore::Engine::Mongo)
+                    | Some(rdb_connstore::Engine::Redis)
+                    | Some(rdb_connstore::Engine::Cassandra)
             ) {
                 let leaf_kind = match engine {
-                    Some(rdbs_connstore::Engine::Redis) => "key",
-                    Some(rdbs_connstore::Engine::Cassandra) => "table",
+                    Some(rdb_connstore::Engine::Redis) => "key",
+                    Some(rdb_connstore::Engine::Cassandra) => "table",
                     _ => "collection",
                 };
                 let now_open = {
@@ -5501,9 +5501,9 @@ fn main() -> Result<(), slint::PlatformError> {
             // existing open-table handler instead of duplicating its browse setup.
             if !matches!(
                 engine,
-                Some(rdbs_connstore::Engine::Postgres)
-                    | Some(rdbs_connstore::Engine::MySql)
-                    | Some(rdbs_connstore::Engine::Sqlite)
+                Some(rdb_connstore::Engine::Postgres)
+                    | Some(rdb_connstore::Engine::MySql)
+                    | Some(rdb_connstore::Engine::Sqlite)
             ) {
                 w.invoke_open_table(db, label);
                 return;
@@ -6269,7 +6269,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let guard = current.lock().await;
                     match guard.as_ref() {
                         Some((_, driver)) => driver.commit(&ops).await,
-                        None => Err(rdbs_core::error::RdbsError::Connection(
+                        None => Err(rdb_core::error::RdbsError::Connection(
                             "not connected".into(),
                         )),
                     }
@@ -6399,7 +6399,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 t.set_dark(!now);
                 let _ = settings
                     .borrow_mut()
-                    .update(|s| s.theme = rdbs_connstore::ThemeMode::from_dark(!now));
+                    .update(|s| s.theme = rdb_connstore::ThemeMode::from_dark(!now));
             }
         });
     }
@@ -6427,14 +6427,14 @@ fn main() -> Result<(), slint::PlatformError> {
             _ => "5432",
         }
     }
-    fn label_to_engine(label: &str) -> rdbs_connstore::Engine {
+    fn label_to_engine(label: &str) -> rdb_connstore::Engine {
         match label {
-            "MySQL" => rdbs_connstore::Engine::MySql,
-            "Redis" => rdbs_connstore::Engine::Redis,
-            "MongoDB" => rdbs_connstore::Engine::Mongo,
-            "SQLite" => rdbs_connstore::Engine::Sqlite,
-            "Cassandra" => rdbs_connstore::Engine::Cassandra,
-            _ => rdbs_connstore::Engine::Postgres,
+            "MySQL" => rdb_connstore::Engine::MySql,
+            "Redis" => rdb_connstore::Engine::Redis,
+            "MongoDB" => rdb_connstore::Engine::Mongo,
+            "SQLite" => rdb_connstore::Engine::Sqlite,
+            "Cassandra" => rdb_connstore::Engine::Cassandra,
+            _ => rdb_connstore::Engine::Postgres,
         }
     }
     let editing_id: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
@@ -6490,9 +6490,9 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_database(SharedString::from(sc.database.unwrap_or_default()));
             w.set_f_password(SharedString::default());
             w.set_f_sslmode(SharedString::from(match sc.sslmode {
-                rdbs_core::conn::SslMode::Disable => "Disable",
-                rdbs_core::conn::SslMode::Prefer => "Prefer",
-                rdbs_core::conn::SslMode::Require => "Require",
+                rdb_core::conn::SslMode::Disable => "Disable",
+                rdb_core::conn::SslMode::Prefer => "Prefer",
+                rdb_core::conn::SslMode::Require => "Require",
             }));
             w.set_f_params(SharedString::from(sc.params.unwrap_or_default()));
             w.set_f_color(SharedString::from(
@@ -6526,7 +6526,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let raw = w.get_f_import_url().to_string();
-            match rdbs_connstore::parse_conn_url(&raw) {
+            match rdb_connstore::parse_conn_url(&raw) {
                 Ok(parsed) => {
                     if let Some(engine) = parsed.engine {
                         w.set_f_engine(SharedString::from(AnyDriver::label(engine)));
@@ -6552,9 +6552,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                     if let Some(sslmode) = parsed.sslmode {
                         w.set_f_sslmode(SharedString::from(match sslmode {
-                            rdbs_core::conn::SslMode::Disable => "Disable",
-                            rdbs_core::conn::SslMode::Prefer => "Prefer",
-                            rdbs_core::conn::SslMode::Require => "Require",
+                            rdb_core::conn::SslMode::Disable => "Disable",
+                            rdb_core::conn::SslMode::Prefer => "Prefer",
+                            rdb_core::conn::SslMode::Require => "Require",
                         }));
                     }
                     w.set_form_error(SharedString::default());
@@ -6666,9 +6666,9 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             let engine = label_to_engine(w.get_f_engine().as_ref());
             let sslmode = match w.get_f_sslmode().to_string().as_str() {
-                "Disable" => rdbs_core::conn::SslMode::Disable,
-                "Require" => rdbs_core::conn::SslMode::Require,
-                _ => rdbs_core::conn::SslMode::Prefer,
+                "Disable" => rdb_core::conn::SslMode::Disable,
+                "Require" => rdb_core::conn::SslMode::Require,
+                _ => rdb_core::conn::SslMode::Prefer,
             };
             let database = {
                 let d = w.get_f_database().to_string();
@@ -6694,7 +6694,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     Some(p)
                 }
             };
-            let cfg = rdbs_core::conn::ConnConfig {
+            let cfg = rdb_core::conn::ConnConfig {
                 host,
                 port,
                 user: w.get_f_user().to_string(),
@@ -6772,9 +6772,9 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             let engine = label_to_engine(w.get_f_engine().as_ref());
             let sslmode = match w.get_f_sslmode().to_string().as_str() {
-                "Disable" => rdbs_core::conn::SslMode::Disable,
-                "Require" => rdbs_core::conn::SslMode::Require,
-                _ => rdbs_core::conn::SslMode::Prefer,
+                "Disable" => rdb_core::conn::SslMode::Disable,
+                "Require" => rdb_core::conn::SslMode::Require,
+                _ => rdb_core::conn::SslMode::Prefer,
             };
             let database = {
                 let d = w.get_f_database().to_string();
@@ -6796,10 +6796,10 @@ fn main() -> Result<(), slint::PlatformError> {
             let password = w.get_f_password().to_string();
             let id = editing_id.borrow().clone();
 
-            let result: rdbs_connstore::Result<()> = (|| {
+            let result: rdb_connstore::Result<()> = (|| {
                 let mut st = store.borrow_mut();
                 let conn_id = if id.is_empty() {
-                    let mut sc = rdbs_connstore::SavedConnection::new(
+                    let mut sc = rdb_connstore::SavedConnection::new(
                         name,
                         engine,
                         host,
@@ -6817,7 +6817,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let mut sc = st
                         .get(&id)
                         .cloned()
-                        .ok_or_else(|| rdbs_connstore::ConnStoreError::NotFound(id.clone()))?;
+                        .ok_or_else(|| rdb_connstore::ConnStoreError::NotFound(id.clone()))?;
                     sc.name = name;
                     sc.engine = engine;
                     sc.host = host;
@@ -6979,7 +6979,7 @@ mod tests {
 
     #[test]
     fn mongo_browse_default_is_twenty() {
-        use rdbs_connstore::Engine;
+        use rdb_connstore::Engine;
         assert_eq!(default_browse_limit(Engine::Mongo), 20);
         assert_eq!(default_browse_limit(Engine::Postgres), 300);
         assert_eq!(default_browse_limit(Engine::MySql), 300);
@@ -7010,7 +7010,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
-            Some(rdbs_connstore::Engine::Postgres),
+            Some(rdb_connstore::Engine::Postgres),
             "or",
         );
         let tables: Vec<_> = rows.iter().filter(|r| r.kind == "table").collect();
@@ -7027,7 +7027,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
-            Some(rdbs_connstore::Engine::Postgres),
+            Some(rdb_connstore::Engine::Postgres),
             "",
         );
         assert_eq!(rows.iter().filter(|r| r.kind == "table").count(), 3);
@@ -7063,35 +7063,35 @@ mod tests {
 
     #[test]
     fn browse_text_per_engine() {
-        let t = rdbs_core::write::TableRef {
+        let t = rdb_core::write::TableRef {
             database: None,
             schema: Some("public".into()),
             name: "users".into(),
         };
         assert_eq!(
-            browse_text(rdbs_connstore::Engine::Postgres, &t, 1, 300, ""),
+            browse_text(rdb_connstore::Engine::Postgres, &t, 1, 300, ""),
             "SELECT * FROM \"public\".\"users\" LIMIT 300 OFFSET 300"
         );
         assert_eq!(
-            browse_text(rdbs_connstore::Engine::MySql, &t, 0, 50, ""),
+            browse_text(rdb_connstore::Engine::MySql, &t, 0, 50, ""),
             "SELECT * FROM `users` LIMIT 50 OFFSET 0"
         );
         assert_eq!(
-            browse_text(rdbs_connstore::Engine::Redis, &t, 2, 100, ""),
+            browse_text(rdb_connstore::Engine::Redis, &t, 2, 100, ""),
             "BROWSE users 200 100"
         );
-        let m = rdbs_core::write::TableRef {
+        let m = rdb_core::write::TableRef {
             database: Some("shop".into()),
             schema: None,
             name: "orders".into(),
         };
         assert_eq!(
-            browse_text(rdbs_connstore::Engine::Mongo, &m, 1, 50, ""),
+            browse_text(rdb_connstore::Engine::Mongo, &m, 1, 50, ""),
             "{\"collection\":\"orders\",\"database\":\"shop\",\"op\":\"find\",\"body\":{},\"limit\":50,\"skip\":50}"
         );
         // A filter document lands in the find body.
         assert_eq!(
-            browse_text(rdbs_connstore::Engine::Mongo, &m, 0, 20, r#"{"status":"A"}"#),
+            browse_text(rdb_connstore::Engine::Mongo, &m, 0, 20, r#"{"status":"A"}"#),
             "{\"collection\":\"orders\",\"database\":\"shop\",\"op\":\"find\",\"body\":{\"status\":\"A\"},\"limit\":20,\"skip\":0}"
         );
     }
@@ -7103,7 +7103,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &HashSet::new(),
-            Some(rdbs_connstore::Engine::Postgres),
+            Some(rdb_connstore::Engine::Postgres),
             "USERS",
         );
         assert_eq!(rows.iter().filter(|r| r.kind == "table").count(), 1);

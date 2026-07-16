@@ -6,13 +6,13 @@ use mongodb::bson::{doc, Document};
 use mongodb::options::ClientOptions;
 use mongodb::{Client, Collection};
 
-use rdbs_core::conn::{ConnConfig, SslMode};
-use rdbs_core::driver::Driver;
-use rdbs_core::error::{RdbsError, Result};
-use rdbs_core::query::{MongoKind, MongoOp, Query};
-use rdbs_core::result::{Cell, ResultSet};
-use rdbs_core::schema::{Container, ContainerKind, Database, Schema};
-use rdbs_core::write::{TableRef, WriteOp};
+use rdb_core::conn::{ConnConfig, SslMode};
+use rdb_core::driver::Driver;
+use rdb_core::error::{RdbsError, Result};
+use rdb_core::query::{MongoKind, MongoOp, Query};
+use rdb_core::result::{Cell, ResultSet};
+use rdb_core::schema::{Container, ContainerKind, Database, Schema};
+use rdb_core::write::{TableRef, WriteOp};
 
 use crate::convert::{document_to_json, json_to_document};
 

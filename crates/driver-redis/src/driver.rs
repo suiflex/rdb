@@ -3,14 +3,14 @@ use redis::aio::MultiplexedConnection;
 use redis::{Client, Value};
 use tokio::sync::Mutex;
 
-use rdbs_core::conn::ConnConfig;
-use rdbs_core::driver::Driver;
-use rdbs_core::error::{RdbsError, Result};
-use rdbs_core::query::Query;
-use rdbs_core::result::RedisValue;
-use rdbs_core::result::{Cell, ResultSet};
-use rdbs_core::schema::{Container, ContainerKind, Database, Schema};
-use rdbs_core::write::{TableRef, WriteOp};
+use rdb_core::conn::ConnConfig;
+use rdb_core::driver::Driver;
+use rdb_core::error::{RdbsError, Result};
+use rdb_core::query::Query;
+use rdb_core::result::RedisValue;
+use rdb_core::result::{Cell, ResultSet};
+use rdb_core::schema::{Container, ContainerKind, Database, Schema};
+use rdb_core::write::{TableRef, WriteOp};
 
 use crate::convert::{connection_url, pairs_from_flat, pairs_from_members, value_to_resultset};
 
@@ -274,11 +274,11 @@ impl RedisDriver {
                     "list" => {
                         // Lists delete by index: LSET a sentinel, then LREM it.
                         let idx = pair_text(pk, "index").ok_or_else(|| missing("index"))?;
-                        build_cmd("LSET", &[key, &idx, "__rdbs_deleted__"])
+                        build_cmd("LSET", &[key, &idx, "__rdb_deleted__"])
                             .query_async::<()>(&mut *conn)
                             .await
                             .map_err(qerr)?;
-                        build_cmd("LREM", &[key, "1", "__rdbs_deleted__"])
+                        build_cmd("LREM", &[key, "1", "__rdb_deleted__"])
                     }
                     "set" => {
                         let member = pair_text(pk, "member").ok_or_else(|| missing("member"))?;

@@ -3,13 +3,13 @@ use scylla::client::session::Session;
 use scylla::client::session_builder::SessionBuilder;
 use scylla::value::Row;
 
-use rdbs_core::conn::ConnConfig;
-use rdbs_core::driver::Driver;
-use rdbs_core::error::{RdbsError, Result};
-use rdbs_core::query::Query;
-use rdbs_core::result::{Column, ResultSet};
-use rdbs_core::schema::{Container, ContainerKind, Database, Field, Schema};
-use rdbs_core::write::{TableRef, WriteOp};
+use rdb_core::conn::ConnConfig;
+use rdb_core::driver::Driver;
+use rdb_core::error::{RdbsError, Result};
+use rdb_core::query::Query;
+use rdb_core::result::{Column, ResultSet};
+use rdb_core::schema::{Container, ContainerKind, Database, Field, Schema};
+use rdb_core::write::{TableRef, WriteOp};
 
 use crate::type_map;
 use crate::write_cql;

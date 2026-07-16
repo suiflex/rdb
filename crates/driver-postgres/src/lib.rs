@@ -1,4 +1,4 @@
-//! rdbs-driver-postgres: a `rdbs_core::driver::Driver` backed by tokio-postgres.
+//! rdbs-driver-postgres: a `rdb_core::driver::Driver` backed by tokio-postgres.
 
 mod conn_string;
 mod driver;

@@ -3,9 +3,9 @@
 // is present (CI, dev with Docker Desktop) they run; without Docker they fail
 // fast at container start, which is the intended signal.
 
-use rdbs_core::conn::{ConnConfig, SslMode};
-use rdbs_core::driver::Driver;
-use rdbs_driver_postgres::PostgresDriver;
+use rdb_core::conn::{ConnConfig, SslMode};
+use rdb_core::driver::Driver;
+use rdb_driver_postgres::PostgresDriver;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::ContainerAsync;
 use testcontainers_modules::postgres::Postgres;
@@ -44,8 +44,8 @@ async fn connect_ping_close() {
 
 #[tokio::test]
 async fn select_returns_tabular_rows() {
-    use rdbs_core::query::Query;
-    use rdbs_core::result::{Cell, ResultSet};
+    use rdb_core::query::Query;
+    use rdb_core::result::{Cell, ResultSet};
 
     let (_container, cfg) = start_pg().await;
     let driver = PostgresDriver::connect(&cfg).await.expect("connect");
@@ -89,8 +89,8 @@ async fn select_returns_tabular_rows() {
 
 #[tokio::test]
 async fn non_sql_queries_are_unsupported() {
-    use rdbs_core::error::RdbsError;
-    use rdbs_core::query::{MongoKind, MongoOp, Query};
+    use rdb_core::error::RdbsError;
+    use rdb_core::query::{MongoKind, MongoOp, Query};
 
     let (_container, cfg) = start_pg().await;
     let driver = PostgresDriver::connect(&cfg).await.expect("connect");
@@ -117,8 +117,8 @@ async fn non_sql_queries_are_unsupported() {
 
 #[tokio::test]
 async fn schema_lists_created_table_and_fields() {
-    use rdbs_core::query::Query;
-    use rdbs_core::schema::ContainerKind;
+    use rdb_core::query::Query;
+    use rdb_core::schema::ContainerKind;
 
     let (_container, cfg) = start_pg().await;
     let driver = PostgresDriver::connect(&cfg).await.expect("connect");

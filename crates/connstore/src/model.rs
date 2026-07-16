@@ -1,4 +1,4 @@
-use rdbs_core::conn::{ConnConfig, SslMode};
+use rdb_core::conn::{ConnConfig, SslMode};
 use serde::{Deserialize, Serialize};
 
 /// Database engine of a saved connection. The MVP ships four; the variant set

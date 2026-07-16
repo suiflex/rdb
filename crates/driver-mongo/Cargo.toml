@@ -1,10 +1,10 @@
 [package]
-name = "rdbs-driver-mongo"
+name = "rdb-driver-mongo"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-rdbs-core = { path = "../core" }
+rdb-core = { path = "../core" }
 async-trait = "0.1"
 mongodb = "3"
 serde_json = "1"

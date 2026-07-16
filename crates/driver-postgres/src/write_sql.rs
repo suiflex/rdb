@@ -6,8 +6,8 @@
 //! match each column's wire type exactly. Escaping doubles single quotes and
 //! strips NUL; identifiers are double-quoted with `"` doubling.
 
-use rdbs_core::result::Cell;
-use rdbs_core::write::TableRef;
+use rdb_core::result::Cell;
+use rdb_core::write::TableRef;
 
 /// `"ident"` with embedded double quotes doubled.
 pub fn quote_ident(ident: &str) -> String {

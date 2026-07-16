@@ -2,7 +2,7 @@
 //! connection store for an in-memory temp store matching the reference
 //! design, and (later) routes "connect" to the in-process MockDriver.
 
-use rdbs_connstore::{ConnStore, Engine, SavedConnection};
+use rdb_connstore::{ConnStore, Engine, SavedConnection};
 
 fn conn(
     name: &str,
@@ -26,7 +26,7 @@ pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
     let _ = std::fs::create_dir_all(&dir);
     // File backend only: demo mode must never touch the OS keychain.
     let backend =
-        Box::new(rdbs_connstore::EncryptedFileBackend::new(&dir).expect("file secret backend"));
+        Box::new(rdb_connstore::EncryptedFileBackend::new(&dir).expect("file secret backend"));
     let mut store = ConnStore::new(dir.join("connections.json"), backend);
 
     let host = "128.199.74.52";
@@ -77,7 +77,7 @@ pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
             "PROFIN",
             true,
         );
-        c.sslmode = rdbs_core::conn::SslMode::Require;
+        c.sslmode = rdb_core::conn::SslMode::Require;
         c.tags = vec!["profin".into(), "fintech".into()];
         add(c);
     }
@@ -155,13 +155,13 @@ pub fn mock_mode() -> bool {
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use rdbs_core::conn::ConnConfig;
-use rdbs_core::driver::Driver;
-use rdbs_core::error::{RdbsError, Result};
-use rdbs_core::query::Query;
-use rdbs_core::result::{Cell, Column, ResultSet, Row};
-use rdbs_core::schema::{Container, ContainerKind, Database, Field, Function, Schema};
-use rdbs_core::write::{TableRef, WriteOp};
+use rdb_core::conn::ConnConfig;
+use rdb_core::driver::Driver;
+use rdb_core::error::{RdbsError, Result};
+use rdb_core::query::Query;
+use rdb_core::result::{Cell, Column, ResultSet, Row};
+use rdb_core::schema::{Container, ContainerKind, Database, Field, Function, Schema};
+use rdb_core::write::{TableRef, WriteOp};
 
 /// (name, weight) — weights sum to 986 like the reference `emiten` table.
 const SECTORS: &[(&str, i64)] = &[

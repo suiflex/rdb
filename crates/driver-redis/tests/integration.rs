@@ -2,12 +2,12 @@
 //! Requires Docker. Ignored by default; run with
 //! `cargo test -p rdbs-driver-redis -- --ignored`.
 
-use rdbs_core::conn::{ConnConfig, SslMode};
-use rdbs_core::driver::Driver;
-use rdbs_core::query::Query;
-use rdbs_core::result::{RedisValue, ResultSet};
-use rdbs_core::schema::ContainerKind;
-use rdbs_driver_redis::RedisDriver;
+use rdb_core::conn::{ConnConfig, SslMode};
+use rdb_core::driver::Driver;
+use rdb_core::query::Query;
+use rdb_core::result::{RedisValue, ResultSet};
+use rdb_core::schema::ContainerKind;
+use rdb_driver_redis::RedisDriver;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::redis::Redis;
 

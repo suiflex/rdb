@@ -1,7 +1,7 @@
 # Split FE/BE build entry points. BE = crates/* libs, FE = rdbs (app/).
 # Run `make` or `make help` for the target list.
 
-BE_PKGS = rdbs-core rdbs-connstore rdbs-driver-postgres rdbs-driver-mysql rdbs-driver-redis rdbs-driver-mongo
+BE_PKGS = rdb-core rdb-connstore rdb-driver-postgres rdb-driver-mysql rdb-driver-redis rdb-driver-mongo
 FE_PKG  = rdbs
 BE_FLAGS = $(addprefix -p ,$(BE_PKGS))
 

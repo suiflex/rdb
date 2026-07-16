@@ -1,6 +1,6 @@
 use mongodb::bson::{Bson, Document};
 
-use rdbs_core::error::{RdbsError, Result};
+use rdb_core::error::{RdbsError, Result};
 
 /// Convert a JSON object into a BSON `Document`. Filters, insert payloads, and
 /// aggregation stages all arrive as JSON objects, so a non-object is a usage
