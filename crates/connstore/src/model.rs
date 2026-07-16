@@ -77,7 +77,7 @@ impl SavedConnection {
         }
     }
 
-    /// Rebuild a `rdbs-core::ConnConfig`, injecting the password fetched from the
+    /// Rebuild a `rdb-core::ConnConfig`, injecting the password fetched from the
     /// secret backend. The password is the only secret that ever lives in memory.
     pub fn to_conn_config(&self, password: Option<String>) -> ConnConfig {
         ConnConfig {

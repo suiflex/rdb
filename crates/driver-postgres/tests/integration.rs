@@ -89,7 +89,7 @@ async fn select_returns_tabular_rows() {
 
 #[tokio::test]
 async fn non_sql_queries_are_unsupported() {
-    use rdb_core::error::RdbsError;
+    use rdb_core::error::RdbError;
     use rdb_core::query::{MongoKind, MongoOp, Query};
 
     let (_container, cfg) = start_pg().await;
@@ -98,7 +98,7 @@ async fn non_sql_queries_are_unsupported() {
     let cmd = driver
         .query(&Query::Command(vec!["GET".into(), "k".into()]))
         .await;
-    assert!(matches!(cmd, Err(RdbsError::UnsupportedQuery)));
+    assert!(matches!(cmd, Err(RdbError::UnsupportedQuery)));
 
     let mongo = driver
         .query(&Query::Mongo(Box::new(MongoOp {
@@ -110,7 +110,7 @@ async fn non_sql_queries_are_unsupported() {
             kind: MongoKind::Find(serde_json::json!({})),
         })))
         .await;
-    assert!(matches!(mongo, Err(RdbsError::UnsupportedQuery)));
+    assert!(matches!(mongo, Err(RdbError::UnsupportedQuery)));
 
     driver.close().await.expect("close");
 }

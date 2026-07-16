@@ -22,7 +22,7 @@ fn cfg(path: &str) -> ConnConfig {
 
 fn temp_db() -> String {
     let mut p = std::env::temp_dir();
-    p.push(format!("rdbs-sqlite-test-{}.db", std::process::id()));
+    p.push(format!("rdb-sqlite-test-{}.db", std::process::id()));
     let _ = std::fs::remove_file(&p);
     p.to_string_lossy().into_owned()
 }

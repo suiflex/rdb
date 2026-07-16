@@ -157,7 +157,7 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use rdb_core::conn::ConnConfig;
 use rdb_core::driver::Driver;
-use rdb_core::error::{RdbsError, Result};
+use rdb_core::error::{RdbError, Result};
 use rdb_core::query::Query;
 use rdb_core::result::{Cell, Column, ResultSet, Row};
 use rdb_core::schema::{Container, ContainerKind, Database, Field, Function, Schema};
@@ -592,7 +592,7 @@ impl Driver for MockDriver {
         // Believable latency for the “● 12 ms” readout.
         tokio::time::sleep(std::time::Duration::from_millis(11)).await;
         let Query::Sql(sql) = q else {
-            return Err(RdbsError::UnsupportedQuery);
+            return Err(RdbError::UnsupportedQuery);
         };
         let sql = sql.trim();
         let upper = sql.to_uppercase();
@@ -644,11 +644,11 @@ impl Driver for MockDriver {
                         rows: vec![vec![Cell::Text(expr.to_string())]],
                     });
                 }
-                return Err(RdbsError::UnsupportedQuery);
+                return Err(RdbError::UnsupportedQuery);
             };
             let tables = self.tables.lock().unwrap();
             let Some(t) = tables.get(&table) else {
-                return Err(RdbsError::Query(format!(
+                return Err(RdbError::Query(format!(
                     "relation \"{table}\" does not exist"
                 )));
             };
@@ -681,7 +681,7 @@ impl Driver for MockDriver {
         tables
             .get(&table.name)
             .map(|t| t.rows.len() as u64)
-            .ok_or_else(|| RdbsError::Query(format!("relation \"{}\" does not exist", table.name)))
+            .ok_or_else(|| RdbError::Query(format!("relation \"{}\" does not exist", table.name)))
     }
 
     async fn commit(&self, ops: &[WriteOp]) -> Result<u64> {
@@ -690,7 +690,7 @@ impl Driver for MockDriver {
         for op in ops {
             let t = tables
                 .get_mut(&op.table().name)
-                .ok_or_else(|| RdbsError::Query("unknown table".into()))?;
+                .ok_or_else(|| RdbError::Query("unknown table".into()))?;
             let find = |rows: &Vec<Row>, pk: &[(String, Cell)]| -> Option<usize> {
                 let pk_idx: Vec<(usize, &Cell)> = pk
                     .iter()

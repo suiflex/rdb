@@ -1,4 +1,4 @@
-//! rdbs-connstore: saved connections (JSON, no passwords) + OS keychain secrets
+//! rdb-connstore: saved connections (JSON, no passwords) + OS keychain secrets
 //! with an encrypted-file fallback for headless Linux.
 
 pub mod conn_url;

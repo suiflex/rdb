@@ -1,6 +1,6 @@
 //! Real-engine test: spins a Redis container, then exercises the driver.
 //! Requires Docker. Ignored by default; run with
-//! `cargo test -p rdbs-driver-redis -- --ignored`.
+//! `cargo test -p rdb-driver-redis -- --ignored`.
 
 use rdb_core::conn::{ConnConfig, SslMode};
 use rdb_core::driver::Driver;

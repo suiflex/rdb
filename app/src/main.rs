@@ -564,17 +564,17 @@ fn sync_query_console(w: &MainWindow, log: &Arc<std::sync::Mutex<Vec<String>>>) 
 async fn try_connect(
     engine: rdb_connstore::Engine,
     cfg: rdb_core::conn::ConnConfig,
-) -> Result<u64, rdb_core::error::RdbsError> {
+) -> Result<u64, rdb_core::error::RdbError> {
     let t0 = std::time::Instant::now();
     let attempt = async {
         let driver = AnyDriver::connect(engine, &cfg).await?;
         driver.ping().await?;
-        Ok::<_, rdb_core::error::RdbsError>(())
+        Ok::<_, rdb_core::error::RdbError>(())
     };
     match tokio::time::timeout(std::time::Duration::from_secs(8), attempt).await {
         Ok(Ok(())) => Ok(t0.elapsed().as_millis().max(1) as u64),
         Ok(Err(e)) => Err(e),
-        Err(_) => Err(rdb_core::error::RdbsError::Connection(
+        Err(_) => Err(rdb_core::error::RdbError::Connection(
             "connection timed out".into(),
         )),
     }
@@ -3955,15 +3955,15 @@ fn main() -> Result<(), slint::PlatformError> {
                 // the Cancel button aborts sooner.
                 let attempt = async {
                     let cfg =
-                        cfg.map_err(|e| rdb_core::error::RdbsError::Connection(e.to_string()))?;
+                        cfg.map_err(|e| rdb_core::error::RdbError::Connection(e.to_string()))?;
                     let driver = AnyDriver::connect(engine, &cfg).await?;
                     let schema = driver.schema().await?;
-                    Ok::<_, rdb_core::error::RdbsError>((driver, schema))
+                    Ok::<_, rdb_core::error::RdbError>((driver, schema))
                 };
                 let result =
                     match tokio::time::timeout(std::time::Duration::from_secs(15), attempt).await {
                         Ok(r) => r,
-                        Err(_) => Err(rdb_core::error::RdbsError::Connection(
+                        Err(_) => Err(rdb_core::error::RdbError::Connection(
                             "connection timed out".into(),
                         )),
                     };
@@ -4261,7 +4261,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         // in and freeze the grid. Browse text already carries its
                         // own LIMIT, so cap_select leaves it untouched.
                         let row_limit = browse.lock().unwrap().limit;
-                        let mut out = Err(rdb_core::error::RdbsError::Query("empty query".into()));
+                        let mut out = Err(rdb_core::error::RdbError::Query("empty query".into()));
                         for (i, s) in stmts.iter().enumerate() {
                             let s = cap_select(*engine, s, row_limit);
                             append_query_console(&query_console, s.clone());
@@ -4276,12 +4276,12 @@ fn main() -> Result<(), slint::PlatformError> {
                                     }
                                     driver.query(&q).await
                                 }
-                                Err(msg) => Err(rdb_core::error::RdbsError::Query(msg)),
+                                Err(msg) => Err(rdb_core::error::RdbError::Query(msg)),
                             };
                             if let Err(e) = &out {
                                 // Point the user at the offending statement.
                                 if n > 1 {
-                                    out = Err(rdb_core::error::RdbsError::Query(format!(
+                                    out = Err(rdb_core::error::RdbError::Query(format!(
                                         "statement {}/{n}: {e}",
                                         i + 1
                                     )));
@@ -4292,7 +4292,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         (out, n)
                     }
                     None => (
-                        Err(rdb_core::error::RdbsError::Connection(
+                        Err(rdb_core::error::RdbError::Connection(
                             "not connected".into(),
                         )),
                         1,
@@ -4647,7 +4647,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 .query_stream(&q, STREAM_BATCH, cancel_prod, ctx)
                                 .await
                         }
-                        None => Err(rdb_core::error::RdbsError::Connection(
+                        None => Err(rdb_core::error::RdbError::Connection(
                             "not connected".into(),
                         )),
                     }
@@ -6269,7 +6269,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let guard = current.lock().await;
                     match guard.as_ref() {
                         Some((_, driver)) => driver.commit(&ops).await,
-                        None => Err(rdb_core::error::RdbsError::Connection(
+                        None => Err(rdb_core::error::RdbError::Connection(
                             "not connected".into(),
                         )),
                     }

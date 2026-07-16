@@ -2,7 +2,7 @@
 //! driver's tests), so it is `#[ignore]` by default. Run with:
 //!
 //!   docker run --rm -d -p 9042:9042 cassandra:5
-//!   cargo test -p rdbs-driver-cassandra -- --ignored
+//!   cargo test -p rdb-driver-cassandra -- --ignored
 
 use rdb_core::conn::{ConnConfig, SslMode};
 use rdb_core::driver::Driver;

@@ -3,7 +3,7 @@ use serde_json::Value as Json;
 /// A request to a driver. An enum (not a string) so non-SQL engines are
 /// first-class and SQL assumptions never leak into the abstraction. Each
 /// driver handles the variant it understands and returns
-/// `RdbsError::UnsupportedQuery` for the rest.
+/// `RdbError::UnsupportedQuery` for the rest.
 #[derive(Debug, Clone)]
 pub enum Query {
     /// SQL text — Postgres, MySQL.

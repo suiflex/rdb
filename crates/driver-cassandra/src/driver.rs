@@ -5,7 +5,7 @@ use scylla::value::Row;
 
 use rdb_core::conn::ConnConfig;
 use rdb_core::driver::Driver;
-use rdb_core::error::{RdbsError, Result};
+use rdb_core::error::{RdbError, Result};
 use rdb_core::query::Query;
 use rdb_core::result::{Column, ResultSet};
 use rdb_core::schema::{Container, ContainerKind, Database, Field, Schema};
@@ -45,7 +45,7 @@ impl Driver for CassandraDriver {
         let session = builder
             .build()
             .await
-            .map_err(|e| RdbsError::Connection(e.to_string()))?;
+            .map_err(|e| RdbError::Connection(e.to_string()))?;
         Ok(CassandraDriver { session })
     }
 
@@ -53,7 +53,7 @@ impl Driver for CassandraDriver {
         self.session
             .query_unpaged("SELECT now() FROM system.local", ())
             .await
-            .map_err(|e| RdbsError::Connection(e.to_string()))?;
+            .map_err(|e| RdbError::Connection(e.to_string()))?;
         Ok(())
     }
 
@@ -64,15 +64,15 @@ impl Driver for CassandraDriver {
             .session
             .query_unpaged("SELECT keyspace_name FROM system_schema.keyspaces", ())
             .await
-            .map_err(|e| RdbsError::Schema(e.to_string()))?
+            .map_err(|e| RdbError::Schema(e.to_string()))?
             .into_rows_result()
-            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+            .map_err(|e| RdbError::Schema(e.to_string()))?;
         let mut databases = Vec::new();
         for row in res
             .rows::<(String,)>()
-            .map_err(|e| RdbsError::Schema(e.to_string()))?
+            .map_err(|e| RdbError::Schema(e.to_string()))?
         {
-            let (name,) = row.map_err(|e| RdbsError::Schema(e.to_string()))?;
+            let (name,) = row.map_err(|e| RdbError::Schema(e.to_string()))?;
             if SYSTEM_KEYSPACES.contains(&name.as_str()) {
                 continue;
             }
@@ -94,16 +94,16 @@ impl Driver for CassandraDriver {
                 (database,),
             )
             .await
-            .map_err(|e| RdbsError::Schema(e.to_string()))?
+            .map_err(|e| RdbError::Schema(e.to_string()))?
             .into_rows_result()
-            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+            .map_err(|e| RdbError::Schema(e.to_string()))?;
 
         let mut containers = Vec::new();
         for row in tables_res
             .rows::<(String,)>()
-            .map_err(|e| RdbsError::Schema(e.to_string()))?
+            .map_err(|e| RdbError::Schema(e.to_string()))?
         {
-            let (table,) = row.map_err(|e| RdbsError::Schema(e.to_string()))?;
+            let (table,) = row.map_err(|e| RdbError::Schema(e.to_string()))?;
             let fields = self.columns_of(database, &table).await?;
             containers.push(Container {
                 name: table,
@@ -117,20 +117,20 @@ impl Driver for CassandraDriver {
     async fn query(&self, q: &Query) -> Result<ResultSet> {
         let cql = match q {
             Query::Sql(s) => s,
-            Query::Command(_) | Query::Mongo(_) => return Err(RdbsError::UnsupportedQuery),
+            Query::Command(_) | Query::Mongo(_) => return Err(RdbError::UnsupportedQuery),
         };
         let res = self
             .session
             .query_unpaged(cql.as_str(), ())
             .await
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+            .map_err(|e| RdbError::Query(e.to_string()))?;
         if !res.is_rows() {
             // ponytail: CQL DML returns no affected-row count.
             return Ok(ResultSet::Affected(0));
         }
         let rows_res = res
             .into_rows_result()
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+            .map_err(|e| RdbError::Query(e.to_string()))?;
         let cols: Vec<Column> = rows_res
             .column_specs()
             .iter()
@@ -142,9 +142,9 @@ impl Driver for CassandraDriver {
         let mut out = Vec::new();
         for row in rows_res
             .rows::<Row>()
-            .map_err(|e| RdbsError::Query(e.to_string()))?
+            .map_err(|e| RdbError::Query(e.to_string()))?
         {
-            let row = row.map_err(|e| RdbsError::Query(e.to_string()))?;
+            let row = row.map_err(|e| RdbError::Query(e.to_string()))?;
             out.push(row.columns.iter().map(type_map::cell).collect());
         }
         Ok(ResultSet::Tabular { cols, rows: out })
@@ -160,17 +160,17 @@ impl Driver for CassandraDriver {
                 (keyspace, table.name.as_str()),
             )
             .await
-            .map_err(|e| RdbsError::Schema(e.to_string()))?
+            .map_err(|e| RdbError::Schema(e.to_string()))?
             .into_rows_result()
-            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+            .map_err(|e| RdbError::Schema(e.to_string()))?;
         // Partition keys first (by position), then clustering keys (by position).
         let mut partition: Vec<(i32, String)> = Vec::new();
         let mut clustering: Vec<(i32, String)> = Vec::new();
         for row in res
             .rows::<(String, String, i32)>()
-            .map_err(|e| RdbsError::Schema(e.to_string()))?
+            .map_err(|e| RdbError::Schema(e.to_string()))?
         {
-            let (name, kind, position) = row.map_err(|e| RdbsError::Schema(e.to_string()))?;
+            let (name, kind, position) = row.map_err(|e| RdbError::Schema(e.to_string()))?;
             match kind.as_str() {
                 "partition_key" => partition.push((position, name)),
                 "clustering" => clustering.push((position, name)),
@@ -192,12 +192,12 @@ impl Driver for CassandraDriver {
             .session
             .query_unpaged(cql, ())
             .await
-            .map_err(|e| RdbsError::Query(e.to_string()))?
+            .map_err(|e| RdbError::Query(e.to_string()))?
             .into_rows_result()
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+            .map_err(|e| RdbError::Query(e.to_string()))?;
         let (n,): (i64,) = res
             .first_row()
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+            .map_err(|e| RdbError::Query(e.to_string()))?;
         Ok(n as u64)
     }
 
@@ -214,7 +214,7 @@ impl Driver for CassandraDriver {
             match self.session.query_unpaged(cql, ()).await {
                 Ok(_) => applied += 1,
                 Err(e) => {
-                    return Err(RdbsError::Query(format!(
+                    return Err(RdbError::Query(format!(
                         "{e} (applied {applied} of {} ops)",
                         ops.len()
                     )))
@@ -241,15 +241,15 @@ impl CassandraDriver {
                 (keyspace, table),
             )
             .await
-            .map_err(|e| RdbsError::Schema(e.to_string()))?
+            .map_err(|e| RdbError::Schema(e.to_string()))?
             .into_rows_result()
-            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+            .map_err(|e| RdbError::Schema(e.to_string()))?;
         let mut fields = Vec::new();
         for row in res
             .rows::<(String, String)>()
-            .map_err(|e| RdbsError::Schema(e.to_string()))?
+            .map_err(|e| RdbError::Schema(e.to_string()))?
         {
-            let (name, type_name) = row.map_err(|e| RdbsError::Schema(e.to_string()))?;
+            let (name, type_name) = row.map_err(|e| RdbError::Schema(e.to_string()))?;
             // CQL columns are nullable except primary-key parts; the schema
             // table doesn't flag that cheaply, so report nullable.
             fields.push(Field {

@@ -1,6 +1,6 @@
 //! Real-engine test: spins a MySQL container, then exercises the driver.
 //! Requires a running Docker daemon. Ignored by default so plain `cargo test`
-//! stays offline; run with `cargo test -p rdbs-driver-mysql -- --ignored`.
+//! stays offline; run with `cargo test -p rdb-driver-mysql -- --ignored`.
 
 use rdb_core::conn::{ConnConfig, SslMode};
 use rdb_core::driver::Driver;

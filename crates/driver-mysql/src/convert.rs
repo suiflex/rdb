@@ -2,7 +2,7 @@ use mysql_async::consts::ColumnType;
 use mysql_async::Value;
 use rdb_core::result::Cell;
 
-/// Map a mysql_async cell value into rdbs-core's `Cell`.
+/// Map a mysql_async cell value into rdb-core's `Cell`.
 ///
 /// Bytes are treated as text when valid UTF-8 (covers CHAR/VARCHAR/TEXT and
 /// DECIMAL, which mysql returns as bytes), otherwise as raw `Bytes`

@@ -5,7 +5,7 @@ use tokio::sync::Mutex;
 
 use rdb_core::conn::ConnConfig;
 use rdb_core::driver::Driver;
-use rdb_core::error::{RdbsError, Result};
+use rdb_core::error::{RdbError, Result};
 use rdb_core::query::Query;
 use rdb_core::result::RedisValue;
 use rdb_core::result::{Cell, ResultSet};
@@ -30,11 +30,11 @@ pub struct RedisDriver {
 impl Driver for RedisDriver {
     async fn connect(cfg: &ConnConfig) -> Result<Self> {
         let client =
-            Client::open(connection_url(cfg)).map_err(|e| RdbsError::Connection(e.to_string()))?;
+            Client::open(connection_url(cfg)).map_err(|e| RdbError::Connection(e.to_string()))?;
         let conn = client
             .get_multiplexed_async_connection()
             .await
-            .map_err(|e| RdbsError::Connection(e.to_string()))?;
+            .map_err(|e| RdbError::Connection(e.to_string()))?;
         let db = cfg.database.clone().unwrap_or_else(|| "0".to_string());
         Ok(RedisDriver {
             conn: Mutex::new(conn),
@@ -47,11 +47,11 @@ impl Driver for RedisDriver {
         let reply: String = redis::cmd("PING")
             .query_async(&mut *conn)
             .await
-            .map_err(|e| RdbsError::Connection(e.to_string()))?;
+            .map_err(|e| RdbError::Connection(e.to_string()))?;
         if reply == "PONG" {
             Ok(())
         } else {
-            Err(RdbsError::Connection(format!(
+            Err(RdbError::Connection(format!(
                 "unexpected PING reply: {reply}"
             )))
         }
@@ -78,7 +78,7 @@ impl Driver for RedisDriver {
             .arg(MAX_KEYS as i64)
             .query_async(&mut *conn)
             .await
-            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+            .map_err(|e| RdbError::Schema(e.to_string()))?;
         Ok(keys
             .into_iter()
             .map(|k| Container {
@@ -92,10 +92,10 @@ impl Driver for RedisDriver {
     async fn query(&self, q: &Query) -> Result<ResultSet> {
         let tokens = match q {
             Query::Command(tokens) => tokens,
-            _ => return Err(RdbsError::UnsupportedQuery),
+            _ => return Err(RdbError::UnsupportedQuery),
         };
         if tokens.is_empty() {
-            return Err(RdbsError::Query("empty command".into()));
+            return Err(RdbError::Query("empty command".into()));
         }
 
         // `BROWSE <key> [offset limit]` is a UI-only convention (not a real
@@ -104,7 +104,7 @@ impl Driver for RedisDriver {
         if tokens[0].eq_ignore_ascii_case("BROWSE") {
             let key = tokens
                 .get(1)
-                .ok_or_else(|| RdbsError::Query("BROWSE needs a key".into()))?;
+                .ok_or_else(|| RdbError::Query("BROWSE needs a key".into()))?;
             let offset = tokens.get(2).and_then(|t| t.parse::<usize>().ok());
             let limit = tokens.get(3).and_then(|t| t.parse::<usize>().ok());
             return self.browse_key(key, offset, limit).await;
@@ -119,7 +119,7 @@ impl Driver for RedisDriver {
         let value: Value = cmd
             .query_async(&mut *conn)
             .await
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+            .map_err(|e| RdbError::Query(e.to_string()))?;
 
         Ok(value_to_resultset(tokens[0].to_uppercase(), value))
     }
@@ -152,7 +152,7 @@ impl Driver for RedisDriver {
             .arg(&table.name)
             .query_async(&mut *conn)
             .await
-            .map_err(|e| RdbsError::Query(e.to_string()))
+            .map_err(|e| RdbError::Query(e.to_string()))
     }
 
     /// Sequential type-aware writes; stops at the first failure and reports
@@ -163,7 +163,7 @@ impl Driver for RedisDriver {
             let key = &op.table().name;
             let kind = self.key_type(key).await?;
             self.apply_op(key, &kind, op).await.map_err(|e| {
-                RdbsError::Query(format!("{e} (applied {applied} of {} ops)", ops.len()))
+                RdbError::Query(format!("{e} (applied {applied} of {} ops)", ops.len()))
             })?;
             applied += 1;
         }
@@ -202,15 +202,15 @@ impl RedisDriver {
             .arg(key)
             .query_async(&mut *conn)
             .await
-            .map_err(|e| RdbsError::Query(e.to_string()))
+            .map_err(|e| RdbError::Query(e.to_string()))
     }
 
     /// One buffered write against `key` of type `kind`. The op payload uses
     /// the browse-grid column names: identity under `field`/`index`/`member`/
     /// `key`, the new content under `value` (zsets: value = score).
     async fn apply_op(&self, key: &str, kind: &str, op: &WriteOp) -> Result<()> {
-        let qerr = |e: redis::RedisError| RdbsError::Query(e.to_string());
-        let missing = |what: &str| RdbsError::Query(format!("write op missing \"{what}\""));
+        let qerr = |e: redis::RedisError| RdbError::Query(e.to_string());
+        let missing = |what: &str| RdbError::Query(format!("write op missing \"{what}\""));
         let mut conn = self.conn.lock().await;
         match op {
             WriteOp::Update { pk, changes, .. } => {
@@ -238,7 +238,7 @@ impl RedisDriver {
                             .map_err(qerr)?;
                         build_cmd("SADD", &[key, &value])
                     }
-                    other => return Err(RdbsError::Query(format!("cannot edit type {other}"))),
+                    other => return Err(RdbError::Query(format!("cannot edit type {other}"))),
                 };
                 cmd.query_async::<()>(&mut *conn).await.map_err(qerr)
             }
@@ -259,7 +259,7 @@ impl RedisDriver {
                         build_cmd("ZADD", &[key, &value, &member])
                     }
                     other => {
-                        return Err(RdbsError::Query(format!("cannot insert into type {other}")))
+                        return Err(RdbError::Query(format!("cannot insert into type {other}")))
                     }
                 };
                 cmd.query_async::<()>(&mut *conn).await.map_err(qerr)
@@ -289,7 +289,7 @@ impl RedisDriver {
                         build_cmd("ZREM", &[key, &member])
                     }
                     other => {
-                        return Err(RdbsError::Query(format!("cannot delete from type {other}")))
+                        return Err(RdbError::Query(format!("cannot delete from type {other}")))
                     }
                 };
                 cmd.query_async::<()>(&mut *conn).await.map_err(qerr)
@@ -308,7 +308,7 @@ impl RedisDriver {
         offset: Option<usize>,
         limit: Option<usize>,
     ) -> Result<ResultSet> {
-        let qerr = |e: redis::RedisError| RdbsError::Query(e.to_string());
+        let qerr = |e: redis::RedisError| RdbError::Query(e.to_string());
         let off = offset.unwrap_or(0);
         // Range end for LRANGE/ZRANGE: inclusive; no limit → -1 (to the end).
         let end: i64 = match limit {
