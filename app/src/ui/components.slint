@@ -2,6 +2,16 @@
 import { Tokens } from "tokens.slint";
 import { AppIcon } from "icons.slint";
 
+// Shared tooltip state. Buttons report their hovered tooltip + window-space
+// anchor here; a single overlay in app-window.slint draws it on the top layer
+// so it is never clipped by content painted after the toolbar row.
+export global Tooltip {
+    in-out property <string> text;
+    in-out property <length> x;   // window coords: button center-x
+    in-out property <length> y;   // window coords: just below the button
+    in-out property <bool> shown;
+}
+
 // Dropdown select: shows the current value + a ▾ caret so it reads as a
 // picker even when closed, then a click opens a themed option list. Replaces
 // std-widgets ComboBox, which rendered as a blank borderless box in this theme.
