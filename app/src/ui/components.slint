@@ -87,14 +87,18 @@ export component DbBadge inherits Rectangle {
         : engine == "mongo" ? Tokens.db-mo
         : engine == "cassandra" ? Tokens.db-ca
         : Tokens.text-faint;
-    Text {
-        text: engine == "postgres" ? "Pg"
-            : engine == "mysql" ? "My"
-            : engine == "redis" ? "Re"
-            : engine == "sqlite" ? "Sl"
-            : engine == "mongo" ? "Mo"
-            : engine == "cassandra" ? "Ca"
-            : "?";
+    // Known engine → white brand glyph (icons/db-<engine>.svg via AppIcon).
+    property <bool> known: engine == "postgres" || engine == "mysql"
+        || engine == "redis" || engine == "sqlite" || engine == "mongo"
+        || engine == "cassandra";
+    if known: AppIcon {
+        name: "db-" + engine;
+        size: root.size * 0.58;
+        color: white;
+    }
+    // ponytail: fallback keeps unknown engines from rendering a blank card.
+    if !known: Text {
+        text: "?";
         color: white;
         font-size: root.size * 0.42;
         font-weight: 700;
