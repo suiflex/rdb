@@ -689,8 +689,10 @@ in-out property <string> rename-text;
                             }
                         }
                     }
-                    // theme toggle: sun in dark mode, moon in light
-                    if root.connected: VerticalLayout {
+                    // theme toggle: sun in dark mode, moon in light.
+                    // Always visible (connections screen + workspace) so the
+                    // control lives in the same header spot in both states.
+                    VerticalLayout {
                         alignment: center;
                         IconButton {
                             icon: Tokens.dark ? "sun" : "moon";
@@ -749,9 +751,6 @@ in-out property <string> rename-text;
             edit-clicked(i) => { root.open-edit-form(i); }
             toggle-group(g) => { root.toggle-group(g); }
             filter(t) => { root.conn-filter(t); }
-            // URL import lives in the add form; file-based import would need
-            // a native dialog dependency.
-            import-clicked() => { root.open-add-form(); }
             backup-clicked() => { root.backup-conns(); }
         }
 

@@ -31,7 +31,6 @@ export component ConnPicker inherits Rectangle {
     callback test-clicked(int);
     callback add-clicked();
     callback edit-clicked(int);
-    callback import-clicked();
     callback backup-clicked();
     callback toggle-group(string);
     callback filter(string);
@@ -122,19 +121,23 @@ export component ConnPicker inherits Rectangle {
 
                             // --- connection row --- (selected-conn = store index)
                             if !item.is-header: Rectangle {
+                                // per-engine brand tint on the row card; selection
+                                // & hover deepen the same tint so color stays.
+                                property <color> tint: Tokens.db-color(item.engine);
                                 border-radius: Tokens.radius-lg;
-                                background: item.index == root.selected-conn ? Tokens.accent-tint
-                                    : row-ta.has-hover ? Tokens.border : transparent;
+                                background: item.index == root.selected-conn ? tint.with-alpha(0.30)
+                                    : row-ta.has-hover ? tint.with-alpha(0.20)
+                                    : tint.with-alpha(0.12);
                                 border-width: item.index == root.selected-conn ? 1px : 0;
-                                border-color: Tokens.accent.with-alpha(0.35);
+                                border-color: tint.with-alpha(0.5);
                                 animate background { duration: Tokens.fade; }
 
-                                // selection = 2px accent left bar (never a pill)
+                                // selection = 2px brand-color left bar (never a pill)
                                 if item.index == root.selected-conn: Rectangle {
                                     x: 0;
                                     width: Tokens.selection-bar-w;
                                     height: parent.height;
-                                    background: Tokens.accent;
+                                    background: tint;
                                     border-radius: 1px;
                                 }
 
@@ -213,7 +216,6 @@ export component ConnPicker inherits Rectangle {
                             alignment: center;
                             HorizontalLayout {
                                 spacing: Tokens.sp4;
-                                TextButton { text: "Import"; clicked => { root.import-clicked(); } }
                                 TextButton { text: "Backup"; clicked => { root.backup-clicked(); } }
                             }
                         }
@@ -235,10 +237,25 @@ export component ConnPicker inherits Rectangle {
             background: Tokens.canvas;
             horizontal-stretch: 1;
 
-            if root.selected-conn < 0: Text {
-                text: root.error == "" ? "Select a connection" : root.error;
-                color: root.error == "" ? Tokens.text-faint : Tokens.error;
-                font-size: Tokens.font-md;
+            if root.selected-conn < 0: VerticalLayout {
+                alignment: center;
+                spacing: Tokens.sp4;
+                HorizontalLayout {
+                    alignment: center;
+                    Image {
+                        source: @image-url("../../assets/icon.svg");
+                        width: 72px;
+                        height: 72px;
+                        image-fit: contain;
+                        opacity: 0.9;
+                    }
+                }
+                Text {
+                    text: root.error == "" ? "Select a connection" : root.error;
+                    color: root.error == "" ? Tokens.text-faint : Tokens.error;
+                    font-size: Tokens.font-md;
+                    horizontal-alignment: center;
+                }
             }
 
             if root.selected-conn >= 0: VerticalLayout {
