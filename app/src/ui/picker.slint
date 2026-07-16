@@ -31,7 +31,6 @@ export component ConnPicker inherits Rectangle {
     callback test-clicked(int);
     callback add-clicked();
     callback edit-clicked(int);
-    callback import-clicked();
     callback backup-clicked();
     callback toggle-group(string);
     callback filter(string);
@@ -213,7 +212,6 @@ export component ConnPicker inherits Rectangle {
                             alignment: center;
                             HorizontalLayout {
                                 spacing: Tokens.sp4;
-                                TextButton { text: "Import"; clicked => { root.import-clicked(); } }
                                 TextButton { text: "Backup"; clicked => { root.backup-clicked(); } }
                             }
                         }

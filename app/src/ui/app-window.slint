@@ -749,9 +749,6 @@ in-out property <string> rename-text;
             edit-clicked(i) => { root.open-edit-form(i); }
             toggle-group(g) => { root.toggle-group(g); }
             filter(t) => { root.conn-filter(t); }
-            // URL import lives in the add form; file-based import would need
-            // a native dialog dependency.
-            import-clicked() => { root.open-add-form(); }
             backup-clicked() => { root.backup-conns(); }
         }
 
