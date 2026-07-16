@@ -2,6 +2,16 @@
 import { Tokens } from "tokens.slint";
 import { AppIcon } from "icons.slint";
 
+// Shared tooltip state. Buttons report their hovered tooltip + window-space
+// anchor here; a single overlay in app-window.slint draws it on the top layer
+// so it is never clipped by content painted after the toolbar row.
+export global Tooltip {
+    in-out property <string> text;
+    in-out property <length> x;   // window coords: button center-x
+    in-out property <length> y;   // window coords: just below the button
+    in-out property <bool> shown;
+}
+
 // Dropdown select: shows the current value + a ▾ caret so it reads as a
 // picker even when closed, then a click opens a themed option list. Replaces
 // std-widgets ComboBox, which rendered as a blank borderless box in this theme.
@@ -162,22 +172,16 @@ export component SecondaryButton inherits Rectangle {
     ta := TouchArea {
         enabled: root.enabled;
         clicked => { root.clicked(); }
-    }
-    // Plain overlay tooltip (see IconButton): never grabs the click.
-    if root.tooltip != "": Rectangle {
-        x: (root.width - self.width) / 2;
-        y: root.height + 4px;
-        width: tip.preferred-width + 2 * Tokens.sp2;
-        height: tip.preferred-height + Tokens.sp1;
-        border-radius: Tokens.radius;
-        background: Tokens.chrome;
-        border-width: 1px;
-        border-color: Tokens.border;
-        visible: ta.has-hover;
-        tip := Text {
-            text: root.tooltip;
-            color: Tokens.text;
-            font-size: Tokens.font-xs;
+        // report hover to the shared Tooltip overlay (drawn in app-window)
+        changed has-hover => {
+            if self.has-hover && root.tooltip != "" {
+                Tooltip.text = root.tooltip;
+                Tooltip.x = root.absolute-position.x + root.width / 2;
+                Tooltip.y = root.absolute-position.y + root.height + 4px;
+                Tooltip.shown = true;
+            } else if Tooltip.text == root.tooltip {
+                Tooltip.shown = false;
+            }
         }
     }
 }
@@ -386,23 +390,17 @@ export component GlyphButton inherits Rectangle {
         color: ta.has-hover && root.danger-hover ? white : Tokens.text-dim;
         font-size: root.glyph-size;
     }
-    ta := TouchArea { clicked => { root.clicked(); } }
-    // Plain overlay tooltip (see IconButton): a no-auto-close PopupWindow
-    // swallowed the following click, so the button never fired.
-    if root.tooltip != "": Rectangle {
-        x: (root.width - self.width) / 2;
-        y: root.height + 4px;
-        width: tip.preferred-width + 2 * Tokens.sp2;
-        height: tip.preferred-height + Tokens.sp1;
-        border-radius: Tokens.radius;
-        background: Tokens.chrome;
-        border-width: 1px;
-        border-color: Tokens.border;
-        visible: ta.has-hover;
-        tip := Text {
-            text: root.tooltip;
-            color: Tokens.text;
-            font-size: Tokens.font-xs;
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+        changed has-hover => {
+            if self.has-hover && root.tooltip != "" {
+                Tooltip.text = root.tooltip;
+                Tooltip.x = root.absolute-position.x + root.width / 2;
+                Tooltip.y = root.absolute-position.y + root.height + 4px;
+                Tooltip.shown = true;
+            } else if Tooltip.text == root.tooltip {
+                Tooltip.shown = false;
+            }
         }
     }
 }
@@ -426,24 +424,17 @@ export component IconButton inherits Rectangle {
         size: root.icon-size;
         color: root.active ? Tokens.accent : Tokens.text-dim;
     }
-    ta := TouchArea { clicked => { root.clicked(); } }
-    // Tooltip as a plain overlay (no TouchArea) so it never grabs pointer
-    // input — a PopupWindow with no-auto-close swallowed the click that
-    // followed the hover, so the button never fired.
-    if root.tooltip != "": Rectangle {
-        x: (root.width - self.width) / 2;
-        y: root.height + 4px;
-        width: tip.preferred-width + 2 * Tokens.sp2;
-        height: tip.preferred-height + Tokens.sp1;
-        border-radius: Tokens.radius;
-        background: Tokens.chrome;
-        border-width: 1px;
-        border-color: Tokens.border;
-        visible: ta.has-hover;
-        tip := Text {
-            text: root.tooltip;
-            color: Tokens.text;
-            font-size: Tokens.font-xs;
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+        changed has-hover => {
+            if self.has-hover && root.tooltip != "" {
+                Tooltip.text = root.tooltip;
+                Tooltip.x = root.absolute-position.x + root.width / 2;
+                Tooltip.y = root.absolute-position.y + root.height + 4px;
+                Tooltip.shown = true;
+            } else if Tooltip.text == root.tooltip {
+                Tooltip.shown = false;
+            }
         }
     }
 }

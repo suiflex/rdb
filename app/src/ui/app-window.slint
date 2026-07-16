@@ -3,7 +3,7 @@ export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
-    SearchCommandPill, BreadcrumbChip, GlyphButton, IconButton, PrimaryButton, SecondaryButton, TextButton
+    SearchCommandPill, BreadcrumbChip, GlyphButton, IconButton, PrimaryButton, SecondaryButton, TextButton, Tooltip
 } from "components.slint";
 import { Sidebar } from "sidebar.slint";
 import { ConnPicker } from "picker.slint";
@@ -1768,6 +1768,24 @@ in-out property <string> rename-text;
                     }
                 }
             }
+        }
+    }
+
+    // Shared tooltip overlay — topmost sibling so it paints above all content
+    // and modals; anchored in window coords via each button's absolute-position.
+    if Tooltip.shown && Tooltip.text != "": Rectangle {
+        x: min(max(Tooltip.x - self.width / 2, 4px), root.width - self.width - 4px);
+        y: Tooltip.y;
+        width: tip.preferred-width + 2 * Tokens.sp2;
+        height: tip.preferred-height + Tokens.sp1;
+        border-radius: Tokens.radius;
+        background: Tokens.chrome;
+        border-width: 1px;
+        border-color: Tokens.border;
+        tip := Text {
+            text: Tooltip.text;
+            color: Tokens.text;
+            font-size: Tokens.font-xs;
         }
     }
 }
