@@ -6578,28 +6578,48 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         });
     }
-    // backup saved connections to a JSON file. Passwords are not in the
-    // list — they live in the keychain — so the dump is safe to write.
+    // export saved connections. Passwords are not in the list — they live in
+    // the keychain — so the dump is safe to write. Arg: 0 = JSON, 1 = CSV.
     {
         let weak = window.as_weak();
         let store = store.clone();
-        window.on_backup_conns(move || {
+        window.on_export_conns(move |fmt| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
             let st = store.borrow();
-            let json = match serde_json::to_string_pretty(st.list()) {
+            let (ext, body) = if fmt == 1 {
+                ("csv", Ok(export::conns_to_csv(st.list())))
+            } else {
+                ("json", serde_json::to_string_pretty(st.list()))
+            };
+            let contents = match body {
                 Ok(j) => j,
                 Err(e) => {
-                    w.set_sel_footer(SharedString::from(format!("backup failed: {e}")));
+                    w.set_sel_footer(SharedString::from(format!("export failed: {e}")));
                     return;
                 }
             };
-            let path = export::export_path("rdb-connections", "json");
-            w.set_sel_footer(SharedString::from(match std::fs::write(&path, json) {
-                Ok(()) => format!("backup → {}", path.display()),
-                Err(e) => format!("backup failed: {e}"),
-            }));
+            // Native save dialog via rfd's async API + Slint's local executor:
+            // the sync dialog blocks the winit event loop and never surfaces.
+            let weak = w.as_weak();
+            let _ = slint::spawn_local(async move {
+                let Some(file) = rfd::AsyncFileDialog::new()
+                    .set_file_name(format!("rdb-connections.{ext}"))
+                    .add_filter(ext.to_uppercase(), &[ext])
+                    .save_file()
+                    .await
+                else {
+                    return; // user cancelled
+                };
+                let msg = match std::fs::write(file.path(), contents) {
+                    Ok(()) => format!("export → {}", file.path().display()),
+                    Err(e) => format!("export failed: {e}"),
+                };
+                if let Some(w) = weak.upgrade() {
+                    w.set_sel_footer(SharedString::from(msg));
+                }
+            });
         });
     }
     // quick test from the picker detail pane: saved config, result in the

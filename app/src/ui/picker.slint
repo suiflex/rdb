@@ -31,7 +31,8 @@ export component ConnPicker inherits Rectangle {
     callback test-clicked(int);
     callback add-clicked();
     callback edit-clicked(int);
-    callback backup-clicked();
+    // Export saved connections to ~/Downloads. Arg is the format: 0 = JSON, 1 = CSV.
+    callback export-conns(int);
     callback toggle-group(string);
     callback filter(string);
 
@@ -216,7 +217,45 @@ export component ConnPicker inherits Rectangle {
                             alignment: center;
                             HorizontalLayout {
                                 spacing: Tokens.sp4;
-                                TextButton { text: "Backup"; clicked => { root.backup-clicked(); } }
+                                Rectangle {
+                                    width: exp-btn.preferred-width;
+                                    height: exp-btn.preferred-height;
+                                    export-menu := PopupWindow {
+                                        x: 0;
+                                        y: -76px;
+                                        width: 130px;
+                                        height: menu-box.preferred-height;
+                                        menu-box := Rectangle {
+                                            background: Tokens.card;
+                                            border-width: 1px;
+                                            border-color: Tokens.border-strong;
+                                            border-radius: Tokens.radius;
+                                            drop-shadow-blur: 12px;
+                                            drop-shadow-color: #00000022;
+                                            VerticalLayout {
+                                                padding: 4px;
+                                                for opt[i] in ["JSON", "CSV"]: Rectangle {
+                                                    height: 28px;
+                                                    border-radius: 6px;
+                                                    background: exp-row-ta.has-hover ? Tokens.accent-tint : transparent;
+                                                    exp-row-ta := TouchArea {
+                                                        clicked => { export-menu.close(); root.export-conns(i); }
+                                                    }
+                                                    HorizontalLayout {
+                                                        padding-left: Tokens.sp2;
+                                                        Text {
+                                                            text: opt;
+                                                            color: Tokens.text;
+                                                            font-size: Tokens.font-sm;
+                                                            vertical-alignment: center;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    exp-btn := TextButton { text: "Export ▾"; clicked => { export-menu.show(); } }
+                                }
                             }
                         }
                     }
