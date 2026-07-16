@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// postinstall: download the matching prebuilt `rdbs` binary from the GitHub
+// postinstall: download the matching prebuilt `rdb` binary from the GitHub
 // Release whose tag equals this package's version, and drop it in vendor/.
 // ponytail: shells out to the system `tar` (bsdtar handles both .tar.gz and
 // .zip on macOS/Linux/Win10+) instead of pulling an archive dependency.
@@ -16,12 +16,12 @@ const REPO = "suiflex/rdb";
 // be self-checked without touching the network.
 function resolveTarget(platform, arch) {
   const map = {
-    "darwin:arm64": ["aarch64-apple-darwin", "tar.gz", "rdbs"],
-    "darwin:x64": ["x86_64-apple-darwin", "tar.gz", "rdbs"],
-    "linux:x64": ["x86_64-unknown-linux-gnu", "tar.gz", "rdbs"],
-    "linux:arm64": ["aarch64-unknown-linux-gnu", "tar.gz", "rdbs"],
-    "win32:x64": ["x86_64-pc-windows-msvc", "zip", "rdbs.exe"],
-    "win32:arm64": ["aarch64-pc-windows-msvc", "zip", "rdbs.exe"],
+    "darwin:arm64": ["aarch64-apple-darwin", "tar.gz", "rdb"],
+    "darwin:x64": ["x86_64-apple-darwin", "tar.gz", "rdb"],
+    "linux:x64": ["x86_64-unknown-linux-gnu", "tar.gz", "rdb"],
+    "linux:arm64": ["aarch64-unknown-linux-gnu", "tar.gz", "rdb"],
+    "win32:x64": ["x86_64-pc-windows-msvc", "zip", "rdb.exe"],
+    "win32:arm64": ["aarch64-pc-windows-msvc", "zip", "rdb.exe"],
   };
   const hit = map[`${platform}:${arch}`];
   if (!hit) {
@@ -56,7 +56,7 @@ function download(url, dest, redirects = 0) {
 async function main() {
   const version = require("./package.json").version;
   const { target, ext, bin } = resolveTarget(process.platform, process.arch);
-  const asset = `rdbs-${target}.${ext}`;
+  const asset = `rdb-${target}.${ext}`;
   const tag = `v${version}`;
   const url = `https://github.com/${REPO}/releases/download/${tag}/${asset}`;
 
@@ -83,7 +83,7 @@ async function main() {
 if (process.argv.includes("--selftest")) {
   const assert = require("assert");
   assert.strictEqual(resolveTarget("darwin", "arm64").target, "aarch64-apple-darwin");
-  assert.strictEqual(resolveTarget("win32", "x64").bin, "rdbs.exe");
+  assert.strictEqual(resolveTarget("win32", "x64").bin, "rdb.exe");
   assert.strictEqual(resolveTarget("linux", "x64").ext, "tar.gz");
   assert.throws(() => resolveTarget("sunos", "sparc"));
   console.log("selftest ok");

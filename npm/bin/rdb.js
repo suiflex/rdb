@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Thin launcher: exec the vendored `rdbs` binary fetched by install.js,
+// Thin launcher: exec the vendored `rdb` binary fetched by install.js,
 // forwarding args and stdio, and propagating its exit code.
 "use strict";
 
@@ -7,7 +7,7 @@ const path = require("path");
 const fs = require("fs");
 const { spawnSync } = require("child_process");
 
-const bin = process.platform === "win32" ? "rdbs.exe" : "rdbs";
+const bin = process.platform === "win32" ? "rdb.exe" : "rdb";
 const binPath = path.join(__dirname, "..", "vendor", bin);
 
 if (!fs.existsSync(binPath)) {

@@ -9,7 +9,7 @@ SQLite, Cassandra in one binary. No Electron.
 npm i -g @suiflex/rdb
 ```
 
-The postinstall step downloads the prebuilt `rdbs` binary for your platform
+The postinstall step downloads the prebuilt `rdb` binary for your platform
 (macOS, Linux, Windows — x64 & arm64) from the matching
 [GitHub Release](https://github.com/suiflex/rdb/releases). Then run:
 
@@ -20,8 +20,8 @@ rdb
 ## Links
 
 - Source & docs: https://github.com/suiflex/rdb
-- Also available via Homebrew (`brew install suiflex/tap/rdbs`) and
-  Scoop (`scoop install rdbs`).
+- Also available via Homebrew (`brew install suiflex/tap/rdb`) and
+  Scoop (`scoop install rdb`).
 
 ## License
 
