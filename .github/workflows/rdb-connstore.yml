@@ -1,4 +1,4 @@
-name: rdbs-connstore
+name: rdb-connstore
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
       - Cargo.toml
       - Cargo.lock
       - rust-toolchain.toml
-      - .github/workflows/rdbs-connstore.yml
+      - .github/workflows/rdb-connstore.yml
   pull_request:
     paths:
       - crates/connstore/**
@@ -17,7 +17,7 @@ on:
       - Cargo.toml
       - Cargo.lock
       - rust-toolchain.toml
-      - .github/workflows/rdbs-connstore.yml
+      - .github/workflows/rdb-connstore.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -33,7 +33,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rdbs-connstore
-      - run: cargo fmt -p rdbs-connstore --check
-      - run: cargo clippy -p rdbs-connstore --all-targets -- -D warnings
-      - run: cargo test -p rdbs-connstore --lib
+          shared-key: rdb-connstore
+      - run: cargo fmt -p rdb-connstore --check
+      - run: cargo clippy -p rdb-connstore --all-targets -- -D warnings
+      - run: cargo test -p rdb-connstore --lib

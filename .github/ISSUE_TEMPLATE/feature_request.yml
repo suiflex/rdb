@@ -6,14 +6,14 @@ body:
     id: problem
     attributes:
       label: Problem
-      description: What are you trying to do that rdbs does not let you do today?
+      description: What are you trying to do that rdb does not let you do today?
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
       label: Proposed solution
-      description: What would you like rdbs to do instead?
+      description: What would you like rdb to do instead?
     validations:
       required: true
   - type: textarea

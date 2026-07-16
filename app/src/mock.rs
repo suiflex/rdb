@@ -1,8 +1,8 @@
-//! Demo seeding for design parity: `RDBS_MOCK=1` swaps the user's real
+//! Demo seeding for design parity: `RDB_MOCK=1` swaps the user's real
 //! connection store for an in-memory temp store matching the reference
 //! design, and (later) routes "connect" to the in-process MockDriver.
 
-use rdbs_connstore::{ConnStore, Engine, SavedConnection};
+use rdb_connstore::{ConnStore, Engine, SavedConnection};
 
 fn conn(
     name: &str,
@@ -26,7 +26,7 @@ pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
     let _ = std::fs::create_dir_all(&dir);
     // File backend only: demo mode must never touch the OS keychain.
     let backend =
-        Box::new(rdbs_connstore::EncryptedFileBackend::new(&dir).expect("file secret backend"));
+        Box::new(rdb_connstore::EncryptedFileBackend::new(&dir).expect("file secret backend"));
     let mut store = ConnStore::new(dir.join("connections.json"), backend);
 
     let host = "128.199.74.52";
@@ -77,7 +77,7 @@ pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
             "PROFIN",
             true,
         );
-        c.sslmode = rdbs_core::conn::SslMode::Require;
+        c.sslmode = rdb_core::conn::SslMode::Require;
         c.tags = vec!["profin".into(), "fintech".into()];
         add(c);
     }
@@ -145,7 +145,7 @@ pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
 
 /// True when the app runs in design-mock mode.
 pub fn mock_mode() -> bool {
-    std::env::var("RDBS_MOCK").is_ok_and(|v| v == "1")
+    std::env::var("RDB_MOCK").is_ok_and(|v| v == "1")
 }
 
 // ===========================================================================
@@ -155,13 +155,13 @@ pub fn mock_mode() -> bool {
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use rdbs_core::conn::ConnConfig;
-use rdbs_core::driver::Driver;
-use rdbs_core::error::{RdbsError, Result};
-use rdbs_core::query::Query;
-use rdbs_core::result::{Cell, Column, ResultSet, Row};
-use rdbs_core::schema::{Container, ContainerKind, Database, Field, Function, Schema};
-use rdbs_core::write::{TableRef, WriteOp};
+use rdb_core::conn::ConnConfig;
+use rdb_core::driver::Driver;
+use rdb_core::error::{RdbError, Result};
+use rdb_core::query::Query;
+use rdb_core::result::{Cell, Column, ResultSet, Row};
+use rdb_core::schema::{Container, ContainerKind, Database, Field, Function, Schema};
+use rdb_core::write::{TableRef, WriteOp};
 
 /// (name, weight) — weights sum to 986 like the reference `emiten` table.
 const SECTORS: &[(&str, i64)] = &[
@@ -592,7 +592,7 @@ impl Driver for MockDriver {
         // Believable latency for the “● 12 ms” readout.
         tokio::time::sleep(std::time::Duration::from_millis(11)).await;
         let Query::Sql(sql) = q else {
-            return Err(RdbsError::UnsupportedQuery);
+            return Err(RdbError::UnsupportedQuery);
         };
         let sql = sql.trim();
         let upper = sql.to_uppercase();
@@ -644,11 +644,11 @@ impl Driver for MockDriver {
                         rows: vec![vec![Cell::Text(expr.to_string())]],
                     });
                 }
-                return Err(RdbsError::UnsupportedQuery);
+                return Err(RdbError::UnsupportedQuery);
             };
             let tables = self.tables.lock().unwrap();
             let Some(t) = tables.get(&table) else {
-                return Err(RdbsError::Query(format!(
+                return Err(RdbError::Query(format!(
                     "relation \"{table}\" does not exist"
                 )));
             };
@@ -681,7 +681,7 @@ impl Driver for MockDriver {
         tables
             .get(&table.name)
             .map(|t| t.rows.len() as u64)
-            .ok_or_else(|| RdbsError::Query(format!("relation \"{}\" does not exist", table.name)))
+            .ok_or_else(|| RdbError::Query(format!("relation \"{}\" does not exist", table.name)))
     }
 
     async fn commit(&self, ops: &[WriteOp]) -> Result<u64> {
@@ -690,7 +690,7 @@ impl Driver for MockDriver {
         for op in ops {
             let t = tables
                 .get_mut(&op.table().name)
-                .ok_or_else(|| RdbsError::Query("unknown table".into()))?;
+                .ok_or_else(|| RdbError::Query("unknown table".into()))?;
             let find = |rows: &Vec<Row>, pk: &[(String, Cell)]| -> Option<usize> {
                 let pk_idx: Vec<(usize, &Cell)> = pk
                     .iter()

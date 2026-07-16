@@ -1,12 +1,12 @@
 //! SQLite driver end-to-end. No Docker: uses a temp file, so this runs in
 //! normal `cargo test` (unlike the network-engine drivers).
 
-use rdbs_core::conn::{ConnConfig, SslMode};
-use rdbs_core::driver::Driver;
-use rdbs_core::query::Query;
-use rdbs_core::result::{Cell, ResultSet};
-use rdbs_core::write::{TableRef, WriteOp};
-use rdbs_driver_sqlite::SqliteDriver;
+use rdb_core::conn::{ConnConfig, SslMode};
+use rdb_core::driver::Driver;
+use rdb_core::query::Query;
+use rdb_core::result::{Cell, ResultSet};
+use rdb_core::write::{TableRef, WriteOp};
+use rdb_driver_sqlite::SqliteDriver;
 
 fn cfg(path: &str) -> ConnConfig {
     ConnConfig {
@@ -22,7 +22,7 @@ fn cfg(path: &str) -> ConnConfig {
 
 fn temp_db() -> String {
     let mut p = std::env::temp_dir();
-    p.push(format!("rdbs-sqlite-test-{}.db", std::process::id()));
+    p.push(format!("rdb-sqlite-test-{}.db", std::process::id()));
     let _ = std::fs::remove_file(&p);
     p.to_string_lossy().into_owned()
 }

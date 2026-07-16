@@ -1,23 +1,23 @@
-name: rdbs-driver-mysql
+name: rdb-driver-mongo
 
 on:
   push:
     branches: [develop, main]
     paths:
-      - crates/driver-mysql/**
+      - crates/driver-mongo/**
       - crates/core/**
       - Cargo.toml
       - Cargo.lock
       - rust-toolchain.toml
-      - .github/workflows/rdbs-driver-mysql.yml
+      - .github/workflows/rdb-driver-mongo.yml
   pull_request:
     paths:
-      - crates/driver-mysql/**
+      - crates/driver-mongo/**
       - crates/core/**
       - Cargo.toml
       - Cargo.lock
       - rust-toolchain.toml
-      - .github/workflows/rdbs-driver-mysql.yml
+      - .github/workflows/rdb-driver-mongo.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -33,7 +33,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rdbs-driver-mysql
-      - run: cargo fmt -p rdbs-driver-mysql --check
-      - run: cargo clippy -p rdbs-driver-mysql --all-targets -- -D warnings
-      - run: cargo test -p rdbs-driver-mysql --lib
+          shared-key: rdb-driver-mongo
+      - run: cargo fmt -p rdb-driver-mongo --check
+      - run: cargo clippy -p rdb-driver-mongo --all-targets -- -D warnings
+      - run: cargo test -p rdb-driver-mongo --lib

@@ -52,7 +52,7 @@ pub trait Driver: Send + Sync {
     }
 
     /// Run a query. Drivers handle the `Query` variant(s) they support and
-    /// return `RdbsError::UnsupportedQuery` for the rest.
+    /// return `RdbError::UnsupportedQuery` for the rest.
     async fn query(&self, q: &Query) -> Result<ResultSet>;
 
     /// Stream a row-returning query in batches so a huge result never buffers
@@ -87,7 +87,7 @@ pub trait Driver: Send + Sync {
                 }
                 Ok(())
             }
-            _ => Err(crate::error::RdbsError::UnsupportedQuery),
+            _ => Err(crate::error::RdbError::UnsupportedQuery),
         }
     }
 
@@ -99,14 +99,14 @@ pub trait Driver: Send + Sync {
 
     /// Total rows/members of `table`, for the pagination footer.
     async fn count(&self, _table: &TableRef) -> Result<u64> {
-        Err(crate::error::RdbsError::UnsupportedQuery)
+        Err(crate::error::RdbError::UnsupportedQuery)
     }
 
     /// Apply buffered writes. SQL engines run the batch in one transaction
     /// (all-or-nothing); document/KV engines apply sequentially and stop at
     /// the first failure. Returns the number of ops applied.
     async fn commit(&self, _ops: &[WriteOp]) -> Result<u64> {
-        Err(crate::error::RdbsError::UnsupportedQuery)
+        Err(crate::error::RdbError::UnsupportedQuery)
     }
 
     /// Close the connection, consuming the driver.
@@ -138,7 +138,7 @@ mod tests {
         async fn query(&self, q: &Query) -> crate::error::Result<ResultSet> {
             match q {
                 Query::Sql(_) => Ok(ResultSet::Affected(0)),
-                _ => Err(crate::error::RdbsError::UnsupportedQuery),
+                _ => Err(crate::error::RdbError::UnsupportedQuery),
             }
         }
         async fn close(self) -> crate::error::Result<()> {

@@ -1,4 +1,4 @@
-//! rdbs-driver-mysql: MySQL/MariaDB Driver impl via mysql_async.
+//! rdb-driver-mysql: MySQL/MariaDB Driver impl via mysql_async.
 
 mod convert;
 mod schema;

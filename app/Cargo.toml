@@ -1,22 +1,22 @@
 [package]
-name = "rdbs"
+name = "rdb"
 version = "0.16.0"
 edition = "2021"
 
 [[bin]]
-name = "rdbs"
+name = "rdb"
 path = "src/main.rs"
 
 [dependencies]
 slint = { version = "1.8", default-features = false, features = ["compat-1-2", "std", "backend-winit", "renderer-femtovg", "renderer-software"] }
-rdbs-core = { path = "../crates/core" }
-rdbs-connstore = { path = "../crates/connstore" }
-rdbs-driver-postgres = { path = "../crates/driver-postgres" }
-rdbs-driver-mysql = { path = "../crates/driver-mysql" }
-rdbs-driver-redis = { path = "../crates/driver-redis" }
-rdbs-driver-mongo = { path = "../crates/driver-mongo" }
-rdbs-driver-sqlite = { path = "../crates/driver-sqlite" }
-rdbs-driver-cassandra = { path = "../crates/driver-cassandra" }
+rdb-core = { path = "../crates/core" }
+rdb-connstore = { path = "../crates/connstore" }
+rdb-driver-postgres = { path = "../crates/driver-postgres" }
+rdb-driver-mysql = { path = "../crates/driver-mysql" }
+rdb-driver-redis = { path = "../crates/driver-redis" }
+rdb-driver-mongo = { path = "../crates/driver-mongo" }
+rdb-driver-sqlite = { path = "../crates/driver-sqlite" }
+rdb-driver-cassandra = { path = "../crates/driver-cassandra" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

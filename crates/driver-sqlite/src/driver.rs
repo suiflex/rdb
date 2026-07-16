@@ -4,13 +4,13 @@ use async_trait::async_trait;
 use rusqlite::types::ValueRef;
 use rusqlite::Connection;
 
-use rdbs_core::conn::ConnConfig;
-use rdbs_core::driver::Driver;
-use rdbs_core::error::{RdbsError, Result};
-use rdbs_core::query::Query;
-use rdbs_core::result::{Cell, Column, ResultSet, Row};
-use rdbs_core::schema::{Container, ContainerKind, Database, Field, Schema};
-use rdbs_core::write::{TableRef, WriteOp};
+use rdb_core::conn::ConnConfig;
+use rdb_core::driver::Driver;
+use rdb_core::error::{RdbError, Result};
+use rdb_core::query::Query;
+use rdb_core::result::{Cell, Column, ResultSet, Row};
+use rdb_core::schema::{Container, ContainerKind, Database, Field, Schema};
+use rdb_core::write::{TableRef, WriteOp};
 
 use crate::write_sql;
 
@@ -38,7 +38,7 @@ impl SqliteDriver {
             f(&guard)
         })
         .await
-        .map_err(|e| RdbsError::Query(e.to_string()))?
+        .map_err(|e| RdbError::Query(e.to_string()))?
     }
 }
 
@@ -57,8 +57,8 @@ impl Driver for SqliteDriver {
             }
         })
         .await
-        .map_err(|e| RdbsError::Connection(e.to_string()))?
-        .map_err(|e| RdbsError::Connection(e.to_string()))?;
+        .map_err(|e| RdbError::Connection(e.to_string()))?
+        .map_err(|e| RdbError::Connection(e.to_string()))?;
         Ok(SqliteDriver {
             conn: Arc::new(Mutex::new(conn)),
             db_name,
@@ -68,7 +68,7 @@ impl Driver for SqliteDriver {
     async fn ping(&self) -> Result<()> {
         self.with_conn(|c| {
             c.query_row("SELECT 1", [], |_| Ok(()))
-                .map_err(|e| RdbsError::Connection(e.to_string()))
+                .map_err(|e| RdbError::Connection(e.to_string()))
         })
         .await
     }
@@ -81,7 +81,7 @@ impl Driver for SqliteDriver {
     async fn query(&self, q: &Query) -> Result<ResultSet> {
         let sql = match q {
             Query::Sql(s) => s.clone(),
-            Query::Command(_) | Query::Mongo(_) => return Err(RdbsError::UnsupportedQuery),
+            Query::Command(_) | Query::Mongo(_) => return Err(RdbError::UnsupportedQuery),
         };
         self.with_conn(move |c| run_sql(c, &sql)).await
     }
@@ -96,7 +96,7 @@ impl Driver for SqliteDriver {
         self.with_conn(move |c| {
             let n: i64 = c
                 .query_row(&sql, [], |r| r.get(0))
-                .map_err(|e| RdbsError::Query(e.to_string()))?;
+                .map_err(|e| RdbError::Query(e.to_string()))?;
             Ok(n as u64)
         })
         .await
@@ -116,19 +116,19 @@ impl Driver for SqliteDriver {
             .collect();
         self.with_conn(move |c| {
             c.execute_batch("BEGIN")
-                .map_err(|e| RdbsError::Query(e.to_string()))?;
+                .map_err(|e| RdbError::Query(e.to_string()))?;
             let mut affected = 0u64;
             for sql in &stmts {
                 match c.execute(sql, []) {
                     Ok(n) => affected += n as u64,
                     Err(e) => {
                         let _ = c.execute_batch("ROLLBACK");
-                        return Err(RdbsError::Query(e.to_string()));
+                        return Err(RdbError::Query(e.to_string()));
                     }
                 }
             }
             c.execute_batch("COMMIT")
-                .map_err(|e| RdbsError::Query(e.to_string()))?;
+                .map_err(|e| RdbError::Query(e.to_string()))?;
             Ok(affected)
         })
         .await
@@ -180,9 +180,7 @@ fn is_row_returning(sql: &str) -> bool {
 
 fn run_sql(c: &Connection, sql: &str) -> Result<ResultSet> {
     if is_row_returning(sql) {
-        let mut stmt = c
-            .prepare(sql)
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+        let mut stmt = c.prepare(sql).map_err(|e| RdbError::Query(e.to_string()))?;
         let cols: Vec<Column> = stmt
             .column_names()
             .into_iter()
@@ -192,14 +190,12 @@ fn run_sql(c: &Connection, sql: &str) -> Result<ResultSet> {
             })
             .collect();
         let ncol = cols.len();
-        let mut rows = stmt
-            .query([])
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+        let mut rows = stmt.query([]).map_err(|e| RdbError::Query(e.to_string()))?;
         let mut out: Vec<Row> = Vec::new();
-        while let Some(r) = rows.next().map_err(|e| RdbsError::Query(e.to_string()))? {
+        while let Some(r) = rows.next().map_err(|e| RdbError::Query(e.to_string()))? {
             let mut cells: Row = Vec::with_capacity(ncol);
             for i in 0..ncol {
-                let v = r.get_ref(i).map_err(|e| RdbsError::Query(e.to_string()))?;
+                let v = r.get_ref(i).map_err(|e| RdbError::Query(e.to_string()))?;
                 cells.push(value_to_cell(v));
             }
             out.push(cells);
@@ -208,7 +204,7 @@ fn run_sql(c: &Connection, sql: &str) -> Result<ResultSet> {
     } else {
         let n = c
             .execute(sql, [])
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+            .map_err(|e| RdbError::Query(e.to_string()))?;
         Ok(ResultSet::Affected(n as u64))
     }
 }
@@ -220,12 +216,12 @@ fn schema_impl(c: &Connection, db_name: &str) -> Result<Schema> {
                 "SELECT name FROM sqlite_master \
                  WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
             )
-            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+            .map_err(|e| RdbError::Schema(e.to_string()))?;
         let rows = stmt
             .query_map([], |r| r.get::<_, String>(0))
-            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+            .map_err(|e| RdbError::Schema(e.to_string()))?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(|e| RdbsError::Schema(e.to_string()))?
+            .map_err(|e| RdbError::Schema(e.to_string()))?
     };
 
     let mut containers: Vec<Container> = Vec::with_capacity(tables.len());
@@ -233,7 +229,7 @@ fn schema_impl(c: &Connection, db_name: &str) -> Result<Schema> {
         let pragma = format!("PRAGMA table_info({})", write_sql::quote_ident(&table));
         let mut stmt = c
             .prepare(&pragma)
-            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+            .map_err(|e| RdbError::Schema(e.to_string()))?;
         // table_info columns: cid, name, type, notnull, dflt_value, pk
         let rows = stmt
             .query_map([], |r| {
@@ -243,10 +239,10 @@ fn schema_impl(c: &Connection, db_name: &str) -> Result<Schema> {
                     r.get::<_, i64>(3)?,
                 ))
             })
-            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+            .map_err(|e| RdbError::Schema(e.to_string()))?;
         let mut fields = Vec::new();
         for row in rows {
-            let (name, type_name, notnull) = row.map_err(|e| RdbsError::Schema(e.to_string()))?;
+            let (name, type_name, notnull) = row.map_err(|e| RdbError::Schema(e.to_string()))?;
             fields.push(Field {
                 name,
                 type_name,
@@ -275,14 +271,14 @@ fn primary_key_impl(c: &Connection, table: &str) -> Result<Vec<String>> {
     let pragma = format!("PRAGMA table_info({})", write_sql::quote_ident(table));
     let mut stmt = c
         .prepare(&pragma)
-        .map_err(|e| RdbsError::Schema(e.to_string()))?;
+        .map_err(|e| RdbError::Schema(e.to_string()))?;
     // (name, pk-ordinal); pk == 0 means not part of the primary key.
     let rows = stmt
         .query_map([], |r| Ok((r.get::<_, String>(1)?, r.get::<_, i64>(5)?)))
-        .map_err(|e| RdbsError::Schema(e.to_string()))?;
+        .map_err(|e| RdbError::Schema(e.to_string()))?;
     let mut pk: Vec<(String, i64)> = Vec::new();
     for row in rows {
-        let (name, ord) = row.map_err(|e| RdbsError::Schema(e.to_string()))?;
+        let (name, ord) = row.map_err(|e| RdbError::Schema(e.to_string()))?;
         if ord > 0 {
             pk.push((name, ord));
         }

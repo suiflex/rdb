@@ -1,6 +1,6 @@
-# Contributing to RDBS
+# Contributing to RDB
 
-Thanks for your interest in RDBS — a native, cross-platform database manager
+Thanks for your interest in RDB — a native, cross-platform database manager
 (PostgreSQL, MySQL, Redis, MongoDB, and more) built with Rust and Slint.
 
 This guide covers how to build, test, and submit changes. By participating you
@@ -8,9 +8,9 @@ agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Getting started
 
-RDBS is a Cargo workspace:
+RDB is a Cargo workspace:
 
-- `app/` — the Slint UI binary (`rdbs`), the only crate that names a concrete
+- `app/` — the Slint UI binary (`rdb`), the only crate that names a concrete
   driver (in `app/src/dispatch.rs`).
 - `crates/core/` — the `Driver` trait, `Query`, `ResultSet`, `Schema`, errors.
 - `crates/connstore/` — saved connections + OS keychain / AES-GCM.
@@ -28,11 +28,11 @@ UI builds need the Slint system libraries for your platform — see the
 ## Build, lint, test
 
 A root `Makefile` wraps the common Cargo invocations and splits the frontend
-(the `rdbs` UI binary) from the backend (the `crates/*` libraries). Run
+(the `rdb` UI binary) from the backend (the `crates/*` libraries). Run
 `make help` for the full list. The most common targets:
 
 ```bash
-make fe-build     # build the rdbs UI
+make fe-build     # build the rdb UI
 make fe-run       # run the UI
 make be-build     # build backend crates only
 make be-test      # test backend crates only
@@ -49,7 +49,7 @@ are intentionally kept out of CI.
 ## Adding a database engine
 
 1. Create a new `crates/driver-<engine>/` crate that implements the `Driver`
-   trait from `rdbs-core`.
+   trait from `rdb-core`.
 2. Add a variant to the `AnyDriver` enum in `app/src/dispatch.rs` and forward
    the trait methods.
 

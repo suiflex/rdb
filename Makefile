@@ -1,8 +1,8 @@
-# Split FE/BE build entry points. BE = crates/* libs, FE = rdbs (app/).
+# Split FE/BE build entry points. BE = crates/* libs, FE = rdb (app/).
 # Run `make` or `make help` for the target list.
 
-BE_PKGS = rdbs-core rdbs-connstore rdbs-driver-postgres rdbs-driver-mysql rdbs-driver-redis rdbs-driver-mongo
-FE_PKG  = rdbs
+BE_PKGS = rdb-core rdb-connstore rdb-driver-postgres rdb-driver-mysql rdb-driver-redis rdb-driver-mongo
+FE_PKG  = rdb
 BE_FLAGS = $(addprefix -p ,$(BE_PKGS))
 
 .DEFAULT_GOAL := help
@@ -23,17 +23,17 @@ be-test: ## Test backend crate unit tests (no FE, no Docker)
 be-check: ## Type-check backend crates only
 	cargo check $(BE_FLAGS)
 
-fe-build: ## Build the rdbs UI binary
+fe-build: ## Build the rdb UI binary
 	cargo build -p $(FE_PKG)
 
-fe-run: ## Run the rdbs UI binary
+fe-run: ## Run the rdb UI binary
 	cargo run -p $(FE_PKG)
 
-fe-build-run: ## Build the rdbs UI then launch it (GUI shows after build)
+fe-build-run: ## Build the rdb UI then launch it (GUI shows after build)
 	cargo build -p $(FE_PKG)
 	./$(FE_BIN)
 
-fe-show: ## Launch the rdbs UI; build it first only if missing
+fe-show: ## Launch the rdb UI; build it first only if missing
 	@test -x $(FE_BIN) || cargo build -p $(FE_PKG)
 	./$(FE_BIN)
 

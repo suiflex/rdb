@@ -3,8 +3,8 @@
 //! (`0x..` blobs, lowercase `null`). No `IS NULL` — a CQL primary key is never
 //! null, so identity comparisons are always `=`.
 
-use rdbs_core::result::Cell;
-use rdbs_core::write::TableRef;
+use rdb_core::result::Cell;
+use rdb_core::write::TableRef;
 
 /// `"ident"` with embedded double quotes doubled.
 pub fn quote_ident(ident: &str) -> String {

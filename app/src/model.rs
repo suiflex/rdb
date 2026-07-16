@@ -1,9 +1,9 @@
-//! Pure conversion from rdbs-core result/schema types into flat view-model
+//! Pure conversion from rdb-core result/schema types into flat view-model
 //! structs the UI binds to. No Slint imports here so it stays unit-testable;
 //! `main.rs` maps these into the Slint-generated structs.
 
-use rdbs_core::result::{Cell, RedisValue, ResultSet};
-use rdbs_core::schema::{ContainerKind, Schema};
+use rdb_core::result::{Cell, RedisValue, ResultSet};
+use rdb_core::schema::{ContainerKind, Schema};
 
 #[derive(Debug, Default, Clone)]
 pub struct VmCell {
@@ -477,8 +477,8 @@ pub fn to_completion_nodes(schema_name: &str, schema: &Schema) -> Vec<VmTreeNode
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rdbs_core::result::{Cell, Column, RedisValue, ResultSet};
-    use rdbs_core::schema::{Container, ContainerKind, Database, Field, Schema};
+    use rdb_core::result::{Cell, Column, RedisValue, ResultSet};
+    use rdb_core::schema::{Container, ContainerKind, Database, Field, Schema};
 
     #[test]
     fn doc_tree_folds_nested_and_toggles() {
@@ -696,7 +696,7 @@ mod tests {
 
 // ===== buffered edits (TablePlus-style pending writes) =====
 
-use rdbs_core::write::{TableRef, WriteOp};
+use rdb_core::write::{TableRef, WriteOp};
 use std::collections::{BTreeSet, HashMap};
 
 /// Buffered, uncommitted grid mutations for the open browse container.

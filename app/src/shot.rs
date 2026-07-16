@@ -1,14 +1,14 @@
-//! Dev-only window capture: when `RDBS_SHOT=<path.bmp>` is set, snapshot the
-//! window after `RDBS_SHOT_DELAY_MS` (default 1200) and quit. Used by the
+//! Dev-only window capture: when `RDB_SHOT=<path.bmp>` is set, snapshot the
+//! window after `RDB_SHOT_DELAY_MS` (default 1200) and quit. Used by the
 //! design-parity screenshot loop; inert in normal runs.
 
 use slint::ComponentHandle;
 
 pub fn install<W: ComponentHandle + 'static>(window: &W) {
-    let Ok(path) = std::env::var("RDBS_SHOT") else {
+    let Ok(path) = std::env::var("RDB_SHOT") else {
         return;
     };
-    let delay: u64 = std::env::var("RDBS_SHOT_DELAY_MS")
+    let delay: u64 = std::env::var("RDB_SHOT_DELAY_MS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1200);
@@ -39,12 +39,12 @@ pub fn install<W: ComponentHandle + 'static>(window: &W) {
                     Ok(buf) => {
                         let (wd, ht) = (buf.width(), buf.height());
                         if let Err(e) = write_bmp(&path, wd, ht, buf.as_bytes()) {
-                            eprintln!("RDBS_SHOT write failed: {e}");
+                            eprintln!("RDB_SHOT write failed: {e}");
                         } else {
-                            eprintln!("RDBS_SHOT saved {path} ({wd}x{ht})");
+                            eprintln!("RDB_SHOT saved {path} ({wd}x{ht})");
                         }
                     }
-                    Err(e) => eprintln!("RDBS_SHOT snapshot failed: {e}"),
+                    Err(e) => eprintln!("RDB_SHOT snapshot failed: {e}"),
                 }
             }
             let _ = slint::quit_event_loop();

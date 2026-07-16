@@ -1,10 +1,10 @@
 [package]
-name = "rdbs-driver-sqlite"
+name = "rdb-driver-sqlite"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-rdbs-core = { path = "../core" }
+rdb-core = { path = "../core" }
 async-trait = "0.1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
 # `bundled` compiles SQLite in-tree: no system libsqlite, no network.

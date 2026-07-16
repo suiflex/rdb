@@ -2,13 +2,13 @@ use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 use mysql_async::{OptsBuilder, Pool, Row, SslOpts};
 
-use rdbs_core::conn::{ConnConfig, SslMode};
-use rdbs_core::driver::Driver;
-use rdbs_core::error::{RdbsError, Result};
-use rdbs_core::query::Query;
-use rdbs_core::result::{Column, ResultSet};
-use rdbs_core::schema::Schema;
-use rdbs_core::write::{TableRef, WriteOp};
+use rdb_core::conn::{ConnConfig, SslMode};
+use rdb_core::driver::Driver;
+use rdb_core::error::{RdbError, Result};
+use rdb_core::query::Query;
+use rdb_core::result::{Column, ResultSet};
+use rdb_core::schema::Schema;
+use rdb_core::write::{TableRef, WriteOp};
 
 use crate::convert::{column_type_name, value_to_cell};
 use crate::schema::{columns_query, fold_rows, SchemaRow};
@@ -48,7 +48,7 @@ impl Driver for MysqlDriver {
         let mut conn = pool
             .get_conn()
             .await
-            .map_err(|e| RdbsError::Connection(e.to_string()))?;
+            .map_err(|e| RdbError::Connection(e.to_string()))?;
         drop(conn.ping().await);
         Ok(MysqlDriver { pool })
     }
@@ -58,11 +58,11 @@ impl Driver for MysqlDriver {
             .pool
             .get_conn()
             .await
-            .map_err(|e| RdbsError::Connection(e.to_string()))?;
+            .map_err(|e| RdbError::Connection(e.to_string()))?;
         let _: Vec<i64> = conn
             .query("SELECT 1")
             .await
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+            .map_err(|e| RdbError::Query(e.to_string()))?;
         Ok(())
     }
 
@@ -71,7 +71,7 @@ impl Driver for MysqlDriver {
             .pool
             .get_conn()
             .await
-            .map_err(|e| RdbsError::Connection(e.to_string()))?;
+            .map_err(|e| RdbError::Connection(e.to_string()))?;
         let rows: Vec<SchemaRow> = conn
             .query_map(
                 columns_query(),
@@ -86,26 +86,26 @@ impl Driver for MysqlDriver {
                 },
             )
             .await
-            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+            .map_err(|e| RdbError::Schema(e.to_string()))?;
         Ok(fold_rows(rows))
     }
 
     async fn query(&self, q: &Query) -> Result<ResultSet> {
         let sql = match q {
             Query::Sql(s) => s,
-            _ => return Err(RdbsError::UnsupportedQuery),
+            _ => return Err(RdbError::UnsupportedQuery),
         };
 
         let mut conn = self
             .pool
             .get_conn()
             .await
-            .map_err(|e| RdbsError::Connection(e.to_string()))?;
+            .map_err(|e| RdbError::Connection(e.to_string()))?;
 
         let mut result = conn
             .query_iter(sql.as_str())
             .await
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+            .map_err(|e| RdbError::Query(e.to_string()))?;
 
         // A statement with no result set (INSERT/UPDATE/DELETE/DDL) reports
         // affected rows and yields no columns.
@@ -118,7 +118,7 @@ impl Driver for MysqlDriver {
             result
                 .drop_result()
                 .await
-                .map_err(|e| RdbsError::Query(e.to_string()))?;
+                .map_err(|e| RdbError::Query(e.to_string()))?;
             return Ok(ResultSet::Affected(affected));
         }
 
@@ -137,7 +137,7 @@ impl Driver for MysqlDriver {
         let mysql_rows: Vec<Row> = result
             .collect()
             .await
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+            .map_err(|e| RdbError::Query(e.to_string()))?;
 
         let rows = mysql_rows
             .into_iter()
@@ -145,7 +145,7 @@ impl Driver for MysqlDriver {
                 (0..r.len())
                     .map(|i| match r.as_ref(i) {
                         Some(v) => value_to_cell(v),
-                        None => rdbs_core::result::Cell::Null,
+                        None => rdb_core::result::Cell::Null,
                     })
                     .collect::<Vec<_>>()
             })
@@ -159,7 +159,7 @@ impl Driver for MysqlDriver {
             .pool
             .get_conn()
             .await
-            .map_err(|e| RdbsError::Connection(e.to_string()))?;
+            .map_err(|e| RdbError::Connection(e.to_string()))?;
         let cols: Vec<String> = conn
             .exec(
                 "SELECT column_name FROM information_schema.key_column_usage \
@@ -169,7 +169,7 @@ impl Driver for MysqlDriver {
                 (&table.name, &table.database),
             )
             .await
-            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+            .map_err(|e| RdbError::Schema(e.to_string()))?;
         Ok(cols)
     }
 
@@ -178,14 +178,14 @@ impl Driver for MysqlDriver {
             .pool
             .get_conn()
             .await
-            .map_err(|e| RdbsError::Connection(e.to_string()))?;
+            .map_err(|e| RdbError::Connection(e.to_string()))?;
         let n: Option<u64> = conn
             .query_first(format!(
                 "SELECT COUNT(*) FROM {}",
                 write_sql::table_name(table)
             ))
             .await
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+            .map_err(|e| RdbError::Query(e.to_string()))?;
         Ok(n.unwrap_or(0))
     }
 
@@ -197,11 +197,11 @@ impl Driver for MysqlDriver {
             .pool
             .get_conn()
             .await
-            .map_err(|e| RdbsError::Connection(e.to_string()))?;
+            .map_err(|e| RdbError::Connection(e.to_string()))?;
         let mut tx = conn
             .start_transaction(mysql_async::TxOpts::default())
             .await
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+            .map_err(|e| RdbError::Query(e.to_string()))?;
         let mut affected = 0u64;
         for op in ops {
             let (sql, params) = match op {
@@ -212,12 +212,12 @@ impl Driver for MysqlDriver {
             // A failed statement drops `tx`, which rolls the batch back.
             tx.exec_drop(sql, params)
                 .await
-                .map_err(|e| RdbsError::Query(e.to_string()))?;
+                .map_err(|e| RdbError::Query(e.to_string()))?;
             affected += tx.affected_rows();
         }
         tx.commit()
             .await
-            .map_err(|e| RdbsError::Query(e.to_string()))?;
+            .map_err(|e| RdbError::Query(e.to_string()))?;
         Ok(affected)
     }
 
@@ -225,7 +225,7 @@ impl Driver for MysqlDriver {
         self.pool
             .disconnect()
             .await
-            .map_err(|e| RdbsError::Connection(e.to_string()))?;
+            .map_err(|e| RdbError::Connection(e.to_string()))?;
         Ok(())
     }
 }

@@ -149,7 +149,7 @@ mod tests {
 
     fn tmp() -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "rdbs-settings-test-{}-{}",
+            "rdb-settings-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

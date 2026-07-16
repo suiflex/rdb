@@ -1,4 +1,4 @@
-use rdbs_core::result::Cell;
+use rdb_core::result::Cell;
 use tokio_postgres::types::Type;
 use tokio_postgres::Row;
 

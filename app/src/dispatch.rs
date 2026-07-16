@@ -4,20 +4,20 @@
 //! async trait methods. Construction is the ONLY place the app names a concrete
 //! driver crate.
 
-use rdbs_connstore::Engine;
-use rdbs_core::conn::ConnConfig;
-use rdbs_core::driver::Driver;
-use rdbs_core::error::Result;
-use rdbs_core::query::Query;
-use rdbs_core::result::ResultSet;
-use rdbs_core::schema::{Container, Schema};
-use rdbs_core::write::{TableRef, WriteOp};
-use rdbs_driver_cassandra::CassandraDriver;
-use rdbs_driver_mongo::MongoDriver;
-use rdbs_driver_mysql::MysqlDriver;
-use rdbs_driver_postgres::PostgresDriver;
-use rdbs_driver_redis::RedisDriver;
-use rdbs_driver_sqlite::SqliteDriver;
+use rdb_connstore::Engine;
+use rdb_core::conn::ConnConfig;
+use rdb_core::driver::Driver;
+use rdb_core::error::Result;
+use rdb_core::query::Query;
+use rdb_core::result::ResultSet;
+use rdb_core::schema::{Container, Schema};
+use rdb_core::write::{TableRef, WriteOp};
+use rdb_driver_cassandra::CassandraDriver;
+use rdb_driver_mongo::MongoDriver;
+use rdb_driver_mysql::MysqlDriver;
+use rdb_driver_postgres::PostgresDriver;
+use rdb_driver_redis::RedisDriver;
+use rdb_driver_sqlite::SqliteDriver;
 
 pub enum AnyDriver {
     Postgres(PostgresDriver),
@@ -28,7 +28,7 @@ pub enum AnyDriver {
     // Boxed: a scylla Session is far larger than the other drivers, so keep it
     // off the enum's inline footprint (clippy::large_enum_variant).
     Cassandra(Box<CassandraDriver>),
-    /// In-process demo driver (RDBS_MOCK=1); no network, seeded data.
+    /// In-process demo driver (RDB_MOCK=1); no network, seeded data.
     Mock(crate::mock::MockDriver),
 }
 
@@ -173,7 +173,7 @@ impl AnyDriver {
         q: &Query,
         batch: usize,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-        sink: tokio::sync::mpsc::Sender<rdbs_core::result::StreamItem>,
+        sink: tokio::sync::mpsc::Sender<rdb_core::result::StreamItem>,
     ) -> Result<()> {
         match self {
             AnyDriver::Postgres(d) => d.query_stream(q, batch, cancel, sink).await,
@@ -229,40 +229,40 @@ pub fn write_statements(engine: Engine, ops: &[WriteOp]) -> Vec<String> {
     ops.iter()
         .map(|op| match (engine, op) {
             (Engine::Postgres, WriteOp::Update { table, pk, changes }) => {
-                rdbs_driver_postgres::write_sql::update_sql(table, pk, changes)
+                rdb_driver_postgres::write_sql::update_sql(table, pk, changes)
             }
             (Engine::Postgres, WriteOp::Insert { table, values }) => {
-                rdbs_driver_postgres::write_sql::insert_sql(table, values)
+                rdb_driver_postgres::write_sql::insert_sql(table, values)
             }
             (Engine::Postgres, WriteOp::Delete { table, pk }) => {
-                rdbs_driver_postgres::write_sql::delete_sql(table, pk)
+                rdb_driver_postgres::write_sql::delete_sql(table, pk)
             }
             (Engine::MySql, WriteOp::Update { table, pk, changes }) => {
-                rdbs_driver_mysql::write_sql::update_sql(table, pk, changes).0
+                rdb_driver_mysql::write_sql::update_sql(table, pk, changes).0
             }
             (Engine::MySql, WriteOp::Insert { table, values }) => {
-                rdbs_driver_mysql::write_sql::insert_sql(table, values).0
+                rdb_driver_mysql::write_sql::insert_sql(table, values).0
             }
             (Engine::MySql, WriteOp::Delete { table, pk }) => {
-                rdbs_driver_mysql::write_sql::delete_sql(table, pk).0
+                rdb_driver_mysql::write_sql::delete_sql(table, pk).0
             }
             (Engine::Sqlite, WriteOp::Update { table, pk, changes }) => {
-                rdbs_driver_sqlite::write_sql::update_sql(table, pk, changes)
+                rdb_driver_sqlite::write_sql::update_sql(table, pk, changes)
             }
             (Engine::Sqlite, WriteOp::Insert { table, values }) => {
-                rdbs_driver_sqlite::write_sql::insert_sql(table, values)
+                rdb_driver_sqlite::write_sql::insert_sql(table, values)
             }
             (Engine::Sqlite, WriteOp::Delete { table, pk }) => {
-                rdbs_driver_sqlite::write_sql::delete_sql(table, pk)
+                rdb_driver_sqlite::write_sql::delete_sql(table, pk)
             }
             (Engine::Cassandra, WriteOp::Update { table, pk, changes }) => {
-                rdbs_driver_cassandra::write_cql::update_sql(table, pk, changes)
+                rdb_driver_cassandra::write_cql::update_sql(table, pk, changes)
             }
             (Engine::Cassandra, WriteOp::Insert { table, values }) => {
-                rdbs_driver_cassandra::write_cql::insert_sql(table, values)
+                rdb_driver_cassandra::write_cql::insert_sql(table, values)
             }
             (Engine::Cassandra, WriteOp::Delete { table, pk }) => {
-                rdbs_driver_cassandra::write_cql::delete_sql(table, pk)
+                rdb_driver_cassandra::write_cql::delete_sql(table, pk)
             }
             (Engine::Mongo, op) => format!("MongoDB write: {op:?}"),
             (Engine::Redis, op) => format!("Redis write: {op:?}"),
@@ -273,8 +273,8 @@ pub fn write_statements(engine: Engine, ops: &[WriteOp]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rdbs_connstore::Engine;
-    use rdbs_core::result::Cell;
+    use rdb_connstore::Engine;
+    use rdb_core::result::Cell;
 
     #[test]
     fn engine_maps_to_human_label() {

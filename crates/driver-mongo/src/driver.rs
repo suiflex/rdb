@@ -6,13 +6,13 @@ use mongodb::bson::{doc, Document};
 use mongodb::options::ClientOptions;
 use mongodb::{Client, Collection};
 
-use rdbs_core::conn::{ConnConfig, SslMode};
-use rdbs_core::driver::Driver;
-use rdbs_core::error::{RdbsError, Result};
-use rdbs_core::query::{MongoKind, MongoOp, Query};
-use rdbs_core::result::{Cell, ResultSet};
-use rdbs_core::schema::{Container, ContainerKind, Database, Schema};
-use rdbs_core::write::{TableRef, WriteOp};
+use rdb_core::conn::{ConnConfig, SslMode};
+use rdb_core::driver::Driver;
+use rdb_core::error::{RdbError, Result};
+use rdb_core::query::{MongoKind, MongoOp, Query};
+use rdb_core::result::{Cell, ResultSet};
+use rdb_core::schema::{Container, ContainerKind, Database, Schema};
+use rdb_core::write::{TableRef, WriteOp};
 
 use crate::convert::{document_to_json, json_to_document};
 
@@ -94,13 +94,13 @@ impl Driver for MongoDriver {
     async fn connect(cfg: &ConnConfig) -> Result<Self> {
         let mut options = ClientOptions::parse(build_uri(cfg))
             .await
-            .map_err(|e| RdbsError::Connection(e.to_string()))?;
+            .map_err(|e| RdbError::Connection(e.to_string()))?;
         // Fail fast on an unreachable host/replica set instead of the 30s default
         // server-selection hang.
         options.server_selection_timeout = Some(Duration::from_secs(8));
         options.connect_timeout = Some(Duration::from_secs(8));
         let client =
-            Client::with_options(options).map_err(|e| RdbsError::Connection(e.to_string()))?;
+            Client::with_options(options).map_err(|e| RdbError::Connection(e.to_string()))?;
         let default_db = cfg.database.clone().unwrap_or_else(|| "admin".to_string());
         Ok(MongoDriver { client, default_db })
     }
@@ -110,7 +110,7 @@ impl Driver for MongoDriver {
             .database("admin")
             .run_command(doc! { "ping": 1 })
             .await
-            .map_err(|e| RdbsError::Connection(e.to_string()))?;
+            .map_err(|e| RdbError::Connection(e.to_string()))?;
         Ok(())
     }
 
@@ -122,7 +122,7 @@ impl Driver for MongoDriver {
             .client
             .list_database_names()
             .await
-            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+            .map_err(|e| RdbError::Schema(e.to_string()))?;
         let databases = db_names
             .into_iter()
             .filter(|n| !is_system_db(n))
@@ -158,7 +158,7 @@ impl Driver for MongoDriver {
             .database(database)
             .list_collection_names()
             .await
-            .map_err(|e| RdbsError::Schema(e.to_string()))?;
+            .map_err(|e| RdbError::Schema(e.to_string()))?;
         Ok(coll_names
             .into_iter()
             .take(MAX_COLLECTIONS)
@@ -174,7 +174,7 @@ impl Driver for MongoDriver {
     async fn query(&self, q: &Query) -> Result<ResultSet> {
         let op: &MongoOp = match q {
             Query::Mongo(op) => op,
-            _ => return Err(RdbsError::UnsupportedQuery),
+            _ => return Err(RdbError::UnsupportedQuery),
         };
         let coll = self.collection(op);
 
@@ -191,11 +191,11 @@ impl Driver for MongoDriver {
                 if let Some(sort) = &op.sort {
                     find = find.sort(json_to_document(sort)?);
                 }
-                let cursor = find.await.map_err(|e| RdbsError::Query(e.to_string()))?;
+                let cursor = find.await.map_err(|e| RdbError::Query(e.to_string()))?;
                 let docs: Vec<Document> = cursor
                     .try_collect()
                     .await
-                    .map_err(|e| RdbsError::Query(e.to_string()))?;
+                    .map_err(|e| RdbError::Query(e.to_string()))?;
                 Ok(ResultSet::Documents(
                     docs.into_iter().map(document_to_json).collect(),
                 ))
@@ -204,7 +204,7 @@ impl Driver for MongoDriver {
                 let doc = json_to_document(payload)?;
                 coll.insert_one(doc)
                     .await
-                    .map_err(|e| RdbsError::Query(e.to_string()))?;
+                    .map_err(|e| RdbError::Query(e.to_string()))?;
                 Ok(ResultSet::Affected(1))
             }
             MongoKind::Aggregate(stages) => {
@@ -215,11 +215,11 @@ impl Driver for MongoDriver {
                 let cursor = coll
                     .aggregate(pipeline)
                     .await
-                    .map_err(|e| RdbsError::Query(e.to_string()))?;
+                    .map_err(|e| RdbError::Query(e.to_string()))?;
                 let docs: Vec<Document> = cursor
                     .try_collect()
                     .await
-                    .map_err(|e| RdbsError::Query(e.to_string()))?;
+                    .map_err(|e| RdbError::Query(e.to_string()))?;
                 Ok(ResultSet::Documents(
                     docs.into_iter().map(document_to_json).collect(),
                 ))
@@ -239,7 +239,7 @@ impl Driver for MongoDriver {
             .collection::<Document>(&table.name)
             .count_documents(doc! {})
             .await
-            .map_err(|e| RdbsError::Query(e.to_string()))
+            .map_err(|e| RdbError::Query(e.to_string()))
     }
 
     /// Sequential (no multi-doc transaction — standalone servers lack them);
@@ -276,7 +276,7 @@ impl Driver for MongoDriver {
             match res {
                 Ok(()) => applied += 1,
                 Err(e) => {
-                    return Err(RdbsError::Query(format!(
+                    return Err(RdbError::Query(format!(
                         "{e} (applied {applied} of {} ops)",
                         ops.len()
                     )))
@@ -301,7 +301,7 @@ fn pk_id(pk: &[(String, Cell)]) -> Result<mongodb::bson::Bson> {
         .iter()
         .find(|(k, _)| k == "_id")
         .or_else(|| pk.first())
-        .ok_or_else(|| RdbsError::Query("write op without a row identity".into()))?;
+        .ok_or_else(|| RdbError::Query("write op without a row identity".into()))?;
     if let Cell::Text(s) = cell {
         if let Ok(oid) = mongodb::bson::oid::ObjectId::parse_str(s) {
             return Ok(mongodb::bson::Bson::ObjectId(oid));

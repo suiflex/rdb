@@ -1,23 +1,23 @@
-name: rdbs-driver-postgres
+name: rdb-driver-redis
 
 on:
   push:
     branches: [develop, main]
     paths:
-      - crates/driver-postgres/**
+      - crates/driver-redis/**
       - crates/core/**
       - Cargo.toml
       - Cargo.lock
       - rust-toolchain.toml
-      - .github/workflows/rdbs-driver-postgres.yml
+      - .github/workflows/rdb-driver-redis.yml
   pull_request:
     paths:
-      - crates/driver-postgres/**
+      - crates/driver-redis/**
       - crates/core/**
       - Cargo.toml
       - Cargo.lock
       - rust-toolchain.toml
-      - .github/workflows/rdbs-driver-postgres.yml
+      - .github/workflows/rdb-driver-redis.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -33,7 +33,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rdbs-driver-postgres
-      - run: cargo fmt -p rdbs-driver-postgres --check
-      - run: cargo clippy -p rdbs-driver-postgres --all-targets -- -D warnings
-      - run: cargo test -p rdbs-driver-postgres --lib
+          shared-key: rdb-driver-redis
+      - run: cargo fmt -p rdb-driver-redis --check
+      - run: cargo clippy -p rdb-driver-redis --all-targets -- -D warnings
+      - run: cargo test -p rdb-driver-redis --lib

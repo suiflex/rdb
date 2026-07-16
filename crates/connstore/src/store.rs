@@ -141,9 +141,9 @@ impl ConnStore {
         self.secrets.delete(id)
     }
 
-    /// Build a `rdbs-core::ConnConfig` for a saved connection with its stored
+    /// Build a `rdb-core::ConnConfig` for a saved connection with its stored
     /// password injected. Errors if the connection id is unknown.
-    pub fn conn_config_for(&self, id: &str) -> Result<rdbs_core::conn::ConnConfig> {
+    pub fn conn_config_for(&self, id: &str) -> Result<rdb_core::conn::ConnConfig> {
         let conn = self
             .get(id)
             .ok_or_else(|| ConnStoreError::NotFound(id.to_string()))?;

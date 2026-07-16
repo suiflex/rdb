@@ -1,10 +1,10 @@
 [package]
-name = "rdbs-driver-postgres"
+name = "rdb-driver-postgres"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-rdbs-core = { path = "../core" }
+rdb-core = { path = "../core" }
 async-trait = "0.1"
 futures-util = "0.3"
 tokio = { version = "1", features = ["full"] }

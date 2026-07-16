@@ -1,4 +1,4 @@
-//! rdbs-driver-sqlite: a `rdbs_core::driver::Driver` backed by rusqlite.
+//! rdb-driver-sqlite: a `rdb_core::driver::Driver` backed by rusqlite.
 //!
 //! SQLite is a single local file, so `ConnConfig.database` carries the file
 //! path (host/port/user are unused). rusqlite is synchronous; every call runs

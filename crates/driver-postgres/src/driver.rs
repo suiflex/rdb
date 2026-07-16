@@ -4,13 +4,13 @@ use postgres_native_tls::MakeTlsConnector;
 use tokio::task::JoinHandle;
 use tokio_postgres::{Client, NoTls};
 
-use rdbs_core::conn::{ConnConfig, SslMode};
-use rdbs_core::driver::Driver;
-use rdbs_core::error::{RdbsError, Result};
-use rdbs_core::query::Query;
-use rdbs_core::result::{Column, ResultSet, Row};
-use rdbs_core::schema::{Container, ContainerKind, Database, Field, Schema};
-use rdbs_core::write::{TableRef, WriteOp};
+use rdb_core::conn::{ConnConfig, SslMode};
+use rdb_core::driver::Driver;
+use rdb_core::error::{RdbError, Result};
+use rdb_core::query::Query;
+use rdb_core::result::{Column, ResultSet, Row};
+use rdb_core::schema::{Container, ContainerKind, Database, Field, Schema};
+use rdb_core::write::{TableRef, WriteOp};
 
 use crate::conn_string::build_conn_string;
 use crate::write_sql;
@@ -38,7 +38,7 @@ impl Driver for PostgresDriver {
         let (client, conn_task) = if matches!(cfg.sslmode, SslMode::Disable) {
             let (client, connection) = tokio_postgres::connect(&conn_str, NoTls)
                 .await
-                .map_err(|e| RdbsError::Connection(pg_err(&e)))?;
+                .map_err(|e| RdbError::Connection(pg_err(&e)))?;
             let conn_task = tokio::spawn(async move {
                 let _ = connection.await;
             });
@@ -48,11 +48,11 @@ impl Driver for PostgresDriver {
                 .danger_accept_invalid_certs(true)
                 .danger_accept_invalid_hostnames(true)
                 .build()
-                .map_err(|e| RdbsError::Connection(e.to_string()))?;
+                .map_err(|e| RdbError::Connection(e.to_string()))?;
             let connector = MakeTlsConnector::new(tls);
             let (client, connection) = tokio_postgres::connect(&conn_str, connector)
                 .await
-                .map_err(|e| RdbsError::Connection(pg_err(&e)))?;
+                .map_err(|e| RdbError::Connection(pg_err(&e)))?;
             let conn_task = tokio::spawn(async move {
                 let _ = connection.await;
             });
@@ -65,7 +65,7 @@ impl Driver for PostgresDriver {
         self.client
             .query("SELECT 1", &[])
             .await
-            .map_err(|e| RdbsError::Connection(pg_err(&e)))?;
+            .map_err(|e| RdbError::Connection(pg_err(&e)))?;
         Ok(())
     }
 
@@ -89,7 +89,7 @@ impl Driver for PostgresDriver {
                 &[],
             )
             .await
-            .map_err(|e| RdbsError::Schema(pg_err(&e)))?;
+            .map_err(|e| RdbError::Schema(pg_err(&e)))?;
         Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect())
     }
 
@@ -106,7 +106,7 @@ impl Driver for PostgresDriver {
                 &[],
             )
             .await
-            .map_err(|e| RdbsError::Schema(pg_err(&e)))?;
+            .map_err(|e| RdbError::Schema(pg_err(&e)))?;
         Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect())
     }
 
@@ -119,7 +119,7 @@ impl Driver for PostgresDriver {
         q: &Query,
         batch: usize,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-        sink: tokio::sync::mpsc::Sender<rdbs_core::result::StreamItem>,
+        sink: tokio::sync::mpsc::Sender<rdb_core::result::StreamItem>,
     ) -> Result<()> {
         query_stream_impl(&self.client, q, batch.max(1), cancel, sink).await
     }
@@ -139,7 +139,7 @@ impl Driver for PostgresDriver {
                 &[&table.name, &schema],
             )
             .await
-            .map_err(|e| RdbsError::Schema(pg_err(&e)))?;
+            .map_err(|e| RdbError::Schema(pg_err(&e)))?;
         Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect())
     }
 
@@ -149,7 +149,7 @@ impl Driver for PostgresDriver {
             .client
             .query_one(&sql, &[])
             .await
-            .map_err(|e| RdbsError::Query(pg_err(&e)))?;
+            .map_err(|e| RdbError::Query(pg_err(&e)))?;
         let n: i64 = row.get(0);
         Ok(n as u64)
     }
@@ -162,12 +162,12 @@ impl Driver for PostgresDriver {
             self.client
                 .execute(&sql, &[])
                 .await
-                .map_err(|e| RdbsError::Query(pg_err(&e)))
+                .map_err(|e| RdbError::Query(pg_err(&e)))
         };
         self.client
             .execute("BEGIN", &[])
             .await
-            .map_err(|e| RdbsError::Query(pg_err(&e)))?;
+            .map_err(|e| RdbError::Query(pg_err(&e)))?;
         let mut affected = 0u64;
         for op in ops {
             let sql = match op {
@@ -186,7 +186,7 @@ impl Driver for PostgresDriver {
         self.client
             .execute("COMMIT", &[])
             .await
-            .map_err(|e| RdbsError::Query(pg_err(&e)))?;
+            .map_err(|e| RdbError::Query(pg_err(&e)))?;
         Ok(affected)
     }
 
@@ -225,14 +225,14 @@ fn pg_err(e: &tokio_postgres::Error) -> String {
 async fn query_impl(client: &Client, q: &Query) -> Result<ResultSet> {
     let sql = match q {
         Query::Sql(s) => s,
-        Query::Command(_) | Query::Mongo(_) => return Err(RdbsError::UnsupportedQuery),
+        Query::Command(_) | Query::Mongo(_) => return Err(RdbError::UnsupportedQuery),
     };
 
     if is_row_returning(sql) {
         let rows = client
             .query(sql, &[])
             .await
-            .map_err(|e| RdbsError::Query(pg_err(&e)))?;
+            .map_err(|e| RdbError::Query(pg_err(&e)))?;
         let cols = column_meta(&rows);
         let mut out_rows: Vec<Row> = Vec::with_capacity(rows.len());
         for row in &rows {
@@ -250,7 +250,7 @@ async fn query_impl(client: &Client, q: &Query) -> Result<ResultSet> {
         let affected = client
             .execute(sql, &[])
             .await
-            .map_err(|e| RdbsError::Query(pg_err(&e)))?;
+            .map_err(|e| RdbError::Query(pg_err(&e)))?;
         Ok(ResultSet::Affected(affected))
     }
 }
@@ -265,20 +265,20 @@ async fn query_stream_impl(
     q: &Query,
     batch: usize,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    sink: tokio::sync::mpsc::Sender<rdbs_core::result::StreamItem>,
+    sink: tokio::sync::mpsc::Sender<rdb_core::result::StreamItem>,
 ) -> Result<()> {
     use futures_util::TryStreamExt;
-    use rdbs_core::result::StreamItem;
+    use rdb_core::result::StreamItem;
 
     let sql = match q {
         Query::Sql(s) => s,
-        Query::Command(_) | Query::Mongo(_) => return Err(RdbsError::UnsupportedQuery),
+        Query::Command(_) | Query::Mongo(_) => return Err(RdbError::UnsupportedQuery),
     };
     if !is_row_returning(sql) {
         client
             .execute(sql, &[])
             .await
-            .map_err(|e| RdbsError::Query(pg_err(&e)))?;
+            .map_err(|e| RdbError::Query(pg_err(&e)))?;
         let _ = sink.send(StreamItem::Meta(Vec::new())).await;
         return Ok(());
     }
@@ -286,7 +286,7 @@ async fn query_stream_impl(
     let stmt = client
         .prepare(sql)
         .await
-        .map_err(|e| RdbsError::Query(pg_err(&e)))?;
+        .map_err(|e| RdbError::Query(pg_err(&e)))?;
     let cols: Vec<Column> = stmt
         .columns()
         .iter()
@@ -305,7 +305,7 @@ async fn query_stream_impl(
     let row_stream = client
         .query_raw(&stmt, no_params)
         .await
-        .map_err(|e| RdbsError::Query(pg_err(&e)))?;
+        .map_err(|e| RdbError::Query(pg_err(&e)))?;
     tokio::pin!(row_stream);
 
     let mut buf: Vec<Row> = Vec::with_capacity(batch);
@@ -313,7 +313,7 @@ async fn query_stream_impl(
         match row_stream
             .try_next()
             .await
-            .map_err(|e| RdbsError::Query(pg_err(&e)))?
+            .map_err(|e| RdbError::Query(pg_err(&e)))?
         {
             Some(row) => {
                 let mut cells: Row = Vec::with_capacity(ncols);
@@ -380,10 +380,10 @@ async fn schema_impl(client: &Client, schema: &str) -> Result<Schema> {
     let db_row = client
         .query_one("SELECT current_database()", &[])
         .await
-        .map_err(|e| RdbsError::Schema(pg_err(&e)))?;
+        .map_err(|e| RdbError::Schema(pg_err(&e)))?;
     let db_name: String = db_row
         .try_get(0)
-        .map_err(|e| RdbsError::Schema(pg_err(&e)))?;
+        .map_err(|e| RdbError::Schema(pg_err(&e)))?;
 
     // User tables + columns from information_schema, scoped to one schema.
     // Ordered so columns of the same table are contiguous for grouping.
@@ -398,7 +398,7 @@ async fn schema_impl(client: &Client, schema: &str) -> Result<Schema> {
             &[&schema],
         )
         .await
-        .map_err(|e| RdbsError::Schema(pg_err(&e)))?;
+        .map_err(|e| RdbError::Schema(pg_err(&e)))?;
 
     let mut containers: Vec<Container> = Vec::new();
     for row in &rows {
@@ -424,7 +424,7 @@ async fn schema_impl(client: &Client, schema: &str) -> Result<Schema> {
     // Stored functions (public schema): name + full CREATE source for the
     // function view. Per-row source failures (e.g. C-language internals that
     // pg_get_functiondef rejects) are skipped, never fatal.
-    let mut functions: Vec<rdbs_core::schema::Function> = Vec::new();
+    let mut functions: Vec<rdb_core::schema::Function> = Vec::new();
     if let Ok(rows) = client
         .query(
             "SELECT p.proname, pg_catalog.pg_get_functiondef(p.oid) \
@@ -439,7 +439,7 @@ async fn schema_impl(client: &Client, schema: &str) -> Result<Schema> {
         for row in &rows {
             let name: String = row.get(0);
             if let Ok(def) = row.try_get::<_, String>(1) {
-                functions.push(rdbs_core::schema::Function {
+                functions.push(rdb_core::schema::Function {
                     name,
                     definition: def,
                 });

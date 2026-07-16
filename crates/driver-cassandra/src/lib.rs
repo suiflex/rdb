@@ -1,4 +1,4 @@
-//! rdbs-driver-cassandra: a `rdbs_core::driver::Driver` backed by scylla.
+//! rdb-driver-cassandra: a `rdb_core::driver::Driver` backed by scylla.
 //!
 //! Cassandra speaks CQL: results are tabular, but the namespace is
 //! keyspace→table (a keyspace maps to a `Database`, its tables to `Container`s).
