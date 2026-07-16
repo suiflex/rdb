@@ -180,9 +180,7 @@ fn is_row_returning(sql: &str) -> bool {
 
 fn run_sql(c: &Connection, sql: &str) -> Result<ResultSet> {
     if is_row_returning(sql) {
-        let mut stmt = c
-            .prepare(sql)
-            .map_err(|e| RdbError::Query(e.to_string()))?;
+        let mut stmt = c.prepare(sql).map_err(|e| RdbError::Query(e.to_string()))?;
         let cols: Vec<Column> = stmt
             .column_names()
             .into_iter()
@@ -192,9 +190,7 @@ fn run_sql(c: &Connection, sql: &str) -> Result<ResultSet> {
             })
             .collect();
         let ncol = cols.len();
-        let mut rows = stmt
-            .query([])
-            .map_err(|e| RdbError::Query(e.to_string()))?;
+        let mut rows = stmt.query([]).map_err(|e| RdbError::Query(e.to_string()))?;
         let mut out: Vec<Row> = Vec::new();
         while let Some(r) = rows.next().map_err(|e| RdbError::Query(e.to_string()))? {
             let mut cells: Row = Vec::with_capacity(ncol);
