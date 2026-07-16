@@ -1,10 +1,10 @@
 [package]
-name = "rdbs"
+name = "rdb"
 version = "0.16.0"
 edition = "2021"
 
 [[bin]]
-name = "rdbs"
+name = "rdb"
 path = "src/main.rs"
 
 [dependencies]

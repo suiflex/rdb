@@ -5576,6 +5576,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "rdb"
+version = "0.16.0"
+dependencies = [
+ "async-trait",
+ "copypasta",
+ "json5",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "open",
+ "rdb-connstore",
+ "rdb-core",
+ "rdb-driver-cassandra",
+ "rdb-driver-mongo",
+ "rdb-driver-mysql",
+ "rdb-driver-postgres",
+ "rdb-driver-redis",
+ "rdb-driver-sqlite",
+ "rfd",
+ "semver",
+ "serde",
+ "serde_json",
+ "slint",
+ "slint-build",
+ "tokio",
+ "ureq",
+]
+
+[[package]]
 name = "rdb-connstore"
 version = "0.1.0"
 dependencies = [
@@ -5677,35 +5706,6 @@ dependencies = [
  "rdb-core",
  "rusqlite",
  "tokio",
-]
-
-[[package]]
-name = "rdbs"
-version = "0.16.0"
-dependencies = [
- "async-trait",
- "copypasta",
- "json5",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "open",
- "rdb-connstore",
- "rdb-core",
- "rdb-driver-cassandra",
- "rdb-driver-mongo",
- "rdb-driver-mysql",
- "rdb-driver-postgres",
- "rdb-driver-redis",
- "rdb-driver-sqlite",
- "rfd",
- "semver",
- "serde",
- "serde_json",
- "slint",
- "slint-build",
- "tokio",
- "ureq",
 ]
 
 [[package]]
