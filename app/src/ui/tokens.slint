@@ -45,6 +45,16 @@ export global Tokens {
     out property <color> db-sl: #8E44AD;
     out property <color> db-mo: #58B98A;
     out property <color> db-ca: #1287A8;
+    // engine string -> brand color (shared by DbBadge + connection row tint)
+    public pure function db-color(engine: string) -> color {
+        return engine == "postgres" ? db-pg
+            : engine == "mysql" ? db-my
+            : engine == "redis" ? db-re
+            : engine == "sqlite" ? db-sl
+            : engine == "mongo" ? db-mo
+            : engine == "cassandra" ? db-ca
+            : text-faint;
+    }
 
     // ----- special cell colors -----
     out property <color> fk-text: dark ? #7FA0DE : #4A6BB0;   // foreign-key cells, with ↗

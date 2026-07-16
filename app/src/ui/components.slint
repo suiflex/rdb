@@ -80,13 +80,7 @@ export component DbBadge inherits Rectangle {
     width: self.size;
     height: self.size;
     border-radius: self.size * 0.28;
-    background: engine == "postgres" ? Tokens.db-pg
-        : engine == "mysql" ? Tokens.db-my
-        : engine == "redis" ? Tokens.db-re
-        : engine == "sqlite" ? Tokens.db-sl
-        : engine == "mongo" ? Tokens.db-mo
-        : engine == "cassandra" ? Tokens.db-ca
-        : Tokens.text-faint;
+    background: Tokens.db-color(engine);
     // Known engine → white brand glyph (icons/db-<engine>.svg via AppIcon).
     property <bool> known: engine == "postgres" || engine == "mysql"
         || engine == "redis" || engine == "sqlite" || engine == "mongo"
