@@ -7,7 +7,7 @@ import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "palette.slint";
 import {
-    UnderlineSegment, SecondaryButton, PrimaryButton, TextButton, FilterField, KeyCap
+    UnderlineSegment, SecondaryButton, PrimaryButton, TextButton, ExportButton, FilterField, KeyCap
 } from "components.slint";
 import { ScrollView, ComboBox } from "std-widgets.slint";
 import { AppIcon } from "icons.slint";
@@ -584,45 +584,7 @@ export component WorkArea inherits Rectangle {
                     TextButton { text: root.editor-collapsed ? "Editor ▸" : "Editor ▾"; clicked => { root.editor-collapsed = !root.editor-collapsed; } }
                     if !root.browse-mode: TextButton { text: root.filter-open ? "Filter ▲" : "Filter ▼"; clicked => { root.filter-open = !root.filter-open; } }
                     TextButton { text: "Copy"; clicked => { root.copy-results(); } }
-                    Rectangle {
-                        width: exp-btn.preferred-width;
-                        height: exp-btn.preferred-height;
-                        export-menu := PopupWindow {
-                            x: 0;
-                            y: 30px;
-                            width: 150px;
-                            height: menu-box.preferred-height;
-                            menu-box := Rectangle {
-                                background: Tokens.card;
-                                border-width: 1px;
-                                border-color: Tokens.border-strong;
-                                border-radius: Tokens.radius;
-                                drop-shadow-blur: 12px;
-                                drop-shadow-color: #00000022;
-                                VerticalLayout {
-                                    padding: 4px;
-                                    for opt[i] in ["CSV", "JSON", "TSV", "SQL INSERT", "Markdown"]: Rectangle {
-                                        height: 28px;
-                                        border-radius: 6px;
-                                        background: exp-row-ta.has-hover ? Tokens.accent-tint : transparent;
-                                        exp-row-ta := TouchArea {
-                                            clicked => { export-menu.close(); root.export-results(i); }
-                                        }
-                                        HorizontalLayout {
-                                            padding-left: Tokens.sp2;
-                                            Text {
-                                                text: opt;
-                                                color: Tokens.text;
-                                                font-size: Tokens.font-sm;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        exp-btn := TextButton { text: "Export ▾"; clicked => { export-menu.show(); } }
-                    }
+                    ExportButton { export(i) => { root.export-results(i); } }
                     TextButton { text: "Chart"; clicked => { root.sql-view-mode = 2; } }
                 }
                 // result tabs — appear once ⌘\ has spawned a second result

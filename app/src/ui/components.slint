@@ -205,6 +205,61 @@ export component TextButton inherits Rectangle {
     ta := TouchArea { clicked => { root.clicked(); } }
 }
 
+// Export dropdown: sized/styled exactly like TextButton so it aligns and
+// spaces with the other toolbar buttons, but opens a format menu. `export(i)`
+// reports the chosen row index into the option list below.
+export component ExportButton inherits Rectangle {
+    callback export(int);
+    height: Tokens.button-h;
+    width: label.preferred-width + 2 * Tokens.sp2;
+    border-radius: Tokens.radius;
+    background: ta.has-hover ? Tokens.border : transparent;
+    animate background { duration: Tokens.fade; }
+    label := Text {
+        text: "Export ▾";
+        color: Tokens.text-dim;
+        font-size: Tokens.font-sm;
+        font-weight: 500;
+    }
+    menu := PopupWindow {
+        x: 0;
+        y: parent.height + 2px;
+        width: 150px;
+        // No explicit height: let the popup size to its content. Binding it to
+        // the child's preferred-height is a parent↔child cycle that collapses
+        // the popup to zero, so the menu never appears (see SelectBox above).
+        Rectangle {
+            background: Tokens.card;
+            border-width: 1px;
+            border-color: Tokens.border-strong;
+            border-radius: Tokens.radius;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: #00000022;
+            VerticalLayout {
+                padding: 4px;
+                for opt[i] in ["CSV", "JSON", "TSV", "SQL INSERT", "Markdown"]: Rectangle {
+                    height: 28px;
+                    border-radius: 6px;
+                    background: row-ta.has-hover ? Tokens.accent-tint : transparent;
+                    row-ta := TouchArea {
+                        clicked => { menu.close(); root.export(i); }
+                    }
+                    HorizontalLayout {
+                        padding-left: Tokens.sp2;
+                        Text {
+                            text: opt;
+                            color: Tokens.text;
+                            font-size: Tokens.font-sm;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    ta := TouchArea { clicked => { menu.show(); } }
+}
+
 // Form text input (conn form): Tokens-styled card box, optional password mode.
 export component FormField inherits Rectangle {
     in property <string> placeholder;

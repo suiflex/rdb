@@ -261,6 +261,9 @@ in-out property <string> rename-text;
     callback clear-console();
     in-out property <int> sidebar-mode: 0;
     in-out property <bool> sidebar-visible: true;
+    // Narrow icon-rail state: dragging the splitter below the min width snaps
+    // the sidebar to a compact rail of tab icons instead of crushing the header.
+    in-out property <bool> sidebar-rail: false;
     in-out property <bool> detail-visible: true;
     in-out property <bool> results-collapsed: false;
     callback editor-key(string, bool, bool, bool) -> bool;
@@ -780,7 +783,7 @@ in-out property <string> rename-text;
                 max-width: 100000px;
                 spacing: 0px;
 
-                if root.sidebar-visible: Sidebar {
+                if root.sidebar-visible && !root.sidebar-rail: Sidebar {
                     focus-tick: root.focus-filter-tick;
                     // Keep navigation compact: the old preferred-only sizing let
                     // the layout stretch this panel to 480px and crush the work area.
@@ -829,7 +832,59 @@ in-out property <string> rename-text;
                         root.new-tab();
                     }
                     collapse() => {
-                        root.sidebar-visible = false;
+                        // Collapse to the icon rail (same as dragging to the min),
+                        // not the bare reveal sliver — keeps the two paths
+                        // consistent. Full hide stays on the header toggle.
+                        root.sidebar-rail = true;
+                    }
+                }
+
+                // icon rail: compact tab icons when dragged below the min width.
+                // Clicking a tab expands back to the full sidebar in that mode.
+                if root.sidebar-visible && root.sidebar-rail: Rectangle {
+                    width: 48px;
+                    background: Tokens.sidebar;
+                    VerticalLayout {
+                        alignment: start;
+                        padding-top: Tokens.sp2;
+                        padding-left: Tokens.sp2;
+                        padding-right: Tokens.sp2;
+                        spacing: Tokens.sp1;
+                        IconButton {
+                            icon: "layers";
+                            tooltip: "Items";
+                            active: root.sidebar-mode == 0;
+                            clicked => {
+                                root.sidebar-mode = 0;
+                                root.sidebar-mode-changed(0);
+                                root.sidebar-rail = false;
+                            }
+                        }
+                        IconButton {
+                            icon: "terminal";
+                            tooltip: "Queries";
+                            active: root.sidebar-mode == 1;
+                            clicked => {
+                                root.sidebar-mode = 1;
+                                root.sidebar-mode-changed(1);
+                                root.sidebar-rail = false;
+                            }
+                        }
+                        IconButton {
+                            icon: "clock";
+                            tooltip: "History";
+                            active: root.sidebar-mode == 2;
+                            clicked => {
+                                root.sidebar-mode = 2;
+                                root.sidebar-mode-changed(2);
+                                root.sidebar-rail = false;
+                            }
+                        }
+                        IconButton {
+                            icon: "panel-expand";
+                            tooltip: "Expand sidebar";
+                            clicked => { root.sidebar-rail = false; }
+                        }
                     }
                 }
 
@@ -853,7 +908,16 @@ in-out property <string> rename-text;
                     split-h-area := TouchArea {
                         mouse-cursor: col-resize;
                         moved => {
-                            root.sidebar-w = clamp(root.sidebar-w + (self.mouse-x - self.pressed-x), 184px, 360px);
+                            // Rail is latched: once snapped, freeze the drag so the
+                            // handle jumping left (218px → 48px rail) can't oscillate
+                            // the state. Expand via the rail's tab/expand buttons.
+                            if !root.sidebar-rail {
+                                if root.sidebar-w + (self.mouse-x - self.pressed-x) < 150px {
+                                    root.sidebar-rail = true;
+                                } else {
+                                    root.sidebar-w = clamp(root.sidebar-w + (self.mouse-x - self.pressed-x), 184px, 360px);
+                                }
+                            }
                         }
                     }
                 }
