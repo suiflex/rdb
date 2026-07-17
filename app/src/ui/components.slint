@@ -225,8 +225,10 @@ export component ExportButton inherits Rectangle {
         x: 0;
         y: parent.height + 2px;
         width: 150px;
-        height: box.preferred-height;
-        box := Rectangle {
+        // No explicit height: let the popup size to its content. Binding it to
+        // the child's preferred-height is a parent↔child cycle that collapses
+        // the popup to zero, so the menu never appears (see SelectBox above).
+        Rectangle {
             background: Tokens.card;
             border-width: 1px;
             border-color: Tokens.border-strong;
