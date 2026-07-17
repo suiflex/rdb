@@ -7,6 +7,11 @@ edition = "2021"
 name = "rdb"
 path = "src/main.rs"
 
+[features]
+# Design-parity tooling (seeded MockDriver + RDB_SHOT capture). Non-default so
+# release builds exclude ~830 lines of dev-only code.
+mock = []
+
 [dependencies]
 slint = { version = "1.8", default-features = false, features = ["compat-1-2", "std", "backend-winit", "renderer-femtovg", "renderer-software"] }
 rdb-core = { path = "../crates/core" }

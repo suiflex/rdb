@@ -10,10 +10,12 @@ pub fn parse_hex(s: &str) -> Option<Color> {
     if h.len() != 6 {
         return None;
     }
-    let r = u8::from_str_radix(&h[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&h[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&h[4..6], 16).ok()?;
-    Some(Color::from_rgb_u8(r, g, b))
+    let rgb = u32::from_str_radix(h, 16).ok()?;
+    Some(Color::from_rgb_u8(
+        (rgb >> 16) as u8,
+        (rgb >> 8) as u8,
+        rgb as u8,
+    ))
 }
 
 /// Parse with a fallback to the design-system accent (Tokens.accent, #2c5fd8).

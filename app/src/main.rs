@@ -19,6 +19,7 @@ mod export;
 mod mock;
 mod model;
 mod query_parse;
+#[cfg(feature = "mock")]
 mod shot;
 mod sql_format;
 mod theme;
@@ -7119,6 +7120,7 @@ fn main() -> Result<(), slint::PlatformError> {
         install_macos_app_icon,
     );
 
+    #[cfg(feature = "mock")]
     shot::install(&window);
     let run_result = window.run();
     // On exit, capture the active tab's latest text (edits made without a tab

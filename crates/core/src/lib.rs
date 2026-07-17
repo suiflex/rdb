@@ -7,3 +7,4 @@ pub mod query;
 pub mod result;
 pub mod schema;
 pub mod write;
+pub mod write_sql;
