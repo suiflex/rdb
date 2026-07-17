@@ -1,15 +1,18 @@
-//! CQL text builders for the buffered write path. Like the SQL builders but
-//! keyspace-qualified (`"ks"."tbl"`) and with CQL literal spellings
-//! (`0x..` blobs, lowercase `null`). No `IS NULL` — a CQL primary key is never
-//! null, so identity comparisons are always `=`.
+//! Cassandra (CQL) dialect for the shared literal write-builder. Table names
+//! are keyspace-qualified (`"ks"."tbl"`) and literals use CQL spellings
+//! (`0x..` blobs, lowercase `null`). A CQL primary key is never null, so the
+//! shared `IS NULL` identity path is unreachable in practice.
 
 use rdb_core::result::Cell;
 use rdb_core::write::TableRef;
+use rdb_core::write_sql::{self as builder, Dialect};
 
-/// `"ident"` with embedded double quotes doubled.
-pub fn quote_ident(ident: &str) -> String {
-    format!("\"{}\"", ident.replace('"', "\"\""))
-}
+pub use rdb_core::write_sql::quote_ident;
+
+const DIALECT: Dialect = Dialect {
+    table_name,
+    literal,
+};
 
 /// Keyspace-qualified table name; `database` carries the keyspace.
 pub fn table_name(t: &TableRef) -> String {
@@ -22,7 +25,7 @@ pub fn table_name(t: &TableRef) -> String {
 }
 
 /// A cell as a CQL literal.
-pub fn literal(c: &Cell) -> String {
+fn literal(c: &Cell) -> String {
     match c {
         Cell::Null => "null".into(),
         Cell::Int(i) => i.to_string(),
@@ -36,39 +39,16 @@ pub fn literal(c: &Cell) -> String {
     }
 }
 
-fn where_clause(pk: &[(String, Cell)]) -> String {
-    pk.iter()
-        .map(|(col, val)| format!("{} = {}", quote_ident(col), literal(val)))
-        .collect::<Vec<_>>()
-        .join(" AND ")
-}
-
 pub fn update_sql(t: &TableRef, pk: &[(String, Cell)], changes: &[(String, Cell)]) -> String {
-    let sets: Vec<String> = changes
-        .iter()
-        .map(|(col, val)| format!("{} = {}", quote_ident(col), literal(val)))
-        .collect();
-    format!(
-        "UPDATE {} SET {} WHERE {}",
-        table_name(t),
-        sets.join(", "),
-        where_clause(pk)
-    )
+    builder::update_sql(t, pk, changes, &DIALECT)
 }
 
 pub fn insert_sql(t: &TableRef, values: &[(String, Cell)]) -> String {
-    let cols: Vec<String> = values.iter().map(|(c, _)| quote_ident(c)).collect();
-    let vals: Vec<String> = values.iter().map(|(_, v)| literal(v)).collect();
-    format!(
-        "INSERT INTO {} ({}) VALUES ({})",
-        table_name(t),
-        cols.join(", "),
-        vals.join(", ")
-    )
+    builder::insert_sql(t, values, &DIALECT)
 }
 
 pub fn delete_sql(t: &TableRef, pk: &[(String, Cell)]) -> String {
-    format!("DELETE FROM {} WHERE {}", table_name(t), where_clause(pk))
+    builder::delete_sql(t, pk, &DIALECT)
 }
 
 #[cfg(test)]
