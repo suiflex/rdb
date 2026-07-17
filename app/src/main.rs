@@ -2682,6 +2682,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let displayed_grid = displayed_grid.clone();
         let load_editor_text = load_editor_text.clone();
         let query_console = query_console.clone();
+        let ed_state = ed_state.clone();
         window.on_schema_choose(move |idx| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -2696,8 +2697,21 @@ fn main() -> Result<(), slint::PlatformError> {
             // Anything browsed belonged to the old schema; force a fresh pick and
             // drop expand/collapse state that referenced the old schema's tables.
             w.set_active_table(SharedString::default());
-            workspace_tabs.lock().unwrap().clear();
-            *active_tab_id.lock().unwrap() = None;
+            // Table/browse tabs referenced the old schema and must drop, but SQL
+            // scratch tabs are schema-agnostic — keep them so a query in progress
+            // survives the switch. Snapshot the live editor into the active tab
+            // first (the user may not have run/switched since typing).
+            let keep_active: Option<String> = {
+                let mut tabs = workspace_tabs.lock().unwrap();
+                if let Some(id) = active_tab_id.lock().unwrap().clone() {
+                    if let Some(tab) = tabs.iter_mut().find(|t| t.id == id) {
+                        tab.query_text = ed_state.borrow().text();
+                    }
+                }
+                tabs.retain(|t| t.kind == "sql");
+                tabs.first().map(|t| t.id.clone())
+            };
+            *active_tab_id.lock().unwrap() = keep_active.clone();
             let limit = browse.lock().unwrap().limit;
             *browse.lock().unwrap() = BrowseState {
                 limit,
@@ -2705,8 +2719,16 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             results.lock().unwrap().clear();
             *displayed_grid.lock().unwrap() = None;
-            set_workspace_tabs(&w, &[], None);
-            load_editor_text("");
+            {
+                let tabs = workspace_tabs.lock().unwrap();
+                set_workspace_tabs(&w, &tabs, keep_active.as_deref());
+                let text = keep_active
+                    .as_ref()
+                    .and_then(|id| tabs.iter().find(|t| t.id == *id))
+                    .map(|t| t.query_text.clone())
+                    .unwrap_or_default();
+                load_editor_text(&text);
+            }
             clear_grid(&w);
             expanded_tables.lock().unwrap().clear();
             *collapsed_categories.borrow_mut() = default_collapsed_cats();
