@@ -621,7 +621,14 @@ export component WorkArea inherits Rectangle {
                                 }
                             }
                         }
-                        exp-btn := TextButton { text: "Export ▾"; clicked => { export-menu.show(); } }
+                        // Center vertically: the layout stretches this wrapper to
+                        // the toolbar height, so pin the button to the middle to
+                        // match the bare TextButtons beside it.
+                        exp-btn := TextButton {
+                            y: (parent.height - self.height) / 2;
+                            text: "Export ▾";
+                            clicked => { export-menu.show(); }
+                        }
                     }
                     TextButton { text: "Chart"; clicked => { root.sql-view-mode = 2; } }
                 }
