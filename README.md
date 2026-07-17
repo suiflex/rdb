@@ -21,6 +21,8 @@
 
 A native, lightweight, cross-platform database manager built with Rust and Slint — in the spirit of TablePlus but compiled from a single codebase for macOS and Linux.
 
+> Where RDB is headed and why — see [**VISION.md**](./VISION.md).
+
 ## Features
 
 - **Multi-engine** — PostgreSQL, MySQL/MariaDB, Redis, MongoDB, SQLite, Cassandra in one app
