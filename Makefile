@@ -7,7 +7,7 @@ BE_FLAGS = $(addprefix -p ,$(BE_PKGS))
 
 .DEFAULT_GOAL := help
 
-.PHONY: help be-build be-test be-check fe-build fe-run fe-build-run fe-show fmt fmt-check lint test test-it build all clean
+.PHONY: help be-build be-test be-check fe-build fe-run fe-run-mock fe-build-run fe-show fmt fmt-check lint test test-it build all clean
 
 FE_BIN = target/debug/$(FE_PKG)
 
@@ -28,6 +28,9 @@ fe-build: ## Build the rdb UI binary
 
 fe-run: ## Run the rdb UI binary
 	cargo run -p $(FE_PKG)
+
+fe-run-mock: ## Run the UI with the seeded design-mock data (RDB_MOCK=1)
+	RDB_MOCK=1 cargo run -p $(FE_PKG) --features mock
 
 fe-build-run: ## Build the rdb UI then launch it (GUI shows after build)
 	cargo build -p $(FE_PKG)

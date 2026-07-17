@@ -29,6 +29,7 @@ pub enum AnyDriver {
     // off the enum's inline footprint (clippy::large_enum_variant).
     Cassandra(Box<CassandraDriver>),
     /// In-process demo driver (RDB_MOCK=1); no network, seeded data.
+    #[cfg(feature = "mock")]
     Mock(crate::mock::MockDriver),
 }
 
@@ -59,6 +60,7 @@ impl AnyDriver {
 
     /// Connect using the concrete driver for `engine`.
     pub async fn connect(engine: Engine, cfg: &ConnConfig) -> Result<Self> {
+        #[cfg(feature = "mock")]
         if crate::mock::mock_mode() {
             return Ok(AnyDriver::Mock(
                 crate::mock::MockDriver::connect(cfg).await?,
@@ -85,6 +87,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.ping().await,
             AnyDriver::Sqlite(d) => d.ping().await,
             AnyDriver::Cassandra(d) => d.ping().await,
+            #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.ping().await,
         }
     }
@@ -97,6 +100,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.schema().await,
             AnyDriver::Sqlite(d) => d.schema().await,
             AnyDriver::Cassandra(d) => d.schema().await,
+            #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.schema().await,
         }
     }
@@ -109,6 +113,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.schema_for(schema).await,
             AnyDriver::Sqlite(d) => d.schema_for(schema).await,
             AnyDriver::Cassandra(d) => d.schema_for(schema).await,
+            #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.schema_for(schema).await,
         }
     }
@@ -121,6 +126,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.list_schemas().await,
             AnyDriver::Sqlite(d) => d.list_schemas().await,
             AnyDriver::Cassandra(d) => d.list_schemas().await,
+            #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.list_schemas().await,
         }
     }
@@ -133,6 +139,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.list_databases().await,
             AnyDriver::Sqlite(d) => d.list_databases().await,
             AnyDriver::Cassandra(d) => d.list_databases().await,
+            #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.list_databases().await,
         }
     }
@@ -145,6 +152,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.containers(database).await,
             AnyDriver::Sqlite(d) => d.containers(database).await,
             AnyDriver::Cassandra(d) => d.containers(database).await,
+            #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.containers(database).await,
         }
     }
@@ -157,6 +165,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.query(q).await,
             AnyDriver::Sqlite(d) => d.query(q).await,
             AnyDriver::Cassandra(d) => d.query(q).await,
+            #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.query(q).await,
         }
     }
@@ -178,6 +187,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.query_stream(q, batch, cancel, sink).await,
             AnyDriver::Sqlite(d) => d.query_stream(q, batch, cancel, sink).await,
             AnyDriver::Cassandra(d) => d.query_stream(q, batch, cancel, sink).await,
+            #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.query_stream(q, batch, cancel, sink).await,
         }
     }
@@ -190,6 +200,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.primary_key(table).await,
             AnyDriver::Sqlite(d) => d.primary_key(table).await,
             AnyDriver::Cassandra(d) => d.primary_key(table).await,
+            #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.primary_key(table).await,
         }
     }
@@ -202,6 +213,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.count(table).await,
             AnyDriver::Sqlite(d) => d.count(table).await,
             AnyDriver::Cassandra(d) => d.count(table).await,
+            #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.count(table).await,
         }
     }
@@ -214,6 +226,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.commit(ops).await,
             AnyDriver::Sqlite(d) => d.commit(ops).await,
             AnyDriver::Cassandra(d) => d.commit(ops).await,
+            #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.commit(ops).await,
         }
     }
