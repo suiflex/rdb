@@ -77,7 +77,6 @@ impl AnyDriver {
     }
 
     /// Part of the driver surface; wired into the UI status check later.
-    #[allow(dead_code)]
     pub async fn ping(&self) -> Result<()> {
         match self {
             AnyDriver::Postgres(d) => d.ping().await,
@@ -102,7 +101,6 @@ impl AnyDriver {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn schema_for(&self, schema: &str) -> Result<Schema> {
         match self {
             AnyDriver::Postgres(d) => d.schema_for(schema).await,
@@ -115,7 +113,6 @@ impl AnyDriver {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn list_schemas(&self) -> Result<Vec<String>> {
         match self {
             AnyDriver::Postgres(d) => d.list_schemas().await,
@@ -128,7 +125,6 @@ impl AnyDriver {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn list_databases(&self) -> Result<Vec<String>> {
         match self {
             AnyDriver::Postgres(d) => d.list_databases().await,
