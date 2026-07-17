@@ -41,10 +41,26 @@ export component ConnPicker inherits Rectangle {
     HorizontalLayout {
         spacing: 0;
 
-        // ================= left: grouped list =================
+        // ================= left: floating grouped list =================
+        // Canvas gutter around the card so the sidebar reads as a floating
+        // panel (rounded, bordered, drop-shadow) instead of a flush column.
         Rectangle {
-            width: 352px;
-            background: Tokens.sidebar;
+            width: 372px;
+            background: Tokens.canvas;
+
+            card := Rectangle {
+                x: Tokens.sp3;
+                y: Tokens.sp3;
+                width: parent.width - 2 * Tokens.sp3;
+                height: parent.height - 2 * Tokens.sp3;
+                background: Tokens.sidebar;
+                border-radius: Tokens.radius-lg;
+                border-width: 1px;
+                border-color: Tokens.border;
+                drop-shadow-blur: 18px;
+                drop-shadow-color: #00000035;
+                drop-shadow-offset-y: 6px;
+                clip: true;
 
             VerticalLayout {
                 spacing: 0;
@@ -260,13 +276,6 @@ export component ConnPicker inherits Rectangle {
                     }
                 }
             }
-
-            // right hairline separating list from detail
-            Rectangle {
-                x: parent.width - 1px;
-                width: 1px;
-                height: parent.height;
-                background: Tokens.border;
             }
         }
 
