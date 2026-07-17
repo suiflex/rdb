@@ -96,7 +96,7 @@ export component MainWindow inherits Window {
             MenuItem {
                 title: "Toggle Sidebar";
                 enabled: root.connected;
-                activated => { root.sidebar-visible = !root.sidebar-visible; }
+                activated => { root.sidebar-rail = !root.sidebar-rail; }
             }
             MenuItem {
                 title: "Toggle Details";
@@ -656,8 +656,10 @@ in-out property <string> rename-text;
                         IconButton {
                             icon: "columns";
                             tooltip: "Toggle sidebar";
-                            active: root.sidebar-visible;
-                            clicked => { root.sidebar-visible = !root.sidebar-visible; }
+                            // Collapse to the icon rail (matches the sidebar's own
+                            // collapse button) rather than fully hiding it.
+                            active: !root.sidebar-rail;
+                            clicked => { root.sidebar-rail = !root.sidebar-rail; }
                         }
                     }
                     // hide/show the selected-row details panel

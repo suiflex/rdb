@@ -41,10 +41,26 @@ export component ConnPicker inherits Rectangle {
     HorizontalLayout {
         spacing: 0;
 
-        // ================= left: grouped list =================
+        // ================= left: floating grouped list =================
+        // Canvas gutter around the card so the sidebar reads as a floating
+        // panel (rounded, bordered, drop-shadow) instead of a flush column.
         Rectangle {
-            width: 352px;
-            background: Tokens.sidebar;
+            width: 372px;
+            background: Tokens.canvas;
+
+            card := Rectangle {
+                x: Tokens.sp3;
+                y: Tokens.sp3;
+                width: parent.width - 2 * Tokens.sp3;
+                height: parent.height - 2 * Tokens.sp3;
+                background: Tokens.sidebar;
+                border-radius: Tokens.radius-lg;
+                border-width: 1px;
+                border-color: Tokens.border;
+                drop-shadow-blur: 18px;
+                drop-shadow-color: #00000035;
+                drop-shadow-offset-y: 6px;
+                clip: true;
 
             VerticalLayout {
                 spacing: 0;
@@ -122,25 +138,17 @@ export component ConnPicker inherits Rectangle {
 
                             // --- connection row --- (selected-conn = store index)
                             if !item.is-header: Rectangle {
-                                // per-engine brand tint on the row card; selection
-                                // & hover deepen the same tint so color stays.
+                                // Only the selected row fills — solid brand color
+                                // so it dominates the list (CodexBar-style). Idle
+                                // rows stay plain (engine color still reads from
+                                // the badge square); hover gets a faint tint.
                                 property <color> tint: Tokens.db-color(item.engine);
+                                property <bool> selected: item.index == root.selected-conn;
                                 border-radius: Tokens.radius-lg;
-                                background: item.index == root.selected-conn ? tint.with-alpha(0.30)
-                                    : row-ta.has-hover ? tint.with-alpha(0.20)
-                                    : tint.with-alpha(0.12);
-                                border-width: item.index == root.selected-conn ? 1px : 0;
-                                border-color: tint.with-alpha(0.5);
+                                background: selected ? tint
+                                    : row-ta.has-hover ? tint.with-alpha(0.14)
+                                    : transparent;
                                 animate background { duration: Tokens.fade; }
-
-                                // selection = 2px brand-color left bar (never a pill)
-                                if item.index == root.selected-conn: Rectangle {
-                                    x: 0;
-                                    width: Tokens.selection-bar-w;
-                                    height: parent.height;
-                                    background: tint;
-                                    border-radius: 1px;
-                                }
 
                                 row-ta := TouchArea {
                                     clicked => { root.select-conn(item.index); }
@@ -153,7 +161,14 @@ export component ConnPicker inherits Rectangle {
                                     spacing: Tokens.sp3;
                                     VerticalLayout {
                                         alignment: center;
-                                        DbBadge { engine: item.engine; size: 24px; }
+                                        // ring keeps the same-color badge visible
+                                        // on the solid selected fill
+                                        DbBadge {
+                                            engine: item.engine;
+                                            size: 24px;
+                                            border-width: selected ? 1px : 0;
+                                            border-color: white.with-alpha(0.5);
+                                        }
                                     }
                                     VerticalLayout {
                                         alignment: center;
@@ -161,14 +176,14 @@ export component ConnPicker inherits Rectangle {
                                         horizontal-stretch: 1;
                                         Text {
                                             text: item.name;
-                                            color: Tokens.text;
+                                            color: selected ? white : Tokens.text;
                                             font-size: Tokens.font-md;
                                             font-weight: Tokens.weight-emphasis;
                                             overflow: elide;
                                         }
                                         Text {
                                             text: item.subline;
-                                            color: Tokens.text-dim;
+                                            color: selected ? white.with-alpha(0.75) : Tokens.text-dim;
                                             font-size: Tokens.font-xs;
                                             font-family: Tokens.mono;
                                             overflow: elide;
@@ -261,13 +276,6 @@ export component ConnPicker inherits Rectangle {
                     }
                 }
             }
-
-            // right hairline separating list from detail
-            Rectangle {
-                x: parent.width - 1px;
-                width: 1px;
-                height: parent.height;
-                background: Tokens.border;
             }
         }
 
