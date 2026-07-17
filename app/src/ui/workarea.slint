@@ -16,6 +16,9 @@ export component WorkArea inherits Rectangle {
     // ----- editor / results state (wired 1:1 from MainWindow) -----
     // Collapse the SQL editor pane to give the results grid more room.
     property <bool> editor-collapsed: false;
+    // Hide the result body (grid/docs). Toggled from the window header, next to
+    // the sidebar/details toggles.
+    in-out property <bool> results-collapsed: false;
     // Reveal the query editor while browsing a table/collection (default closed).
     property <bool> browse-editor-open: false;
     in-out property <bool> detail-visible: true;
@@ -124,7 +127,8 @@ export component WorkArea inherits Rectangle {
     callback format-sql();
     callback explain-query();
     callback copy-results();
-    callback export-csv();
+    // Export displayed results. Arg = format: 0 CSV, 1 JSON, 2 TSV, 3 SQL, 4 Markdown.
+    callback export-results(int);
 
     // SQL result footer segments: 0 Data · 1 Message · 2 Chart.
     in-out property <int> sql-view-mode: 0;
@@ -580,7 +584,45 @@ export component WorkArea inherits Rectangle {
                     TextButton { text: root.editor-collapsed ? "Editor ▸" : "Editor ▾"; clicked => { root.editor-collapsed = !root.editor-collapsed; } }
                     if !root.browse-mode: TextButton { text: root.filter-open ? "Filter ▲" : "Filter ▼"; clicked => { root.filter-open = !root.filter-open; } }
                     TextButton { text: "Copy"; clicked => { root.copy-results(); } }
-                    TextButton { text: "Export CSV"; clicked => { root.export-csv(); } }
+                    Rectangle {
+                        width: exp-btn.preferred-width;
+                        height: exp-btn.preferred-height;
+                        export-menu := PopupWindow {
+                            x: 0;
+                            y: 30px;
+                            width: 150px;
+                            height: menu-box.preferred-height;
+                            menu-box := Rectangle {
+                                background: Tokens.card;
+                                border-width: 1px;
+                                border-color: Tokens.border-strong;
+                                border-radius: Tokens.radius;
+                                drop-shadow-blur: 12px;
+                                drop-shadow-color: #00000022;
+                                VerticalLayout {
+                                    padding: 4px;
+                                    for opt[i] in ["CSV", "JSON", "TSV", "SQL INSERT", "Markdown"]: Rectangle {
+                                        height: 28px;
+                                        border-radius: 6px;
+                                        background: exp-row-ta.has-hover ? Tokens.accent-tint : transparent;
+                                        exp-row-ta := TouchArea {
+                                            clicked => { export-menu.close(); root.export-results(i); }
+                                        }
+                                        HorizontalLayout {
+                                            padding-left: Tokens.sp2;
+                                            Text {
+                                                text: opt;
+                                                color: Tokens.text;
+                                                font-size: Tokens.font-sm;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        exp-btn := TextButton { text: "Export ▾"; clicked => { export-menu.show(); } }
+                    }
                     TextButton { text: "Chart"; clicked => { root.sql-view-mode = 2; } }
                 }
                 // result tabs — appear once ⌘\ has spawned a second result
@@ -624,7 +666,7 @@ export component WorkArea inherits Rectangle {
         }
 
         // draggable splitter: grow/shrink the editor vs the results (SQL tabs)
-        if (!root.browse-mode || root.browse-editor-open) && !root.fn-mode: Rectangle {
+        if (!root.browse-mode || root.browse-editor-open) && !root.fn-mode && !root.results-collapsed: Rectangle {
             height: 6px;
             background: split-ta.has-hover || split-ta.pressed ? Tokens.accent : Tokens.chrome;
             split-ta := TouchArea {
@@ -641,7 +683,7 @@ export component WorkArea inherits Rectangle {
         // columns) and are toggled by `filter-open`; see the "Filter" button.
 
         // ================= result body =================
-        if !root.fn-mode: body := Rectangle {
+        if !root.fn-mode && !root.results-collapsed: body := Rectangle {
             property <bool> detail-shown: root.detail-visible && root.view-mode == 0
                 && root.result-kind == 0 && root.col-count > 0 && root.selected-row >= 0
                 && (root.selected-row + 1) * root.col-count <= root.cells.length;
@@ -662,7 +704,7 @@ export component WorkArea inherits Rectangle {
                 sort-asc: root.grid-sort-asc;
                 sort-col(i) => { root.sort-col(i); }
                 reorder-col(i, x) => { root.reorder-col(i, x); }
-                filter-open: false;
+                filter-open: root.filter-open;
                 col-filter-values: root.grid-col-filters;
                 set-col-filter(i, t) => { root.set-col-filter(i, t); }
                 selected-row <=> root.selected-row;
