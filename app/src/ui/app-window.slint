@@ -832,7 +832,10 @@ in-out property <string> rename-text;
                         root.new-tab();
                     }
                     collapse() => {
-                        root.sidebar-visible = false;
+                        // Collapse to the icon rail (same as dragging to the min),
+                        // not the bare reveal sliver — keeps the two paths
+                        // consistent. Full hide stays on the header toggle.
+                        root.sidebar-rail = true;
                     }
                 }
 
