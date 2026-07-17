@@ -357,6 +357,10 @@ struct BrowseState {
     /// Compass-style Mongo filter document (raw JSON, already validated). Empty
     /// = browse all. Ignored for non-Mongo engines.
     mongo_filter: String,
+    /// Per-column server-side filters as (column-name, raw-expr) for SQL engines.
+    /// Empty expr = no filter on that column. Pushed into the browse query's
+    /// WHERE clause so filtering hits the DB, not just the fetched page.
+    col_filters: Vec<(String, String)>,
 }
 
 /// Default browse page size per engine. Mongo documents are fat, so a Mongo
@@ -762,6 +766,43 @@ fn default_col_width(name: &str, type_name: &str) -> f32 {
     }
 }
 
+/// Build a `WHERE` clause from per-column filters for SQL engines. Each entry is
+/// (column-name, raw-expr); an empty expr is skipped. A leading comparison
+/// operator (`=`, `<>`, `>=`, `<=`, `>`, `<`, `!=`) is honoured, otherwise the
+/// expr is treated as a substring match via `contains_kw` (`LIKE`/`ILIKE`).
+/// `quote` wraps/escapes the identifier for the dialect. Values are always
+/// single-quoted with `'` doubled; the DB coerces to the column type.
+/// ponytail: string literal + implicit cast; typed binds are a follow-up.
+fn sql_where(
+    cols: &[(String, String)],
+    quote: impl Fn(&str) -> String,
+    contains_kw: &str,
+) -> String {
+    let esc = |v: &str| v.replace('\'', "''");
+    let ops = ["<=", ">=", "<>", "!=", "=", ">", "<"];
+    let clauses: Vec<String> = cols
+        .iter()
+        .filter_map(|(name, raw)| {
+            let raw = raw.trim();
+            if raw.is_empty() {
+                return None;
+            }
+            Some(match ops.iter().find(|op| raw.starts_with(**op)) {
+                Some(op) => {
+                    let val = raw[op.len()..].trim();
+                    format!("{} {} '{}'", quote(name), op, esc(val))
+                }
+                None => format!("{} {} '%{}%'", quote(name), contains_kw, esc(raw)),
+            })
+        })
+        .collect();
+    if clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", clauses.join(" AND "))
+    }
+}
+
 fn browse_text(
     engine: rdb_connstore::Engine,
     table: &rdb_core::write::TableRef,
@@ -769,27 +810,40 @@ fn browse_text(
     limit: u64,
     // Mongo-only filter document (raw JSON, empty = all). Unused by SQL engines.
     filter: &str,
+    // Per-column (name, expr) filters → WHERE clause. Unused by Mongo/Redis.
+    col_filters: &[(String, String)],
 ) -> String {
     let offset = page * limit;
     match engine {
         rdb_connstore::Engine::Postgres => {
             let schema = table.schema.as_deref().unwrap_or("public");
             let q = |s: &str| s.replace('"', "\"\"");
+            let where_sql = sql_where(col_filters, |c| format!("\"{}\"", q(c)), "ILIKE");
             format!(
-                "SELECT * FROM \"{}\".\"{}\" LIMIT {limit} OFFSET {offset}",
+                "SELECT * FROM \"{}\".\"{}\"{where_sql} LIMIT {limit} OFFSET {offset}",
                 q(schema),
                 q(&table.name)
             )
         }
         rdb_connstore::Engine::MySql => {
+            let where_sql = sql_where(
+                col_filters,
+                |c| format!("`{}`", c.replace('`', "``")),
+                "LIKE",
+            );
             format!(
-                "SELECT * FROM `{}` LIMIT {limit} OFFSET {offset}",
+                "SELECT * FROM `{}`{where_sql} LIMIT {limit} OFFSET {offset}",
                 table.name.replace('`', "``")
             )
         }
         rdb_connstore::Engine::Sqlite => {
+            let where_sql = sql_where(
+                col_filters,
+                |c| format!("\"{}\"", c.replace('"', "\"\"")),
+                "LIKE",
+            );
             format!(
-                "SELECT * FROM \"{}\" LIMIT {limit} OFFSET {offset}",
+                "SELECT * FROM \"{}\"{where_sql} LIMIT {limit} OFFSET {offset}",
                 table.name.replace('"', "\"\"")
             )
         }
@@ -3473,6 +3527,12 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // Deferred handle to `run_browse` (defined later): per-column filters in
+    // browse mode re-query the DB, but this handler is wired before run_browse
+    // exists. Filled in once run_browse is built, below.
+    #[allow(clippy::type_complexity)]
+    let browse_trigger: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+
     // ----- apply client-side row filter to the last result (Feature C) -----
     {
         let weak = window.as_weak();
@@ -3531,6 +3591,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let sort_state = sort_state.clone();
         let col_order = col_order.clone();
         let col_filters = col_filters.clone();
+        let browse = browse.clone();
+        let browse_trigger = browse_trigger.clone();
         window.on_set_col_filter(move |display_c, text| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -3550,6 +3612,37 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(&orig) = visible.get(display_c.max(0) as usize) else {
                 return;
             };
+            // Browse mode (a table is open): push the filter into the query's
+            // WHERE clause and re-fetch from the DB, so filtering isn't limited
+            // to the current page. SQL result mode stays client-side (below).
+            if browse.lock().unwrap().table.is_some() {
+                let name = {
+                    let guard = last_view.lock().unwrap();
+                    match guard.as_ref() {
+                        Some(model::ResultView::Table(g)) => {
+                            g.columns.get(orig).map(|c| c.name.clone())
+                        }
+                        Some(model::ResultView::Documents(d)) => {
+                            d.grid.columns.get(orig).map(|c| c.name.clone())
+                        }
+                        _ => None,
+                    }
+                };
+                if let Some(name) = name {
+                    {
+                        let mut b = browse.lock().unwrap();
+                        b.col_filters.retain(|(n, _)| n != &name);
+                        if !text.trim().is_empty() {
+                            b.col_filters.push((name, text.to_string()));
+                        }
+                        b.page = 0; // filter changes the row set → back to page 1
+                    }
+                    if let Some(run) = browse_trigger.borrow().clone() {
+                        run();
+                    }
+                }
+                return;
+            }
             let cfilters = {
                 let mut cf = col_filters.lock().unwrap();
                 if orig < cf.len() {
@@ -4979,11 +5072,20 @@ fn main() -> Result<(), slint::PlatformError> {
             } else {
                 st.limit
             };
-            let text = browse_text(engine, &table, st.page, limit, &st.mongo_filter);
+            let text = browse_text(
+                engine,
+                &table,
+                st.page,
+                limit,
+                &st.mongo_filter,
+                &st.col_filters,
+            );
             load_editor_text(&text);
             run_sql(text);
         })
     };
+    // Wire the deferred handle so per-column browse filters can re-query.
+    *browse_trigger.borrow_mut() = Some(run_browse.clone());
 
     {
         let weak = window.as_weak();
@@ -5056,6 +5158,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 st.total = None;
                 st.pk_cols.clear();
                 st.mongo_filter.clear();
+                st.col_filters.clear();
             }
             {
                 let tab = WorkspaceTab {
@@ -7133,15 +7236,15 @@ mod tests {
             name: "users".into(),
         };
         assert_eq!(
-            browse_text(rdb_connstore::Engine::Postgres, &t, 1, 300, ""),
+            browse_text(rdb_connstore::Engine::Postgres, &t, 1, 300, "", &[]),
             "SELECT * FROM \"public\".\"users\" LIMIT 300 OFFSET 300"
         );
         assert_eq!(
-            browse_text(rdb_connstore::Engine::MySql, &t, 0, 50, ""),
+            browse_text(rdb_connstore::Engine::MySql, &t, 0, 50, "", &[]),
             "SELECT * FROM `users` LIMIT 50 OFFSET 0"
         );
         assert_eq!(
-            browse_text(rdb_connstore::Engine::Redis, &t, 2, 100, ""),
+            browse_text(rdb_connstore::Engine::Redis, &t, 2, 100, "", &[]),
             "BROWSE users 200 100"
         );
         let m = rdb_core::write::TableRef {
@@ -7150,13 +7253,43 @@ mod tests {
             name: "orders".into(),
         };
         assert_eq!(
-            browse_text(rdb_connstore::Engine::Mongo, &m, 1, 50, ""),
+            browse_text(rdb_connstore::Engine::Mongo, &m, 1, 50, "", &[]),
             "{\"collection\":\"orders\",\"database\":\"shop\",\"op\":\"find\",\"body\":{},\"limit\":50,\"skip\":50}"
         );
         // A filter document lands in the find body.
         assert_eq!(
-            browse_text(rdb_connstore::Engine::Mongo, &m, 0, 20, r#"{"status":"A"}"#),
+            browse_text(rdb_connstore::Engine::Mongo, &m, 0, 20, r#"{"status":"A"}"#, &[]),
             "{\"collection\":\"orders\",\"database\":\"shop\",\"op\":\"find\",\"body\":{\"status\":\"A\"},\"limit\":20,\"skip\":0}"
+        );
+    }
+
+    #[test]
+    fn browse_text_column_filters_build_where() {
+        let t = rdb_core::write::TableRef {
+            database: None,
+            schema: Some("public".into()),
+            name: "users".into(),
+        };
+        // Bare text → contains match; Postgres uses ILIKE, other SQL LIKE.
+        // A leading operator is honoured verbatim; empty exprs are skipped.
+        let filters = [
+            ("name".to_string(), "ali".to_string()),
+            ("age".to_string(), ">= 18".to_string()),
+            ("city".to_string(), "".to_string()),
+        ];
+        assert_eq!(
+            browse_text(rdb_connstore::Engine::Postgres, &t, 0, 50, "", &filters),
+            "SELECT * FROM \"public\".\"users\" WHERE \"name\" ILIKE '%ali%' AND \"age\" >= '18' LIMIT 50 OFFSET 0"
+        );
+        assert_eq!(
+            browse_text(rdb_connstore::Engine::MySql, &t, 0, 50, "", &filters),
+            "SELECT * FROM `users` WHERE `name` LIKE '%ali%' AND `age` >= '18' LIMIT 50 OFFSET 0"
+        );
+        // Single quotes in the value are doubled (no injection).
+        let q = [("name".to_string(), "=o'brien".to_string())];
+        assert_eq!(
+            browse_text(rdb_connstore::Engine::Sqlite, &t, 0, 10, "", &q),
+            "SELECT * FROM \"users\" WHERE \"name\" = 'o''brien' LIMIT 10 OFFSET 0"
         );
     }
 
