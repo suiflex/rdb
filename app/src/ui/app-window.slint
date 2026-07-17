@@ -905,13 +905,15 @@ in-out property <string> rename-text;
                     split-h-area := TouchArea {
                         mouse-cursor: col-resize;
                         moved => {
-                            // Below the min width, snap to the icon rail instead
-                            // of crushing the header; drag back out to restore.
-                            if root.sidebar-w + (self.mouse-x - self.pressed-x) < 150px {
-                                root.sidebar-rail = true;
-                            } else {
-                                root.sidebar-rail = false;
-                                root.sidebar-w = clamp(root.sidebar-w + (self.mouse-x - self.pressed-x), 184px, 360px);
+                            // Rail is latched: once snapped, freeze the drag so the
+                            // handle jumping left (218px → 48px rail) can't oscillate
+                            // the state. Expand via the rail's tab/expand buttons.
+                            if !root.sidebar-rail {
+                                if root.sidebar-w + (self.mouse-x - self.pressed-x) < 150px {
+                                    root.sidebar-rail = true;
+                                } else {
+                                    root.sidebar-w = clamp(root.sidebar-w + (self.mouse-x - self.pressed-x), 184px, 360px);
+                                }
                             }
                         }
                     }
