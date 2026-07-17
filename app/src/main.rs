@@ -2755,24 +2755,31 @@ fn main() -> Result<(), slint::PlatformError> {
             // scratch tabs are schema-agnostic — keep them so a query in progress
             // survives the switch. Snapshot the live editor into the active tab
             // first (the user may not have run/switched since typing).
+            let prev_active = active_tab_id.lock().unwrap().clone();
             let keep_active: Option<String> = {
                 let mut tabs = workspace_tabs.lock().unwrap();
-                if let Some(id) = active_tab_id.lock().unwrap().clone() {
+                if let Some(id) = prev_active.clone() {
                     if let Some(tab) = tabs.iter_mut().find(|t| t.id == id) {
                         tab.query_text = ed_state.borrow().text();
                     }
                 }
                 tabs.retain(|t| t.kind == "sql");
-                tabs.first().map(|t| t.id.clone())
+                // Prefer keeping the tab the user was on (if it was SQL); else the
+                // first surviving SQL tab.
+                prev_active
+                    .clone()
+                    .filter(|id| tabs.iter().any(|t| &t.id == id))
+                    .or_else(|| tabs.first().map(|t| t.id.clone()))
             };
+            // Standby: the active SQL tab survives, so its result is still valid —
+            // leave the grid up instead of blanking it.
+            let standby = keep_active.is_some() && keep_active == prev_active;
             *active_tab_id.lock().unwrap() = keep_active.clone();
             let limit = browse.lock().unwrap().limit;
             *browse.lock().unwrap() = BrowseState {
                 limit,
                 ..Default::default()
             };
-            results.lock().unwrap().clear();
-            *displayed_grid.lock().unwrap() = None;
             {
                 let tabs = workspace_tabs.lock().unwrap();
                 set_workspace_tabs(&w, &tabs, keep_active.as_deref());
@@ -2783,7 +2790,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     .unwrap_or_default();
                 load_editor_text(&text);
             }
-            clear_grid(&w);
+            if !standby {
+                results.lock().unwrap().clear();
+                *displayed_grid.lock().unwrap() = None;
+                clear_grid(&w);
+            }
             expanded_tables.lock().unwrap().clear();
             *collapsed_categories.borrow_mut() = default_collapsed_cats();
             let engine = *cur_engine.borrow();
