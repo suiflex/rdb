@@ -379,7 +379,7 @@ in-out property <string> rename-text;
     in property <bool> test-busy;
     callback open-add-form();
     callback open-edit-form(int);
-    callback backup-conns();
+    callback export-conns(int);
     callback form-engine-changed(string);
     callback form-import-url();
     callback form-test-conn();
@@ -751,7 +751,7 @@ in-out property <string> rename-text;
             edit-clicked(i) => { root.open-edit-form(i); }
             toggle-group(g) => { root.toggle-group(g); }
             filter(t) => { root.conn-filter(t); }
-            backup-clicked() => { root.backup-conns(); }
+            export-conns(fmt) => { root.export-conns(fmt); }
         }
 
         // ===== workspace (shown once connected) =====
