@@ -49,6 +49,18 @@ export component TabularGrid inherits Rectangle {
         list.viewport-y = min(0px, list.visible-height - list.viewport-height);
     }
 
+    // Drive the ListView from the wheel directly. The list is nested inside the
+    // horizontal ScrollView below, and the outer Flickable intermittently
+    // swallows the vertical wheel delta — so rows only scroll "sometimes".
+    // Forwarding the delta here (clamped to the same bounds as scroll-grid-tick)
+    // makes vertical scrolling deterministic regardless of which Flickable the
+    // event lands on.
+    function scroll-rows(dy: length) {
+        list.viewport-y = max(
+            min(0px, list.visible-height - list.viewport-height),
+            min(0px, list.viewport-y + dy));
+    }
+
     // A horizontal ScrollView owns the whole grid so the header and rows pan
     // together; the header sits above the ListView so it stays put while rows
     // scroll vertically. The ListView virtualizes — only the on-screen rows are
@@ -193,7 +205,15 @@ export component TabularGrid inherits Rectangle {
                 : r == root.selected-row ? Tokens.accent-tint.with-alpha(0.55)
                 : row-ta.has-hover ? Tokens.chrome.with-alpha(0.6)
                 : transparent;
-            row-ta := TouchArea {}
+            row-ta := TouchArea {
+                scroll-event(e) => {
+                    if (abs(e.delta-y) >= abs(e.delta-x)) {
+                        root.scroll-rows(e.delta-y);
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
             HorizontalLayout {
                 // row-number gutter
                 Rectangle {
@@ -224,6 +244,13 @@ export component TabularGrid inherits Rectangle {
                     cell-ta := TouchArea {
                         clicked => { root.select-cell(r, c); }
                         double-clicked => { root.edit-cell(r, c); }
+                        scroll-event(e) => {
+                            if (abs(e.delta-y) >= abs(e.delta-x)) {
+                                root.scroll-rows(e.delta-y);
+                                return accept;
+                            }
+                            return reject;
+                        }
                     }
                     if !is-bar: Text {
                         vertical-alignment: center;
