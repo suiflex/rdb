@@ -1,0 +1,170 @@
+// Workspace navigation cluster: the Sidebar (or its collapsed icon rail / reveal
+// strip) plus the draggable width splitter, bundled so the whole thing can sit
+// on either edge of the work area. `mirror` puts the splitter on the left and
+// flips the drag direction, for when the sidebar lives on the right.
+//
+// State (mode/visible/rail/width) is owned by MainWindow and read one-way here;
+// mutations go back up through callbacks. Two NavCluster copies exist (one per
+// edge) and only one renders — a shared owner keeps them in lock-step, which a
+// duplicated two-way binding would not.
+import { Tokens } from "tokens.slint";
+import { TreeNode } from "structs.slint";
+import { IconButton } from "components.slint";
+import { Sidebar } from "sidebar.slint";
+
+export component NavCluster inherits HorizontalLayout {
+    // Sidebar on the right: splitter on the inner (left) edge, drag sign flipped.
+    in property <bool> mirror: false;
+
+    in property <[TreeNode]> tree;
+    in property <string> conn-name;
+    in property <string> active-table;
+    in property <int> active-count: -1;
+    in property <[TreeNode]> query-tree;
+    in property <[string]> schema-list;
+    in property <string> schema-name;
+    in property <int> sidebar-mode: 0;
+    in property <bool> sidebar-visible: true;
+    in property <bool> sidebar-rail: false;
+    in property <length> sidebar-w;
+    in property <int> focus-tick;
+
+    callback set-rail(bool);
+    callback set-visible(bool);
+    callback set-w(length);
+
+    callback disconnect();
+    callback open-function(string);
+    callback open-query(string, int);
+    callback mode-changed(int);
+    callback open-table(string, string);
+    callback pin-table(string, string);
+    callback toggle-fields(string, string);
+    callback toggle-node(string);
+    callback select-schema(string);
+    callback filter-tree(string);
+    callback add-item();
+
+    spacing: 0px;
+
+    // draggable vertical splitter (sidebar width) — leading edge when mirrored
+    if root.sidebar-visible && root.mirror: splitter-l := Rectangle {
+        width: 1px;
+        background: split-l-area.has-hover || split-l-area.pressed ? Tokens.accent : Tokens.border;
+        split-l-area := TouchArea {
+            mouse-cursor: col-resize;
+            moved => {
+                if !root.sidebar-rail {
+                    if root.sidebar-w - (self.mouse-x - self.pressed-x) < 150px {
+                        root.set-rail(true);
+                    } else {
+                        root.set-w(clamp(root.sidebar-w - (self.mouse-x - self.pressed-x), 184px, 360px));
+                    }
+                }
+            }
+        }
+    }
+
+    if root.sidebar-visible && !root.sidebar-rail: Sidebar {
+        focus-tick: root.focus-tick;
+        horizontal-stretch: 0;
+        min-width: root.sidebar-w;
+        max-width: root.sidebar-w;
+        tree: root.tree;
+        conn-name: root.conn-name;
+        active-table: root.active-table;
+        active-count: root.active-count;
+        query-tree: root.query-tree;
+        mode: root.sidebar-mode;
+        schema-list: root.schema-list;
+        schema-name: root.schema-name;
+        disconnect() => { root.disconnect(); }
+        open-function(f) => { root.open-function(f); }
+        open-query(q, i) => { root.open-query(q, i); }
+        mode-changed(m) => { root.mode-changed(m); }
+        open-table(db, t) => { root.open-table(db, t); }
+        pin-table(db, t) => { root.pin-table(db, t); }
+        toggle-fields(db, t) => { root.toggle-fields(db, t); }
+        toggle-node(t) => { root.toggle-node(t); }
+        select-schema(s) => { root.select-schema(s); }
+        filter-tree(t) => { root.filter-tree(t); }
+        add-item() => { root.add-item(); }
+        collapse() => { root.set-rail(true); }
+    }
+
+    // icon rail: compact tab icons when collapsed below the min width.
+    if root.sidebar-visible && root.sidebar-rail: Rectangle {
+        width: 48px;
+        background: Tokens.sidebar;
+        VerticalLayout {
+            alignment: start;
+            padding-top: Tokens.sp2;
+            padding-left: Tokens.sp2;
+            padding-right: Tokens.sp2;
+            spacing: Tokens.sp1;
+            IconButton {
+                icon: "layers";
+                tooltip: "Items";
+                active: root.sidebar-mode == 0;
+                clicked => {
+                    root.mode-changed(0);
+                    root.set-rail(false);
+                }
+            }
+            IconButton {
+                icon: "terminal";
+                tooltip: "Queries";
+                active: root.sidebar-mode == 1;
+                clicked => {
+                    root.mode-changed(1);
+                    root.set-rail(false);
+                }
+            }
+            IconButton {
+                icon: "clock";
+                tooltip: "History";
+                active: root.sidebar-mode == 2;
+                clicked => {
+                    root.mode-changed(2);
+                    root.set-rail(false);
+                }
+            }
+            IconButton {
+                icon: "panel-expand";
+                tooltip: "Expand sidebar";
+                clicked => { root.set-rail(false); }
+            }
+        }
+    }
+
+    // reveal strip when the sidebar is hidden
+    if !root.sidebar-visible: VerticalLayout {
+        alignment: start;
+        padding-top: Tokens.sp2;
+        padding-left: Tokens.sp1;
+        padding-right: Tokens.sp1;
+        IconButton {
+            icon: "panel-expand";
+            tooltip: "Show sidebar";
+            clicked => { root.set-visible(true); }
+        }
+    }
+
+    // draggable vertical splitter — trailing edge when the sidebar is on the left
+    if root.sidebar-visible && !root.mirror: splitter-r := Rectangle {
+        width: 1px;
+        background: split-r-area.has-hover || split-r-area.pressed ? Tokens.accent : Tokens.border;
+        split-r-area := TouchArea {
+            mouse-cursor: col-resize;
+            moved => {
+                if !root.sidebar-rail {
+                    if root.sidebar-w + (self.mouse-x - self.pressed-x) < 150px {
+                        root.set-rail(true);
+                    } else {
+                        root.set-w(clamp(root.sidebar-w + (self.mouse-x - self.pressed-x), 184px, 360px));
+                    }
+                }
+            }
+        }
+    }
+}
