@@ -5577,7 +5577,7 @@ dependencies = [
 
 [[package]]
 name = "rdb"
-version = "0.16.0"
+version = "0.18.0"
 dependencies = [
  "async-trait",
  "copypasta",
@@ -6664,6 +6664,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "pin-weak",
+ "raw-window-handle",
  "slint-macros",
  "unicode-segmentation",
  "vtable",

@@ -4930,9 +4930,14 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             // Native save dialog via rfd's async API + Slint's local executor:
             // the sync dialog blocks the winit event loop and never surfaces.
+            // Parent it to our window so macOS presents the panel as a sheet
+            // (an unparented NSSavePanel silently no-ops for a non-foreground
+            // process, so nothing appears and nothing is written).
+            let parent = w.window().window_handle();
             let weak = w.as_weak();
             let _ = slint::spawn_local(async move {
                 let Some(file) = rfd::AsyncFileDialog::new()
+                    .set_parent(&parent)
                     .set_file_name(format!("rdb-export.{ext}"))
                     .add_filter(filter, &[ext])
                     .save_file()

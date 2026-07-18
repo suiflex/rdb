@@ -13,7 +13,7 @@ path = "src/main.rs"
 mock = []
 
 [dependencies]
-slint = { version = "1.8", default-features = false, features = ["compat-1-2", "std", "backend-winit", "renderer-femtovg", "renderer-software"] }
+slint = { version = "1.8", default-features = false, features = ["compat-1-2", "std", "backend-winit", "renderer-femtovg", "renderer-software", "raw-window-handle-06"] }
 rdb-core = { path = "../crates/core" }
 rdb-connstore = { path = "../crates/connstore" }
 rdb-driver-postgres = { path = "../crates/driver-postgres" }
