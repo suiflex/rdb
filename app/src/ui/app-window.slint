@@ -657,7 +657,10 @@ in-out property <string> rename-text;
                     if root.connected: VerticalLayout {
                         alignment: center;
                         IconButton {
-                            icon: "columns";
+                            // Point the divider at the sidebar's side, matching the
+                            // details toggle (columns == left divider; panel-right ==
+                            // right divider).
+                            icon: root.sidebar-right ? "panel-right" : "columns";
                             tooltip: "Toggle sidebar";
                             // Collapse to the icon rail rather than fully hiding it.
                             active: !root.sidebar-rail;
