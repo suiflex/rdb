@@ -337,6 +337,9 @@ in-out property <string> rename-text;
     // ----- tabs + palette -----
     in property <[TabItem]> tabs;
     in-out property <int> active-tab: -1;
+    // Dual-pane split for the active SQL tab (right pane + focused pane index).
+    in-out property <bool> split: false;
+    in-out property <int> active-pane: 0;
     in property <bool> palette-open;
     in property <[PaletteItem]> palette-items;
     callback new-tab();
@@ -968,6 +971,8 @@ in-out property <string> rename-text;
 
                     if root.tabs.length > 0: WorkArea {
                         vertical-stretch: 1;
+                        split: root.split;
+                        active-pane: root.active-pane;
                         detail-visible <=> root.detail-visible;
                         detail-left: root.sidebar-right;
                         results-collapsed <=> root.results-collapsed;

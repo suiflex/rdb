@@ -113,6 +113,10 @@ export component WorkArea inherits Rectangle {
     in-out property <string> limit-text;
     // Draggable height of the SQL editor pane (session-local).
     in-out property <length> editor-h: 340px;
+    // Dual-pane split (SQL tabs only): show a second editor+result pane on the
+    // right. `active-pane` is the focused pane (0 left / 1 right).
+    in property <bool> split: false;
+    in property <int> active-pane: 0;
     // Browse chrome shows whenever a table is open in this tab.
     property <bool> browse-mode: root.active-table != "";
     // Footer view segments: 0 Data · 1 Structure · 2 Indexes
@@ -382,11 +386,15 @@ export component WorkArea inherits Rectangle {
             }
         }
 
-        // ================= query pane (editor + results) =================
-        // Browse and SQL tabs render this pane; function tabs use the view above.
-        // A SQL tab can later show two of these side by side (dual-pane split).
-        if !root.fn-mode: QueryPane {
+        // ================= query pane(s) (editor + results) =================
+        // Browse and SQL tabs render the left pane; function tabs use the view
+        // above. A SQL tab can split into two panes side by side; the right pane
+        // shows only when `split` is set (wired in a later step).
+        if !root.fn-mode: HorizontalLayout {
             vertical-stretch: 1;
+            spacing: 0;
+            QueryPane {
+            horizontal-stretch: 1;
             browse-mode: root.browse-mode;
             browse-editor-open: root.browse-editor-open;
             fn-mode: root.fn-mode;
@@ -471,6 +479,21 @@ export component WorkArea inherits Rectangle {
             structure-columns: root.structure-columns;
             index-rows: root.index-rows;
             chart-bars: root.chart-bars;
+            }
+
+            // vertical divider between the two panes (SQL split)
+            if root.split: Rectangle {
+                width: 6px;
+                background: Tokens.chrome;
+            }
+
+            // right pane — empty until its per-pane state is wired.
+            if root.split: QueryPane {
+                horizontal-stretch: 1;
+                fn-mode: root.fn-mode;
+                sql-capable: root.sql-capable;
+                read-only: root.read-only;
+            }
         }
 
         // ================= pending-edits strip =================
