@@ -469,6 +469,55 @@ struct StoredResult {
     latency: String,
 }
 
+/// The live editor + result state a single query pane owns independently. A SQL
+/// tab can show up to two of these side by side (dual-pane split), so everything
+/// that must not be shared between panes — the editor buffer, folds, completion,
+/// find hits, result set, grid view/sort/filter, and streaming — lives here.
+struct PaneRuntime {
+    ed_state: Rc<RefCell<editor::EditorState>>,
+    folded_heads: Rc<RefCell<HashSet<usize>>>,
+    completion_ctx: Rc<RefCell<(usize, Vec<String>)>>,
+    find_hits: Rc<RefCell<Vec<(usize, usize, usize)>>>,
+    edit_buf: Arc<std::sync::Mutex<model::EditBuffer>>,
+    results: Arc<std::sync::Mutex<Vec<StoredResult>>>,
+    active_result: Arc<std::sync::Mutex<usize>>,
+    result_new_tab: Arc<std::sync::atomic::AtomicBool>,
+    displayed_grid: Arc<std::sync::Mutex<Option<model::GridModel>>>,
+    browse: Arc<std::sync::Mutex<BrowseState>>,
+    hidden_cols: Arc<std::sync::Mutex<HashSet<usize>>>,
+    sort_state: Arc<std::sync::Mutex<(i32, bool)>>,
+    col_order: Arc<std::sync::Mutex<Vec<usize>>>,
+    col_filters: Arc<std::sync::Mutex<Vec<String>>>,
+    stream_cancel: Rc<RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>>,
+    stream_timer: Rc<RefCell<Option<slint::Timer>>>,
+}
+
+impl PaneRuntime {
+    fn new() -> Self {
+        Self {
+            ed_state: Rc::new(RefCell::new(editor::EditorState::from_text(""))),
+            folded_heads: Rc::new(RefCell::new(HashSet::new())),
+            completion_ctx: Rc::new(RefCell::new((0, Vec::new()))),
+            find_hits: Rc::new(RefCell::new(Vec::new())),
+            edit_buf: Arc::new(std::sync::Mutex::new(model::EditBuffer::default())),
+            results: Arc::new(std::sync::Mutex::new(Vec::new())),
+            active_result: Arc::new(std::sync::Mutex::new(0)),
+            result_new_tab: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            displayed_grid: Arc::new(std::sync::Mutex::new(None)),
+            browse: Arc::new(std::sync::Mutex::new(BrowseState {
+                limit: 300,
+                ..Default::default()
+            })),
+            hidden_cols: Arc::new(std::sync::Mutex::new(HashSet::new())),
+            sort_state: Arc::new(std::sync::Mutex::new((-1, true))),
+            col_order: Arc::new(std::sync::Mutex::new(Vec::new())),
+            col_filters: Arc::new(std::sync::Mutex::new(Vec::new())),
+            stream_cancel: Rc::new(RefCell::new(None)),
+            stream_timer: Rc::new(RefCell::new(None)),
+        }
+    }
+}
+
 /// Rust-owned document state. Slint only renders this list; an empty list and
 /// `active_tab_id == None` are a real empty workspace, not a synthetic query.
 #[derive(Clone)]
@@ -1818,44 +1867,37 @@ fn main() -> Result<(), slint::PlatformError> {
     // Sidebar tree filter text. Arc<Mutex> so lazy-load tasks can read it.
     let sidebar_filter: Arc<std::sync::Mutex<String>> =
         Arc::new(std::sync::Mutex::new(String::new()));
+    // Up to two independent editor+result panes per SQL tab (dual-pane split).
+    // Only pane 0 is wired for now; the alias bindings below bind the existing
+    // single-pane code to pane 0 so behavior is unchanged.
+    let panes: Rc<[PaneRuntime; 2]> = Rc::new([PaneRuntime::new(), PaneRuntime::new()]);
     // Browse-mode pagination state (open container + page window + pk).
-    let browse: Arc<std::sync::Mutex<BrowseState>> = Arc::new(std::sync::Mutex::new(BrowseState {
-        limit: 300,
-        ..Default::default()
-    }));
+    let browse = panes[0].browse.clone();
     // Streaming ("No limit") state, UI-thread only. `stream_cancel` is the flag
     // the Cancel button (and a new run) flips to stop the producer; `stream_timer`
     // is the UI-thread drain timer that appends batches to the grid.
-    let stream_cancel: Rc<std::cell::RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>> =
-        Rc::new(std::cell::RefCell::new(None));
-    let stream_timer: Rc<std::cell::RefCell<Option<slint::Timer>>> =
-        Rc::new(std::cell::RefCell::new(None));
+    let stream_cancel = panes[0].stream_cancel.clone();
+    let stream_timer = panes[0].stream_timer.clone();
     // Buffered, uncommitted grid edits (⌘S commits, Esc/Discard drops).
-    let edit_buf: Arc<std::sync::Mutex<model::EditBuffer>> =
-        Arc::new(std::sync::Mutex::new(model::EditBuffer::default()));
+    let edit_buf = panes[0].edit_buf.clone();
     // The grid currently on screen (post client-side filter): edit-buffer row
     // indices refer to THIS grid, and its cells carry the pre-edit pk values.
-    let displayed_grid: Arc<std::sync::Mutex<Option<model::GridModel>>> =
-        Arc::new(std::sync::Mutex::new(None));
+    let displayed_grid = panes[0].displayed_grid.clone();
     // Column indices (into the last result) hidden via the Columns popup.
-    let hidden_cols: Arc<std::sync::Mutex<HashSet<usize>>> =
-        Arc::new(std::sync::Mutex::new(HashSet::new()));
+    let hidden_cols = panes[0].hidden_cols.clone();
     // Client-side sort: ORIGINAL column index (-1 = none) + ascending flag.
-    let sort_state: Arc<std::sync::Mutex<(i32, bool)>> =
-        Arc::new(std::sync::Mutex::new((-1, true)));
+    let sort_state = panes[0].sort_state.clone();
     // Display order of columns as ORIGINAL indices (drag-to-reorder). Reset to
     // 0..ncols on every fresh result.
-    let col_order: Arc<std::sync::Mutex<Vec<usize>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let col_order = panes[0].col_order.clone();
     // Per-column filter boxes, raw text indexed by ORIGINAL column. Empty =
     // no filter. Reset to blanks on every fresh result.
-    let col_filters: Arc<std::sync::Mutex<Vec<String>>> =
-        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let col_filters = panes[0].col_filters.clone();
     // Result tabs for the SQL editor: cached results + the active index. ⌘\
     // sets `result_new_tab` so the next run appends instead of replacing.
-    let results: Arc<std::sync::Mutex<Vec<StoredResult>>> =
-        Arc::new(std::sync::Mutex::new(Vec::new()));
-    let active_result: Arc<std::sync::Mutex<usize>> = Arc::new(std::sync::Mutex::new(0));
-    let result_new_tab = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let results = panes[0].results.clone();
+    let active_result = panes[0].active_result.clone();
+    let result_new_tab = panes[0].result_new_tab.clone();
     // One Rust source of truth for document identity and state. The UI index is
     // derived from `active_tab_id`; it is -1 while this Option is None.
     let workspace_tabs: Arc<std::sync::Mutex<Vec<WorkspaceTab>>> =
@@ -1909,12 +1951,11 @@ fn main() -> Result<(), slint::PlatformError> {
     window.set_schema_tree(ModelRc::from(Rc::new(VecModel::<TreeNode>::default())));
 
     // ----- SQL editor: Rust-owned buffer + lexer feeding the span model -----
-    let ed_state: Rc<RefCell<editor::EditorState>> =
-        Rc::new(RefCell::new(editor::EditorState::from_text("")));
+    let ed_state = panes[0].ed_state.clone();
     // Statement head lines the user has folded closed. Kept by line index and
     // re-validated against the current statement spans on every render, so an
     // edit that shifts lines can only unfold — never hide the wrong lines.
-    let folded_heads: Rc<RefCell<HashSet<usize>>> = Rc::new(RefCell::new(HashSet::new()));
+    let folded_heads = panes[0].folded_heads.clone();
     let sync_editor = {
         let weak = window.as_weak();
         let ed_state = ed_state.clone();
@@ -2020,7 +2061,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // ----- SQL autocomplete: recompute popup, accept a choice -----
     // completion_ctx = (word char length to replace, candidate labels).
-    let completion_ctx: Rc<RefCell<(usize, Vec<String>)>> = Rc::new(RefCell::new((0, Vec::new())));
+    let completion_ctx = panes[0].completion_ctx.clone();
     let refresh_completion: Rc<dyn Fn()> = {
         let weak = window.as_weak();
         let ed_state = ed_state.clone();
@@ -2330,7 +2371,7 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     // ----- find-in-editor (⌘F) -----
-    let find_hits: Rc<RefCell<Vec<(usize, usize, usize)>>> = Rc::new(RefCell::new(Vec::new()));
+    let find_hits = panes[0].find_hits.clone();
     // Select the find hit at `idx` and refresh the "n / total" readout.
     #[allow(clippy::type_complexity)]
     let show_find: Rc<dyn Fn(&MainWindow, usize)> = {
