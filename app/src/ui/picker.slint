@@ -36,6 +36,8 @@ export component ConnPicker inherits Rectangle {
     callback toggle-group(string);
     // Toggle the starred flag on a connection (arg is the store index).
     callback toggle-favorite(int);
+    // Drag-reorder: (store index of dragged row, signed number of rows moved).
+    callback reorder-conn(int, int);
     callback filter(string);
 
     background: Tokens.canvas;
@@ -161,6 +163,35 @@ export component ConnPicker inherits Rectangle {
                                     padding-left: Tokens.sp3;
                                     padding-right: Tokens.sp3;
                                     spacing: Tokens.sp3;
+                                    // Drag handle: reorders within the group.
+                                    // Always rendered (so the pointer grab isn't
+                                    // dropped mid-drag when the row loses hover);
+                                    // faint until hovered. Emits a row-step delta
+                                    // on release for Rust to resolve.
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 12px;
+                                            opacity: row-ta.has-hover || grip-ta.pressed ? 1.0 : 0.0;
+                                            Text {
+                                                text: "⋮⋮";
+                                                color: selected ? white.with-alpha(0.7) : Tokens.text-faint;
+                                                font-size: 13px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            grip-ta := TouchArea {
+                                                mouse-cursor: grab;
+                                                pointer-event(ev) => {
+                                                    if ev.kind == PointerEventKind.up {
+                                                        root.reorder-conn(
+                                                            item.index,
+                                                            round((self.mouse-y - self.pressed-y) / 40px));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                     VerticalLayout {
                                         alignment: center;
                                         // ring keeps the same-color badge visible
