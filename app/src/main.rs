@@ -87,12 +87,20 @@ fn build_conn_items(
                 subline: SharedString::default(),
                 local: false,
                 count: buckets[g].len() as i32,
+                favorite: false,
             });
         }
         if !expanded {
             continue;
         }
-        for &i in &buckets[g] {
+        // Favorites float to the top of their group, then explicit sort order.
+        // Stable sort keeps store insertion order for equal keys (order == 0).
+        let mut idxs = buckets[g].clone();
+        idxs.sort_by_key(|&i| {
+            let s = &store.list()[i];
+            (!s.favorite, s.order)
+        });
+        for &i in &idxs {
             let s = &store.list()[i];
             let subline = match &s.database {
                 Some(db) => format!("{} : {}", s.host, db),
@@ -110,6 +118,7 @@ fn build_conn_items(
                 subline: subline.into(),
                 local: s.local,
                 count: 0,
+                favorite: s.favorite,
             });
         }
     }
