@@ -87,12 +87,20 @@ fn build_conn_items(
                 subline: SharedString::default(),
                 local: false,
                 count: buckets[g].len() as i32,
+                favorite: false,
             });
         }
         if !expanded {
             continue;
         }
-        for &i in &buckets[g] {
+        // Favorites float to the top of their group, then explicit sort order.
+        // Stable sort keeps store insertion order for equal keys (order == 0).
+        let mut idxs = buckets[g].clone();
+        idxs.sort_by_key(|&i| {
+            let s = &store.list()[i];
+            (!s.favorite, s.order)
+        });
+        for &i in &idxs {
             let s = &store.list()[i];
             let subline = match &s.database {
                 Some(db) => format!("{} : {}", s.host, db),
@@ -110,6 +118,7 @@ fn build_conn_items(
                 subline: subline.into(),
                 local: s.local,
                 count: 0,
+                favorite: s.favorite,
             });
         }
     }
@@ -3493,6 +3502,85 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             *conn_filter.borrow_mut() = t.to_string();
+            let items =
+                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
+            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+        });
+    }
+
+    // ----- star/unstar a saved connection -----
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let collapsed = collapsed.clone();
+        let conn_filter = conn_filter.clone();
+        window.on_toggle_favorite(move |idx| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let id = {
+                let s = store.borrow();
+                match s.list().get(idx as usize) {
+                    Some(c) => (c.id.clone(), c.favorite),
+                    None => return,
+                }
+            };
+            let (id, was_fav) = id;
+            let _ = store.borrow_mut().set_favorite(&id, !was_fav);
+            let items =
+                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
+            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+        });
+    }
+
+    // ----- drag-reorder a connection within its group -----
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let collapsed = collapsed.clone();
+        let conn_filter = conn_filter.clone();
+        window.on_reorder_conn(move |from_idx, delta| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if delta == 0 {
+                return;
+            }
+            // Resolve the row-step delta against the dragged connection's group,
+            // using the same (favorite desc, order asc) display order as the
+            // builder, then map back to a store index for `reorder`.
+            let (from_id, target_vec_idx) = {
+                let s = store.borrow();
+                let list = s.list();
+                let Some(from) = list.get(from_idx as usize) else {
+                    return;
+                };
+                let group_key = |c: &rdb_connstore::SavedConnection| {
+                    c.group
+                        .as_deref()
+                        .filter(|g| !g.trim().is_empty())
+                        .unwrap_or(UNGROUPED)
+                        .to_string()
+                };
+                let g = group_key(from);
+                let mut members: Vec<usize> = list
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| group_key(c) == g)
+                    .map(|(i, _)| i)
+                    .collect();
+                members.sort_by_key(|&i| (!list[i].favorite, list[i].order));
+                let Some(pos) = members.iter().position(|&i| i == from_idx as usize) else {
+                    return;
+                };
+                let target_pos =
+                    (pos as i64 + delta as i64).clamp(0, members.len() as i64 - 1) as usize;
+                if target_pos == pos {
+                    return;
+                }
+                (from.id.clone(), members[target_pos])
+            };
+            let _ = store.borrow_mut().reorder(&from_id, target_vec_idx);
             let items =
                 build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
             w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));

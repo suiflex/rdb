@@ -34,6 +34,10 @@ export component ConnPicker inherits Rectangle {
     // Export saved connections to ~/Downloads. Arg is the format: 0 = JSON, 1 = CSV.
     callback export-conns(int);
     callback toggle-group(string);
+    // Toggle the starred flag on a connection (arg is the store index).
+    callback toggle-favorite(int);
+    // Drag-reorder: (store index of dragged row, signed number of rows moved).
+    callback reorder-conn(int, int);
     callback filter(string);
 
     background: Tokens.canvas;
@@ -149,6 +153,14 @@ export component ConnPicker inherits Rectangle {
                                     : row-ta.has-hover ? tint.with-alpha(0.14)
                                     : transparent;
                                 animate background { duration: Tokens.fade; }
+                                // "Grabbed" affordance while dragging the handle:
+                                // Slint can't cheaply follow the cursor without a
+                                // feedback loop, so lift + outline signals the drag
+                                // is live; the drop lands on pointer release.
+                                border-width: grip-ta.pressed ? 1px : 0;
+                                border-color: Tokens.accent;
+                                drop-shadow-blur: grip-ta.pressed ? 14px : 0;
+                                drop-shadow-color: #00000055;
 
                                 row-ta := TouchArea {
                                     clicked => { root.select-conn(item.index); }
@@ -159,6 +171,35 @@ export component ConnPicker inherits Rectangle {
                                     padding-left: Tokens.sp3;
                                     padding-right: Tokens.sp3;
                                     spacing: Tokens.sp3;
+                                    // Drag handle: reorders within the group.
+                                    // Always rendered (so the pointer grab isn't
+                                    // dropped mid-drag when the row loses hover);
+                                    // faint until hovered. Emits a row-step delta
+                                    // on release for Rust to resolve.
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 12px;
+                                            opacity: row-ta.has-hover || grip-ta.has-hover || grip-ta.pressed ? 1.0 : 0.0;
+                                            Text {
+                                                text: "⋮⋮";
+                                                color: selected ? white.with-alpha(0.7) : Tokens.text-faint;
+                                                font-size: 13px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            grip-ta := TouchArea {
+                                                mouse-cursor: grab;
+                                                pointer-event(ev) => {
+                                                    if ev.kind == PointerEventKind.up {
+                                                        root.reorder-conn(
+                                                            item.index,
+                                                            round((self.mouse-y - self.pressed-y) / 40px));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                     VerticalLayout {
                                         alignment: center;
                                         // ring keeps the same-color badge visible
@@ -192,6 +233,33 @@ export component ConnPicker inherits Rectangle {
                                     if item.local: VerticalLayout {
                                         alignment: center;
                                         OutlineChip { text: "LOCAL"; }
+                                    }
+                                    // Star toggle: always present (so its own
+                                    // TouchArea keeps receiving clicks); shown when
+                                    // starred or on hover. Gating on `if` here would
+                                    // remove the element the instant the pointer
+                                    // enters it and steals hover from the row.
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 22px;
+                                            height: 22px;
+                                            opacity: item.favorite || row-ta.has-hover || star-ta.has-hover ? 1.0 : 0.0;
+                                            border-radius: Tokens.radius;
+                                            background: star-ta.has-hover ? Tokens.card.with-alpha(0.4) : transparent;
+                                            Text {
+                                                text: item.favorite ? "★" : "☆";
+                                                color: item.favorite
+                                                    ? #f5b301
+                                                    : (selected ? white.with-alpha(0.8) : Tokens.text-faint);
+                                                font-size: 15px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            star-ta := TouchArea {
+                                                clicked => { root.toggle-favorite(item.index); }
+                                            }
+                                        }
                                     }
                                 }
                             }

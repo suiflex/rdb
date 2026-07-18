@@ -160,6 +160,8 @@ in-out property <bool> rename-modal-open: false;
 in-out property <int> rename-target: -1;
 in-out property <string> rename-text;
     callback toggle-group(string);
+    callback toggle-favorite(int);          // star/unstar a saved connection
+    callback reorder-conn(int, int);        // (dragged store index, row-step delta)
     callback open-table(string, string);   // (database, container)
     callback pin-table(string, string);    // double-click pins the object tab
     callback pin-tab(int);                 // double-click pins a preview tab
@@ -784,6 +786,8 @@ in-out property <string> rename-text;
             add-clicked() => { root.open-add-form(); }
             edit-clicked(i) => { root.open-edit-form(i); }
             toggle-group(g) => { root.toggle-group(g); }
+            toggle-favorite(i) => { root.toggle-favorite(i); }
+            reorder-conn(i, d) => { root.reorder-conn(i, d); }
             filter(t) => { root.conn-filter(t); }
             export-conns(fmt) => { root.export-conns(fmt); }
         }

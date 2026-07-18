@@ -122,6 +122,36 @@ impl ConnStore {
         }
     }
 
+    /// Toggle/set the starred flag on a connection.
+    pub fn set_favorite(&mut self, id: &str, favorite: bool) -> Result<()> {
+        match self.index_of(id) {
+            Some(i) => {
+                self.conns[i].favorite = favorite;
+                self.flush()
+            }
+            None => Err(ConnStoreError::NotFound(id.to_string())),
+        }
+    }
+
+    /// Move a connection to `new_index` in the list and renumber every
+    /// connection's `order` to its new position, so the stored order is the
+    /// source of truth for the UI.
+    ///
+    /// `new_index` is clamped to the valid range.
+    // ponytail: renumber-all on each move; O(n), fine for a hand-managed list.
+    pub fn reorder(&mut self, id: &str, new_index: usize) -> Result<()> {
+        let from = self
+            .index_of(id)
+            .ok_or_else(|| ConnStoreError::NotFound(id.to_string()))?;
+        let to = new_index.min(self.conns.len() - 1);
+        let conn = self.conns.remove(from);
+        self.conns.insert(to, conn);
+        for (i, c) in self.conns.iter_mut().enumerate() {
+            c.order = i as i64;
+        }
+        self.flush()
+    }
+
     /// Store `password` in the secret backend keyed by the connection id.
     /// Errors if the connection id is unknown.
     pub fn set_password(&self, id: &str, password: &str) -> Result<()> {
@@ -205,6 +235,54 @@ mod tests {
         let secrets = Box::new(crate::secret::EncryptedFileBackend::new(dir.path()).unwrap());
         let store = ConnStore::load(path, secrets).unwrap();
         assert_eq!(store.get(&id).unwrap().name, "persisted");
+    }
+
+    #[test]
+    fn set_favorite_toggles_flag() {
+        let (_dir, mut store) = temp_store();
+        let c = pg("star me");
+        let id = c.id.clone();
+        store.add(c).unwrap();
+        assert!(!store.get(&id).unwrap().favorite);
+
+        store.set_favorite(&id, true).unwrap();
+        assert!(store.get(&id).unwrap().favorite);
+
+        store.set_favorite(&id, false).unwrap();
+        assert!(!store.get(&id).unwrap().favorite);
+    }
+
+    #[test]
+    fn reorder_moves_and_renumbers_order() {
+        let (_dir, mut store) = temp_store();
+        let (a, b, c) = (pg("a"), pg("b"), pg("c"));
+        let (ia, ic) = (a.id.clone(), c.id.clone());
+        store.add(a).unwrap();
+        store.add(b).unwrap();
+        store.add(c).unwrap();
+
+        // Move "c" (index 2) to the front.
+        store.reorder(&ic, 0).unwrap();
+
+        let list = store.list();
+        assert_eq!(list[0].id, ic);
+        assert_eq!(list[1].id, ia);
+        // order rewritten to match position.
+        for (i, conn) in list.iter().enumerate() {
+            assert_eq!(conn.order, i as i64);
+        }
+    }
+
+    #[test]
+    fn reorder_clamps_out_of_range_index() {
+        let (_dir, mut store) = temp_store();
+        let (a, b) = (pg("a"), pg("b"));
+        let ia = a.id.clone();
+        store.add(a).unwrap();
+        store.add(b).unwrap();
+
+        store.reorder(&ia, 99).unwrap();
+        assert_eq!(store.list()[1].id, ia);
     }
 
     #[test]
