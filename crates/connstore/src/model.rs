@@ -49,6 +49,13 @@ pub struct SavedConnection {
     /// (`mongodb+srv://…`). Consumed by the Mongo driver; ignored by others.
     #[serde(default)]
     pub params: Option<String>,
+    /// Starred connection: the UI shows a badge and floats it to the top.
+    #[serde(default)]
+    pub favorite: bool,
+    /// Explicit sort key for the connection list. Default `0` falls back to
+    /// insertion order; drag-reorder rewrites it.
+    #[serde(default)]
+    pub order: i64,
 }
 
 impl SavedConnection {
@@ -74,6 +81,8 @@ impl SavedConnection {
             local: false,
             tags: Vec::new(),
             params: None,
+            favorite: false,
+            order: 0,
         }
     }
 
@@ -111,6 +120,8 @@ mod tests {
             local: false,
             tags: Vec::new(),
             params: None,
+            favorite: false,
+            order: 0,
         }
     }
 
