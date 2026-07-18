@@ -153,6 +153,14 @@ export component ConnPicker inherits Rectangle {
                                     : row-ta.has-hover ? tint.with-alpha(0.14)
                                     : transparent;
                                 animate background { duration: Tokens.fade; }
+                                // "Grabbed" affordance while dragging the handle:
+                                // Slint can't cheaply follow the cursor without a
+                                // feedback loop, so lift + outline signals the drag
+                                // is live; the drop lands on pointer release.
+                                border-width: grip-ta.pressed ? 1px : 0;
+                                border-color: Tokens.accent;
+                                drop-shadow-blur: grip-ta.pressed ? 14px : 0;
+                                drop-shadow-color: #00000055;
 
                                 row-ta := TouchArea {
                                     clicked => { root.select-conn(item.index); }
@@ -172,7 +180,7 @@ export component ConnPicker inherits Rectangle {
                                         alignment: center;
                                         Rectangle {
                                             width: 12px;
-                                            opacity: row-ta.has-hover || grip-ta.pressed ? 1.0 : 0.0;
+                                            opacity: row-ta.has-hover || grip-ta.has-hover || grip-ta.pressed ? 1.0 : 0.0;
                                             Text {
                                                 text: "⋮⋮";
                                                 color: selected ? white.with-alpha(0.7) : Tokens.text-faint;
@@ -226,14 +234,17 @@ export component ConnPicker inherits Rectangle {
                                         alignment: center;
                                         OutlineChip { text: "LOCAL"; }
                                     }
-                                    // Star toggle: always shown when starred;
-                                    // otherwise appears on row hover so the whole
-                                    // list doesn't read as cluttered.
-                                    if item.favorite || row-ta.has-hover: VerticalLayout {
+                                    // Star toggle: always present (so its own
+                                    // TouchArea keeps receiving clicks); shown when
+                                    // starred or on hover. Gating on `if` here would
+                                    // remove the element the instant the pointer
+                                    // enters it and steals hover from the row.
+                                    VerticalLayout {
                                         alignment: center;
                                         Rectangle {
                                             width: 22px;
                                             height: 22px;
+                                            opacity: item.favorite || row-ta.has-hover || star-ta.has-hover ? 1.0 : 0.0;
                                             border-radius: Tokens.radius;
                                             background: star-ta.has-hover ? Tokens.card.with-alpha(0.4) : transparent;
                                             Text {
