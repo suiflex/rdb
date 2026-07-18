@@ -34,6 +34,8 @@ export component ConnPicker inherits Rectangle {
     // Export saved connections to ~/Downloads. Arg is the format: 0 = JSON, 1 = CSV.
     callback export-conns(int);
     callback toggle-group(string);
+    // Toggle the starred flag on a connection (arg is the store index).
+    callback toggle-favorite(int);
     callback filter(string);
 
     background: Tokens.canvas;
@@ -192,6 +194,30 @@ export component ConnPicker inherits Rectangle {
                                     if item.local: VerticalLayout {
                                         alignment: center;
                                         OutlineChip { text: "LOCAL"; }
+                                    }
+                                    // Star toggle: always shown when starred;
+                                    // otherwise appears on row hover so the whole
+                                    // list doesn't read as cluttered.
+                                    if item.favorite || row-ta.has-hover: VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 22px;
+                                            height: 22px;
+                                            border-radius: Tokens.radius;
+                                            background: star-ta.has-hover ? Tokens.card.with-alpha(0.4) : transparent;
+                                            Text {
+                                                text: item.favorite ? "★" : "☆";
+                                                color: item.favorite
+                                                    ? #f5b301
+                                                    : (selected ? white.with-alpha(0.8) : Tokens.text-faint);
+                                                font-size: 15px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            star-ta := TouchArea {
+                                                clicked => { root.toggle-favorite(item.index); }
+                                            }
+                                        }
                                     }
                                 }
                             }

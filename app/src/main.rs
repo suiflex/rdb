@@ -3508,6 +3508,31 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ----- star/unstar a saved connection -----
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let collapsed = collapsed.clone();
+        let conn_filter = conn_filter.clone();
+        window.on_toggle_favorite(move |idx| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let id = {
+                let s = store.borrow();
+                match s.list().get(idx as usize) {
+                    Some(c) => (c.id.clone(), c.favorite),
+                    None => return,
+                }
+            };
+            let (id, was_fav) = id;
+            let _ = store.borrow_mut().set_favorite(&id, !was_fav);
+            let items =
+                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
+            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+        });
+    }
+
     // ----- disconnect: drop the driver and return to the picker -----
     {
         let weak = window.as_weak();
