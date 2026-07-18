@@ -653,14 +653,14 @@ in-out property <string> rename-text;
                 // settings. One row so all icons share even spacing.
                 HorizontalLayout {
                     spacing: Tokens.sp1;
-                    // hide/show the left sidebar
-                    if root.connected: VerticalLayout {
+                    // Sidebar toggle sits on the sidebar's side: left of the
+                    // details toggle by default, right of it when the sidebar is
+                    // on the right — so the button lines up with the panel it
+                    // controls instead of being ambiguous.
+                    if root.connected && !root.sidebar-right: VerticalLayout {
                         alignment: center;
                         IconButton {
-                            // Point the divider at the sidebar's side, matching the
-                            // details toggle (columns == left divider; panel-right ==
-                            // right divider).
-                            icon: root.sidebar-right ? "panel-right" : "columns";
+                            icon: "columns";
                             tooltip: "Toggle sidebar";
                             // Collapse to the icon rail rather than fully hiding it.
                             active: !root.sidebar-rail;
@@ -677,6 +677,16 @@ in-out property <string> rename-text;
                             tooltip: "Toggle details panel";
                             active: root.detail-visible;
                             clicked => { root.detail-visible = !root.detail-visible; }
+                        }
+                    }
+                    // Sidebar toggle, right-hand placement (sidebar on the right).
+                    if root.connected && root.sidebar-right: VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: "panel-right";
+                            tooltip: "Toggle sidebar";
+                            active: !root.sidebar-rail;
+                            clicked => { root.sidebar-rail = !root.sidebar-rail; }
                         }
                     }
                     // hide/show the results panel (grid/documents)
