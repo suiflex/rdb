@@ -5,7 +5,7 @@ export { Tokens }
 import {
     SearchCommandPill, BreadcrumbChip, GlyphButton, IconButton, PrimaryButton, SecondaryButton, TextButton, Tooltip
 } from "components.slint";
-import { Sidebar } from "sidebar.slint";
+import { NavCluster } from "nav-cluster.slint";
 import { ConnPicker } from "picker.slint";
 import { WorkArea } from "workarea.slint";
 import { CommandPalette, ListModal, PaletteItem } from "palette.slint";
@@ -265,6 +265,9 @@ in-out property <string> rename-text;
     // the sidebar to a compact rail of tab icons instead of crushing the header.
     in-out property <bool> sidebar-rail: false;
     in-out property <bool> detail-visible: true;
+    // Place the sidebar on the right (detail panel flips to the left).
+    in-out property <bool> sidebar-right: false;
+    callback set-sidebar-side(bool);
     in-out property <bool> results-collapsed: false;
     callback editor-key(string, bool, bool, bool) -> bool;
     callback editor-press(int, int);
@@ -650,14 +653,16 @@ in-out property <string> rename-text;
                 // settings. One row so all icons share even spacing.
                 HorizontalLayout {
                     spacing: Tokens.sp1;
-                    // hide/show the left sidebar
-                    if root.connected: VerticalLayout {
+                    // Sidebar toggle sits on the sidebar's side: left of the
+                    // details toggle by default, right of it when the sidebar is
+                    // on the right — so the button lines up with the panel it
+                    // controls instead of being ambiguous.
+                    if root.connected && !root.sidebar-right: VerticalLayout {
                         alignment: center;
                         IconButton {
                             icon: "columns";
                             tooltip: "Toggle sidebar";
-                            // Collapse to the icon rail (matches the sidebar's own
-                            // collapse button) rather than fully hiding it.
+                            // Collapse to the icon rail rather than fully hiding it.
                             active: !root.sidebar-rail;
                             clicked => { root.sidebar-rail = !root.sidebar-rail; }
                         }
@@ -666,10 +671,22 @@ in-out property <string> rename-text;
                     if root.connected: VerticalLayout {
                         alignment: center;
                         IconButton {
-                            icon: "panel-right";
+                            // Details panel moves to the left edge when the sidebar
+                            // is on the right, so mirror the icon to match.
+                            icon: root.sidebar-right ? "panel-left" : "panel-right";
                             tooltip: "Toggle details panel";
                             active: root.detail-visible;
                             clicked => { root.detail-visible = !root.detail-visible; }
+                        }
+                    }
+                    // Sidebar toggle, right-hand placement (sidebar on the right).
+                    if root.connected && root.sidebar-right: VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: "panel-right";
+                            tooltip: "Toggle sidebar";
+                            active: !root.sidebar-rail;
+                            clicked => { root.sidebar-rail = !root.sidebar-rail; }
                         }
                     }
                     // hide/show the results panel (grid/documents)
@@ -785,143 +802,36 @@ in-out property <string> rename-text;
                 max-width: 100000px;
                 spacing: 0px;
 
-                if root.sidebar-visible && !root.sidebar-rail: Sidebar {
-                    focus-tick: root.focus-filter-tick;
-                    // Keep navigation compact: the old preferred-only sizing let
-                    // the layout stretch this panel to 480px and crush the work area.
+                // Navigation cluster on the left (default). The right-side copy
+                // lives after the work column; only one renders at a time.
+                if !root.sidebar-right: NavCluster {
                     horizontal-stretch: 0;
-                    min-width: root.sidebar-w;
-                    max-width: root.sidebar-w;
+                    focus-tick: root.focus-filter-tick;
                     tree: root.schema-tree;
                     conn-name: root.status-conn;
                     active-table: root.active-table;
                     active-count: root.total-rows;
                     query-tree: root.query-tree;
-                    mode <=> root.sidebar-mode;
+                    sidebar-mode: root.sidebar-mode;
+                    sidebar-visible: root.sidebar-visible;
+                    sidebar-rail: root.sidebar-rail;
+                    sidebar-w: root.sidebar-w;
                     schema-list: root.schema-list;
-                    schema-name <=> root.schema-name;
-                    disconnect() => {
-                        root.disconnect();
-                    }
-                    open-function(f) => {
-                        root.open-function(f);
-                    }
-                    open-query(q, i) => {
-                        root.open-query(q, i);
-                    }
-                    mode-changed(m) => {
-                        root.sidebar-mode-changed(m);
-                    }
-                    open-table(db, t) => {
-                        root.open-table(db, t);
-                    }
-                    pin-table(db, t) => {
-                        root.pin-table(db, t);
-                    }
-                    toggle-fields(db, t) => {
-                        root.toggle-fields(db, t);
-                    }
-                    toggle-node(t) => {
-                        root.toggle-schema-node(t);
-                    }
-                    select-schema(s) => {
-                        root.select-schema(s);
-                    }
-                    filter-tree(t) => {
-                        root.filter-tree(t);
-                    }
-                    add-item() => {
-                        root.new-tab();
-                    }
-                    collapse() => {
-                        // Collapse to the icon rail (same as dragging to the min),
-                        // not the bare reveal sliver — keeps the two paths
-                        // consistent. Full hide stays on the header toggle.
-                        root.sidebar-rail = true;
-                    }
-                }
-
-                // icon rail: compact tab icons when dragged below the min width.
-                // Clicking a tab expands back to the full sidebar in that mode.
-                if root.sidebar-visible && root.sidebar-rail: Rectangle {
-                    width: 48px;
-                    background: Tokens.sidebar;
-                    VerticalLayout {
-                        alignment: start;
-                        padding-top: Tokens.sp2;
-                        padding-left: Tokens.sp2;
-                        padding-right: Tokens.sp2;
-                        spacing: Tokens.sp1;
-                        IconButton {
-                            icon: "layers";
-                            tooltip: "Items";
-                            active: root.sidebar-mode == 0;
-                            clicked => {
-                                root.sidebar-mode = 0;
-                                root.sidebar-mode-changed(0);
-                                root.sidebar-rail = false;
-                            }
-                        }
-                        IconButton {
-                            icon: "terminal";
-                            tooltip: "Queries";
-                            active: root.sidebar-mode == 1;
-                            clicked => {
-                                root.sidebar-mode = 1;
-                                root.sidebar-mode-changed(1);
-                                root.sidebar-rail = false;
-                            }
-                        }
-                        IconButton {
-                            icon: "clock";
-                            tooltip: "History";
-                            active: root.sidebar-mode == 2;
-                            clicked => {
-                                root.sidebar-mode = 2;
-                                root.sidebar-mode-changed(2);
-                                root.sidebar-rail = false;
-                            }
-                        }
-                        IconButton {
-                            icon: "panel-expand";
-                            tooltip: "Expand sidebar";
-                            clicked => { root.sidebar-rail = false; }
-                        }
-                    }
-                }
-
-                // reveal strip when the sidebar is hidden
-                if !root.sidebar-visible: VerticalLayout {
-                    alignment: start;
-                    padding-top: Tokens.sp2;
-                    padding-left: Tokens.sp1;
-                    padding-right: Tokens.sp1;
-                    IconButton {
-                        icon: "panel-expand";
-                        tooltip: "Show sidebar";
-                        clicked => { root.sidebar-visible = true; }
-                    }
-                }
-
-                // draggable vertical splitter (sidebar width)
-                if root.sidebar-visible: Rectangle {
-                    width: 1px;
-                    background: split-h-area.has-hover || split-h-area.pressed ? Tokens.accent : Tokens.border;
-                    split-h-area := TouchArea {
-                        mouse-cursor: col-resize;
-                        moved => {
-                            // Rail is latched: once snapped, freeze the drag so the
-                            // handle jumping left (218px → 48px rail) can't oscillate
-                            // the state. Expand via the rail's tab/expand buttons.
-                            if !root.sidebar-rail {
-                                if root.sidebar-w + (self.mouse-x - self.pressed-x) < 150px {
-                                    root.sidebar-rail = true;
-                                } else {
-                                    root.sidebar-w = clamp(root.sidebar-w + (self.mouse-x - self.pressed-x), 184px, 360px);
-                                }
-                            }
-                        }
-                    }
+                    schema-name: root.schema-name;
+                    set-rail(v) => { root.sidebar-rail = v; }
+                    set-visible(v) => { root.sidebar-visible = v; }
+                    set-w(v) => { root.sidebar-w = v; }
+                    disconnect() => { root.disconnect(); }
+                    open-function(f) => { root.open-function(f); }
+                    open-query(q, i) => { root.open-query(q, i); }
+                    mode-changed(m) => { root.sidebar-mode = m; root.sidebar-mode-changed(m); }
+                    open-table(db, t) => { root.open-table(db, t); }
+                    pin-table(db, t) => { root.pin-table(db, t); }
+                    toggle-fields(db, t) => { root.toggle-fields(db, t); }
+                    toggle-node(t) => { root.toggle-schema-node(t); }
+                    select-schema(s) => { root.select-schema(s); }
+                    filter-tree(t) => { root.filter-tree(t); }
+                    add-item() => { root.new-tab(); }
                 }
 
                 // work column: tab bar + work area (takes all remaining width)
@@ -1055,6 +965,7 @@ in-out property <string> rename-text;
                     if root.tabs.length > 0: WorkArea {
                         vertical-stretch: 1;
                         detail-visible <=> root.detail-visible;
+                        detail-left: root.sidebar-right;
                         results-collapsed <=> root.results-collapsed;
                         console-open <=> root.console-open;
                         console-count: root.query-console.length;
@@ -1316,6 +1227,39 @@ in-out property <string> rename-text;
                             }
                         }
                     }
+                }
+
+                // Navigation cluster on the right (mirrored). Only one of the
+                // two NavCluster copies renders, keyed off `sidebar-right`.
+                if root.sidebar-right: NavCluster {
+                    mirror: true;
+                    horizontal-stretch: 0;
+                    focus-tick: root.focus-filter-tick;
+                    tree: root.schema-tree;
+                    conn-name: root.status-conn;
+                    active-table: root.active-table;
+                    active-count: root.total-rows;
+                    query-tree: root.query-tree;
+                    sidebar-mode: root.sidebar-mode;
+                    sidebar-visible: root.sidebar-visible;
+                    sidebar-rail: root.sidebar-rail;
+                    sidebar-w: root.sidebar-w;
+                    schema-list: root.schema-list;
+                    schema-name: root.schema-name;
+                    set-rail(v) => { root.sidebar-rail = v; }
+                    set-visible(v) => { root.sidebar-visible = v; }
+                    set-w(v) => { root.sidebar-w = v; }
+                    disconnect() => { root.disconnect(); }
+                    open-function(f) => { root.open-function(f); }
+                    open-query(q, i) => { root.open-query(q, i); }
+                    mode-changed(m) => { root.sidebar-mode = m; root.sidebar-mode-changed(m); }
+                    open-table(db, t) => { root.open-table(db, t); }
+                    pin-table(db, t) => { root.pin-table(db, t); }
+                    toggle-fields(db, t) => { root.toggle-fields(db, t); }
+                    toggle-node(t) => { root.toggle-schema-node(t); }
+                    select-schema(s) => { root.select-schema(s); }
+                    filter-tree(t) => { root.filter-tree(t); }
+                    add-item() => { root.new-tab(); }
                 }
             }
         }
@@ -1632,6 +1576,43 @@ in-out property <string> rename-text;
                                     border-radius: 9px;
                                     background: #FFFFFF;
                                     x: Tokens.dark ? parent.width - self.width - 3px : 3px;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // --- sidebar side ---
+                HorizontalLayout {
+                    spacing: Tokens.sp3;
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: "Sidebar on the right";
+                            color: Tokens.text;
+                            font-size: 13px;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        TouchArea {
+                            width: 42px;
+                            height: 24px;
+                            clicked => {
+                                root.sidebar-right = !root.sidebar-right;
+                                root.set-sidebar-side(root.sidebar-right);
+                            }
+                            Rectangle {
+                                border-radius: 12px;
+                                background: root.sidebar-right ? Tokens.accent : Tokens.border-strong;
+                                Rectangle {
+                                    width: 18px;
+                                    height: 18px;
+                                    border-radius: 9px;
+                                    background: #FFFFFF;
+                                    x: root.sidebar-right ? parent.width - self.width - 3px : 3px;
                                     y: (parent.height - self.height) / 2;
                                 }
                             }

@@ -22,6 +22,9 @@ export component WorkArea inherits Rectangle {
     // Reveal the query editor while browsing a table/collection (default closed).
     property <bool> browse-editor-open: false;
     in-out property <bool> detail-visible: true;
+    // Detail panel sits on the left edge (sidebar is on the right) instead of
+    // its default right edge.
+    in property <bool> detail-left: false;
     // SQL console (rendered by MainWindow below the work column); the footer
     // holds the toggle + clear so it reads as one bottom bar.
     in-out property <bool> console-open: false;
@@ -655,7 +658,7 @@ export component WorkArea inherits Rectangle {
 
             // Data grid — SQL/KeyValue, and Mongo documents in grid view.
             if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0) && (root.result-kind == 0 || root.result-kind == 2 || (root.result-kind == 1 && root.doc-view == 0)): TabularGrid {
-                x: 0;
+                x: (body.detail-shown && root.detail-left) ? body.detail-w + 1px : 0;
                 width: body.detail-shown ? body.width - body.detail-w - 1px : body.width;
                 height: 100%;
                 columns: root.columns;
@@ -684,7 +687,7 @@ export component WorkArea inherits Rectangle {
             }
 
             if body.detail-shown: Rectangle {
-                x: body.width - body.detail-w;
+                x: root.detail-left ? 0 : body.width - body.detail-w;
                 width: body.detail-w;
                 height: 100%;
                 background: Tokens.card;

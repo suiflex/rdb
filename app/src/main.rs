@@ -1748,6 +1748,7 @@ fn main() -> Result<(), slint::PlatformError> {
         .global::<Theme>()
         .set_dark(settings.borrow().get().theme.is_dark());
     window.set_update_check_enabled(settings.borrow().get().update_check);
+    window.set_sidebar_right(settings.borrow().get().ui_state.sidebar_right);
     window.set_app_version(env!("CARGO_PKG_VERSION").into());
 
     // Fixed window size for the screenshot loop: RDB_WIN=WxH (logical px).
@@ -6572,6 +6573,16 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(w) = weak.upgrade() {
                 w.set_update_check_enabled(v);
             }
+        });
+    }
+
+    // ----- settings: sidebar-on-the-right toggle -----
+    {
+        let settings = settings.clone();
+        window.on_set_sidebar_side(move |v| {
+            let _ = settings
+                .borrow_mut()
+                .update(|s| s.ui_state.sidebar_right = v);
         });
     }
 

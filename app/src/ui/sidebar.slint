@@ -13,9 +13,10 @@ export component Sidebar inherits Rectangle {
     in property <string> active-table;   // highlighted (currently open) table
     in property <int> active-count: -1;  // row count badge on the active table
     in property <[string]> schema-list;
-    in-out property <string> schema-name;
-    // 0 = Items, 1 = Queries, 2 = History
-    in-out property <int> mode: 0;
+    in property <string> schema-name;
+    // 0 = Items, 1 = Queries, 2 = History. Read-only: tab clicks signal via
+    // mode-changed and the owner (MainWindow) sets the value back down.
+    in property <int> mode: 0;
     // Query tab rows reuse TreeNode: kind "qcat" headers / "query" / "recent".
     in property <[TreeNode]> query-tree;
     callback disconnect();
@@ -29,7 +30,6 @@ export component Sidebar inherits Rectangle {
     callback filter-tree(string);
     callback mode-changed(int);
     callback add-item();
-    callback collapse();                   // hide the sidebar
     // bumped by ⌘P (app-window) to focus the filter field
     in property <int> focus-tick;
     changed focus-tick => { fld.focus-input(); }
@@ -65,27 +65,11 @@ export component Sidebar inherits Rectangle {
                     }
                     mt := TouchArea {
                         clicked => {
-                            root.mode = m;
                             root.mode-changed(m);
                         }
                     }
                 }
                 Rectangle { horizontal-stretch: 1; }
-                // collapse the sidebar (un-hide via the header toggle or the
-                // reveal button that takes this panel's place)
-                Rectangle {
-                    width: 24px;
-                    height: 24px;
-                    y: (parent.height - self.height) / 2;
-                    border-radius: 5px;
-                    background: collapse-ta.has-hover ? Tokens.border : transparent;
-                    AppIcon {
-                        name: "panel-collapse";
-                        size: Tokens.icon-sm;
-                        color: collapse-ta.has-hover ? Tokens.text : Tokens.text-faint;
-                    }
-                    collapse-ta := TouchArea { clicked => { root.collapse(); } }
-                }
             }
         }
 
