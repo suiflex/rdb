@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.18.0](https://github.com/suiflex/rdb/compare/v0.17.0...v0.18.0) (2026-07-18)
+
+
+### Features
+
+* **app:** add connections CSV serializer ([9d06f5d](https://github.com/suiflex/rdb/commit/9d06f5dd8a42a8c9f8ff625cf04bc4d3c46fb9db))
+* **app:** allow the sidebar on the right side ([884b6db](https://github.com/suiflex/rdb/commit/884b6db44036439d00a3878ab3f05a8e5d3846c5))
+* **app:** export connections as JSON or CSV ([8d2e116](https://github.com/suiflex/rdb/commit/8d2e116fdadbd090b91b26d53a8ffd9d8a264416))
+* **app:** export connections as JSON or CSV ([a3386b1](https://github.com/suiflex/rdb/commit/a3386b19430d9c8bfdf778e813a67da79aa8d4f0))
+* **app:** export query results in multiple formats ([e025f8d](https://github.com/suiflex/rdb/commit/e025f8da8433f44c985d1b2f41308a6a622844f4))
+* **app:** server-side column filter (WHERE) for table browse ([2d9437f](https://github.com/suiflex/rdb/commit/2d9437fa5194b97b79100489d8998f98d7f54e4f))
+* movable sidebar (left/right) with settings toggle ([bed919b](https://github.com/suiflex/rdb/commit/bed919b964083c93745b5deda5c09b668bbdedb8))
+* SQL console UX — results toggle, export formats, filter ([4018ac7](https://github.com/suiflex/rdb/commit/4018ac78437cb6af05bdd5f58bcfe4afdd10a1ac))
+* **ui:** collapse sidebar to icon rail on drag-to-min ([264d576](https://github.com/suiflex/rdb/commit/264d5760685345f0be8dc0944dd4aea223b186c0))
+* **ui:** results toggle, tooltip, export menu, per-column filter ([e9fdbe9](https://github.com/suiflex/rdb/commit/e9fdbe9e80a65f8a2b3a8b9103ddae5717038648))
+* **ui:** workarea + sidebar UX fixes and server-side table filter ([61e01a5](https://github.com/suiflex/rdb/commit/61e01a54a3a7081dacfb7c6a76cb1eb7c69f4b03))
+
+
+### Bug Fixes
+
+* **app:** collapse sidebar to icon rail from the header toggle ([40edf1a](https://github.com/suiflex/rdb/commit/40edf1a93dce47c8c72686060cbaf01abb7dda54))
+* **app:** keep result grid visible when switching schema ([1b7d98b](https://github.com/suiflex/rdb/commit/1b7d98ba2f6d8c87eb6ffad16d9b5217f1a9515a))
+* **app:** keep SQL query tabs when switching schema ([5982220](https://github.com/suiflex/rdb/commit/59822201c19fa55d7db3aafe9f08306774a9da34))
+* **app:** mirror the sidebar header toggle icon on the right ([219c180](https://github.com/suiflex/rdb/commit/219c18028f818f1ad5821ec8c20c2fefedfad214))
+* **app:** place the sidebar toggle button on the sidebar's side ([a8c174e](https://github.com/suiflex/rdb/commit/a8c174ee9976f2764dbf34faf95b48eba2e6c2a5))
+* **dispatch:** drop stale allow(dead_code) ([e6b03ae](https://github.com/suiflex/rdb/commit/e6b03ae92163e681ba5b1a0a50feba6fca44748f))
+* **ui:** center Export button in results toolbar ([0381013](https://github.com/suiflex/rdb/commit/0381013306c140100ab59aa5ba6b0cbd382c553e))
+* **ui:** collapse sidebar to icon rail, not reveal sliver ([43be444](https://github.com/suiflex/rdb/commit/43be444b2e45b70b6551a362a1086e315e13be1d))
+* **ui:** latch sidebar rail to stop drag flicker ([98c8fa7](https://github.com/suiflex/rdb/commit/98c8fa757f463dac3e0d0bd807df3b16bd1500a7))
+* **ui:** show Export menu by removing popup height cycle ([1e8d1e3](https://github.com/suiflex/rdb/commit/1e8d1e33070b6f4b3a184aea00c4d1d35d0b9e3a))
+
 ## [0.17.0](https://github.com/suiflex/rdb/compare/v0.16.0...v0.17.0) (2026-07-16)
 
 
