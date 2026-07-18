@@ -45,6 +45,8 @@ pub struct UiState {
     pub collapsed_groups: Vec<String>,
     /// Last connection-picker filter text.
     pub last_filter: String,
+    /// Place the workspace sidebar on the right instead of the left.
+    pub sidebar_right: bool,
 }
 
 /// Query-editor / results preferences.
