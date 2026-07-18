@@ -659,8 +659,7 @@ in-out property <string> rename-text;
                         IconButton {
                             icon: "columns";
                             tooltip: "Toggle sidebar";
-                            // Collapse to the icon rail (matches the sidebar's own
-                            // collapse button) rather than fully hiding it.
+                            // Collapse to the icon rail rather than fully hiding it.
                             active: !root.sidebar-rail;
                             clicked => { root.sidebar-rail = !root.sidebar-rail; }
                         }
