@@ -3962,6 +3962,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let edit_buf = edit_buf.clone();
         let db_override = db_override.clone();
         let tabs_restored = tabs_restored.clone();
+        let restore_tab = restore_tab.clone();
         window.on_connect_clicked(move |idx| {
             let i = idx as usize;
             // One-shot: set by the database switcher, empty for a fresh picker
@@ -3983,13 +3984,33 @@ fn main() -> Result<(), slint::PlatformError> {
             *current_connection_id.lock().unwrap() = Some(sc.id.clone());
             // First connect of the session (or a database switch) restores the
             // persisted SQL scratch tabs; a later switch to another connection
-            // starts with a clean workspace.
+            // keeps the SQL scratch tabs so the user can hop between connections
+            // without losing their queries.
             let restore = !tabs_restored.get() || db_ovr.is_some();
             tabs_restored.set(true);
             let (init_tabs, init_active) = if restore {
                 load_query_tabs()
             } else {
-                (Vec::new(), None)
+                // Retain the SQL scratch tabs (with their results) so switching
+                // connection leaves the last result on screen — "standby". Drop
+                // the connection-scoped table/function tabs (their data would be
+                // stale) and only clear the in-flight loading flag so no tab is
+                // left showing a stuck spinner.
+                let mut kept: Vec<WorkspaceTab> =
+                    std::mem::take(&mut *workspace_tabs.lock().unwrap())
+                        .into_iter()
+                        .filter(|t| t.kind == "sql")
+                        .collect();
+                for t in &mut kept {
+                    t.loading = false;
+                }
+                let active = active_tab_id
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .filter(|id| kept.iter().any(|t| t.id == *id))
+                    .or_else(|| kept.first().map(|t| t.id.clone()));
+                (kept, active)
             };
             *workspace_tabs.lock().unwrap() = init_tabs;
             *active_tab_id.lock().unwrap() = init_active.clone();
@@ -4057,6 +4078,20 @@ fn main() -> Result<(), slint::PlatformError> {
                     sc.engine,
                 )))));
                 w.set_filter_op(SharedString::from("="));
+                // Re-present the active tab's stored result so a connection
+                // switch keeps the last result visible instead of blanking the
+                // grid. No-op (clears) when the tab has no stored result, e.g.
+                // the disk-restored tabs on the first connect of the session.
+                let active_idx = init_active.as_deref().and_then(|id| {
+                    workspace_tabs
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .position(|t| t.id == id)
+                });
+                if let Some(idx) = active_idx {
+                    restore_tab(&w, idx);
+                }
             }
             // Fresh connection: nothing browsed, nothing expanded.
             *cur_engine.borrow_mut() = Some(sc.engine);
