@@ -1,0 +1,732 @@
+// One query pane: the SQL editor (toolbar + find bar + CodeEditor + results
+// header/tabs), the editor/results splitter, and the result body (grid, detail
+// panel, Mongo docs, structure, indexes, message, chart). A SQL tab can show two
+// of these side by side (dual-pane split); browse/function chrome stays in
+// WorkArea. Lifted verbatim from workarea.slint — property names match 1:1 so
+// the moved markup's `root.<prop>` references resolve to this component.
+import { Tokens } from "tokens.slint";
+import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow, DocRow } from "structs.slint";
+import { CodeEditor } from "code-editor.slint";
+import { TabularGrid } from "tabular-grid.slint";
+import { PaletteItem } from "palette.slint";
+import { SecondaryButton, PrimaryButton, TextButton, ExportButton } from "components.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export component QueryPane inherits Rectangle {
+    // ----- tab-global context (forwarded from WorkArea) -----
+    in property <bool> browse-mode: false;
+    in property <bool> browse-editor-open: false;
+    in property <bool> fn-mode: false;
+    in property <bool> results-collapsed: false;
+    in property <bool> detail-visible: true;
+    in property <bool> detail-left: false;
+    in property <int> view-mode: 0;
+    in property <bool> sql-capable: true;
+    in property <bool> read-only: true;
+
+    // ----- editor toolbar -----
+    in-out property <length> editor-h: 340px;
+    in property <bool> query-running;
+    in property <bool> streaming;
+    in-out property <string> limit-text;
+    in property <string> query-label;
+    callback run();
+    callback run-selection();
+    callback format-sql();
+    callback explain-query();
+    callback cancel-stream();
+    callback set-limit(string);
+
+    // ----- find bar -----
+    in property <bool> find-open;
+    in property <string> find-text;
+    in property <string> find-status;
+    callback find-changed(string);
+    callback find-next();
+    callback find-prev();
+    callback find-close();
+
+    // ----- editor model -----
+    in-out property <bool> editor-collapsed: false;
+    in property <[[Span]]> editor-lines;
+    in property <[int]> editor-fold-state;
+    in property <[bool]> editor-line-hidden;
+    in property <string> editor-placeholder;
+    in property <int> cursor-line;
+    in property <int> cursor-col;
+    callback toggle-fold(int);
+    callback editor-key(string, bool, bool, bool) -> bool;
+    callback editor-press(int, int);
+    callback editor-drag(int, int);
+    callback editor-select-word(int, int);
+
+    // ----- autocomplete -----
+    in property <[PaletteItem]> completion-items;
+    in property <bool> completion-visible;
+    in property <int> completion-selected;
+    callback completion-choose(int);
+
+    // ----- results header + tabs -----
+    in property <string> results-meta;
+    in-out property <bool> filter-open: false;
+    in-out property <int> sql-view-mode: 0;
+    in property <[string]> result-tabs;
+    in property <int> active-result;
+    callback select-result-tab(int);
+    callback close-result-tab(int);
+    callback copy-results();
+    callback export-results(int);
+
+    // ----- result grid -----
+    in property <[GridColumn]> columns;
+    in property <[GridCell]> cells;
+    in property <int> col-count;
+    in property <[length]> col-widths;
+    in property <int> result-kind: 0;
+    in property <string> result-status;
+    in property <bool> status-error;
+    in property <int> grid-sort-col: -1;
+    in property <bool> grid-sort-asc: true;
+    in property <[string]> grid-col-filters;
+    in-out property <int> selected-row: 0;
+    in-out property <int> selected-col: -1;
+    in property <int> editing-row: -1;
+    in property <int> editing-col: -1;
+    in-out property <string> editing-value;
+    in property <int> scroll-grid-tick;
+    callback sort-col(int);
+    callback reorder-col(int, length);
+    callback set-col-filter(int, string);
+    callback resize-col(int, length);
+    callback select-cell(int, int);
+    callback edit-cell(int, int);
+    callback cell-edited(int, int, string);
+    callback cell-advance(int, int, string, bool);
+    callback stage-cell(int, int, string);
+    callback edit-cancelled();
+
+    // ----- other result views -----
+    in property <int> doc-view: 0;
+    in property <[DocRow]> doc-tree;
+    callback toggle-doc-node(string);
+    in property <[StructField]> structure-columns;
+    in property <[IndexRow]> index-rows;
+    in property <[ChartBar]> chart-bars;
+
+    background: transparent;
+
+    VerticalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 0;
+
+        // ================= SQL editor (non-browse tabs) =================
+        // Also shown over a browse grid when the user opens "Query ▸".
+        if (!root.browse-mode || root.browse-editor-open) && !root.fn-mode: Rectangle {
+            vertical-stretch: 0.0;
+            preferred-height: root.editor-h;
+            background: Tokens.canvas;
+            VerticalLayout {
+                width: 100%;
+                height: 100%;
+                spacing: 0;
+                HorizontalLayout {
+                    height: 44px;
+                    padding-left: Tokens.sp3;
+                    padding-right: Tokens.sp3;
+                    spacing: Tokens.sp2;
+                    VerticalLayout {
+                        alignment: center;
+                        PrimaryButton {
+                            text: root.query-running ? "Running…" : "▶ Run  ⌘⏎";
+                            height: 28px;
+                            enabled: !root.query-running;
+                            clicked => { root.run(); }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        SecondaryButton { text: "Run Selection"; height: 28px; clicked => { root.run-selection(); } }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        visible: root.sql-capable;
+                        SecondaryButton { text: "Format"; height: 28px; clicked => { root.format-sql(); } }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        visible: root.sql-capable;
+                        SecondaryButton {
+                            text: "Explain";
+                            height: 28px;
+                            clicked => { root.explain-query(); }
+                        }
+                    }
+                    // Row limit for manual queries: a number caps the result;
+                    // "No limit" streams the whole table in progressively.
+                    VerticalLayout {
+                        alignment: center;
+                        visible: root.sql-capable;
+                        HorizontalLayout {
+                            spacing: Tokens.sp1;
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: "Limit";
+                                    color: Tokens.text-faint;
+                                    font-size: Tokens.font-sm;
+                                }
+                            }
+                            Rectangle {
+                                width: 78px;
+                                height: 28px;
+                                border-radius: Tokens.radius;
+                                border-width: 1px;
+                                border-color: Tokens.border-strong;
+                                background: Tokens.card;
+                                TextInput {
+                                    width: parent.width;
+                                    text <=> root.limit-text;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    single-line: true;
+                                    color: Tokens.text;
+                                    font-family: Tokens.mono;
+                                    font-size: Tokens.font-sm;
+                                    accepted => { root.set-limit(self.text); }
+                                }
+                            }
+                        }
+                    }
+                    if root.streaming: VerticalLayout {
+                        alignment: center;
+                        SecondaryButton {
+                            text: "✕ Cancel";
+                            height: 28px;
+                            clicked => { root.cancel-stream(); }
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text {
+                        text: root.query-label;
+                        color: Tokens.text-faint;
+                        font-size: Tokens.font-sm;
+                        vertical-alignment: center;
+                    }
+                }
+                // find bar (⌘F): input + match count + prev/next + close
+                if root.find-open: Rectangle {
+                    height: 36px;
+                    background: Tokens.chrome;
+                    // Focus the input one tick after the bar mounts. Calling
+                    // .focus() from the input's own `init` recurses through the
+                    // layout geometry solver (Slint 1.16); a deferred Timer
+                    // avoids it. `did-focus` resets on every reopen because the
+                    // conditional recreates this element.
+                    property <bool> did-focus;
+                    Timer {
+                        interval: 16ms;
+                        running: !parent.did-focus;
+                        triggered => { find-input.focus(); parent.did-focus = true; }
+                    }
+                    HorizontalLayout {
+                        padding-left: Tokens.sp3;
+                        padding-right: Tokens.sp3;
+                        spacing: Tokens.sp2;
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 240px;
+                                height: 26px;
+                                border-radius: Tokens.radius;
+                                border-width: 1px;
+                                border-color: Tokens.border-strong;
+                                background: Tokens.card;
+                                find-input := TextInput {
+                                    x: Tokens.sp2;
+                                    width: parent.width - 2 * Tokens.sp2;
+                                    vertical-alignment: center;
+                                    text: root.find-text;
+                                    color: Tokens.text;
+                                    font-family: Tokens.mono;
+                                    font-size: Tokens.font-sm;
+                                    single-line: true;
+                                    edited => { root.find-changed(self.text); }
+                                    accepted => { root.find-next(); }
+                                    key-pressed(e) => {
+                                        if (e.text == Key.Escape) { root.find-close(); return accept; }
+                                        return reject;
+                                    }
+                                }
+                            }
+                        }
+                        Text {
+                            text: root.find-status;
+                            color: Tokens.text-faint;
+                            font-size: Tokens.font-sm;
+                            font-family: Tokens.mono;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        VerticalLayout {
+                            alignment: center;
+                            SecondaryButton { text: "‹ Prev"; height: 26px; clicked => { root.find-prev(); } }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            SecondaryButton { text: "Next ›"; height: 26px; clicked => { root.find-next(); } }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            SecondaryButton { text: "✕"; height: 26px; clicked => { root.find-close(); } }
+                        }
+                    }
+                }
+                if !root.editor-collapsed: CodeEditor {
+                    vertical-stretch: 1;
+                    lines: root.editor-lines;
+                    fold-state: root.editor-fold-state;
+                    line-hidden: root.editor-line-hidden;
+                    toggle-fold(l) => { root.toggle-fold(l); }
+                    placeholder: root.editor-placeholder;
+                    cursor-line: root.cursor-line;
+                    cursor-col: root.cursor-col;
+                    completion-items: root.completion-items;
+                    completion-visible: root.completion-visible;
+                    completion-selected: root.completion-selected;
+                    completion-choose(i) => { root.completion-choose(i); }
+                    edit-key(t, cmd, alt, shift) => { root.editor-key(t, cmd, alt, shift) }
+                    press-pos(l, c) => { root.editor-press(l, c); }
+                    drag-pos(l, c) => { root.editor-drag(l, c); }
+                    select-word(l, c) => { root.editor-select-word(l, c); }
+                }
+                Rectangle { height: 1px; background: Tokens.border; }
+                // results header strip
+                HorizontalLayout {
+                    height: 34px;
+                    padding-left: Tokens.sp3;
+                    padding-right: Tokens.sp3;
+                    spacing: Tokens.sp2;
+                    Text {
+                        text: "Results";
+                        color: Tokens.text;
+                        font-size: Tokens.font-sm;
+                        font-weight: Tokens.weight-emphasis;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: root.results-meta;
+                        color: Tokens.text-faint;
+                        font-size: Tokens.font-sm;
+                        font-family: Tokens.mono;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    TextButton { text: root.editor-collapsed ? "Editor ▸" : "Editor ▾"; clicked => { root.editor-collapsed = !root.editor-collapsed; } }
+                    if !root.browse-mode: TextButton { text: root.filter-open ? "Filter ▲" : "Filter ▼"; clicked => { root.filter-open = !root.filter-open; } }
+                    TextButton { text: "Copy"; clicked => { root.copy-results(); } }
+                    ExportButton { export(i) => { root.export-results(i); } }
+                    TextButton { text: "Chart"; clicked => { root.sql-view-mode = 2; } }
+                }
+                // result tabs — appear once ⌘\ has spawned a second result
+                if root.result-tabs.length > 1: HorizontalLayout {
+                    height: 30px;
+                    padding-left: Tokens.sp3;
+                    padding-right: Tokens.sp3;
+                    spacing: Tokens.sp1;
+                    alignment: start;
+                    for name[i] in root.result-tabs: Rectangle {
+                        height: 24px;
+                        width: rl.preferred-width + 2 * Tokens.sp2 + 18px;
+                        border-radius: Tokens.radius;
+                        background: i == root.active-result ? Tokens.accent-tint
+                            : rta.has-hover ? Tokens.chrome : transparent;
+                        rta := TouchArea { clicked => { root.select-result-tab(i); } }
+                        HorizontalLayout {
+                            padding-left: Tokens.sp2;
+                            padding-right: Tokens.sp1;
+                            spacing: Tokens.sp1;
+                            rl := Text {
+                                text: name;
+                                color: i == root.active-result ? Tokens.on-tint : Tokens.text-dim;
+                                font-size: Tokens.font-sm;
+                                vertical-alignment: center;
+                            }
+                            Rectangle {
+                                width: 16px;
+                                Text {
+                                    text: "×";
+                                    color: Tokens.text-faint;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: center;
+                                }
+                                TouchArea { clicked => { root.close-result-tab(i); } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // draggable splitter: grow/shrink the editor vs the results (SQL tabs)
+        if (!root.browse-mode || root.browse-editor-open) && !root.fn-mode && !root.results-collapsed: Rectangle {
+            height: 6px;
+            background: split-ta.has-hover || split-ta.pressed ? Tokens.accent : Tokens.chrome;
+            split-ta := TouchArea {
+                mouse-cursor: row-resize;
+                moved => {
+                    root.editor-h = clamp(
+                        root.editor-h + (self.mouse-y - self.pressed-y),
+                        120px, root.height - 200px);
+                }
+            }
+        }
+
+        // The per-column filter inputs live inside TabularGrid (aligned to the
+        // columns) and are toggled by `filter-open`; see the "Filter" button.
+
+        // ================= result body =================
+        if !root.fn-mode && !root.results-collapsed: body := Rectangle {
+            property <bool> detail-shown: root.detail-visible && root.view-mode == 0
+                && root.result-kind == 0 && root.col-count > 0 && root.selected-row >= 0
+                && (root.selected-row + 1) * root.col-count <= root.cells.length;
+            property <length> detail-w: min(320px, max(240px, self.width * 0.32));
+            vertical-stretch: 1;
+            background: Tokens.canvas;
+
+            // Data grid — SQL/KeyValue, and Mongo documents in grid view.
+            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0) && (root.result-kind == 0 || root.result-kind == 2 || (root.result-kind == 1 && root.doc-view == 0)): TabularGrid {
+                x: (body.detail-shown && root.detail-left) ? body.detail-w + 1px : 0;
+                width: body.detail-shown ? body.width - body.detail-w - 1px : body.width;
+                height: 100%;
+                columns: root.columns;
+                cells: root.cells;
+                col-count: root.col-count;
+                col-widths: root.col-widths;
+                sorted-col: root.grid-sort-col;
+                sort-asc: root.grid-sort-asc;
+                sort-col(i) => { root.sort-col(i); }
+                reorder-col(i, x) => { root.reorder-col(i, x); }
+                filter-open: root.filter-open;
+                col-filter-values: root.grid-col-filters;
+                set-col-filter(i, t) => { root.set-col-filter(i, t); }
+                selected-row <=> root.selected-row;
+                selected-col <=> root.selected-col;
+                editing-row: root.editing-row;
+                editing-col: root.editing-col;
+                editing-value <=> root.editing-value;
+                resize-col(i, d) => { root.resize-col(i, d); }
+                select-cell(r, c) => { root.select-cell(r, c); }
+                edit-cell(r, c) => { root.edit-cell(r, c); }
+                cell-edited(r, c, t) => { root.cell-edited(r, c, t); }
+                cell-advance(r, c, t, fwd) => { root.cell-advance(r, c, t, fwd); }
+                edit-cancelled() => { root.edit-cancelled(); }
+                scroll-grid-tick: root.scroll-grid-tick;
+            }
+
+            if body.detail-shown: Rectangle {
+                x: root.detail-left ? 0 : body.width - body.detail-w;
+                width: body.detail-w;
+                height: 100%;
+                background: Tokens.card;
+                border-width: 1px;
+                border-color: Tokens.border;
+
+                VerticalLayout {
+                    spacing: 0;
+                    Rectangle {
+                        height: 40px;
+                        background: Tokens.chrome;
+                        HorizontalLayout {
+                            padding-left: Tokens.sp3;
+                            padding-right: Tokens.sp3;
+                            Text {
+                                text: "Details";
+                                color: Tokens.text;
+                                font-size: Tokens.font-sm;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            Text {
+                                text: "Row " + (root.selected-row + 1);
+                                color: Tokens.text-faint;
+                                font-family: Tokens.mono;
+                                font-size: Tokens.font-xs;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                    Rectangle { height: 1px; background: Tokens.border; }
+                    ScrollView {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            padding: Tokens.sp3;
+                            spacing: Tokens.sp3;
+                            for c in root.col-count: Rectangle {
+                                property <GridCell> detail-cell: root.cells[root.selected-row * root.col-count + c];
+                                height: 96px;
+                                VerticalLayout {
+                                    spacing: Tokens.sp1;
+                                    HorizontalLayout {
+                                        Text {
+                                            text: root.columns[c].name;
+                                            color: Tokens.text-dim;
+                                            font-family: Tokens.mono;
+                                            font-size: Tokens.font-xs;
+                                            overflow: elide;
+                                        }
+                                        Rectangle { horizontal-stretch: 1; }
+                                        Text {
+                                            text: root.columns[c].type-name;
+                                            color: Tokens.text-faint;
+                                            font-family: Tokens.mono;
+                                            font-size: Tokens.font-xs;
+                                        }
+                                    }
+                                    Rectangle {
+                                        vertical-stretch: 1;
+                                        clip: true;
+                                        border-radius: Tokens.radius;
+                                        border-width: 1px;
+                                        border-color: detail-input.has-focus ? Tokens.accent : Tokens.border-strong;
+                                        background: Tokens.canvas;
+                                        detail-input := TextInput {
+                                            x: Tokens.sp2;
+                                            y: Tokens.sp2;
+                                            width: parent.width - 2 * Tokens.sp2;
+                                            height: parent.height - 2 * Tokens.sp2;
+                                            text: detail-cell.is-null ? "" : detail-cell.text;
+                                            enabled: !root.read-only;
+                                            single-line: false;
+                                            wrap: word-wrap;
+                                            vertical-alignment: top;
+                                            color: root.read-only ? Tokens.text-dim : Tokens.text;
+                                            font-family: Tokens.mono;
+                                            font-size: Tokens.font-sm;
+                                            edited => { root.stage-cell(root.selected-row, c, self.text); }
+                                        }
+                                        if detail-cell.is-null && detail-input.text == "": Text {
+                                            x: Tokens.sp2;
+                                            y: Tokens.sp2;
+                                            text: "NULL";
+                                            color: Tokens.text-ghost;
+                                            font-family: Tokens.mono;
+                                            font-size: Tokens.font-sm;
+                                            font-italic: true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // empty result: distinct from an error, distinct from loading
+            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0)
+                && root.result-kind == 0 && root.cells.length == 0
+                && !root.status-error && !root.query-running: VerticalLayout {
+                alignment: center;
+                spacing: Tokens.sp2;
+                Text {
+                    text: "No rows";
+                    color: Tokens.text-dim;
+                    font-size: Tokens.font-md;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: root.browse-mode && !root.read-only
+                        ? "Table is empty — “+ Row” inserts one"
+                        : "The query returned no rows";
+                    color: Tokens.text-faint;
+                    font-size: Tokens.font-sm;
+                    horizontal-alignment: center;
+                }
+            }
+
+            // in-flight query indicator
+            if root.query-running: VerticalLayout {
+                alignment: center;
+                Text {
+                    text: "Running…";
+                    color: Tokens.text-dim;
+                    font-size: Tokens.font-md;
+                    horizontal-alignment: center;
+                }
+            }
+
+            // Documents (Mongo) — JSON tree view (grid view uses TabularGrid above).
+            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0) && root.result-kind == 1 && root.doc-view == 1: ScrollView {
+                width: 100%;
+                height: 100%;
+                VerticalLayout {
+                    padding: Tokens.sp3;
+                    spacing: 0;
+                    alignment: start;
+                    for row in root.doc-tree: Rectangle {
+                        height: 22px;
+                        // Whole branch row is clickable to fold/unfold; leaves inert.
+                        background: row-ta.has-hover && row.expandable ? Tokens.card : transparent;
+                        row-ta := TouchArea {
+                            enabled: row.expandable;
+                            clicked => { root.toggle-doc-node(row.path); }
+                        }
+                        HorizontalLayout {
+                            padding-left: row.depth * 16px;
+                            spacing: Tokens.sp1;
+                            alignment: start;
+                            // fold caret (branches only)
+                            Text {
+                                width: 14px;
+                                text: row.expandable ? (row.expanded ? "▾" : "▸") : "";
+                                color: Tokens.text-dim;
+                                font-size: Tokens.font-xs;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                width: 200px;
+                                text: row.key + ":";
+                                color: Tokens.accent;
+                                font-family: Tokens.mono;
+                                font-size: Tokens.font-sm;
+                                overflow: elide;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: row.preview;
+                                color: row.expandable ? Tokens.text-dim : Tokens.text;
+                                font-family: Tokens.mono;
+                                font-size: Tokens.font-sm;
+                                horizontal-alignment: left;
+                                overflow: elide;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Affected-rows toast
+            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0) && root.result-kind == 3: Text {
+                text: root.result-status;
+                color: root.status-error ? Tokens.error : Tokens.text-dim;
+                font-size: Tokens.font-md;
+            }
+
+            // Structure view
+            if root.view-mode == 1: ScrollView {
+                width: 100%;
+                height: 100%;
+                VerticalLayout {
+                    width: parent.visible-width;
+                    padding: Tokens.sp3;
+                    spacing: 0;
+                    alignment: start;
+                    HorizontalLayout {
+                        height: Tokens.grid-header-h;
+                        Text { width: 220px; text: "column"; color: Tokens.text; font-family: Tokens.mono; font-size: Tokens.font-sm; font-weight: 600; vertical-alignment: center; }
+                        Text { width: 180px; text: "type"; color: Tokens.text; font-family: Tokens.mono; font-size: Tokens.font-sm; font-weight: 600; vertical-alignment: center; }
+                        Text { text: "nullable"; color: Tokens.text; font-family: Tokens.mono; font-size: Tokens.font-sm; font-weight: 600; vertical-alignment: center; }
+                    }
+                    Rectangle { height: 1px; background: Tokens.border-strong; }
+                    for f in root.structure-columns: HorizontalLayout {
+                        height: Tokens.grid-row-h;
+                        Text { width: 220px; text: f.name; color: Tokens.text; font-family: Tokens.mono; font-size: Tokens.font-sm; vertical-alignment: center; }
+                        Text { width: 180px; text: f.type-name; color: Tokens.text-dim; font-family: Tokens.mono; font-size: Tokens.font-sm; vertical-alignment: center; }
+                        Text { text: f.nullable ? "YES" : "NO"; color: f.nullable ? Tokens.text-faint : Tokens.text-dim; font-family: Tokens.mono; font-size: Tokens.font-sm; vertical-alignment: center; }
+                    }
+                }
+            }
+
+            // Indexes view (from engine catalogs; empty for engines without them)
+            if root.view-mode == 2 && root.index-rows.length == 0: Text {
+                text: "No indexes to show";
+                color: Tokens.text-faint;
+                font-size: Tokens.font-md;
+            }
+            if root.view-mode == 2 && root.index-rows.length > 0: ScrollView {
+                width: 100%;
+                height: 100%;
+                VerticalLayout {
+                    width: parent.visible-width;
+                    padding: Tokens.sp3;
+                    spacing: 0;
+                    alignment: start;
+                    HorizontalLayout {
+                        height: Tokens.grid-header-h;
+                        Text { width: 220px; text: "index"; color: Tokens.text; font-family: Tokens.mono; font-size: Tokens.font-sm; font-weight: 600; vertical-alignment: center; }
+                        Text { text: "definition"; color: Tokens.text; font-family: Tokens.mono; font-size: Tokens.font-sm; font-weight: 600; vertical-alignment: center; }
+                    }
+                    Rectangle { height: 1px; background: Tokens.border-strong; }
+                    for ix in root.index-rows: HorizontalLayout {
+                        height: Tokens.grid-row-h;
+                        Text { width: 220px; text: ix.name; color: Tokens.text; font-family: Tokens.mono; font-size: Tokens.font-sm; vertical-alignment: center; overflow: elide; }
+                        Text { text: ix.definition; color: Tokens.text-dim; font-family: Tokens.mono; font-size: Tokens.font-sm; vertical-alignment: center; overflow: elide; }
+                    }
+                }
+            }
+
+            // Message view (SQL footer segment)
+            if !root.browse-mode && root.view-mode == 0 && root.sql-view-mode == 1: VerticalLayout {
+                padding: Tokens.sp3;
+                alignment: start;
+                Text {
+                    text: root.result-status == "" ? "No messages" : root.result-status;
+                    color: root.status-error ? Tokens.error : Tokens.text-dim;
+                    font-size: Tokens.font-md;
+                }
+            }
+
+            // Chart view: horizontal bars, first text column vs first numeric column
+            if !root.browse-mode && root.view-mode == 0 && root.sql-view-mode == 2: ScrollView {
+                width: 100%;
+                height: 100%;
+                VerticalLayout {
+                    width: parent.visible-width;
+                    padding: Tokens.sp3;
+                    spacing: Tokens.sp1;
+                    alignment: start;
+                    if root.chart-bars.length == 0: Text {
+                        text: "Nothing to chart — the result needs a numeric column";
+                        color: Tokens.text-faint;
+                        font-size: Tokens.font-md;
+                    }
+                    for bar in root.chart-bars: HorizontalLayout {
+                        height: 20px;
+                        spacing: Tokens.sp2;
+                        Text {
+                            width: 160px;
+                            text: bar.label;
+                            color: Tokens.text-dim;
+                            font-size: Tokens.font-sm;
+                            font-family: Tokens.mono;
+                            overflow: elide;
+                            vertical-alignment: center;
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            Rectangle {
+                                x: 0;
+                                width: parent.width * bar.frac;
+                                height: 14px;
+                                y: (parent.height - self.height) / 2;
+                                border-radius: 3px;
+                                background: Tokens.accent;
+                            }
+                        }
+                        Text {
+                            width: 100px;
+                            text: bar.value;
+                            color: Tokens.text;
+                            font-size: Tokens.font-sm;
+                            font-family: Tokens.mono;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
