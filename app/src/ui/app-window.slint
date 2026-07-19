@@ -536,11 +536,6 @@ in-out property <string> rename-text;
                     root.run-new-tab();
                     return accept;
                 }
-                // ⌘D splits / unsplits the SQL editor into two panes.
-                if (e.text == "d" && root.active-table == "") {
-                    root.toggle-split();
-                    return accept;
-                }
                 if (e.text == "s") {
                     root.commit-edits();
                     return accept;
