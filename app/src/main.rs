@@ -1307,6 +1307,48 @@ fn set_p_query_running(w: &MainWindow, pane: usize, b: bool) {
         w.set_p1_query_running(b);
     }
 }
+fn set_p_completion_items(w: &MainWindow, pane: usize, m: ModelRc<PaletteItem>) {
+    if pane == 0 {
+        w.set_completion_items(m);
+    } else {
+        w.set_p1_completion_items(m);
+    }
+}
+fn set_p_completion_visible(w: &MainWindow, pane: usize, b: bool) {
+    if pane == 0 {
+        w.set_completion_visible(b);
+    } else {
+        w.set_p1_completion_visible(b);
+    }
+}
+fn get_p_completion_visible(w: &MainWindow, pane: usize) -> bool {
+    if pane == 0 {
+        w.get_completion_visible()
+    } else {
+        w.get_p1_completion_visible()
+    }
+}
+fn set_p_completion_selected(w: &MainWindow, pane: usize, i: i32) {
+    if pane == 0 {
+        w.set_completion_selected(i);
+    } else {
+        w.set_p1_completion_selected(i);
+    }
+}
+fn get_p_completion_selected(w: &MainWindow, pane: usize) -> i32 {
+    if pane == 0 {
+        w.get_completion_selected()
+    } else {
+        w.get_p1_completion_selected()
+    }
+}
+fn p_completion_count(w: &MainWindow, pane: usize) -> i32 {
+    if pane == 0 {
+        w.get_completion_items().row_count() as i32
+    } else {
+        w.get_p1_completion_items().row_count() as i32
+    }
+}
 fn set_p_find_open(w: &MainWindow, pane: usize, b: bool) {
     if pane == 0 {
         w.set_find_open(b);
@@ -2299,23 +2341,21 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // ----- SQL autocomplete: recompute popup, accept a choice -----
     // completion_ctx = (word char length to replace, candidate labels).
-    let completion_ctx = panes[0].completion_ctx.clone();
-    let refresh_completion: Rc<dyn Fn()> = {
+    let refresh_completion: Rc<dyn Fn(usize)> = {
         let weak = window.as_weak();
-        let ed_state = ed_state.clone();
+        let panes = panes.clone();
         let completion_nodes = completion_nodes.clone();
-        let completion_ctx = completion_ctx.clone();
-        Rc::new(move || {
+        Rc::new(move |pane| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let before = ed_state.borrow().before_cursor_doc();
+            let before = panes[pane].ed_state.borrow().before_cursor_doc();
             let schema = w.get_schema_name().to_string();
             let (word_len, cands) =
                 completion::suggest(&before, &completion_nodes.lock().unwrap(), &schema);
             if cands.is_empty() {
-                w.set_completion_visible(false);
-                *completion_ctx.borrow_mut() = (0, Vec::new());
+                set_p_completion_visible(&w, pane, false);
+                *panes[pane].completion_ctx.borrow_mut() = (0, Vec::new());
                 return;
             }
             let items: Vec<PaletteItem> = cands
@@ -2327,41 +2367,44 @@ fn main() -> Result<(), slint::PlatformError> {
                     local: false,
                 })
                 .collect();
-            *completion_ctx.borrow_mut() =
+            *panes[pane].completion_ctx.borrow_mut() =
                 (word_len, cands.iter().map(|c| c.label.clone()).collect());
-            w.set_completion_items(ModelRc::from(Rc::new(VecModel::from(items))));
-            w.set_completion_selected(0);
-            w.set_completion_visible(true);
+            set_p_completion_items(&w, pane, ModelRc::from(Rc::new(VecModel::from(items))));
+            set_p_completion_selected(&w, pane, 0);
+            set_p_completion_visible(&w, pane, true);
         })
     };
-    let accept_completion: Rc<dyn Fn(i32)> = {
+    let accept_completion: Rc<dyn Fn(usize, i32)> = {
         let weak = window.as_weak();
-        let ed_state = ed_state.clone();
+        let panes = panes.clone();
         let sync_editor = sync_editor.clone();
-        let completion_ctx = completion_ctx.clone();
-        Rc::new(move |idx: i32| {
+        Rc::new(move |pane, idx| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let (word_len, labels) = completion_ctx.borrow().clone();
+            let (word_len, labels) = panes[pane].completion_ctx.borrow().clone();
             let Some(label) = labels.get(idx.max(0) as usize).cloned() else {
                 return;
             };
             {
-                let mut ed = ed_state.borrow_mut();
+                let mut ed = panes[pane].ed_state.borrow_mut();
                 for _ in 0..word_len {
                     ed.backspace();
                 }
                 ed.insert(&label);
             }
-            w.set_completion_visible(false);
-            *completion_ctx.borrow_mut() = (0, Vec::new());
-            sync_editor(0);
+            set_p_completion_visible(&w, pane, false);
+            *panes[pane].completion_ctx.borrow_mut() = (0, Vec::new());
+            sync_editor(pane);
         })
     };
     {
         let accept = accept_completion.clone();
-        window.on_completion_choose(move |i| accept(i));
+        window.on_completion_choose(move |i| accept(0, i));
+    }
+    {
+        let accept = accept_completion.clone();
+        window.on_p1_completion_choose(move |i| accept(1, i));
     }
     {
         let panes = panes.clone();
@@ -2371,32 +2414,45 @@ fn main() -> Result<(), slint::PlatformError> {
         let accept_completion = accept_completion.clone();
         let cur_engine = cur_engine.clone();
         // Shared editor-key handler for both split panes; `pane` selects which
-        // editor buffer it drives. Autocomplete is pane-0 only for now.
+        // editor buffer and completion popup it drives.
         #[allow(clippy::type_complexity)]
         let edit_key: Rc<dyn Fn(usize, SharedString, bool, bool, bool) -> bool> = Rc::new(
             move |pane: usize, text: SharedString, meta: bool, alt: bool, shift: bool| {
                 let ed_state = panes[pane].ed_state.clone();
+                // Typing in a pane focuses it, so global shortcuts (⌘F/⌘⏎) land
+                // on the pane the caret is really in.
+                if let Some(w) = weak.upgrade() {
+                    if w.get_active_pane() != pane as i32 {
+                        w.set_active_pane(pane as i32);
+                    }
+                }
                 // While the autocomplete popup is open it owns nav / accept / close.
                 if let Some(w) = weak.upgrade() {
-                    if pane == 0 && w.get_completion_visible() {
-                        let n = w.get_completion_items().row_count() as i32;
+                    if get_p_completion_visible(&w, pane) {
+                        let n = p_completion_count(&w, pane);
                         match text.as_str() {
                             "\u{f700}" if n > 0 => {
-                                w.set_completion_selected(
-                                    (w.get_completion_selected() - 1 + n) % n,
+                                set_p_completion_selected(
+                                    &w,
+                                    pane,
+                                    (get_p_completion_selected(&w, pane) - 1 + n) % n,
                                 );
                                 return true;
                             }
                             "\u{f701}" if n > 0 => {
-                                w.set_completion_selected((w.get_completion_selected() + 1) % n);
+                                set_p_completion_selected(
+                                    &w,
+                                    pane,
+                                    (get_p_completion_selected(&w, pane) + 1) % n,
+                                );
                                 return true;
                             }
                             "\t" | "\n" | "\r" => {
-                                accept_completion(w.get_completion_selected());
+                                accept_completion(pane, get_p_completion_selected(&w, pane));
                                 return true;
                             }
                             "\u{1b}" => {
-                                w.set_completion_visible(false);
+                                set_p_completion_visible(&w, pane, false);
                                 return true;
                             }
                             _ => {}
@@ -2594,11 +2650,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 };
                 if handled {
                     sync_editor(pane);
-                    // Typing/deleting shifts the completion context — recompute
-                    // (pane-0 only for now).
-                    if pane == 0 {
-                        refresh_completion();
-                    }
+                    // Typing/deleting shifts this pane's completion context.
+                    refresh_completion(pane);
                 }
                 handled
             },
@@ -2621,9 +2674,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 // Clicking a pane focuses it: drives the accent + which pane
                 // global shortcuts fall back to.
                 w.set_active_pane(pane as i32);
-                if pane == 0 {
-                    w.set_completion_visible(false);
-                }
+                set_p_completion_visible(&w, pane, false);
             }
             panes[pane].ed_state.borrow_mut().move_to(line, col, false);
             sync_editor(pane);
