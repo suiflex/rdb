@@ -2087,10 +2087,8 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // ----- SQL editor: Rust-owned buffer + lexer feeding the span model -----
     let ed_state = panes[0].ed_state.clone();
-    // Statement head lines the user has folded closed. Kept by line index and
-    // re-validated against the current statement spans on every render, so an
-    // edit that shifts lines can only unfold — never hide the wrong lines.
-    let folded_heads = panes[0].folded_heads.clone();
+    // Statement head lines the user has folded closed live per-pane in
+    // `panes[*].folded_heads`; sync_editor + the fold toggle read them by pane.
     let sync_editor = {
         let weak = window.as_weak();
         let panes = panes.clone();
@@ -2199,10 +2197,11 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // ----- toggle a statement fold from the gutter arrow -----
     {
-        let ed_state = ed_state.clone();
-        let folded_heads = folded_heads.clone();
+        let panes = panes.clone();
         let sync_editor = sync_editor.clone();
-        window.on_toggle_fold(move |line| {
+        let fold: Rc<dyn Fn(usize, i32)> = Rc::new(move |pane: usize, line: i32| {
+            let ed_state = panes[pane].ed_state.clone();
+            let folded_heads = panes[pane].folded_heads.clone();
             let head = line.max(0) as usize;
             let now_closed = {
                 let mut f = folded_heads.borrow_mut();
@@ -2226,7 +2225,15 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 }
             }
-            sync_editor(0);
+            sync_editor(pane);
+        });
+        window.on_toggle_fold({
+            let fold = fold.clone();
+            move |line| fold(0, line)
+        });
+        window.on_p1_toggle_fold({
+            let fold = fold.clone();
+            move |line| fold(1, line)
         });
     }
 
@@ -2297,247 +2304,293 @@ fn main() -> Result<(), slint::PlatformError> {
         window.on_completion_choose(move |i| accept(i));
     }
     {
-        let ed_state = ed_state.clone();
+        let panes = panes.clone();
         let sync_editor = sync_editor.clone();
         let weak = window.as_weak();
         let refresh_completion = refresh_completion.clone();
         let accept_completion = accept_completion.clone();
         let cur_engine = cur_engine.clone();
-        window.on_editor_key(move |text, meta, alt, shift| {
-            // While the autocomplete popup is open it owns nav / accept / close.
-            if let Some(w) = weak.upgrade() {
-                if w.get_completion_visible() {
-                    let n = w.get_completion_items().row_count() as i32;
-                    match text.as_str() {
-                        "\u{f700}" if n > 0 => {
-                            w.set_completion_selected((w.get_completion_selected() - 1 + n) % n);
-                            return true;
+        // Shared editor-key handler for both split panes; `pane` selects which
+        // editor buffer it drives. Autocomplete is pane-0 only for now.
+        #[allow(clippy::type_complexity)]
+        let edit_key: Rc<dyn Fn(usize, SharedString, bool, bool, bool) -> bool> = Rc::new(
+            move |pane: usize, text: SharedString, meta: bool, alt: bool, shift: bool| {
+                let ed_state = panes[pane].ed_state.clone();
+                // While the autocomplete popup is open it owns nav / accept / close.
+                if let Some(w) = weak.upgrade() {
+                    if pane == 0 && w.get_completion_visible() {
+                        let n = w.get_completion_items().row_count() as i32;
+                        match text.as_str() {
+                            "\u{f700}" if n > 0 => {
+                                w.set_completion_selected(
+                                    (w.get_completion_selected() - 1 + n) % n,
+                                );
+                                return true;
+                            }
+                            "\u{f701}" if n > 0 => {
+                                w.set_completion_selected((w.get_completion_selected() + 1) % n);
+                                return true;
+                            }
+                            "\t" | "\n" | "\r" => {
+                                accept_completion(w.get_completion_selected());
+                                return true;
+                            }
+                            "\u{1b}" => {
+                                w.set_completion_visible(false);
+                                return true;
+                            }
+                            _ => {}
                         }
-                        "\u{f701}" if n > 0 => {
-                            w.set_completion_selected((w.get_completion_selected() + 1) % n);
-                            return true;
-                        }
-                        "\t" | "\n" | "\r" => {
-                            accept_completion(w.get_completion_selected());
-                            return true;
-                        }
-                        "\u{1b}" => {
-                            w.set_completion_visible(false);
-                            return true;
-                        }
-                        _ => {}
                     }
                 }
-            }
-            // Cursor motion first: arrows / home / end, with macOS ⌘ (line &
-            // document) and ⌥ (word) semantics. shift extends the selection.
-            if matches!(
-                text.as_str(),
-                "\u{f700}" | "\u{f701}" | "\u{f702}" | "\u{f703}" | "\u{f729}" | "\u{f72b}"
-            ) {
-                {
-                    let mut ed = ed_state.borrow_mut();
-                    ed.set_selecting(shift);
-                    match text.as_str() {
-                        "\u{f702}" => {
-                            if alt {
-                                ed.move_word(-1)
-                            } else if meta {
-                                ed.home()
-                            } else {
-                                ed.move_cursor(0, -1)
+                // Cursor motion first: arrows / home / end, with macOS ⌘ (line &
+                // document) and ⌥ (word) semantics. shift extends the selection.
+                if matches!(
+                    text.as_str(),
+                    "\u{f700}" | "\u{f701}" | "\u{f702}" | "\u{f703}" | "\u{f729}" | "\u{f72b}"
+                ) {
+                    {
+                        let mut ed = ed_state.borrow_mut();
+                        ed.set_selecting(shift);
+                        match text.as_str() {
+                            "\u{f702}" => {
+                                if alt {
+                                    ed.move_word(-1)
+                                } else if meta {
+                                    ed.home()
+                                } else {
+                                    ed.move_cursor(0, -1)
+                                }
                             }
-                        }
-                        "\u{f703}" => {
-                            if alt {
-                                ed.move_word(1)
-                            } else if meta {
-                                ed.end()
-                            } else {
-                                ed.move_cursor(0, 1)
+                            "\u{f703}" => {
+                                if alt {
+                                    ed.move_word(1)
+                                } else if meta {
+                                    ed.end()
+                                } else {
+                                    ed.move_cursor(0, 1)
+                                }
                             }
-                        }
-                        "\u{f700}" => {
-                            if meta {
-                                ed.move_doc_start()
-                            } else {
-                                ed.move_cursor(-1, 0)
+                            "\u{f700}" => {
+                                if meta {
+                                    ed.move_doc_start()
+                                } else {
+                                    ed.move_cursor(-1, 0)
+                                }
                             }
-                        }
-                        "\u{f701}" => {
-                            if meta {
-                                ed.move_doc_end()
-                            } else {
-                                ed.move_cursor(1, 0)
+                            "\u{f701}" => {
+                                if meta {
+                                    ed.move_doc_end()
+                                } else {
+                                    ed.move_cursor(1, 0)
+                                }
                             }
+                            "\u{f729}" => ed.home(),
+                            "\u{f72b}" => ed.end(),
+                            _ => {}
                         }
-                        "\u{f729}" => ed.home(),
-                        "\u{f72b}" => ed.end(),
-                        _ => {}
                     }
+                    sync_editor(pane);
+                    return true;
                 }
-                sync_editor(0);
-                return true;
-            }
-            if meta {
-                // Editor-owned cmd combos; everything else bubbles up to the
-                // window shortcut scope (⌘⏎ run, ⌘S commit, ⌘R refresh, …).
+                if meta {
+                    // Editor-owned cmd combos; everything else bubbles up to the
+                    // window shortcut scope (⌘⏎ run, ⌘S commit, ⌘R refresh, …).
+                    let handled = {
+                        let mut ed = ed_state.borrow_mut();
+                        match text.as_str() {
+                            "a" => {
+                                ed.select_all();
+                                true
+                            }
+                            "c" => {
+                                // no selection → copy the statement under the cursor
+                                let t =
+                                    ed.selected_text().unwrap_or_else(|| ed.current_statement());
+                                clip_set(&t);
+                                true
+                            }
+                            "x" => {
+                                if let Some(t) = ed.selected_text() {
+                                    clip_set(&t);
+                                    ed.cut_selection();
+                                }
+                                true
+                            }
+                            "v" => {
+                                if let Some(t) = clip_get() {
+                                    ed.insert(&t.replace("\r\n", "\n"));
+                                }
+                                true
+                            }
+                            "z" if shift => {
+                                ed.redo();
+                                true
+                            }
+                            "z" => {
+                                ed.undo();
+                                true
+                            }
+                            "/" => {
+                                // Comment marker follows the connected engine's query
+                                // language; default to SQL when not yet connected.
+                                let engine = cur_engine
+                                    .borrow()
+                                    .unwrap_or(rdb_connstore::Engine::Postgres);
+                                ed.toggle_comment(crate::query_parse::comment_prefix(engine));
+                                true
+                            }
+                            _ => false,
+                        }
+                    };
+                    if handled {
+                        sync_editor(pane);
+                    }
+                    return handled;
+                }
                 let handled = {
                     let mut ed = ed_state.borrow_mut();
-                    match text.as_str() {
-                        "a" => {
-                            ed.select_all();
-                            true
-                        }
-                        "c" => {
-                            // no selection → copy the statement under the cursor
-                            let t = ed.selected_text().unwrap_or_else(|| ed.current_statement());
-                            clip_set(&t);
-                            true
-                        }
-                        "x" => {
-                            if let Some(t) = ed.selected_text() {
-                                clip_set(&t);
-                                ed.cut_selection();
+                    // movement keys: shift extends the selection, plain drops it
+                    if matches!(
+                        text.as_str(),
+                        "\u{f700}" | "\u{f701}" | "\u{f702}" | "\u{f703}" | "\u{f729}" | "\u{f72b}"
+                    ) {
+                        ed.set_selecting(shift);
+                    }
+                    let mut it = text.chars();
+                    match (it.next(), it.next()) {
+                        (Some(c), None) => match c {
+                            '\u{8}' => {
+                                ed.backspace();
+                                true
                             }
-                            true
-                        }
-                        "v" => {
-                            if let Some(t) = clip_get() {
-                                ed.insert(&t.replace("\r\n", "\n"));
+                            '\u{7f}' => {
+                                ed.delete();
+                                true
                             }
-                            true
-                        }
-                        "z" if shift => {
-                            ed.redo();
-                            true
-                        }
-                        "z" => {
-                            ed.undo();
-                            true
-                        }
-                        "/" => {
-                            // Comment marker follows the connected engine's query
-                            // language; default to SQL when not yet connected.
-                            let engine = cur_engine
-                                .borrow()
-                                .unwrap_or(rdb_connstore::Engine::Postgres);
-                            ed.toggle_comment(crate::query_parse::comment_prefix(engine));
+                            '\n' | '\r' => {
+                                ed.newline();
+                                true
+                            }
+                            '\t' => {
+                                ed.insert("  ");
+                                true
+                            }
+                            // Esc clears the selection; without one it bubbles
+                            // up (modal close).
+                            '\u{1b}' if ed.selection().is_some() => {
+                                ed.set_selecting(false);
+                                true
+                            }
+                            '\u{f700}' => {
+                                ed.move_cursor(-1, 0);
+                                true
+                            }
+                            '\u{f701}' => {
+                                ed.move_cursor(1, 0);
+                                true
+                            }
+                            '\u{f702}' => {
+                                ed.move_cursor(0, -1);
+                                true
+                            }
+                            '\u{f703}' => {
+                                ed.move_cursor(0, 1);
+                                true
+                            }
+                            '\u{f729}' => {
+                                ed.home();
+                                true
+                            }
+                            '\u{f72b}' => {
+                                ed.end();
+                                true
+                            }
+                            c if !c.is_control() => {
+                                ed.insert(&c.to_string());
+                                true
+                            }
+                            _ => false,
+                        },
+                        (Some(_), Some(_)) if !text.starts_with('\u{f700}') => {
+                            ed.insert(&text);
                             true
                         }
                         _ => false,
                     }
                 };
                 if handled {
-                    sync_editor(0);
-                }
-                return handled;
-            }
-            let handled = {
-                let mut ed = ed_state.borrow_mut();
-                // movement keys: shift extends the selection, plain drops it
-                if matches!(
-                    text.as_str(),
-                    "\u{f700}" | "\u{f701}" | "\u{f702}" | "\u{f703}" | "\u{f729}" | "\u{f72b}"
-                ) {
-                    ed.set_selecting(shift);
-                }
-                let mut it = text.chars();
-                match (it.next(), it.next()) {
-                    (Some(c), None) => match c {
-                        '\u{8}' => {
-                            ed.backspace();
-                            true
-                        }
-                        '\u{7f}' => {
-                            ed.delete();
-                            true
-                        }
-                        '\n' | '\r' => {
-                            ed.newline();
-                            true
-                        }
-                        '\t' => {
-                            ed.insert("  ");
-                            true
-                        }
-                        // Esc clears the selection; without one it bubbles
-                        // up (modal close).
-                        '\u{1b}' if ed.selection().is_some() => {
-                            ed.set_selecting(false);
-                            true
-                        }
-                        '\u{f700}' => {
-                            ed.move_cursor(-1, 0);
-                            true
-                        }
-                        '\u{f701}' => {
-                            ed.move_cursor(1, 0);
-                            true
-                        }
-                        '\u{f702}' => {
-                            ed.move_cursor(0, -1);
-                            true
-                        }
-                        '\u{f703}' => {
-                            ed.move_cursor(0, 1);
-                            true
-                        }
-                        '\u{f729}' => {
-                            ed.home();
-                            true
-                        }
-                        '\u{f72b}' => {
-                            ed.end();
-                            true
-                        }
-                        c if !c.is_control() => {
-                            ed.insert(&c.to_string());
-                            true
-                        }
-                        _ => false,
-                    },
-                    (Some(_), Some(_)) if !text.starts_with('\u{f700}') => {
-                        ed.insert(&text);
-                        true
+                    sync_editor(pane);
+                    // Typing/deleting shifts the completion context — recompute
+                    // (pane-0 only for now).
+                    if pane == 0 {
+                        refresh_completion();
                     }
-                    _ => false,
                 }
-            };
-            if handled {
-                sync_editor(0);
-                // Typing/deleting shifts the completion context — recompute.
-                refresh_completion();
-            }
-            handled
+                handled
+            },
+        );
+        window.on_editor_key({
+            let edit_key = edit_key.clone();
+            move |text, meta, alt, shift| edit_key(0, text, meta, alt, shift)
+        });
+        window.on_p1_editor_key({
+            let edit_key = edit_key.clone();
+            move |text, meta, alt, shift| edit_key(1, text, meta, alt, shift)
         });
     }
     {
-        let ed_state = ed_state.clone();
+        let panes = panes.clone();
         let sync_editor = sync_editor.clone();
         let weak = window.as_weak();
-        window.on_editor_press(move |line, col| {
-            if let Some(w) = weak.upgrade() {
-                w.set_completion_visible(false);
+        let press: Rc<dyn Fn(usize, i32, i32)> = Rc::new(move |pane, line, col| {
+            if pane == 0 {
+                if let Some(w) = weak.upgrade() {
+                    w.set_completion_visible(false);
+                }
             }
-            ed_state.borrow_mut().move_to(line, col, false);
-            sync_editor(0);
+            panes[pane].ed_state.borrow_mut().move_to(line, col, false);
+            sync_editor(pane);
+        });
+        window.on_editor_press({
+            let press = press.clone();
+            move |line, col| press(0, line, col)
+        });
+        window.on_p1_editor_press({
+            let press = press.clone();
+            move |line, col| press(1, line, col)
         });
     }
     {
-        let ed_state = ed_state.clone();
+        let panes = panes.clone();
         let sync_editor = sync_editor.clone();
-        window.on_editor_drag(move |line, col| {
-            ed_state.borrow_mut().move_to(line, col, true);
-            sync_editor(0);
+        let drag: Rc<dyn Fn(usize, i32, i32)> = Rc::new(move |pane, line, col| {
+            panes[pane].ed_state.borrow_mut().move_to(line, col, true);
+            sync_editor(pane);
+        });
+        window.on_editor_drag({
+            let drag = drag.clone();
+            move |line, col| drag(0, line, col)
+        });
+        window.on_p1_editor_drag({
+            let drag = drag.clone();
+            move |line, col| drag(1, line, col)
         });
     }
     {
-        let ed_state = ed_state.clone();
+        let panes = panes.clone();
         let sync_editor = sync_editor.clone();
-        window.on_editor_select_word(move |line, col| {
-            ed_state.borrow_mut().select_word_at(line, col);
-            sync_editor(0);
+        let select_word: Rc<dyn Fn(usize, i32, i32)> = Rc::new(move |pane, line, col| {
+            panes[pane].ed_state.borrow_mut().select_word_at(line, col);
+            sync_editor(pane);
+        });
+        window.on_editor_select_word({
+            let select_word = select_word.clone();
+            move |line, col| select_word(0, line, col)
+        });
+        window.on_p1_editor_select_word({
+            let select_word = select_word.clone();
+            move |line, col| select_word(1, line, col)
         });
     }
 
