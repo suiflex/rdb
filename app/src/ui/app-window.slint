@@ -340,6 +340,82 @@ in-out property <string> rename-text;
     // Dual-pane split for the active SQL tab (right pane + focused pane index).
     in-out property <bool> split: false;
     in-out property <int> active-pane: 0;
+    // Pane 1 (right split pane) mirror state, filled by Rust while split is on.
+    in property <[[Span]]> p1-editor-lines;
+    in property <[int]> p1-editor-fold-state;
+    in property <[bool]> p1-editor-line-hidden;
+    in property <string> p1-editor-placeholder;
+    in property <int> p1-cursor-line;
+    in property <int> p1-cursor-col;
+    in-out property <bool> p1-editor-collapsed;
+    in-out property <length> p1-editor-h: 340px;
+    in property <[PaletteItem]> p1-completion-items;
+    in property <bool> p1-completion-visible;
+    in property <int> p1-completion-selected;
+    in property <bool> p1-find-open;
+    in property <string> p1-find-text;
+    in property <string> p1-find-status;
+    in property <bool> p1-query-running;
+    in property <bool> p1-streaming;
+    in-out property <string> p1-limit-text;
+    in property <string> p1-query-label;
+    in property <string> p1-results-meta;
+    in property <[string]> p1-result-tabs;
+    in property <int> p1-active-result;
+    in-out property <int> p1-sql-view-mode;
+    in-out property <bool> p1-filter-open;
+    in property <[GridColumn]> p1-columns;
+    in property <[GridCell]> p1-cells;
+    in property <int> p1-col-count;
+    in property <[length]> p1-col-widths;
+    in property <int> p1-result-kind;
+    in property <string> p1-result-status;
+    in property <bool> p1-status-error;
+    in property <int> p1-grid-sort-col: -1;
+    in property <bool> p1-grid-sort-asc: true;
+    in property <[string]> p1-grid-col-filters;
+    in-out property <int> p1-selected-row;
+    in-out property <int> p1-selected-col: -1;
+    in property <int> p1-editing-row: -1;
+    in property <int> p1-editing-col: -1;
+    in-out property <string> p1-editing-value;
+    in property <int> p1-scroll-grid-tick;
+    in property <int> p1-doc-view;
+    in property <[DocRow]> p1-doc-tree;
+    in property <[StructField]> p1-structure-columns;
+    in property <[IndexRow]> p1-index-rows;
+    in property <[ChartBar]> p1-chart-bars;
+    callback p1-run();
+    callback p1-run-selection();
+    callback p1-format-sql();
+    callback p1-explain-query();
+    callback p1-cancel-stream();
+    callback p1-set-limit(string);
+    callback p1-find-changed(string);
+    callback p1-find-next();
+    callback p1-find-prev();
+    callback p1-find-close();
+    callback p1-toggle-fold(int);
+    callback p1-editor-key(string, bool, bool, bool) -> bool;
+    callback p1-editor-press(int, int);
+    callback p1-editor-drag(int, int);
+    callback p1-editor-select-word(int, int);
+    callback p1-completion-choose(int);
+    callback p1-select-result-tab(int);
+    callback p1-close-result-tab(int);
+    callback p1-copy-results();
+    callback p1-export-results(int);
+    callback p1-sort-col(int);
+    callback p1-reorder-col(int, length);
+    callback p1-set-col-filter(int, string);
+    callback p1-resize-col(int, length);
+    callback p1-select-cell(int, int);
+    callback p1-edit-cell(int, int);
+    callback p1-cell-edited(int, int, string);
+    callback p1-cell-advance(int, int, string, bool);
+    callback p1-stage-cell(int, int, string);
+    callback p1-edit-cancelled();
+    callback p1-toggle-doc-node(string);
     in property <bool> palette-open;
     in property <[PaletteItem]> palette-items;
     callback new-tab();
@@ -973,6 +1049,81 @@ in-out property <string> rename-text;
                         vertical-stretch: 1;
                         split: root.split;
                         active-pane: root.active-pane;
+                        p1-editor-lines: root.p1-editor-lines;
+                        p1-editor-fold-state: root.p1-editor-fold-state;
+                        p1-editor-line-hidden: root.p1-editor-line-hidden;
+                        p1-editor-placeholder: root.p1-editor-placeholder;
+                        p1-cursor-line: root.p1-cursor-line;
+                        p1-cursor-col: root.p1-cursor-col;
+                        p1-editor-collapsed <=> root.p1-editor-collapsed;
+                        p1-editor-h <=> root.p1-editor-h;
+                        p1-completion-items: root.p1-completion-items;
+                        p1-completion-visible: root.p1-completion-visible;
+                        p1-completion-selected: root.p1-completion-selected;
+                        p1-find-open: root.p1-find-open;
+                        p1-find-text: root.p1-find-text;
+                        p1-find-status: root.p1-find-status;
+                        p1-query-running: root.p1-query-running;
+                        p1-streaming: root.p1-streaming;
+                        p1-limit-text <=> root.p1-limit-text;
+                        p1-query-label: root.p1-query-label;
+                        p1-results-meta: root.p1-results-meta;
+                        p1-result-tabs: root.p1-result-tabs;
+                        p1-active-result: root.p1-active-result;
+                        p1-sql-view-mode <=> root.p1-sql-view-mode;
+                        p1-filter-open <=> root.p1-filter-open;
+                        p1-columns: root.p1-columns;
+                        p1-cells: root.p1-cells;
+                        p1-col-count: root.p1-col-count;
+                        p1-col-widths: root.p1-col-widths;
+                        p1-result-kind: root.p1-result-kind;
+                        p1-result-status: root.p1-result-status;
+                        p1-status-error: root.p1-status-error;
+                        p1-grid-sort-col: root.p1-grid-sort-col;
+                        p1-grid-sort-asc: root.p1-grid-sort-asc;
+                        p1-grid-col-filters: root.p1-grid-col-filters;
+                        p1-selected-row <=> root.p1-selected-row;
+                        p1-selected-col <=> root.p1-selected-col;
+                        p1-editing-row: root.p1-editing-row;
+                        p1-editing-col: root.p1-editing-col;
+                        p1-editing-value <=> root.p1-editing-value;
+                        p1-scroll-grid-tick: root.p1-scroll-grid-tick;
+                        p1-doc-view: root.p1-doc-view;
+                        p1-doc-tree: root.p1-doc-tree;
+                        p1-structure-columns: root.p1-structure-columns;
+                        p1-index-rows: root.p1-index-rows;
+                        p1-chart-bars: root.p1-chart-bars;
+                        p1-run() => { root.p1-run(); }
+                        p1-run-selection() => { root.p1-run-selection(); }
+                        p1-format-sql() => { root.p1-format-sql(); }
+                        p1-explain-query() => { root.p1-explain-query(); }
+                        p1-cancel-stream() => { root.p1-cancel-stream(); }
+                        p1-set-limit(t) => { root.p1-set-limit(t); }
+                        p1-find-changed(t) => { root.p1-find-changed(t); }
+                        p1-find-next() => { root.p1-find-next(); }
+                        p1-find-prev() => { root.p1-find-prev(); }
+                        p1-find-close() => { root.p1-find-close(); }
+                        p1-toggle-fold(l) => { root.p1-toggle-fold(l); }
+                        p1-editor-key(t, cmd, alt, shift) => { root.p1-editor-key(t, cmd, alt, shift) }
+                        p1-editor-press(l, c) => { root.p1-editor-press(l, c); }
+                        p1-editor-drag(l, c) => { root.p1-editor-drag(l, c); }
+                        p1-editor-select-word(l, c) => { root.p1-editor-select-word(l, c); }
+                        p1-completion-choose(i) => { root.p1-completion-choose(i); }
+                        p1-select-result-tab(i) => { root.p1-select-result-tab(i); }
+                        p1-close-result-tab(i) => { root.p1-close-result-tab(i); }
+                        p1-copy-results() => { root.p1-copy-results(); }
+                        p1-export-results(i) => { root.p1-export-results(i); }
+                        p1-sort-col(i) => { root.p1-sort-col(i); }
+                        p1-reorder-col(i, x) => { root.p1-reorder-col(i, x); }
+                        p1-set-col-filter(i, t) => { root.p1-set-col-filter(i, t); }
+                        p1-resize-col(i, d) => { root.p1-resize-col(i, d); }
+                        p1-select-cell(r, c) => { root.p1-select-cell(r, c); }
+                        p1-edit-cell(r, c) => { root.p1-edit-cell(r, c); }
+                        p1-cell-edited(r, c, t) => { root.p1-cell-edited(r, c, t); }
+                        p1-cell-advance(r, c, t, fwd) => { root.p1-cell-advance(r, c, t, fwd); }
+                        p1-stage-cell(r, c, t) => { root.p1-stage-cell(r, c, t); }
+                        p1-edit-cancelled() => { root.p1-edit-cancelled(); }
+                        p1-toggle-doc-node(p) => { root.p1-toggle-doc-node(p); }
                         detail-visible <=> root.detail-visible;
                         detail-left: root.sidebar-right;
                         results-collapsed <=> root.results-collapsed;

@@ -117,6 +117,86 @@ export component WorkArea inherits Rectangle {
     // right. `active-pane` is the focused pane (0 left / 1 right).
     in property <bool> split: false;
     in property <int> active-pane: 0;
+
+    // ----- pane 1 (right split pane) mirror of the per-pane state above -----
+    // Pane 0 uses the base properties; Rust fills these only while `split` is on.
+    in property <[[Span]]> p1-editor-lines;
+    in property <[int]> p1-editor-fold-state;
+    in property <[bool]> p1-editor-line-hidden;
+    in property <string> p1-editor-placeholder;
+    in property <int> p1-cursor-line;
+    in property <int> p1-cursor-col;
+    in-out property <bool> p1-editor-collapsed;
+    in-out property <length> p1-editor-h: 340px;
+    in property <[PaletteItem]> p1-completion-items;
+    in property <bool> p1-completion-visible;
+    in property <int> p1-completion-selected;
+    in property <bool> p1-find-open;
+    in property <string> p1-find-text;
+    in property <string> p1-find-status;
+    in property <bool> p1-query-running;
+    in property <bool> p1-streaming;
+    in-out property <string> p1-limit-text;
+    in property <string> p1-query-label;
+    in property <string> p1-results-meta;
+    in property <[string]> p1-result-tabs;
+    in property <int> p1-active-result;
+    in-out property <int> p1-sql-view-mode;
+    in-out property <bool> p1-filter-open;
+    in property <[GridColumn]> p1-columns;
+    in property <[GridCell]> p1-cells;
+    in property <int> p1-col-count;
+    in property <[length]> p1-col-widths;
+    in property <int> p1-result-kind;
+    in property <string> p1-result-status;
+    in property <bool> p1-status-error;
+    in property <int> p1-grid-sort-col: -1;
+    in property <bool> p1-grid-sort-asc: true;
+    in property <[string]> p1-grid-col-filters;
+    in-out property <int> p1-selected-row;
+    in-out property <int> p1-selected-col: -1;
+    in property <int> p1-editing-row: -1;
+    in property <int> p1-editing-col: -1;
+    in-out property <string> p1-editing-value;
+    in property <int> p1-scroll-grid-tick;
+    in property <int> p1-doc-view;
+    in property <[DocRow]> p1-doc-tree;
+    in property <[StructField]> p1-structure-columns;
+    in property <[IndexRow]> p1-index-rows;
+    in property <[ChartBar]> p1-chart-bars;
+    // Pane 1 callbacks carry no pane arg here; they are wired to pane-1 handlers
+    // on MainWindow (a later step). Left unhandled = no-op until then.
+    callback p1-run();
+    callback p1-run-selection();
+    callback p1-format-sql();
+    callback p1-explain-query();
+    callback p1-cancel-stream();
+    callback p1-set-limit(string);
+    callback p1-find-changed(string);
+    callback p1-find-next();
+    callback p1-find-prev();
+    callback p1-find-close();
+    callback p1-toggle-fold(int);
+    callback p1-editor-key(string, bool, bool, bool) -> bool;
+    callback p1-editor-press(int, int);
+    callback p1-editor-drag(int, int);
+    callback p1-editor-select-word(int, int);
+    callback p1-completion-choose(int);
+    callback p1-select-result-tab(int);
+    callback p1-close-result-tab(int);
+    callback p1-copy-results();
+    callback p1-export-results(int);
+    callback p1-sort-col(int);
+    callback p1-reorder-col(int, length);
+    callback p1-set-col-filter(int, string);
+    callback p1-resize-col(int, length);
+    callback p1-select-cell(int, int);
+    callback p1-edit-cell(int, int);
+    callback p1-cell-edited(int, int, string);
+    callback p1-cell-advance(int, int, string, bool);
+    callback p1-stage-cell(int, int, string);
+    callback p1-edit-cancelled();
+    callback p1-toggle-doc-node(string);
     // Browse chrome shows whenever a table is open in this tab.
     property <bool> browse-mode: root.active-table != "";
     // Footer view segments: 0 Data · 1 Structure · 2 Indexes
@@ -487,12 +567,95 @@ export component WorkArea inherits Rectangle {
                 background: Tokens.chrome;
             }
 
-            // right pane — empty until its per-pane state is wired.
+            // right pane (pane 1) — driven by the p1-* mirror state.
             if root.split: QueryPane {
                 horizontal-stretch: 1;
+                // tab-global context shared with the left pane
+                browse-mode: root.browse-mode;
+                browse-editor-open: root.browse-editor-open;
                 fn-mode: root.fn-mode;
+                results-collapsed: root.results-collapsed;
+                detail-visible: root.detail-visible;
+                detail-left: root.detail-left;
+                view-mode: root.view-mode;
                 sql-capable: root.sql-capable;
                 read-only: root.read-only;
+                // per-pane state
+                editor-h <=> root.p1-editor-h;
+                query-running: root.p1-query-running;
+                streaming: root.p1-streaming;
+                limit-text <=> root.p1-limit-text;
+                query-label: root.p1-query-label;
+                run() => { root.p1-run(); }
+                run-selection() => { root.p1-run-selection(); }
+                format-sql() => { root.p1-format-sql(); }
+                explain-query() => { root.p1-explain-query(); }
+                cancel-stream() => { root.p1-cancel-stream(); }
+                set-limit(t) => { root.p1-set-limit(t); }
+                find-open: root.p1-find-open;
+                find-text: root.p1-find-text;
+                find-status: root.p1-find-status;
+                find-changed(t) => { root.p1-find-changed(t); }
+                find-next() => { root.p1-find-next(); }
+                find-prev() => { root.p1-find-prev(); }
+                find-close() => { root.p1-find-close(); }
+                editor-collapsed <=> root.p1-editor-collapsed;
+                editor-lines: root.p1-editor-lines;
+                editor-fold-state: root.p1-editor-fold-state;
+                editor-line-hidden: root.p1-editor-line-hidden;
+                editor-placeholder: root.p1-editor-placeholder;
+                cursor-line: root.p1-cursor-line;
+                cursor-col: root.p1-cursor-col;
+                toggle-fold(l) => { root.p1-toggle-fold(l); }
+                editor-key(t, cmd, alt, shift) => { root.p1-editor-key(t, cmd, alt, shift) }
+                editor-press(l, c) => { root.p1-editor-press(l, c); }
+                editor-drag(l, c) => { root.p1-editor-drag(l, c); }
+                editor-select-word(l, c) => { root.p1-editor-select-word(l, c); }
+                completion-items: root.p1-completion-items;
+                completion-visible: root.p1-completion-visible;
+                completion-selected: root.p1-completion-selected;
+                completion-choose(i) => { root.p1-completion-choose(i); }
+                results-meta: root.p1-results-meta;
+                filter-open <=> root.p1-filter-open;
+                sql-view-mode <=> root.p1-sql-view-mode;
+                result-tabs: root.p1-result-tabs;
+                active-result: root.p1-active-result;
+                select-result-tab(i) => { root.p1-select-result-tab(i); }
+                close-result-tab(i) => { root.p1-close-result-tab(i); }
+                copy-results() => { root.p1-copy-results(); }
+                export-results(i) => { root.p1-export-results(i); }
+                columns: root.p1-columns;
+                cells: root.p1-cells;
+                col-count: root.p1-col-count;
+                col-widths: root.p1-col-widths;
+                result-kind: root.p1-result-kind;
+                result-status: root.p1-result-status;
+                status-error: root.p1-status-error;
+                grid-sort-col: root.p1-grid-sort-col;
+                grid-sort-asc: root.p1-grid-sort-asc;
+                grid-col-filters: root.p1-grid-col-filters;
+                selected-row <=> root.p1-selected-row;
+                selected-col <=> root.p1-selected-col;
+                editing-row: root.p1-editing-row;
+                editing-col: root.p1-editing-col;
+                editing-value <=> root.p1-editing-value;
+                scroll-grid-tick: root.p1-scroll-grid-tick;
+                sort-col(i) => { root.p1-sort-col(i); }
+                reorder-col(i, x) => { root.p1-reorder-col(i, x); }
+                set-col-filter(i, t) => { root.p1-set-col-filter(i, t); }
+                resize-col(i, d) => { root.p1-resize-col(i, d); }
+                select-cell(r, c) => { root.p1-select-cell(r, c); }
+                edit-cell(r, c) => { root.p1-edit-cell(r, c); }
+                cell-edited(r, c, t) => { root.p1-cell-edited(r, c, t); }
+                cell-advance(r, c, t, fwd) => { root.p1-cell-advance(r, c, t, fwd); }
+                stage-cell(r, c, t) => { root.p1-stage-cell(r, c, t); }
+                edit-cancelled() => { root.p1-edit-cancelled(); }
+                doc-view: root.p1-doc-view;
+                doc-tree: root.p1-doc-tree;
+                toggle-doc-node(p) => { root.p1-toggle-doc-node(p); }
+                structure-columns: root.p1-structure-columns;
+                index-rows: root.p1-index-rows;
+                chart-bars: root.p1-chart-bars;
             }
         }
 
