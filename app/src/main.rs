@@ -1325,6 +1325,13 @@ fn set_p_query_running(w: &MainWindow, pane: usize, b: bool) {
         w.set_p1_query_running(b);
     }
 }
+fn set_p_streaming(w: &MainWindow, pane: usize, b: bool) {
+    if pane == 0 {
+        w.set_streaming(b);
+    } else {
+        w.set_p1_streaming(b);
+    }
+}
 fn set_p_completion_items(w: &MainWindow, pane: usize, m: ModelRc<PaletteItem>) {
     if pane == 0 {
         w.set_completion_items(m);
@@ -2128,11 +2135,6 @@ fn main() -> Result<(), slint::PlatformError> {
     let panes: Rc<[PaneRuntime; 2]> = Rc::new([PaneRuntime::new(), PaneRuntime::new()]);
     // Browse-mode pagination state (open container + page window + pk).
     let browse = panes[0].browse.clone();
-    // Streaming ("No limit") state, UI-thread only. `stream_cancel` is the flag
-    // the Cancel button (and a new run) flips to stop the producer; `stream_timer`
-    // is the UI-thread drain timer that appends batches to the grid.
-    let stream_cancel = panes[0].stream_cancel.clone();
-    let stream_timer = panes[0].stream_timer.clone();
     // Buffered, uncommitted grid edits (⌘S commits, Esc/Discard drops).
     let edit_buf = panes[0].edit_buf.clone();
     // The grid currently on screen (post client-side filter): edit-buffer row
@@ -5143,29 +5145,30 @@ fn main() -> Result<(), slint::PlatformError> {
     // progressively and stays cancelable instead of freezing. The query text
     // reaches the driver verbatim — clean log, no injected LIMIT. A UI-thread
     // timer drains batches into the grid; an off-thread task does the fetch. -----
-    let run_stream: Rc<dyn Fn(String)> = {
+    let run_stream: Rc<dyn Fn(usize, String)> = {
         let weak = window.as_weak();
         let rt = rt.clone();
         let current = current.clone();
         let query_console = query_console.clone();
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
-        let results = results.clone();
-        let active_result = active_result.clone();
+        let panes = panes.clone();
         let last_view = last_view.clone();
-        let displayed_grid = displayed_grid.clone();
-        let hidden_cols = hidden_cols.clone();
-        let sort_state = sort_state.clone();
-        let col_order = col_order.clone();
-        let col_filters = col_filters.clone();
-        let edit_buf = edit_buf.clone();
-        let browse = browse.clone();
-        let stream_cancel = stream_cancel.clone();
-        let stream_timer = stream_timer.clone();
-        Rc::new(move |sql: String| {
+        Rc::new(move |pane, sql: String| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            let results = panes[pane].results.clone();
+            let active_result = panes[pane].active_result.clone();
+            let displayed_grid = panes[pane].displayed_grid.clone();
+            let hidden_cols = panes[pane].hidden_cols.clone();
+            let sort_state = panes[pane].sort_state.clone();
+            let col_order = panes[pane].col_order.clone();
+            let col_filters = panes[pane].col_filters.clone();
+            let edit_buf = panes[pane].edit_buf.clone();
+            let browse = panes[pane].browse.clone();
+            let stream_cancel = panes[pane].stream_cancel.clone();
+            let stream_timer = panes[pane].stream_timer.clone();
             let Some(target_id) = active_tab_id.lock().unwrap().clone() else {
                 return;
             };
@@ -5186,14 +5189,18 @@ fn main() -> Result<(), slint::PlatformError> {
                 .find(|t| t.id == target_id)
             {
                 tab.loading = true;
-                tab.query_text = sql.clone();
+                if pane == 0 {
+                    tab.query_text = sql.clone();
+                } else {
+                    tab.pane1_query = sql.clone();
+                }
             }
-            w.set_query_running(true);
-            w.set_streaming(true);
+            set_p_query_running(&w, pane, true);
+            set_p_streaming(&w, pane, true);
             w.set_grid_read_only(true);
-            clear_grid(&w, 0);
-            w.set_result_status(SharedString::from("streaming…"));
-            w.set_results_meta(SharedString::default());
+            clear_grid(&w, pane);
+            set_p_result_status(&w, pane, SharedString::from("streaming…"));
+            set_p_results_meta(&w, pane, SharedString::default());
 
             // UI-thread accumulator (for filter/sort/export after the stream) and
             // the live cell model we push each batch into.
@@ -5223,6 +5230,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let active_tab_id = active_tab_id.clone();
                 let stream_timer_stop = stream_timer.clone();
                 let target_id = target_id.clone();
+                let pane = pane;
                 timer.start(
                     slint::TimerMode::Repeated,
                     std::time::Duration::from_millis(50),
@@ -5240,12 +5248,14 @@ fn main() -> Result<(), slint::PlatformError> {
                                             type_name: c.type_name.clone().into(),
                                         })
                                         .collect();
-                                    w.set_grid_col_count(gcols.len() as i32);
-                                    w.set_grid_columns(ModelRc::from(Rc::new(VecModel::from(
-                                        gcols,
-                                    ))));
+                                    set_p_col_count(&w, pane, gcols.len() as i32);
+                                    set_p_columns(
+                                        &w,
+                                        pane,
+                                        ModelRc::from(Rc::new(VecModel::from(gcols))),
+                                    );
                                     let vm = Rc::new(VecModel::<GridCell>::default());
-                                    w.set_grid_cells(ModelRc::from(vm.clone()));
+                                    set_p_cells(&w, pane, ModelRc::from(vm.clone()));
                                     *cells_model.borrow_mut() = Some(vm);
                                     *accum.borrow_mut() = model::GridModel {
                                         columns: cols,
@@ -5270,10 +5280,14 @@ fn main() -> Result<(), slint::PlatformError> {
                                             }
                                             acc.rows.push(vmrow);
                                         }
-                                        w.set_result_status(SharedString::from(format!(
-                                            "loaded {}",
-                                            acc.rows.len()
-                                        )));
+                                        set_p_result_status(
+                                            &w,
+                                            pane,
+                                            SharedString::from(format!(
+                                                "loaded {}",
+                                                acc.rows.len()
+                                            )),
+                                        );
                                     }
                                 }
                                 Ok(StreamMsg::Done { capped, elapsed_ms }) => {
@@ -5297,18 +5311,22 @@ fn main() -> Result<(), slint::PlatformError> {
                                         .find(|t| t.id == target_id)
                                     {
                                         tab.loading = false;
-                                        tab.view = Some(sr.clone());
-                                        tab.results = vec![sr.clone()];
-                                        tab.active_result = 0;
+                                        if pane == 0 {
+                                            tab.view = Some(sr.clone());
+                                            tab.results = vec![sr.clone()];
+                                            tab.active_result = 0;
+                                        } else {
+                                            tab.pane1_view = Some(sr.clone());
+                                        }
                                     }
                                     if active_tab_id.lock().unwrap().as_deref() == Some(&target_id)
                                     {
                                         *results.lock().unwrap() = vec![sr];
                                         *active_result.lock().unwrap() = 0;
-                                        set_result_tabs(&w, 0, 1, 0);
+                                        set_result_tabs(&w, pane, 1, 0);
                                         present_view(
                                             &w,
-                                            0,
+                                            pane,
                                             view,
                                             &meta,
                                             &latency,
@@ -5321,8 +5339,8 @@ fn main() -> Result<(), slint::PlatformError> {
                                             &edit_buf,
                                             &browse,
                                         );
-                                        w.set_query_running(false);
-                                        w.set_streaming(false);
+                                        set_p_query_running(&w, pane, false);
+                                        set_p_streaming(&w, pane, false);
                                     }
                                     if let Some(t) = stream_timer_stop.borrow().as_ref() {
                                         t.stop();
@@ -5342,11 +5360,11 @@ fn main() -> Result<(), slint::PlatformError> {
                                     {
                                         apply_result(
                                             &w,
-                                            0,
+                                            pane,
                                             model::ResultView::Affected(format!("error: {e}")),
                                         );
-                                        w.set_query_running(false);
-                                        w.set_streaming(false);
+                                        set_p_query_running(&w, pane, false);
+                                        set_p_streaming(&w, pane, false);
                                     }
                                     if let Some(t) = stream_timer_stop.borrow().as_ref() {
                                         t.stop();
@@ -5355,8 +5373,8 @@ fn main() -> Result<(), slint::PlatformError> {
                                 }
                                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
                                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                                    w.set_query_running(false);
-                                    w.set_streaming(false);
+                                    set_p_query_running(&w, pane, false);
+                                    set_p_streaming(&w, pane, false);
                                     if let Some(t) = stream_timer_stop.borrow().as_ref() {
                                         t.stop();
                                     }
@@ -5480,7 +5498,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         .map(|e| is_bare_select(e, &text))
                         .unwrap_or(false);
                 if stream {
-                    run_stream(text);
+                    run_stream(0, text);
                 } else {
                     run_sql(0, text);
                 }
@@ -5491,10 +5509,13 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // ----- run query in the right split pane (buffered; streaming is pane-0) --
+    // ----- run query in the right split pane -----
     {
         let run_sql = run_sql.clone();
+        let run_stream = run_stream.clone();
         let panes = panes.clone();
+        let cur_engine = cur_engine.clone();
+        let weak = window.as_weak();
         let recent_queries = recent_queries.clone();
         let run_p1 = move || {
             let text = {
@@ -5508,7 +5529,22 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             }
             record_recent(&recent_queries, &text);
-            run_sql(1, text);
+            let stream = weak
+                .upgrade()
+                .map(|w| {
+                    panes[1].browse.lock().unwrap().limit == 0
+                        && cur_engine
+                            .borrow()
+                            .map(|e| is_bare_select(e, &text))
+                            .unwrap_or(false)
+                        && active_tab_kind(&w) != "table"
+                })
+                .unwrap_or(false);
+            if stream {
+                run_stream(1, text);
+            } else {
+                run_sql(1, text);
+            }
         };
         window.on_p1_run(run_p1.clone());
         window.on_p1_run_selection(run_p1);
@@ -5622,7 +5658,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 record_recent(&recent_queries, &stmt);
                 if stream {
-                    run_stream(stmt);
+                    run_stream(0, stmt);
                 } else {
                     run_sql(0, stmt);
                 }
@@ -5633,13 +5669,25 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- Cancel a running stream ("No limit" fetch) -----
     {
         let weak = window.as_weak();
-        let stream_cancel = stream_cancel.clone();
+        let panes = panes.clone();
         window.on_cancel_stream(move || {
-            if let Some(c) = stream_cancel.borrow().as_ref() {
+            if let Some(c) = panes[0].stream_cancel.borrow().as_ref() {
                 c.store(true, std::sync::atomic::Ordering::SeqCst);
             }
             if let Some(w) = weak.upgrade() {
-                w.set_streaming(false);
+                set_p_streaming(&w, 0, false);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_cancel_stream(move || {
+            if let Some(c) = panes[1].stream_cancel.borrow().as_ref() {
+                c.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            if let Some(w) = weak.upgrade() {
+                set_p_streaming(&w, 1, false);
             }
         });
     }
@@ -5670,6 +5718,33 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         });
     }
+    {
+        let weak = window.as_weak();
+        let run_sql = run_sql.clone();
+        let panes = panes.clone();
+        window.on_p1_explain_query(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if !w.get_sql_capable() {
+                return;
+            }
+            let text = panes[1].ed_state.borrow().text();
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                return;
+            }
+            w.set_grid_read_only(true);
+            run_sql(
+                1,
+                if trimmed.to_uppercase().starts_with("EXPLAIN") {
+                    trimmed.to_string()
+                } else {
+                    format!("EXPLAIN {trimmed}")
+                },
+            );
+        });
+    }
 
     // ----- Format button: tidy the editor SQL in place -----
     {
@@ -5681,6 +5756,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 if !text.trim().is_empty() {
                     load_editor_text(0, &sql_format::format(&text));
                 }
+            }
+        });
+    }
+    {
+        let load_editor_text = load_editor_text.clone();
+        let panes = panes.clone();
+        window.on_p1_format_sql(move || {
+            let text = panes[1].ed_state.borrow().text();
+            if !text.trim().is_empty() {
+                load_editor_text(1, &sql_format::format(&text));
             }
         });
     }
@@ -6081,6 +6166,28 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             echo(&w, l);
             run_browse();
+        });
+    }
+
+    {
+        let panes = panes.clone();
+        window.on_p1_set_limit(move |text| {
+            let lower = text.trim().to_ascii_lowercase();
+            let limit = if lower.is_empty()
+                || lower == "0"
+                || lower == "all"
+                || lower == "none"
+                || lower.contains("no limit")
+            {
+                0
+            } else {
+                let digits: String = text.chars().filter(|c| c.is_ascii_digit()).collect();
+                let Some(limit) = digits.parse::<u64>().ok().map(|n| n.clamp(1, 10_000)) else {
+                    return;
+                };
+                limit
+            };
+            panes[1].browse.lock().unwrap().limit = limit;
         });
     }
 
