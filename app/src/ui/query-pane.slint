@@ -25,6 +25,8 @@ export component QueryPane inherits Rectangle {
     in property <bool> read-only: true;
     // Whether the tab is currently split (drives the toggle button label).
     in property <bool> split: false;
+    // This pane has editor focus (shows an accent bar while split).
+    in property <bool> active: false;
     callback toggle-split();
 
     // ----- editor toolbar -----
@@ -733,5 +735,13 @@ export component QueryPane inherits Rectangle {
                 }
             }
         }
+    }
+
+    // Accent bar marks the focused pane while split.
+    if root.active: Rectangle {
+        y: 0;
+        height: 2px;
+        width: 100%;
+        background: Tokens.accent;
     }
 }

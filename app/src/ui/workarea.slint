@@ -478,6 +478,7 @@ export component WorkArea inherits Rectangle {
             width: root.split ? (parent.width - 6px) / 2 : parent.width;
             height: 100%;
             split: root.split;
+            active: root.split && root.active-pane == 0;
             toggle-split() => { root.toggle-split(); }
             browse-mode: root.browse-mode;
             browse-editor-open: root.browse-editor-open;
@@ -579,6 +580,7 @@ export component WorkArea inherits Rectangle {
                 width: (parent.width - 6px) / 2;
                 height: 100%;
                 split: root.split;
+                active: root.split && root.active-pane == 1;
                 toggle-split() => { root.toggle-split(); }
                 // tab-global context shared with the left pane
                 browse-mode: root.browse-mode;

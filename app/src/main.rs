@@ -2564,8 +2564,11 @@ fn main() -> Result<(), slint::PlatformError> {
         let sync_editor = sync_editor.clone();
         let weak = window.as_weak();
         let press: Rc<dyn Fn(usize, i32, i32)> = Rc::new(move |pane, line, col| {
-            if pane == 0 {
-                if let Some(w) = weak.upgrade() {
+            if let Some(w) = weak.upgrade() {
+                // Clicking a pane focuses it: drives the accent + which pane
+                // global shortcuts fall back to.
+                w.set_active_pane(pane as i32);
+                if pane == 0 {
                     w.set_completion_visible(false);
                 }
             }
