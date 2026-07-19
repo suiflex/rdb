@@ -534,6 +534,8 @@ struct WorkspaceTab {
     indexes: Vec<(String, String)>,
     loading: bool,
     pinned: bool,
+    // Workspace group that owns this tab: 0 is left, 1 is right.
+    group: usize,
     // Dual-pane split state for this tab. Right-pane results stay in memory
     // like the left pane; only the SQL text is persisted to disk.
     split: bool,
@@ -558,6 +560,7 @@ impl WorkspaceTab {
             indexes: Vec::new(),
             loading: false,
             pinned: true,
+            group: 0,
             split: false,
             split_ratio: 0.5,
             pane1_query: String::new(),
@@ -738,6 +741,8 @@ struct PersistedTab {
     title: String,
     query_text: String,
     #[serde(default)]
+    group: usize,
+    #[serde(default)]
     split: bool,
     #[serde(default)]
     pane1_query: String,
@@ -771,6 +776,7 @@ fn save_query_tabs(tabs: &[WorkspaceTab], active: Option<&str>) {
             id: t.id.clone(),
             title: t.title.clone(),
             query_text: t.query_text.clone(),
+            group: t.group.min(1),
             split: t.split,
             pane1_query: t.pane1_query.clone(),
             split_ratio: t.split_ratio,
@@ -807,6 +813,7 @@ fn load_query_tabs() -> (Vec<WorkspaceTab>, Option<String>) {
             let mut t = WorkspaceTab::sql(p.id, 0);
             t.title = p.title;
             t.query_text = p.query_text;
+            t.group = p.group.min(1);
             t.split = p.split;
             t.pane1_query = p.pane1_query;
             t.split_ratio = p.split_ratio.clamp(0.2, 0.8);
@@ -3077,6 +3084,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     indexes: Vec::new(),
                     loading: false,
                     pinned: true,
+                    group: 0,
                     split: false,
                     split_ratio: 0.5,
                     pane1_query: String::new(),
@@ -6231,6 +6239,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     indexes: Vec::new(),
                     loading: true,
                     pinned: false,
+                    group: 0,
                     split: false,
                     split_ratio: 0.5,
                     pane1_query: String::new(),
@@ -8353,6 +8362,7 @@ mod tests {
                     id: "query:c:1".into(),
                     title: "Query 1".into(),
                     query_text: "select * from users;".into(),
+                    group: 1,
                     split: true,
                     pane1_query: "select * from orders;".into(),
                     split_ratio: 0.35,
@@ -8361,6 +8371,7 @@ mod tests {
                     id: "query:c:2".into(),
                     title: "scratch".into(),
                     query_text: String::new(),
+                    group: 0,
                     split: false,
                     pane1_query: String::new(),
                     split_ratio: 0.5,
@@ -8372,6 +8383,7 @@ mod tests {
         let back: PersistedTabs = serde_json::from_str(&json).unwrap();
         assert_eq!(back.tabs.len(), 2);
         assert_eq!(back.tabs[0].query_text, "select * from users;");
+        assert_eq!(back.tabs[0].group, 1);
         assert!(back.tabs[0].split);
         assert_eq!(back.tabs[0].pane1_query, "select * from orders;");
         assert_eq!(back.tabs[0].split_ratio, 0.35);
@@ -8385,6 +8397,7 @@ mod tests {
         )
         .unwrap();
         assert!(!payload.tabs[0].split);
+        assert_eq!(payload.tabs[0].group, 0);
         assert!(payload.tabs[0].pane1_query.is_empty());
         assert_eq!(payload.tabs[0].split_ratio, 0.5);
     }
