@@ -342,6 +342,7 @@ in-out property <string> rename-text;
     in property <[TabItem]> p1-tabs;
     in-out property <int> p1-active-tab: -1;
     callback select-p1-tab(int);
+    callback close-p1-tab(int);
     callback move-tab-group(int, int);
     // Dual-pane split for the active SQL tab (right pane + focused pane index).
     in-out property <bool> split: false;
@@ -934,14 +935,21 @@ in-out property <string> rename-text;
                     min-width: 340px;
                     max-width: 100000px;
                     spacing: 0px;
-                    // ----- doc-tab row (36px, tabs h30, active = card + accent top inset) -----
+                    // Each workspace group owns a tab strip directly above its
+                    // preview. `split` here means a second tab group exists;
+                    // it is no longer a second editor inside one document tab.
                     if root.tabs.length > 0: tabbar := Rectangle {
                         height: Tokens.doc-tab-row-h;
                         background: Tokens.chrome;
-                        HorizontalLayout {
-                            padding-left: Tokens.sp2;
-                            padding-top: Tokens.doc-tab-row-h - Tokens.doc-tab-h;
-                            spacing: Tokens.sp1;
+                        left-group := Rectangle {
+                            x: 0;
+                            width: root.split ? (parent.width - 6px) * root.split-ratio : parent.width;
+                            height: parent.height;
+                            clip: true;
+                            HorizontalLayout {
+                                padding-left: Tokens.sp2;
+                                padding-top: Tokens.doc-tab-row-h - Tokens.doc-tab-h;
+                                spacing: Tokens.sp1;
                             for tab[i] in root.tabs: Rectangle {
                                 width: min(170px, tab-content.preferred-width + 2 * Tokens.sp3);
                                 height: Tokens.doc-tab-h;
@@ -963,7 +971,7 @@ in-out property <string> rename-text;
                                         }
                                     }
                                     clicked => {
-                                        root.select-tab(i);
+                                        if !self.dragging { root.select-tab(i); }
                                     }
                                     double-clicked => {
                                         root.pin-tab(i);
@@ -1014,26 +1022,6 @@ in-out property <string> rename-text;
                                         font-italic: tab.preview;
                                         overflow: elide;
                                     }
-                                    // rename affordance (active or hovered tab)
-                                    Rectangle {
-                                        width: 18px;
-                                        height: 18px;
-                                        y: (parent.height - self.height) / 2;
-                                        border-radius: 4px;
-                                        background: rename-ta.has-hover ? Tokens.card : transparent;
-                                        visible: i == root.active-tab || tab-ta.has-hover;
-                                        rename-ta := TouchArea {
-                                            clicked => {
-                                                root.open-rename(i, tab.title);
-                                            }
-                                        }
-
-                                        AppIcon {
-                                            name: "pencil";
-                                            size: 11px;
-                                            color: rename-ta.has-hover ? Tokens.text : Tokens.text-dim;
-                                        }
-                                    }
                                     // close affordance (active or hovered tab)
                                     Rectangle {
                                         width: 18px;
@@ -1056,11 +1044,19 @@ in-out property <string> rename-text;
                                     }
                                 }
                             }
-                            if root.p1-tabs.length > 0: Rectangle {
-                                width: 1px;
-                                height: parent.height - Tokens.sp2;
-                                background: Tokens.border-strong;
+                                Rectangle { horizontal-stretch: 1; }
                             }
+                        }
+                        if root.split: Rectangle {
+                            x: (parent.width - 6px) * root.split-ratio + 6px;
+                            width: (parent.width - 6px) * (1 - root.split-ratio);
+                            height: parent.height;
+                            clip: true;
+                            background: Tokens.chrome;
+                            HorizontalLayout {
+                                padding-left: Tokens.sp2;
+                                padding-top: Tokens.doc-tab-row-h - Tokens.doc-tab-h;
+                                spacing: Tokens.sp1;
                             for tab[i] in root.p1-tabs: Rectangle {
                                 width: min(170px, p1-tab-content.preferred-width + 2 * Tokens.sp3);
                                 height: Tokens.doc-tab-h;
@@ -1080,7 +1076,9 @@ in-out property <string> rename-text;
                                             root.move-tab-group(i, 0);
                                         }
                                     }
-                                    clicked => { root.select-p1-tab(i); }
+                                    clicked => {
+                                        if !self.dragging { root.select-p1-tab(i); }
+                                    }
                                 }
                                 if i == root.p1-active-tab: Rectangle {
                                     y: 0;
@@ -1105,12 +1103,25 @@ in-out property <string> rename-text;
                                         font-weight: i == root.p1-active-tab ? Tokens.weight-emphasis : 400;
                                         overflow: elide;
                                     }
+                                    Rectangle {
+                                        width: 18px;
+                                        height: 18px;
+                                        y: (parent.height - self.height) / 2;
+                                        border-radius: 4px;
+                                        background: p1-close-ta.has-hover ? Tokens.error : transparent;
+                                        visible: i == root.p1-active-tab || p1-tab-ta.has-hover;
+                                        p1-close-ta := TouchArea {
+                                            clicked => { root.close-p1-tab(i); }
+                                        }
+                                        AppIcon {
+                                            name: "close";
+                                            size: 11px;
+                                            color: p1-close-ta.has-hover ? white : Tokens.text-dim;
+                                        }
+                                    }
                                 }
                             }
-                            // trailing filler: gives the tab bar an infinite max-width
-                            // so the work column (and the window) can stretch full-width
-                            Rectangle {
-                                horizontal-stretch: 1;
+                                Rectangle { horizontal-stretch: 1; }
                             }
                         }
                     }

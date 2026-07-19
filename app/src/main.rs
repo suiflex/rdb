@@ -616,6 +616,7 @@ fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&
         })
         .collect();
     w.set_p1_tabs(ModelRc::from(Rc::new(VecModel::from(p1_items))));
+    w.set_split(!right.is_empty());
     if right.is_empty() {
         w.set_p1_active_tab(-1);
     }
@@ -2323,26 +2324,6 @@ fn main() -> Result<(), slint::PlatformError> {
     };
     load_editor_text(0, "");
 
-    // ----- toggle the dual-pane split for the active SQL tab -----
-    {
-        let weak = window.as_weak();
-        let sync_editor = sync_editor.clone();
-        window.on_toggle_split(move || {
-            let Some(w) = weak.upgrade() else {
-                return;
-            };
-            let now = !w.get_split();
-            w.set_split(now);
-            if now {
-                // Render the right pane's (initially empty) editor + result.
-                sync_editor(1);
-                clear_grid(&w, 1);
-                set_p_result_status(&w, 1, SharedString::default());
-                set_p_results_meta(&w, 1, SharedString::default());
-            }
-        });
-    }
-
     // ----- toggle a statement fold from the gutter arrow -----
     {
         let panes = panes.clone();
@@ -3789,7 +3770,6 @@ fn main() -> Result<(), slint::PlatformError> {
         let tabs = workspace_tabs.clone();
         let active_id = active_tab_id.clone();
         let ed_state = ed_state.clone();
-        let panes = panes.clone();
         let browse = browse.clone();
         let results = results.clone();
         let active_result = active_result.clone();
@@ -3804,20 +3784,6 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             tab.query_text = ed_state.borrow().text();
             tab.loading = w.get_query_running();
-            // Dual-pane split rides with SQL tabs (right-pane text only).
-            tab.split = tab.kind == "sql" && w.get_split();
-            tab.split_ratio = w.get_split_ratio().clamp(0.2, 0.8);
-            tab.pane1_query = if tab.kind == "sql" {
-                panes[1].ed_state.borrow().text()
-            } else {
-                String::new()
-            };
-            tab.pane1_results = if tab.kind == "sql" {
-                panes[1].results.lock().unwrap().clone()
-            } else {
-                Vec::new()
-            };
-            tab.pane1_active_result = *panes[1].active_result.lock().unwrap();
             if tab.kind == "table" {
                 tab.browse = browse.lock().unwrap().clone();
             } else if tab.kind == "sql" {
@@ -3837,12 +3803,36 @@ fn main() -> Result<(), slint::PlatformError> {
         })
     };
 
+    // The second workspace group has its own live editor/result runtime. Save
+    // it before selecting, closing, or moving one of its tabs just like the
+    // left group; otherwise a drag could move an older snapshot.
+    let save_p1_tab: Rc<dyn Fn(&MainWindow)> = {
+        let tabs = workspace_tabs.clone();
+        let active_id = active_p1_tab_id.clone();
+        let panes = panes.clone();
+        Rc::new(move |w| {
+            let Some(id) = active_id.lock().unwrap().clone() else {
+                return;
+            };
+            let mut tabs = tabs.lock().unwrap();
+            let Some(tab) = tabs.iter_mut().find(|tab| tab.id == id) else {
+                return;
+            };
+            tab.query_text = panes[1].ed_state.borrow().text();
+            tab.loading = w.get_p1_query_running();
+            if tab.kind == "sql" {
+                tab.results = panes[1].results.lock().unwrap().clone();
+                tab.active_result = *panes[1].active_result.lock().unwrap();
+            }
+            save_query_tabs(&tabs, None);
+        })
+    };
+
     #[allow(clippy::type_complexity)]
     let restore_tab: Rc<dyn Fn(&MainWindow, usize)> = {
         let tabs = workspace_tabs.clone();
         let active_id = active_tab_id.clone();
         let load_editor_text = load_editor_text.clone();
-        let panes = panes.clone();
         let browse = browse.clone();
         let results = results.clone();
         let active_result = active_result.clone();
@@ -3867,38 +3857,7 @@ fn main() -> Result<(), slint::PlatformError> {
             drop(tabs_guard);
 
             load_editor_text(0, &tab.query_text);
-            // Restore this tab's dual-pane split, right-pane editor text and its
-            // last result so the split survives a tab switch intact.
-            w.set_split(tab.split);
-            w.set_split_ratio(tab.split_ratio.clamp(0.2, 0.8));
             w.set_active_pane(0);
-            load_editor_text(1, &tab.pane1_query);
-            if let Some(stored) = tab.pane1_results.get(tab.pane1_active_result).cloned() {
-                *panes[1].results.lock().unwrap() = tab.pane1_results.clone();
-                *panes[1].active_result.lock().unwrap() = tab.pane1_active_result;
-                set_result_tabs(w, 1, tab.pane1_results.len(), tab.pane1_active_result);
-                present_view(
-                    w,
-                    1,
-                    stored.view,
-                    &stored.meta,
-                    &stored.latency,
-                    &last_view,
-                    &panes[1].displayed_grid,
-                    &panes[1].hidden_cols,
-                    &panes[1].sort_state,
-                    &panes[1].col_order,
-                    &panes[1].col_filters,
-                    &panes[1].edit_buf,
-                    &panes[1].browse,
-                );
-            } else {
-                *panes[1].results.lock().unwrap() = Vec::new();
-                set_result_tabs(w, 1, 0, 0);
-                clear_grid(w, 1);
-                set_p_result_status(w, 1, SharedString::default());
-                set_p_results_meta(w, 1, SharedString::default());
-            }
             w.set_fn_mode(tab.kind == "function");
             w.set_query_running(tab.loading);
             w.set_active_table(
@@ -3986,7 +3945,7 @@ fn main() -> Result<(), slint::PlatformError> {
             *panes[1].active_result.lock().unwrap() = tab.active_result;
             set_result_tabs(w, 1, tab.results.len(), tab.active_result);
             w.set_p1_active_tab(group_index as i32);
-            w.set_split(true);
+            w.set_active_pane(1);
             let selected = if tab.kind == "sql" {
                 tab.results.get(tab.active_result).cloned().or(tab.view)
             } else {
@@ -4018,9 +3977,11 @@ fn main() -> Result<(), slint::PlatformError> {
 
     {
         let restore_p1_tab = restore_p1_tab.clone();
+        let save_p1_tab = save_p1_tab.clone();
         let weak = window.as_weak();
         window.on_select_p1_tab(move |index| {
             if let Some(w) = weak.upgrade() {
+                save_p1_tab(&w);
                 restore_p1_tab(&w, index.max(0) as usize);
             }
         });
@@ -4029,18 +3990,24 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let tabs = workspace_tabs.clone();
         let save_active_tab = save_active_tab.clone();
+        let save_p1_tab = save_p1_tab.clone();
         let restore_tab = restore_tab.clone();
         let restore_p1_tab = restore_p1_tab.clone();
         let active_p1_tab_id = active_p1_tab_id.clone();
+        let active_tab_id = active_tab_id.clone();
         window.on_move_tab_group(move |index, target| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
             let target = target.clamp(0, 1) as usize;
             save_active_tab(&w);
+            save_p1_tab(&w);
             let source = if target == 1 { 0 } else { 1 };
             let moved_id = {
                 let mut tabs = tabs.lock().unwrap();
+                if source == 0 && tabs.iter().filter(|tab| tab.group == 0).count() == 1 {
+                    return;
+                }
                 let Some(tab) = tabs
                     .iter_mut()
                     .filter(|tab| tab.group == source)
@@ -4051,23 +4018,27 @@ fn main() -> Result<(), slint::PlatformError> {
                 tab.group = target;
                 tab.id.clone()
             };
-            let tabs_guard = tabs.lock().unwrap();
-            set_workspace_tabs(&w, &tabs_guard, Some(&moved_id));
-            drop(tabs_guard);
-            if target == 1 {
-                restore_p1_tab(&w, 0);
+            let (left_index, right_index, left_id) = {
+                let tabs = tabs.lock().unwrap();
+                let left_index = tabs.iter().position(|tab| tab.group == 0);
+                let left_id = left_index.map(|index| tabs[index].id.clone());
+                let right_index = tabs
+                    .iter()
+                    .filter(|tab| tab.group == 1)
+                    .position(|tab| tab.id == moved_id)
+                    .or_else(|| tabs.iter().filter(|tab| tab.group == 1).position(|_| true));
+                set_workspace_tabs(&w, &tabs, left_id.as_deref());
+                (left_index, right_index, left_id)
+            };
+            *active_tab_id.lock().unwrap() = left_id;
+            if let Some(index) = left_index {
+                restore_tab(&w, index);
+            }
+            if let Some(index) = right_index {
+                restore_p1_tab(&w, index);
             } else {
                 *active_p1_tab_id.lock().unwrap() = None;
-                let tabs_guard = tabs.lock().unwrap();
-                let index = workspace_tab_index(&tabs_guard, Some(&moved_id));
-                drop(tabs_guard);
-                if let Some(index) = index {
-                    restore_tab(&w, index);
-                }
-                if !tabs.lock().unwrap().iter().any(|tab| tab.group == 1) {
-                    w.set_split(false);
-                    w.set_p1_active_tab(-1);
-                }
+                w.set_p1_active_tab(-1);
             }
         });
     }
@@ -6495,7 +6466,13 @@ fn main() -> Result<(), slint::PlatformError> {
         window.on_pin_tab(move |index| {
             let active = active_tab_id.lock().unwrap().clone();
             let mut tabs = workspace_tabs.lock().unwrap();
-            if let Some(tab) = tabs.get_mut(index as usize) {
+            let index = tabs
+                .iter()
+                .enumerate()
+                .filter(|(_, tab)| tab.group == 0)
+                .nth(index.max(0) as usize)
+                .map(|(index, _)| index);
+            if let Some(tab) = index.and_then(|index| tabs.get_mut(index)) {
                 tab.pinned = true;
                 if let Some(w) = weak.upgrade() {
                     set_workspace_tabs(&w, &tabs, active.as_deref());
@@ -6981,14 +6958,7 @@ fn main() -> Result<(), slint::PlatformError> {
             *last_view.lock().unwrap() = None;
             set_result_tabs(&w, 0, 0, 0);
             clear_grid(&w, 0);
-            // A fresh tab is never split; clear the right pane too.
-            w.set_split(false);
-            w.set_split_ratio(0.5);
             w.set_active_pane(0);
-            load_editor_text(1, "");
-            clear_grid(&w, 1);
-            set_p_result_status(&w, 1, SharedString::default());
-            set_p_results_meta(&w, 1, SharedString::default());
             w.set_active_table(SharedString::default());
             w.set_fn_mode(false);
             w.set_query_running(false);
@@ -7274,11 +7244,21 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             }
             let remove_at = if requested >= 0 {
-                requested as usize
+                tabs.iter()
+                    .enumerate()
+                    .filter(|(_, tab)| tab.group == 0)
+                    .nth(requested as usize)
+                    .map(|(index, _)| index)
+                    .unwrap_or(tabs.len())
             } else {
                 workspace_tab_index(&tabs, active_tab_id.lock().unwrap().as_deref()).unwrap_or(0)
             };
             if remove_at >= tabs.len() {
+                return;
+            }
+            if tabs.iter().filter(|tab| tab.group == 0).count() == 1
+                && tabs.iter().any(|tab| tab.group == 1)
+            {
                 return;
             }
             let removed_active =
@@ -7306,9 +7286,22 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             }
             if removed_active {
-                let next = remove_at.min(tabs.len() - 1);
+                let next = tabs
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, tab)| tab.group == 0)
+                    .nth(requested.max(0) as usize)
+                    .map(|(index, _)| index)
+                    .or_else(|| {
+                        tabs.iter()
+                            .enumerate()
+                            .find(|(_, tab)| tab.group == 0)
+                            .map(|(index, _)| index)
+                    });
                 drop(tabs);
-                restore_tab(&w, next);
+                if let Some(next) = next {
+                    restore_tab(&w, next);
+                }
             } else {
                 let active = active_tab_id.lock().unwrap().clone();
                 set_workspace_tabs(&w, &tabs, active.as_deref());
@@ -7317,6 +7310,51 @@ fn main() -> Result<(), slint::PlatformError> {
                 &workspace_tabs.lock().unwrap(),
                 active_tab_id.lock().unwrap().as_deref(),
             );
+        });
+    }
+
+    // Closing a right-group tab uses the right group's filtered index. When its
+    // last tab closes, `set_workspace_tabs` removes the whole second group.
+    {
+        let weak = window.as_weak();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_p1_tab_id = active_p1_tab_id.clone();
+        let save_p1_tab = save_p1_tab.clone();
+        let restore_p1_tab = restore_p1_tab.clone();
+        let active_tab_id = active_tab_id.clone();
+        window.on_close_p1_tab(move |requested| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if requested < 0 {
+                return;
+            }
+            save_p1_tab(&w);
+            let remove_at = {
+                let tabs = workspace_tabs.lock().unwrap();
+                tabs.iter()
+                    .enumerate()
+                    .filter(|(_, tab)| tab.group == 1)
+                    .nth(requested as usize)
+                    .map(|(index, _)| index)
+            };
+            let Some(remove_at) = remove_at else {
+                return;
+            };
+            let mut tabs = workspace_tabs.lock().unwrap();
+            tabs.remove(remove_at);
+            let remaining = tabs.iter().filter(|tab| tab.group == 1).count();
+            let active = active_tab_id.lock().unwrap().clone();
+            set_workspace_tabs(&w, &tabs, active.as_deref());
+            save_query_tabs(&tabs, active.as_deref());
+            drop(tabs);
+            if remaining == 0 {
+                *active_p1_tab_id.lock().unwrap() = None;
+                load_editor_text(1, "");
+                clear_grid(&w, 1);
+            } else {
+                restore_p1_tab(&w, requested.min((remaining - 1) as i32) as usize);
+            }
         });
     }
 
@@ -7364,14 +7402,24 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            if idx < 0 || idx as usize >= workspace_tabs.lock().unwrap().len() {
+            if idx < 0 {
                 return;
             }
             if guard_pending(&w) {
                 return;
             }
             save_active_tab(&w);
-            restore_tab(&w, idx as usize);
+            let index = workspace_tabs
+                .lock()
+                .unwrap()
+                .iter()
+                .enumerate()
+                .filter(|(_, tab)| tab.group == 0)
+                .nth(idx as usize)
+                .map(|(index, _)| index);
+            if let Some(index) = index {
+                restore_tab(&w, index);
+            }
         });
     }
 
