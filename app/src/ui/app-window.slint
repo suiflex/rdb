@@ -559,11 +559,15 @@ in-out property <string> rename-text;
                     return accept;
                 }
                 if (e.text == "t") {
-                    root.new-tab();
+                    root.new-tab-in-group(root.active-pane);
                     return accept;
                 }
                 if (e.text == "w") {
-                    root.close-tab(root.active-tab);
+                    if (root.active-pane == 1) {
+                        root.close-p1-tab(root.p1-active-tab);
+                    } else {
+                        root.close-tab(root.active-tab);
+                    }
                     return accept;
                 }
                 if (e.text == "1") {

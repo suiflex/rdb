@@ -2179,7 +2179,6 @@ fn main() -> Result<(), slint::PlatformError> {
     // sets `result_new_tab` so the next run appends instead of replacing.
     let results = panes[0].results.clone();
     let active_result = panes[0].active_result.clone();
-    let result_new_tab = panes[0].result_new_tab.clone();
     // One Rust source of truth for document identity and state. The UI index is
     // derived from `active_tab_id`; it is -1 while this Option is None.
     let workspace_tabs: Arc<std::sync::Mutex<Vec<WorkspaceTab>>> =
@@ -5058,6 +5057,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let panes = panes.clone();
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
+        let active_p1_tab_id = active_p1_tab_id.clone();
         let query_console = query_console.clone();
         Rc::new(move |pane: usize, sql: String| {
             // Per-pane live state; pane 1 (right split) uses its own buffers so a
@@ -5072,7 +5072,12 @@ fn main() -> Result<(), slint::PlatformError> {
             let results = panes[pane].results.clone();
             let active_result = panes[pane].active_result.clone();
             let result_new_tab = panes[pane].result_new_tab.clone();
-            let Some(target_id) = active_tab_id.lock().unwrap().clone() else {
+            let active_id = if pane == 1 {
+                &active_p1_tab_id
+            } else {
+                &active_tab_id
+            };
+            let Some(target_id) = active_id.lock().unwrap().clone() else {
                 return;
             };
             if let Some(tab) = workspace_tabs
@@ -5082,11 +5087,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 .find(|tab| tab.id == target_id)
             {
                 tab.loading = true;
-                if pane == 0 {
-                    tab.query_text = sql.clone();
-                } else {
-                    tab.pane1_query = sql.clone();
-                }
+                tab.query_text = sql.clone();
             }
             let weak2 = weak.clone();
             let current = current.clone();
@@ -5102,6 +5103,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let active_result = active_result.clone();
             let workspace_tabs = workspace_tabs.clone();
             let active_tab_id = active_tab_id.clone();
+            let active_p1_tab_id = active_p1_tab_id.clone();
             let query_console = query_console.clone();
             // ⌘\ set this; consume it so the next plain run replaces again.
             let new_tab = result_new_tab.swap(false, std::sync::atomic::Ordering::SeqCst);
@@ -5184,8 +5186,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
                         sync_query_console(&w, &query_console);
-                        let is_active =
-                            active_tab_id.lock().unwrap().as_deref() == Some(&target_id);
+                        let active_id = if pane == 1 {
+                            &active_p1_tab_id
+                        } else {
+                            &active_tab_id
+                        };
+                        let is_active = active_id.lock().unwrap().as_deref() == Some(&target_id);
                         if is_active {
                             set_p_query_running(&w, pane, false);
                         }
@@ -5207,46 +5213,28 @@ fn main() -> Result<(), slint::PlatformError> {
                                     meta: meta.clone(),
                                     latency: latency.clone(),
                                 };
-                                let (tab_results, tab_active, is_browse) = if pane == 0 {
-                                    let mut tabs = workspace_tabs.lock().unwrap();
-                                    let Some(tab) = tabs.iter_mut().find(|tab| tab.id == target_id)
-                                    else {
-                                        return;
-                                    };
-                                    tab.loading = false;
-                                    tab.view = Some(sr.clone());
-                                    let is_browse = tab.kind == "table";
-                                    if is_browse {
-                                        tab.results.clear();
-                                        tab.active_result = 0;
-                                    } else if new_tab || tab.results.is_empty() {
-                                        tab.results.push(sr);
-                                        tab.active_result = tab.results.len() - 1;
-                                    } else {
-                                        if tab.active_result >= tab.results.len() {
-                                            tab.active_result = 0;
-                                        }
-                                        tab.results[tab.active_result] = sr;
-                                    }
-                                    (tab.results.clone(), tab.active_result, is_browse)
-                                } else {
-                                    let mut tabs = workspace_tabs.lock().unwrap();
-                                    let Some(tab) = tabs.iter_mut().find(|tab| tab.id == target_id)
-                                    else {
-                                        return;
-                                    };
-                                    tab.loading = false;
-                                    if new_tab || tab.pane1_results.is_empty() {
-                                        tab.pane1_results.push(sr);
-                                        tab.pane1_active_result = tab.pane1_results.len() - 1;
-                                    } else {
-                                        if tab.pane1_active_result >= tab.pane1_results.len() {
-                                            tab.pane1_active_result = 0;
-                                        }
-                                        tab.pane1_results[tab.pane1_active_result] = sr;
-                                    }
-                                    (tab.pane1_results.clone(), tab.pane1_active_result, false)
+                                let mut tabs = workspace_tabs.lock().unwrap();
+                                let Some(tab) = tabs.iter_mut().find(|tab| tab.id == target_id)
+                                else {
+                                    return;
                                 };
+                                tab.loading = false;
+                                tab.view = Some(sr.clone());
+                                let is_browse = tab.kind == "table";
+                                if is_browse {
+                                    tab.results.clear();
+                                    tab.active_result = 0;
+                                } else if new_tab || tab.results.is_empty() {
+                                    tab.results.push(sr);
+                                    tab.active_result = tab.results.len() - 1;
+                                } else {
+                                    if tab.active_result >= tab.results.len() {
+                                        tab.active_result = 0;
+                                    }
+                                    tab.results[tab.active_result] = sr;
+                                }
+                                let tab_results = tab.results.clone();
+                                let tab_active = tab.active_result;
                                 if !is_active {
                                     return;
                                 }
@@ -7008,16 +6996,16 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- ⌘\: run the current statement into a NEW result tab -----
     {
         let weak = window.as_weak();
-        let ed_state = ed_state.clone();
+        let panes = panes.clone();
         let run_sql = run_sql.clone();
         let recent_queries = recent_queries.clone();
-        let result_new_tab = result_new_tab.clone();
         window.on_run_new_tab(move || {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            let pane = w.get_active_pane().clamp(0, 1) as usize;
             let stmt = {
-                let ed = ed_state.borrow();
+                let ed = panes[pane].ed_state.borrow();
                 ed.selected_text()
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
@@ -7027,10 +7015,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             }
             // Same editor; the run lands in an appended result tab.
-            result_new_tab.store(true, std::sync::atomic::Ordering::SeqCst);
-            w.set_grid_read_only(true);
+            panes[pane]
+                .result_new_tab
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            if pane == 0 {
+                w.set_grid_read_only(true);
+            }
             record_recent(&recent_queries, &stmt);
-            run_sql(0, stmt);
+            run_sql(pane, stmt);
         });
     }
 

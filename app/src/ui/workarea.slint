@@ -705,8 +705,8 @@ export component WorkArea inherits Rectangle {
         }
 
         // ================= footer strip (34px) =================
-        Rectangle { height: 1px; background: Tokens.border; }
-        Rectangle {
+        if !root.split: Rectangle { height: 1px; background: Tokens.border; }
+        if !root.split: Rectangle {
             height: Tokens.status-bar-h;
             background: Tokens.chrome;
             HorizontalLayout {
@@ -873,6 +873,52 @@ export component WorkArea inherits Rectangle {
                         font-family: Tokens.mono;
                         vertical-alignment: center;
                     }
+                }
+            }
+        }
+        if root.split: Rectangle {
+            height: 1px;
+            background: Tokens.border;
+        }
+        if root.split: Rectangle {
+            height: Tokens.status-bar-h;
+            background: Tokens.chrome;
+            left-footer := Rectangle {
+                x: 0;
+                width: (parent.width - 6px) * root.split-ratio;
+                height: parent.height;
+                background: Tokens.chrome;
+                HorizontalLayout {
+                    padding-left: Tokens.sp3;
+                    padding-right: Tokens.sp3;
+                    spacing: Tokens.sp3;
+                    UnderlineSegment { text: "Data"; active: root.sql-view-mode == 0; clicked => { root.sql-view-mode = 0; } }
+                    UnderlineSegment { text: "Message"; active: root.sql-view-mode == 1; clicked => { root.sql-view-mode = 1; } }
+                    UnderlineSegment { text: "Chart"; active: root.sql-view-mode == 2; clicked => { root.sql-view-mode = 2; } }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text { text: root.result-status; color: root.status-error ? Tokens.error : Tokens.text-dim; font-size: Tokens.font-sm; vertical-alignment: center; overflow: elide; }
+                }
+            }
+            Rectangle {
+                x: (parent.width - 6px) * root.split-ratio;
+                width: 6px;
+                height: parent.height;
+                background: Tokens.border-strong;
+            }
+            right-footer := Rectangle {
+                x: (parent.width - 6px) * root.split-ratio + 6px;
+                width: (parent.width - 6px) * (1 - root.split-ratio);
+                height: parent.height;
+                background: Tokens.chrome;
+                HorizontalLayout {
+                    padding-left: Tokens.sp3;
+                    padding-right: Tokens.sp3;
+                    spacing: Tokens.sp3;
+                    UnderlineSegment { text: "Data"; active: root.p1-sql-view-mode == 0; clicked => { root.p1-sql-view-mode = 0; } }
+                    UnderlineSegment { text: "Message"; active: root.p1-sql-view-mode == 1; clicked => { root.p1-sql-view-mode = 1; } }
+                    UnderlineSegment { text: "Chart"; active: root.p1-sql-view-mode == 2; clicked => { root.p1-sql-view-mode = 2; } }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text { text: root.p1-result-status; color: root.p1-status-error ? Tokens.error : Tokens.text-dim; font-size: Tokens.font-sm; vertical-alignment: center; overflow: elide; }
                 }
             }
         }
