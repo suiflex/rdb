@@ -1292,6 +1292,13 @@ fn set_p_doc_tree(w: &MainWindow, pane: usize, m: ModelRc<DocRow>) {
         w.set_p1_doc_tree(m);
     }
 }
+fn set_p_query_running(w: &MainWindow, pane: usize, b: bool) {
+    if pane == 0 {
+        w.set_query_running(b);
+    } else {
+        w.set_p1_query_running(b);
+    }
+}
 
 /// Return a copy of `g` keeping only rows where some cell matches `needle`
 /// (already lowercased). An empty needle keeps every row.
@@ -4694,25 +4701,29 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- shared query runner: parse text for the live engine, run it, push
     // the result (grid / documents / error) back to the UI. Used by both the
     // Run button and table clicks. -----
-    let run_sql: Rc<dyn Fn(String)> = {
+    #[allow(clippy::type_complexity)]
+    let run_sql: Rc<dyn Fn(usize, String)> = {
         let weak = window.as_weak();
         let rt = rt.clone();
         let current = current.clone();
         let last_view = last_view.clone();
-        let browse = browse.clone();
-        let edit_buf = edit_buf.clone();
-        let displayed_grid = displayed_grid.clone();
-        let hidden_cols = hidden_cols.clone();
-        let sort_state = sort_state.clone();
-        let col_order = col_order.clone();
-        let col_filters = col_filters.clone();
-        let results = results.clone();
-        let active_result = active_result.clone();
-        let result_new_tab = result_new_tab.clone();
+        let panes = panes.clone();
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
         let query_console = query_console.clone();
-        Rc::new(move |sql: String| {
+        Rc::new(move |pane: usize, sql: String| {
+            // Per-pane live state; pane 1 (right split) uses its own buffers so a
+            // run in one pane never disturbs the other.
+            let browse = panes[pane].browse.clone();
+            let edit_buf = panes[pane].edit_buf.clone();
+            let displayed_grid = panes[pane].displayed_grid.clone();
+            let hidden_cols = panes[pane].hidden_cols.clone();
+            let sort_state = panes[pane].sort_state.clone();
+            let col_order = panes[pane].col_order.clone();
+            let col_filters = panes[pane].col_filters.clone();
+            let results = panes[pane].results.clone();
+            let active_result = panes[pane].active_result.clone();
+            let result_new_tab = panes[pane].result_new_tab.clone();
             let Some(target_id) = active_tab_id.lock().unwrap().clone() else {
                 return;
             };
@@ -4746,7 +4757,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // no `use(...)` run against it, matching what the user sees browsing.
             let mut cur_db = String::new();
             if let Some(w) = weak.upgrade() {
-                w.set_query_running(true);
+                set_p_query_running(&w, pane, true);
                 // Don't force the SQL console open on every run — the eye toggle
                 // owns its visibility. Re-opening it here ignored a user who just
                 // hid it. The console still updates in place when it is open.
@@ -4824,7 +4835,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         let is_active =
                             active_tab_id.lock().unwrap().as_deref() == Some(&target_id);
                         if is_active {
-                            w.set_query_running(false);
+                            set_p_query_running(&w, pane, false);
                         }
                         match (view, err) {
                             (Some(v), _) => {
@@ -4844,7 +4855,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                     meta: meta.clone(),
                                     latency: latency.clone(),
                                 };
-                                let (tab_results, tab_active, is_browse) = {
+                                let (tab_results, tab_active, is_browse) = if pane == 0 {
                                     let mut tabs = workspace_tabs.lock().unwrap();
                                     let Some(tab) = tabs.iter_mut().find(|tab| tab.id == target_id)
                                     else {
@@ -4866,6 +4877,10 @@ fn main() -> Result<(), slint::PlatformError> {
                                         tab.results[tab.active_result] = sr;
                                     }
                                     (tab.results.clone(), tab.active_result, is_browse)
+                                } else {
+                                    // Pane 1 (right split) keeps a single result and
+                                    // is not persisted into the tab's result tabs.
+                                    (vec![sr.clone()], 0, false)
                                 };
                                 if !is_active {
                                     return;
@@ -4873,18 +4888,18 @@ fn main() -> Result<(), slint::PlatformError> {
                                 *results.lock().unwrap() = tab_results;
                                 *active_result.lock().unwrap() = tab_active;
                                 if is_browse {
-                                    set_result_tabs(&w, 0, 0, 0);
+                                    set_result_tabs(&w, pane, 0, 0);
                                 } else {
                                     set_result_tabs(
                                         &w,
-                                        0,
+                                        pane,
                                         results.lock().unwrap().len(),
                                         tab_active,
                                     );
                                 }
                                 present_view(
                                     &w,
-                                    0,
+                                    pane,
                                     v,
                                     &meta,
                                     &latency,
@@ -4913,7 +4928,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 *last_view.lock().unwrap() = None;
                                 apply_result(
                                     &w,
-                                    0,
+                                    pane,
                                     model::ResultView::Affected(format!("error: {e}")),
                                 );
                             }
@@ -5269,13 +5284,36 @@ fn main() -> Result<(), slint::PlatformError> {
                 if stream {
                     run_stream(text);
                 } else {
-                    run_sql(text);
+                    run_sql(0, text);
                 }
                 if w.get_sidebar_mode() != 0 {
                     rebuild_query_tree("");
                 }
             }
         });
+    }
+
+    // ----- run query in the right split pane (buffered; streaming is pane-0) --
+    {
+        let run_sql = run_sql.clone();
+        let panes = panes.clone();
+        let recent_queries = recent_queries.clone();
+        let run_p1 = move || {
+            let text = {
+                let ed = panes[1].ed_state.borrow();
+                ed.selected_text()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| ed.current_statement())
+            };
+            if text.is_empty() {
+                return;
+            }
+            record_recent(&recent_queries, &text);
+            run_sql(1, text);
+        };
+        window.on_p1_run(run_p1.clone());
+        window.on_p1_run_selection(run_p1);
     }
 
     // ----- Copy results (TSV → clipboard) / Export CSV (~/Downloads) -----
@@ -5388,7 +5426,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 if stream {
                     run_stream(stmt);
                 } else {
-                    run_sql(stmt);
+                    run_sql(0, stmt);
                 }
             }
         });
@@ -5428,9 +5466,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_grid_read_only(true);
             }
             if trimmed.to_uppercase().starts_with("EXPLAIN") {
-                run_sql(trimmed.to_string());
+                run_sql(0, trimmed.to_string());
             } else {
-                run_sql(format!("EXPLAIN {trimmed}"));
+                run_sql(0, format!("EXPLAIN {trimmed}"));
             }
         });
     }
@@ -5497,7 +5535,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 &st.col_filters,
             );
             load_editor_text(0, &text);
-            run_sql(text);
+            run_sql(0, text);
         })
     };
     // Wire the deferred handle so per-column browse filters can re-query.
@@ -6193,7 +6231,7 @@ fn main() -> Result<(), slint::PlatformError> {
             result_new_tab.store(true, std::sync::atomic::Ordering::SeqCst);
             w.set_grid_read_only(true);
             record_recent(&recent_queries, &stmt);
-            run_sql(stmt);
+            run_sql(0, stmt);
         });
     }
 
