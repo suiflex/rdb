@@ -534,12 +534,13 @@ struct WorkspaceTab {
     indexes: Vec<(String, String)>,
     loading: bool,
     pinned: bool,
-    // Dual-pane split state for this tab: whether the right pane is open, its
-    // editor text, and its last result (single result, no result-tab strip).
+    // Dual-pane split state for this tab. Right-pane results stay in memory
+    // like the left pane; only the SQL text is persisted to disk.
     split: bool,
     split_ratio: f32,
     pane1_query: String,
-    pane1_view: Option<StoredResult>,
+    pane1_results: Vec<StoredResult>,
+    pane1_active_result: usize,
 }
 
 impl WorkspaceTab {
@@ -560,7 +561,8 @@ impl WorkspaceTab {
             split: false,
             split_ratio: 0.5,
             pane1_query: String::new(),
-            pane1_view: None,
+            pane1_results: Vec::new(),
+            pane1_active_result: 0,
         }
     }
 
@@ -1732,8 +1734,8 @@ thread_local! {
     /// Full JSON-tree nodes + collapsed paths for the currently displayed Mongo
     /// document result. The Slint event loop is single-threaded, so a
     /// thread_local suffices; no cross-tab persistence is needed.
-    static DOC_TREE: std::cell::RefCell<(Vec<model::DocNode>, HashSet<String>)> =
-        std::cell::RefCell::new((Vec::new(), HashSet::new()));
+    static DOC_TREES: std::cell::RefCell<[(Vec<model::DocNode>, HashSet<String>); 2]> =
+        std::cell::RefCell::new(Default::default());
 }
 
 /// Compute the visible JSON-tree rows for the current collapse state and push
@@ -1783,7 +1785,7 @@ fn apply_result(w: &MainWindow, pane: usize, view: model::ResultView) {
             );
             let collapsed = model::default_doc_collapsed(&d.tree);
             push_doc_tree(w, pane, &d.tree, &collapsed);
-            DOC_TREE.with(|s| *s.borrow_mut() = (d.tree, collapsed));
+            DOC_TREES.with(|s| s.borrow_mut()[pane] = (d.tree, collapsed));
         }
         model::ResultView::Affected(status) => {
             set_p_result_kind(w, pane, 3);
@@ -3078,7 +3080,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     split: false,
                     split_ratio: 0.5,
                     pane1_query: String::new(),
-                    pane1_view: None,
+                    pane1_results: Vec::new(),
+                    pane1_active_result: 0,
                 });
                 *active_tab_id.lock().unwrap() = Some(id.clone());
                 set_workspace_tabs(&w, &tabs, Some(&id));
@@ -3784,11 +3787,12 @@ fn main() -> Result<(), slint::PlatformError> {
             } else {
                 String::new()
             };
-            tab.pane1_view = if tab.kind == "sql" {
-                panes[1].results.lock().unwrap().first().cloned()
+            tab.pane1_results = if tab.kind == "sql" {
+                panes[1].results.lock().unwrap().clone()
             } else {
-                None
+                Vec::new()
             };
+            tab.pane1_active_result = *panes[1].active_result.lock().unwrap();
             if tab.kind == "table" {
                 tab.browse = browse.lock().unwrap().clone();
             } else if tab.kind == "sql" {
@@ -3844,10 +3848,10 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_split_ratio(tab.split_ratio.clamp(0.2, 0.8));
             w.set_active_pane(0);
             load_editor_text(1, &tab.pane1_query);
-            if let Some(stored) = tab.pane1_view.clone() {
-                *panes[1].results.lock().unwrap() = vec![stored.clone()];
-                *panes[1].active_result.lock().unwrap() = 0;
-                set_result_tabs(w, 1, 1, 0);
+            if let Some(stored) = tab.pane1_results.get(tab.pane1_active_result).cloned() {
+                *panes[1].results.lock().unwrap() = tab.pane1_results.clone();
+                *panes[1].active_result.lock().unwrap() = tab.pane1_active_result;
+                set_result_tabs(w, 1, tab.pane1_results.len(), tab.pane1_active_result);
                 present_view(
                     w,
                     1,
@@ -4934,7 +4938,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 .find(|tab| tab.id == target_id)
             {
                 tab.loading = true;
-                tab.query_text = sql.clone();
+                if pane == 0 {
+                    tab.query_text = sql.clone();
+                } else {
+                    tab.pane1_query = sql.clone();
+                }
             }
             let weak2 = weak.clone();
             let current = current.clone();
@@ -5078,9 +5086,22 @@ fn main() -> Result<(), slint::PlatformError> {
                                     }
                                     (tab.results.clone(), tab.active_result, is_browse)
                                 } else {
-                                    // Pane 1 (right split) keeps a single result and
-                                    // is not persisted into the tab's result tabs.
-                                    (vec![sr.clone()], 0, false)
+                                    let mut tabs = workspace_tabs.lock().unwrap();
+                                    let Some(tab) = tabs.iter_mut().find(|tab| tab.id == target_id)
+                                    else {
+                                        return;
+                                    };
+                                    tab.loading = false;
+                                    if new_tab || tab.pane1_results.is_empty() {
+                                        tab.pane1_results.push(sr);
+                                        tab.pane1_active_result = tab.pane1_results.len() - 1;
+                                    } else {
+                                        if tab.pane1_active_result >= tab.pane1_results.len() {
+                                            tab.pane1_active_result = 0;
+                                        }
+                                        tab.pane1_results[tab.pane1_active_result] = sr;
+                                    }
+                                    (tab.pane1_results.clone(), tab.pane1_active_result, false)
                                 };
                                 if !is_active {
                                     return;
@@ -5316,7 +5337,8 @@ fn main() -> Result<(), slint::PlatformError> {
                                             tab.results = vec![sr.clone()];
                                             tab.active_result = 0;
                                         } else {
-                                            tab.pane1_view = Some(sr.clone());
+                                            tab.pane1_results = vec![sr.clone()];
+                                            tab.pane1_active_result = 0;
                                         }
                                     }
                                     if active_tab_id.lock().unwrap().as_deref() == Some(&target_id)
@@ -5682,6 +5704,304 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let panes = panes.clone();
+        window.on_p1_reorder_col(move |from, local_x| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let from = from.max(0) as usize;
+            let mut widths: Vec<f32> = w.get_p1_col_widths().iter().collect();
+            if from >= widths.len() {
+                return;
+            }
+            let drop = widths.iter().take(from).sum::<f32>() + local_x;
+            let mut acc = 0.0;
+            let mut target = widths.len() - 1;
+            for (index, width) in widths.iter().enumerate() {
+                if drop < acc + width {
+                    target = index;
+                    break;
+                }
+                acc += width;
+            }
+            if target == from {
+                return;
+            }
+            let hidden = panes[1].hidden_cols.lock().unwrap().clone();
+            {
+                let mut order = panes[1].col_order.lock().unwrap();
+                let visible: Vec<usize> = order
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .filter(|(_, index)| !hidden.contains(index))
+                    .map(|(position, _)| position)
+                    .collect();
+                let (Some(&from_position), Some(&to_position)) =
+                    (visible.get(from), visible.get(target))
+                else {
+                    return;
+                };
+                let value = order.remove(from_position);
+                order.insert(
+                    if to_position > from_position {
+                        to_position - 1
+                    } else {
+                        to_position
+                    },
+                    value,
+                );
+            }
+            let width = widths.remove(from);
+            widths.insert(if target > from { target - 1 } else { target }, width);
+            set_p_col_widths(&w, 1, ModelRc::from(Rc::new(VecModel::from(widths))));
+            let view = {
+                let results = panes[1].results.lock().unwrap();
+                let active = *panes[1].active_result.lock().unwrap();
+                results.get(active).map(|result| result.view.clone())
+            };
+            let Some(view) = view else {
+                return;
+            };
+            let order = panes[1].col_order.lock().unwrap().clone();
+            let filters = panes[1].col_filters.lock().unwrap().clone();
+            let (sort_col, ascending) = *panes[1].sort_state.lock().unwrap();
+            let reordered = compute_view(
+                &view, "", "", "", &filters, &hidden, &order, sort_col, ascending,
+            );
+            *panes[1].displayed_grid.lock().unwrap() = view_grid(&reordered);
+            apply_result(&w, 1, reordered);
+        });
+    }
+
+    // ----- right-pane grid interactions -----
+    {
+        let weak = window.as_weak();
+        window.on_p1_select_cell(move |row, col| {
+            if let Some(w) = weak.upgrade() {
+                w.set_p1_selected_row(row);
+                w.set_p1_selected_col(col);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_p1_edit_cell(move |row, col| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if w.get_grid_read_only() || row < 0 || col < 0 {
+                set_p_result_status(&w, 1, SharedString::from("read-only result"));
+                return;
+            }
+            let count = w.get_p1_col_count();
+            let value = if count > 0 {
+                w.get_p1_cells()
+                    .row_data((row * count + col) as usize)
+                    .filter(|cell| !cell.is_null)
+                    .map(|cell| cell.text)
+                    .unwrap_or_default()
+            } else {
+                SharedString::default()
+            };
+            w.set_p1_editing_value(value);
+            set_p_editing(&w, 1, row, col);
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_stage_cell(move |row, col, text| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if w.get_grid_read_only() || row < 0 || col < 0 {
+                return;
+            }
+            let base = panes[1]
+                .displayed_grid
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|grid| grid.rows.len())
+                .unwrap_or(0);
+            panes[1].edit_buf.lock().unwrap().set_cell(
+                base,
+                row as usize,
+                col as usize,
+                text.to_string(),
+            );
+            let count = w.get_p1_col_count();
+            if count > 0 {
+                let index = (row * count + col) as usize;
+                let cells = w.get_p1_cells();
+                if let Some(mut cell) = cells.row_data(index) {
+                    cell.text = text;
+                    cell.is_null = false;
+                    cell.state = 1;
+                    cells.set_row_data(index, cell);
+                }
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_cell_edited(move |row, col, text| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let base = panes[1]
+                .displayed_grid
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|grid| grid.rows.len())
+                .unwrap_or(0);
+            panes[1].edit_buf.lock().unwrap().set_cell(
+                base,
+                row.max(0) as usize,
+                col.max(0) as usize,
+                text.to_string(),
+            );
+            set_p_editing(&w, 1, -1, -1);
+            if let Some(grid) = panes[1].displayed_grid.lock().unwrap().as_ref() {
+                let edits = panes[1].edit_buf.lock().unwrap();
+                paint_grid_with_edits(&w, 1, grid, &edits);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_p1_edit_cancelled(move || {
+            if let Some(w) = weak.upgrade() {
+                set_p_editing(&w, 1, -1, -1);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_p1_cell_advance(move |row, col, text, forward| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let count = w.get_p1_col_count();
+            if count <= 0 {
+                set_p_editing(&w, 1, -1, -1);
+                return;
+            }
+            w.invoke_p1_cell_edited(row, col, text);
+            let next = if forward { col + 1 } else { col - 1 };
+            let (next_row, next_col) = if next >= count {
+                (row + 1, 0)
+            } else if next < 0 {
+                (row - 1, count - 1)
+            } else {
+                (row, next)
+            };
+            w.set_p1_selected_row(next_row);
+            w.set_p1_selected_col(next_col);
+            set_p_editing(&w, 1, next_row, next_col);
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_p1_resize_col(move |i, delta| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let mut widths: Vec<f32> = w.get_p1_col_widths().iter().collect();
+            if let Some(width) = widths.get_mut(i.max(0) as usize) {
+                *width = (*width + delta).clamp(60.0, 1000.0);
+                w.set_p1_col_widths(ModelRc::from(Rc::new(VecModel::from(widths))));
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_sort_col(move |display_col| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let view = {
+                let results = panes[1].results.lock().unwrap();
+                let active = *panes[1].active_result.lock().unwrap();
+                results.get(active).map(|result| result.view.clone())
+            };
+            let Some(view) = view else {
+                return;
+            };
+            let hidden = panes[1].hidden_cols.lock().unwrap().clone();
+            let order = panes[1].col_order.lock().unwrap().clone();
+            let visible: Vec<usize> = order
+                .iter()
+                .copied()
+                .filter(|index| !hidden.contains(index))
+                .collect();
+            let Some(&original) = visible.get(display_col.max(0) as usize) else {
+                return;
+            };
+            let (sort_col, ascending) = {
+                let mut sort = panes[1].sort_state.lock().unwrap();
+                if sort.0 == original as i32 {
+                    sort.1 = !sort.1;
+                } else {
+                    *sort = (original as i32, true);
+                }
+                *sort
+            };
+            let filters = panes[1].col_filters.lock().unwrap().clone();
+            let sorted = compute_view(
+                &view, "", "", "", &filters, &hidden, &order, sort_col, ascending,
+            );
+            *panes[1].displayed_grid.lock().unwrap() = view_grid(&sorted);
+            set_p_grid_sort(&w, 1, display_col, ascending);
+            apply_result(&w, 1, sorted);
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_set_col_filter(move |display_col, text| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let view = {
+                let results = panes[1].results.lock().unwrap();
+                let active = *panes[1].active_result.lock().unwrap();
+                results.get(active).map(|result| result.view.clone())
+            };
+            let Some(view) = view else {
+                return;
+            };
+            let hidden = panes[1].hidden_cols.lock().unwrap().clone();
+            let order = panes[1].col_order.lock().unwrap().clone();
+            let visible: Vec<usize> = order
+                .iter()
+                .copied()
+                .filter(|index| !hidden.contains(index))
+                .collect();
+            let Some(&original) = visible.get(display_col.max(0) as usize) else {
+                return;
+            };
+            let filters = {
+                let mut filters = panes[1].col_filters.lock().unwrap();
+                if let Some(filter) = filters.get_mut(original) {
+                    *filter = text.to_string();
+                }
+                filters.clone()
+            };
+            let (sort_col, ascending) = *panes[1].sort_state.lock().unwrap();
+            let filtered = compute_view(
+                &view, "", "", "", &filters, &hidden, &order, sort_col, ascending,
+            );
+            *panes[1].displayed_grid.lock().unwrap() = view_grid(&filtered);
+            apply_result(&w, 1, filtered);
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
         window.on_p1_cancel_stream(move || {
             if let Some(c) = panes[1].stream_cancel.borrow().as_ref() {
                 c.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -5914,7 +6234,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     split: false,
                     split_ratio: 0.5,
                     pane1_query: String::new(),
-                    pane1_view: None,
+                    pane1_results: Vec::new(),
+                    pane1_active_result: 0,
                 };
                 let active_id = active_tab_id.lock().unwrap().clone();
                 let mut tabs = workspace_tabs.lock().unwrap();
@@ -6230,14 +6551,31 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            DOC_TREE.with(|s| {
+            DOC_TREES.with(|s| {
                 let mut st = s.borrow_mut();
-                let (full, collapsed) = &mut *st;
+                let (full, collapsed) = &mut st[0];
                 let p = path.to_string();
                 if !collapsed.remove(&p) {
                     collapsed.insert(p);
                 }
                 push_doc_tree(&w, 0, full, collapsed);
+            });
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_p1_toggle_doc_node(move |path| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            DOC_TREES.with(|s| {
+                let mut st = s.borrow_mut();
+                let (full, collapsed) = &mut st[1];
+                let p = path.to_string();
+                if !collapsed.remove(&p) {
+                    collapsed.insert(p);
+                }
+                push_doc_tree(&w, 1, full, collapsed);
             });
         });
     }
@@ -6667,6 +7005,109 @@ fn main() -> Result<(), slint::PlatformError> {
                 None => {
                     clear_grid(&w, 0);
                     *last_view.lock().unwrap() = None;
+                }
+            }
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        let last_view = last_view.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        window.on_p1_select_result_tab(move |i| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let i = i.max(0) as usize;
+            let sr = panes[1].results.lock().unwrap().get(i).cloned();
+            let Some(sr) = sr else {
+                return;
+            };
+            *panes[1].active_result.lock().unwrap() = i;
+            if let Some(id) = active_tab_id.lock().unwrap().clone() {
+                if let Some(tab) = workspace_tabs
+                    .lock()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|tab| tab.id == id)
+                {
+                    tab.pane1_active_result = i;
+                }
+            }
+            w.set_p1_active_result(i as i32);
+            present_view(
+                &w,
+                1,
+                sr.view,
+                &sr.meta,
+                &sr.latency,
+                &last_view,
+                &panes[1].displayed_grid,
+                &panes[1].hidden_cols,
+                &panes[1].sort_state,
+                &panes[1].col_order,
+                &panes[1].col_filters,
+                &panes[1].edit_buf,
+                &panes[1].browse,
+            );
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        let last_view = last_view.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        window.on_p1_close_result_tab(move |i| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let i = i.max(0) as usize;
+            let (count, active, sr) = {
+                let mut rv = panes[1].results.lock().unwrap();
+                if i >= rv.len() {
+                    return;
+                }
+                rv.remove(i);
+                let mut ar = panes[1].active_result.lock().unwrap();
+                if *ar >= rv.len() {
+                    *ar = rv.len().saturating_sub(1);
+                }
+                (rv.len(), *ar, rv.get(*ar).cloned())
+            };
+            set_result_tabs(&w, 1, count, active);
+            if let Some(id) = active_tab_id.lock().unwrap().clone() {
+                if let Some(tab) = workspace_tabs
+                    .lock()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|tab| tab.id == id)
+                {
+                    tab.pane1_results = panes[1].results.lock().unwrap().clone();
+                    tab.pane1_active_result = active;
+                }
+            }
+            match sr {
+                Some(sr) => present_view(
+                    &w,
+                    1,
+                    sr.view,
+                    &sr.meta,
+                    &sr.latency,
+                    &last_view,
+                    &panes[1].displayed_grid,
+                    &panes[1].hidden_cols,
+                    &panes[1].sort_state,
+                    &panes[1].col_order,
+                    &panes[1].col_filters,
+                    &panes[1].edit_buf,
+                    &panes[1].browse,
+                ),
+                None => {
+                    clear_grid(&w, 1);
+                    set_p_results_meta(&w, 1, SharedString::default());
                 }
             }
         });
