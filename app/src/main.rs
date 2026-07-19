@@ -6241,6 +6241,13 @@ fn main() -> Result<(), slint::PlatformError> {
             *last_view.lock().unwrap() = None;
             set_result_tabs(&w, 0, 0, 0);
             clear_grid(&w, 0);
+            // A fresh tab is never split; clear the right pane too.
+            w.set_split(false);
+            w.set_active_pane(0);
+            load_editor_text(1, "");
+            clear_grid(&w, 1);
+            set_p_result_status(&w, 1, SharedString::default());
+            set_p_results_meta(&w, 1, SharedString::default());
             w.set_active_table(SharedString::default());
             w.set_fn_mode(false);
             w.set_query_running(false);
