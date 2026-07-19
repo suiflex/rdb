@@ -1072,7 +1072,7 @@ enum StreamMsg {
 }
 
 /// Push a flat `GridModel` into the window's grid columns/cells properties.
-fn push_grid(w: &MainWindow, g: &model::GridModel) {
+fn push_grid(w: &MainWindow, pane: usize, g: &model::GridModel) {
     let cols: Vec<GridColumn> = g
         .columns
         .iter()
@@ -1091,14 +1091,14 @@ fn push_grid(w: &MainWindow, g: &model::GridModel) {
             });
         }
     }
-    w.set_grid_col_count(cols.len() as i32);
-    w.set_grid_columns(ModelRc::from(Rc::new(VecModel::from(cols))));
-    w.set_grid_cells(ModelRc::from(Rc::new(VecModel::from(flat))));
+    set_p_col_count(w, pane, cols.len() as i32);
+    set_p_columns(w, pane, ModelRc::from(Rc::new(VecModel::from(cols))));
+    set_p_cells(w, pane, ModelRc::from(Rc::new(VecModel::from(flat))));
 }
 
 /// Update only the row cells (not columns/widths), so the per-column filter
 /// inputs keep focus while the user types. Columns are assumed unchanged.
-fn set_grid_cells_only(w: &MainWindow, g: &model::GridModel) {
+fn set_grid_cells_only(w: &MainWindow, pane: usize, g: &model::GridModel) {
     let mut flat: Vec<GridCell> = Vec::new();
     for row in &g.rows {
         for cell in row {
@@ -1109,14 +1109,23 @@ fn set_grid_cells_only(w: &MainWindow, g: &model::GridModel) {
             });
         }
     }
-    w.set_grid_cells(ModelRc::from(Rc::new(VecModel::from(flat))));
-    w.set_result_status(SharedString::from(format!("{} rows", g.rows.len())));
+    set_p_cells(w, pane, ModelRc::from(Rc::new(VecModel::from(flat))));
+    set_p_result_status(
+        w,
+        pane,
+        SharedString::from(format!("{} rows", g.rows.len())),
+    );
 }
 
 /// Push `g` with the buffer's pending edits overlaid: changed cells show the
 /// new text (state 1), delete-marked rows state 2, insert rows appended as
 /// state-3 rows at the bottom.
-fn paint_grid_with_edits(w: &MainWindow, g: &model::GridModel, buf: &model::EditBuffer) {
+fn paint_grid_with_edits(
+    w: &MainWindow,
+    pane: usize,
+    g: &model::GridModel,
+    buf: &model::EditBuffer,
+) {
     let ncols = g.columns.len();
     let mut flat: Vec<GridCell> = Vec::with_capacity((g.rows.len() + buf.inserts.len()) * ncols);
     for (r, row) in g.rows.iter().enumerate() {
@@ -1146,7 +1155,7 @@ fn paint_grid_with_edits(w: &MainWindow, g: &model::GridModel, buf: &model::Edit
             });
         }
     }
-    w.set_grid_cells(ModelRc::from(Rc::new(VecModel::from(flat))));
+    set_p_cells(w, pane, ModelRc::from(Rc::new(VecModel::from(flat))));
 }
 
 /// The grid a view displays, if it has one (for edit-buffer bookkeeping).
@@ -1171,10 +1180,117 @@ fn guard_pending_edits(w: &MainWindow, edit_buf: &std::sync::Mutex<model::EditBu
 }
 
 /// Clear the tabular grid properties (used by non-tabular result kinds).
-fn clear_grid(w: &MainWindow) {
-    w.set_grid_col_count(0);
-    w.set_grid_columns(ModelRc::from(Rc::new(VecModel::<GridColumn>::default())));
-    w.set_grid_cells(ModelRc::from(Rc::new(VecModel::<GridCell>::default())));
+fn clear_grid(w: &MainWindow, pane: usize) {
+    set_p_col_count(w, pane, 0);
+    set_p_columns(
+        w,
+        pane,
+        ModelRc::from(Rc::new(VecModel::<GridColumn>::default())),
+    );
+    set_p_cells(
+        w,
+        pane,
+        ModelRc::from(Rc::new(VecModel::<GridCell>::default())),
+    );
+}
+
+// ----- per-pane result setters: pane 0 writes the base properties, pane 1 the
+// p1-* mirror. Only genuinely per-pane props are routed; tab-global props
+// (browse paging, filter chrome, status latency) always use the base setter.
+fn set_p_cells(w: &MainWindow, pane: usize, m: ModelRc<GridCell>) {
+    if pane == 0 {
+        w.set_grid_cells(m);
+    } else {
+        w.set_p1_cells(m);
+    }
+}
+fn set_p_columns(w: &MainWindow, pane: usize, m: ModelRc<GridColumn>) {
+    if pane == 0 {
+        w.set_grid_columns(m);
+    } else {
+        w.set_p1_columns(m);
+    }
+}
+fn set_p_col_count(w: &MainWindow, pane: usize, n: i32) {
+    if pane == 0 {
+        w.set_grid_col_count(n);
+    } else {
+        w.set_p1_col_count(n);
+    }
+}
+fn set_p_col_widths(w: &MainWindow, pane: usize, m: ModelRc<f32>) {
+    if pane == 0 {
+        w.set_grid_col_widths(m);
+    } else {
+        w.set_p1_col_widths(m);
+    }
+}
+fn set_p_result_kind(w: &MainWindow, pane: usize, k: i32) {
+    if pane == 0 {
+        w.set_result_kind(k);
+    } else {
+        w.set_p1_result_kind(k);
+    }
+}
+fn set_p_result_status(w: &MainWindow, pane: usize, s: SharedString) {
+    if pane == 0 {
+        w.set_result_status(s);
+    } else {
+        w.set_p1_result_status(s);
+    }
+}
+fn set_p_status_error(w: &MainWindow, pane: usize, b: bool) {
+    if pane == 0 {
+        w.set_status_error(b);
+    } else {
+        w.set_p1_status_error(b);
+    }
+}
+fn set_p_results_meta(w: &MainWindow, pane: usize, s: SharedString) {
+    if pane == 0 {
+        w.set_results_meta(s);
+    } else {
+        w.set_p1_results_meta(s);
+    }
+}
+fn set_p_chart_bars(w: &MainWindow, pane: usize, m: ModelRc<ChartBar>) {
+    if pane == 0 {
+        w.set_chart_bars(m);
+    } else {
+        w.set_p1_chart_bars(m);
+    }
+}
+fn set_p_grid_sort(w: &MainWindow, pane: usize, col: i32, asc: bool) {
+    if pane == 0 {
+        w.set_grid_sort_col(col);
+        w.set_grid_sort_asc(asc);
+    } else {
+        w.set_p1_grid_sort_col(col);
+        w.set_p1_grid_sort_asc(asc);
+    }
+}
+fn set_p_grid_col_filters(w: &MainWindow, pane: usize, m: ModelRc<SharedString>) {
+    if pane == 0 {
+        w.set_grid_col_filters(m);
+    } else {
+        w.set_p1_grid_col_filters(m);
+    }
+}
+fn set_p_editing(w: &MainWindow, pane: usize, row: i32, col: i32) {
+    if pane == 0 {
+        w.set_editing_row(row);
+        w.set_editing_col(col);
+    } else {
+        w.set_p1_editing_row(row);
+        w.set_p1_editing_col(col);
+    }
+}
+fn set_p_doc_tree(w: &MainWindow, pane: usize, m: ModelRc<DocRow>) {
+    if pane == 0 {
+        w.set_doc_tree(m);
+    } else {
+        w.set_p1_doc_tree(m);
+    }
 }
 
 /// Return a copy of `g` keeping only rows where some cell matches `needle`
@@ -1495,7 +1611,12 @@ thread_local! {
 
 /// Compute the visible JSON-tree rows for the current collapse state and push
 /// them to the window.
-fn push_doc_tree(w: &MainWindow, full: &[model::DocNode], collapsed: &HashSet<String>) {
+fn push_doc_tree(
+    w: &MainWindow,
+    pane: usize,
+    full: &[model::DocNode],
+    collapsed: &HashSet<String>,
+) {
     let rows: Vec<DocRow> = model::visible_doc_rows(full, collapsed)
         .into_iter()
         .map(|(n, expanded)| DocRow {
@@ -1507,36 +1628,41 @@ fn push_doc_tree(w: &MainWindow, full: &[model::DocNode], collapsed: &HashSet<St
             path: SharedString::from(n.path.clone()),
         })
         .collect();
-    w.set_doc_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
+    set_p_doc_tree(w, pane, ModelRc::from(Rc::new(VecModel::from(rows))));
 }
 
 /// Push a `ResultView` into the window, selecting the per-kind result region
 /// via `result-kind` (0 Table, 1 Documents, 3 Affected).
-fn apply_result(w: &MainWindow, view: model::ResultView) {
+fn apply_result(w: &MainWindow, pane: usize, view: model::ResultView) {
     match view {
         model::ResultView::Table(g) => {
-            w.set_result_kind(0);
+            set_p_result_kind(w, pane, 0);
             w.set_doc_json(SharedString::default());
-            push_grid(w, &g);
-            w.set_result_status(SharedString::from(format!("{} rows", g.rows.len())));
+            push_grid(w, pane, &g);
+            set_p_result_status(
+                w,
+                pane,
+                SharedString::from(format!("{} rows", g.rows.len())),
+            );
         }
         model::ResultView::Documents(d) => {
-            w.set_result_kind(1);
+            set_p_result_kind(w, pane, 1);
             w.set_doc_json(SharedString::from(d.json));
-            push_grid(w, &d.grid);
-            w.set_result_status(SharedString::from(format!(
-                "{} documents",
-                d.grid.rows.len()
-            )));
+            push_grid(w, pane, &d.grid);
+            set_p_result_status(
+                w,
+                pane,
+                SharedString::from(format!("{} documents", d.grid.rows.len())),
+            );
             let collapsed = model::default_doc_collapsed(&d.tree);
-            push_doc_tree(w, &d.tree, &collapsed);
+            push_doc_tree(w, pane, &d.tree, &collapsed);
             DOC_TREE.with(|s| *s.borrow_mut() = (d.tree, collapsed));
         }
         model::ResultView::Affected(status) => {
-            w.set_result_kind(3);
+            set_p_result_kind(w, pane, 3);
             w.set_doc_json(SharedString::default());
-            clear_grid(w);
-            w.set_result_status(SharedString::from(status));
+            clear_grid(w, pane);
+            set_p_result_status(w, pane, SharedString::from(status));
         }
     }
 }
@@ -1548,6 +1674,7 @@ fn apply_result(w: &MainWindow, view: model::ResultView) {
 #[allow(clippy::too_many_arguments)]
 fn present_view(
     w: &MainWindow,
+    pane: usize,
     v: model::ResultView,
     meta: &str,
     latency: &str,
@@ -1576,12 +1703,15 @@ fn present_view(
     *col_order.lock().unwrap() = (0..ncols).collect();
     *sort_state.lock().unwrap() = (-1, true);
     *col_filters.lock().unwrap() = vec![String::new(); ncols];
-    w.set_grid_sort_col(-1);
-    w.set_grid_sort_asc(true);
-    w.set_grid_col_filters(ModelRc::from(Rc::new(VecModel::from(vec![
+    set_p_grid_sort(w, pane, -1, true);
+    set_p_grid_col_filters(
+        w,
+        pane,
+        ModelRc::from(Rc::new(VecModel::from(vec![
             SharedString::default();
             ncols
-        ]))));
+        ]))),
+    );
     let colnames: Vec<SharedString> = match &v {
         model::ResultView::Table(g) => g
             .columns
@@ -1619,11 +1749,10 @@ fn present_view(
         b.pk_cols = st.pk_cols.clone();
     }
     w.set_pending_count(0);
-    w.set_editing_row(-1);
-    w.set_editing_col(-1);
-    w.set_status_error(false);
+    set_p_editing(w, pane, -1, -1);
+    set_p_status_error(w, pane, false);
     w.set_status_latency(SharedString::from(latency));
-    w.set_results_meta(SharedString::from(meta));
+    set_p_results_meta(w, pane, SharedString::from(meta));
     let widths: Vec<f32> = match &v {
         model::ResultView::Table(g) => g
             .columns
@@ -1632,7 +1761,7 @@ fn present_view(
             .collect(),
         _ => vec![140.0; ncols],
     };
-    w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(widths))));
+    set_p_col_widths(w, pane, ModelRc::from(Rc::new(VecModel::from(widths))));
     let bars: Vec<ChartBar> = match &v {
         model::ResultView::Table(g) => model::chart_data(g)
             .into_iter()
@@ -1644,8 +1773,8 @@ fn present_view(
             .collect(),
         _ => Vec::new(),
     };
-    w.set_chart_bars(ModelRc::from(Rc::new(VecModel::from(bars))));
-    apply_result(w, v);
+    set_p_chart_bars(w, pane, ModelRc::from(Rc::new(VecModel::from(bars))));
+    apply_result(w, pane, v);
     let st = browse.lock().unwrap().clone();
     if st.table.is_some() {
         let (start, end, prev, next) = page_bounds(st.page, st.limit, st.total, shown);
@@ -1658,12 +1787,18 @@ fn present_view(
 }
 
 /// Set the result-tab strip labels ("Result 1", …) and active index.
-fn set_result_tabs(w: &MainWindow, count: usize, active: usize) {
+fn set_result_tabs(w: &MainWindow, pane: usize, count: usize, active: usize) {
     let labels: Vec<SharedString> = (1..=count)
         .map(|n| SharedString::from(format!("Result {n}")))
         .collect();
-    w.set_result_tabs(ModelRc::from(Rc::new(VecModel::from(labels))));
-    w.set_active_result(active as i32);
+    let labels = ModelRc::from(Rc::new(VecModel::from(labels)));
+    if pane == 0 {
+        w.set_result_tabs(labels);
+        w.set_active_result(active as i32);
+    } else {
+        w.set_p1_result_tabs(labels);
+        w.set_p1_active_result(active as i32);
+    }
 }
 
 #[cfg(test)]
@@ -2031,6 +2166,7 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         }
     };
+    #[allow(clippy::type_complexity)]
     let load_editor_text: Rc<dyn Fn(usize, &str)> = {
         let panes = panes.clone();
         let sync_editor = sync_editor.clone();
@@ -2860,7 +2996,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if !standby {
                 results.lock().unwrap().clear();
                 *displayed_grid.lock().unwrap() = None;
-                clear_grid(&w);
+                clear_grid(&w, 0);
             }
             expanded_tables.lock().unwrap().clear();
             *collapsed_categories.borrow_mut() = default_collapsed_cats();
@@ -3486,7 +3622,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
             *results.lock().unwrap() = tab.results.clone();
             *active_result.lock().unwrap() = tab.active_result;
-            set_result_tabs(w, tab.results.len(), tab.active_result);
+            set_result_tabs(w, 0, tab.results.len(), tab.active_result);
             let selected = if tab.kind == "sql" {
                 tab.results.get(tab.active_result).cloned().or(tab.view)
             } else {
@@ -3495,6 +3631,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(stored) = selected {
                 present_view(
                     w,
+                    0,
                     stored.view,
                     &stored.meta,
                     &stored.latency,
@@ -3510,7 +3647,7 @@ fn main() -> Result<(), slint::PlatformError> {
             } else {
                 *last_view.lock().unwrap() = None;
                 *displayed_grid.lock().unwrap() = None;
-                clear_grid(w);
+                clear_grid(w, 0);
                 w.set_results_meta(SharedString::default());
                 w.set_result_status(SharedString::default());
             }
@@ -3671,7 +3808,7 @@ fn main() -> Result<(), slint::PlatformError> {
             *active_tab_id.lock().unwrap() = None;
             *current_connection_id.lock().unwrap() = None;
             set_workspace_tabs(&w, &[], None);
-            clear_grid(&w);
+            clear_grid(&w, 0);
             *cur_engine.borrow_mut() = None;
             expanded_tables.lock().unwrap().clear();
             loaded_dbs.lock().unwrap().clear();
@@ -3734,7 +3871,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
             );
             *displayed_grid.lock().unwrap() = view_grid(&filtered);
-            apply_result(&w, filtered);
+            apply_result(&w, 0, filtered);
         });
     }
 
@@ -3829,9 +3966,9 @@ fn main() -> Result<(), slint::PlatformError> {
             // Columns are unchanged, so update only the cells — replacing the
             // columns model would rebuild (and unfocus) the filter inputs.
             if let model::ResultView::Table(g) = &filtered {
-                set_grid_cells_only(&w, g);
+                set_grid_cells_only(&w, 0, g);
             } else {
-                apply_result(&w, filtered);
+                apply_result(&w, 0, filtered);
             }
         });
     }
@@ -3896,7 +4033,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
             );
             *displayed_grid.lock().unwrap() = view_grid(&sorted);
-            apply_result(&w, sorted);
+            apply_result(&w, 0, sorted);
         });
     }
 
@@ -3999,7 +4136,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
             );
             *displayed_grid.lock().unwrap() = view_grid(&transformed);
-            apply_result(&w, transformed);
+            apply_result(&w, 0, transformed);
         });
     }
 
@@ -4073,7 +4210,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(widths))));
             }
             *displayed_grid.lock().unwrap() = view_grid(&transformed);
-            apply_result(&w, transformed);
+            apply_result(&w, 0, transformed);
         });
     }
 
@@ -4172,7 +4309,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let tabs = workspace_tabs.lock().unwrap();
                     set_workspace_tabs(&w, &tabs, init_active.as_deref());
                 }
-                clear_grid(&w);
+                clear_grid(&w, 0);
                 sync_query_console(&w, &query_console);
                 w.set_selected_conn(idx);
                 // Show progress + clear any prior failure immediately.
@@ -4663,12 +4800,18 @@ fn main() -> Result<(), slint::PlatformError> {
                                 *results.lock().unwrap() = tab_results;
                                 *active_result.lock().unwrap() = tab_active;
                                 if is_browse {
-                                    set_result_tabs(&w, 0, 0);
+                                    set_result_tabs(&w, 0, 0, 0);
                                 } else {
-                                    set_result_tabs(&w, results.lock().unwrap().len(), tab_active);
+                                    set_result_tabs(
+                                        &w,
+                                        0,
+                                        results.lock().unwrap().len(),
+                                        tab_active,
+                                    );
                                 }
                                 present_view(
                                     &w,
+                                    0,
                                     v,
                                     &meta,
                                     &latency,
@@ -4697,6 +4840,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 *last_view.lock().unwrap() = None;
                                 apply_result(
                                     &w,
+                                    0,
                                     model::ResultView::Affected(format!("error: {e}")),
                                 );
                             }
@@ -4761,7 +4905,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_query_running(true);
             w.set_streaming(true);
             w.set_grid_read_only(true);
-            clear_grid(&w);
+            clear_grid(&w, 0);
             w.set_result_status(SharedString::from("streaming…"));
             w.set_results_meta(SharedString::default());
 
@@ -4875,9 +5019,10 @@ fn main() -> Result<(), slint::PlatformError> {
                                     {
                                         *results.lock().unwrap() = vec![sr];
                                         *active_result.lock().unwrap() = 0;
-                                        set_result_tabs(&w, 1, 0);
+                                        set_result_tabs(&w, 0, 1, 0);
                                         present_view(
                                             &w,
+                                            0,
                                             view,
                                             &meta,
                                             &latency,
@@ -4911,6 +5056,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                     {
                                         apply_result(
                                             &w,
+                                            0,
                                             model::ResultView::Affected(format!("error: {e}")),
                                         );
                                         w.set_query_running(false);
@@ -5392,8 +5538,8 @@ fn main() -> Result<(), slint::PlatformError> {
             *last_view.lock().unwrap() = None;
             *displayed_grid.lock().unwrap() = None;
             results.lock().unwrap().clear();
-            set_result_tabs(&w, 0, 0);
-            clear_grid(&w);
+            set_result_tabs(&w, 0, 0, 0);
+            clear_grid(&w, 0);
             run_browse();
 
             // Fetch total + primary key off-thread; footer updates when done.
@@ -5671,7 +5817,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 if !collapsed.remove(&p) {
                     collapsed.insert(p);
                 }
-                push_doc_tree(&w, full, collapsed);
+                push_doc_tree(&w, 0, full, collapsed);
             });
         });
     }
@@ -5940,8 +6086,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 ..Default::default()
             };
             *last_view.lock().unwrap() = None;
-            set_result_tabs(&w, 0, 0);
-            clear_grid(&w);
+            set_result_tabs(&w, 0, 0, 0);
+            clear_grid(&w, 0);
             w.set_active_table(SharedString::default());
             w.set_fn_mode(false);
             w.set_query_running(false);
@@ -6016,6 +6162,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_active_result(i as i32);
             present_view(
                 &w,
+                0,
                 sr.view,
                 &sr.meta,
                 &sr.latency,
@@ -6061,7 +6208,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 (rv.len(), *ar, rv.get(*ar).cloned())
             };
-            set_result_tabs(&w, count, active);
+            set_result_tabs(&w, 0, count, active);
             if let Some(id) = active_tab_id.lock().unwrap().clone() {
                 if let Some(tab) = workspace_tabs
                     .lock()
@@ -6076,6 +6223,7 @@ fn main() -> Result<(), slint::PlatformError> {
             match sr {
                 Some(sr) => present_view(
                     &w,
+                    0,
                     sr.view,
                     &sr.meta,
                     &sr.latency,
@@ -6089,7 +6237,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     &browse,
                 ),
                 None => {
-                    clear_grid(&w);
+                    clear_grid(&w, 0);
                     *last_view.lock().unwrap() = None;
                 }
             }
@@ -6146,7 +6294,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 results.lock().unwrap().clear();
                 *last_view.lock().unwrap() = None;
                 *displayed_grid.lock().unwrap() = None;
-                clear_grid(&w);
+                clear_grid(&w, 0);
                 w.set_active_table(SharedString::default());
                 w.set_fn_mode(false);
                 w.set_query_running(false);
@@ -6261,7 +6409,7 @@ fn main() -> Result<(), slint::PlatformError> {
         Rc::new(move |w: &MainWindow| {
             let buf = edit_buf.lock().unwrap();
             if let Some(g) = displayed_grid.lock().unwrap().as_ref() {
-                paint_grid_with_edits(w, g, &buf);
+                paint_grid_with_edits(w, 0, g, &buf);
             }
             w.set_pending_count(buf.pending_count() as i32);
         })
