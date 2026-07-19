@@ -541,8 +541,6 @@ struct WorkspaceTab {
     split: bool,
     split_ratio: f32,
     pane1_query: String,
-    pane1_results: Vec<StoredResult>,
-    pane1_active_result: usize,
 }
 
 impl WorkspaceTab {
@@ -564,8 +562,6 @@ impl WorkspaceTab {
             split: false,
             split_ratio: 0.5,
             pane1_query: String::new(),
-            pane1_results: Vec::new(),
-            pane1_active_result: 0,
         }
     }
 
@@ -3085,8 +3081,6 @@ fn main() -> Result<(), slint::PlatformError> {
                     split: false,
                     split_ratio: 0.5,
                     pane1_query: String::new(),
-                    pane1_results: Vec::new(),
-                    pane1_active_result: 0,
                 });
                 *active_tab_id.lock().unwrap() = Some(id.clone());
                 set_workspace_tabs(&w, &tabs, Some(&id));
@@ -5383,6 +5377,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let results = results.clone();
                 let active_result = active_result.clone();
                 let active_tab_id = active_tab_id.clone();
+                let active_p1_tab_id = active_p1_tab_id.clone();
                 let stream_timer_stop = stream_timer.clone();
                 let target_id = target_id.clone();
                 let pane = pane;
@@ -6372,8 +6367,6 @@ fn main() -> Result<(), slint::PlatformError> {
                     split: false,
                     split_ratio: 0.5,
                     pane1_query: String::new(),
-                    pane1_results: Vec::new(),
-                    pane1_active_result: 0,
                 };
                 let active_id = active_tab_id.lock().unwrap().clone();
                 let mut tabs = workspace_tabs.lock().unwrap();
