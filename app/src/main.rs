@@ -1305,6 +1305,51 @@ fn set_p_query_running(w: &MainWindow, pane: usize, b: bool) {
         w.set_p1_query_running(b);
     }
 }
+fn set_p_find_open(w: &MainWindow, pane: usize, b: bool) {
+    if pane == 0 {
+        w.set_find_open(b);
+    } else {
+        w.set_p1_find_open(b);
+    }
+}
+fn get_p_find_open(w: &MainWindow, pane: usize) -> bool {
+    if pane == 0 {
+        w.get_find_open()
+    } else {
+        w.get_p1_find_open()
+    }
+}
+fn set_p_find_text(w: &MainWindow, pane: usize, s: SharedString) {
+    if pane == 0 {
+        w.set_find_text(s);
+    } else {
+        w.set_p1_find_text(s);
+    }
+}
+fn get_p_find_text(w: &MainWindow, pane: usize) -> String {
+    if pane == 0 {
+        w.get_find_text().to_string()
+    } else {
+        w.get_p1_find_text().to_string()
+    }
+}
+fn set_p_find_status(w: &MainWindow, pane: usize, s: SharedString) {
+    if pane == 0 {
+        w.set_find_status(s);
+    } else {
+        w.set_p1_find_status(s);
+    }
+}
+fn get_p_cursor(w: &MainWindow, pane: usize) -> (usize, usize) {
+    if pane == 0 {
+        (w.get_cursor_line() as usize, w.get_cursor_col() as usize)
+    } else {
+        (
+            w.get_p1_cursor_line() as usize,
+            w.get_p1_cursor_col() as usize,
+        )
+    }
+}
 
 /// Return a copy of `g` keeping only rows where some cell matches `needle`
 /// (already lowercased). An empty needle keeps every row.
@@ -2420,6 +2465,17 @@ fn main() -> Result<(), slint::PlatformError> {
                         }
                         return true;
                     }
+                    // ⌘F opens find in the pane the caret is in.
+                    if text.as_str() == "f" {
+                        if let Some(w) = weak.upgrade() {
+                            if pane == 0 {
+                                w.invoke_toggle_find();
+                            } else {
+                                w.invoke_p1_toggle_find();
+                            }
+                        }
+                        return true;
+                    }
                     // Editor-owned cmd combos; everything else bubbles up to the
                     // window shortcut scope (⌘S commit, ⌘R refresh, …).
                     let handled = {
@@ -2623,129 +2679,138 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // ----- find-in-editor (⌘F) -----
-    let find_hits = panes[0].find_hits.clone();
-    // Select the find hit at `idx` and refresh the "n / total" readout.
+    // ----- find-in-editor (⌘F), per pane -----
+    // Select the find hit at `idx` in `pane` and refresh the "n / total" readout.
     #[allow(clippy::type_complexity)]
-    let show_find: Rc<dyn Fn(&MainWindow, usize)> = {
-        let ed_state = ed_state.clone();
+    let show_find: Rc<dyn Fn(&MainWindow, usize, usize)> = {
+        let panes = panes.clone();
         let sync_editor = sync_editor.clone();
-        let find_hits = find_hits.clone();
-        Rc::new(move |w: &MainWindow, idx: usize| {
-            let hits = find_hits.borrow();
+        Rc::new(move |w: &MainWindow, pane: usize, idx: usize| {
+            let hits = panes[pane].find_hits.borrow();
             if let Some(&(l, s, e)) = hits.get(idx) {
-                ed_state.borrow_mut().set_selection((l, s), (l, e));
-                sync_editor(0);
-                w.set_find_status(SharedString::from(format!("{} / {}", idx + 1, hits.len())));
-            } else if w.get_find_text().is_empty() {
-                w.set_find_status(SharedString::default());
+                panes[pane]
+                    .ed_state
+                    .borrow_mut()
+                    .set_selection((l, s), (l, e));
+                sync_editor(pane);
+                set_p_find_status(
+                    w,
+                    pane,
+                    SharedString::from(format!("{} / {}", idx + 1, hits.len())),
+                );
+            } else if get_p_find_text(w, pane).is_empty() {
+                set_p_find_status(w, pane, SharedString::default());
             } else {
-                w.set_find_status(SharedString::from("no matches"));
+                set_p_find_status(w, pane, SharedString::from("no matches"));
             }
         })
     };
     // Recompute matches for `needle`, jump to the first at/after the cursor.
     #[allow(clippy::type_complexity)]
-    let recompute_find: Rc<dyn Fn(&MainWindow, &str)> = {
-        let ed_state = ed_state.clone();
-        let find_hits = find_hits.clone();
+    let recompute_find: Rc<dyn Fn(&MainWindow, usize, &str)> = {
+        let panes = panes.clone();
         let show_find = show_find.clone();
-        Rc::new(move |w: &MainWindow, needle: &str| {
+        Rc::new(move |w: &MainWindow, pane: usize, needle: &str| {
             let (cur, hits) = {
-                let ed = ed_state.borrow();
+                let ed = panes[pane].ed_state.borrow();
                 ((ed.line, ed.col), editor::find_matches(&ed.lines, needle))
             };
             let idx = hits
                 .iter()
                 .position(|&(l, s, _)| (l, s) >= cur)
                 .unwrap_or(0);
-            *find_hits.borrow_mut() = hits;
-            show_find(w, idx);
+            *panes[pane].find_hits.borrow_mut() = hits;
+            show_find(w, pane, idx);
         })
     };
-    {
-        let weak = window.as_weak();
-        let ed_state = ed_state.clone();
+    // ⌘F: open/close the find bar for a pane; seed from the selection.
+    #[allow(clippy::type_complexity)]
+    let toggle_find: Rc<dyn Fn(&MainWindow, usize)> = {
+        let panes = panes.clone();
         let recompute_find = recompute_find.clone();
-        window.on_toggle_find(move || {
-            let Some(w) = weak.upgrade() else { return };
-            let opening = !w.get_find_open();
-            w.set_find_open(opening);
+        Rc::new(move |w: &MainWindow, pane: usize| {
+            let opening = !get_p_find_open(w, pane);
+            set_p_find_open(w, pane, opening);
             if opening {
-                // Seed with the current single-line selection, if any.
-                if let Some(sel) = ed_state.borrow().selected_text() {
+                if let Some(sel) = panes[pane].ed_state.borrow().selected_text() {
                     if !sel.contains('\n') && !sel.is_empty() {
-                        w.set_find_text(SharedString::from(sel));
+                        set_p_find_text(w, pane, SharedString::from(sel));
                     }
                 }
-                let needle = w.get_find_text().to_string();
-                recompute_find(&w, &needle);
+                let needle = get_p_find_text(w, pane);
+                recompute_find(w, pane, &needle);
             }
-        });
-    }
-    {
-        let weak = window.as_weak();
-        let recompute_find = recompute_find.clone();
-        window.on_find_changed(move |text| {
-            if let Some(w) = weak.upgrade() {
-                recompute_find(&w, &text);
-            }
-        });
-    }
-    {
-        let weak = window.as_weak();
-        let find_hits = find_hits.clone();
+        })
+    };
+    // Step to the next/previous hit in a pane.
+    #[allow(clippy::type_complexity)]
+    let find_step: Rc<dyn Fn(&MainWindow, usize, i32)> = {
+        let panes = panes.clone();
         let show_find = show_find.clone();
-        let step = |w: &MainWindow, find_hits: &RefCell<Vec<(usize, usize, usize)>>, dir: i32| {
-            let n = find_hits.borrow().len();
-            if n == 0 {
-                return None;
-            }
-            // Where are we now? The current caret sits at a hit's end.
-            let cur = (w.get_cursor_line() as usize, w.get_cursor_col() as usize);
-            let hits = find_hits.borrow();
-            let here = hits
-                .iter()
-                .position(|&(l, _, e)| (l, e) == cur)
-                .unwrap_or(0);
-            Some(((here as i32 + dir).rem_euclid(n as i32)) as usize)
-        };
-        let show_find2 = show_find.clone();
-        window.on_find_next(move || {
-            if let Some(w) = weak.upgrade() {
-                if let Some(i) = step(&w, &find_hits, 1) {
-                    show_find2(&w, i);
-                }
-            }
-        });
-    }
-    {
-        let weak = window.as_weak();
-        let find_hits = find_hits.clone();
-        let show_find = show_find.clone();
-        window.on_find_prev(move || {
-            let Some(w) = weak.upgrade() else { return };
-            let n = find_hits.borrow().len();
+        Rc::new(move |w: &MainWindow, pane: usize, dir: i32| {
+            let n = panes[pane].find_hits.borrow().len();
             if n == 0 {
                 return;
             }
-            let cur = (w.get_cursor_line() as usize, w.get_cursor_col() as usize);
-            let here = find_hits
+            let cur = get_p_cursor(w, pane);
+            let here = panes[pane]
+                .find_hits
                 .borrow()
                 .iter()
                 .position(|&(l, _, e)| (l, e) == cur)
                 .unwrap_or(0);
-            let i = ((here as i32 - 1).rem_euclid(n as i32)) as usize;
-            show_find(&w, i);
-        });
-    }
-    {
+            let i = ((here as i32 + dir).rem_euclid(n as i32)) as usize;
+            show_find(w, pane, i);
+        })
+    };
+    for pane in [0usize, 1usize] {
         let weak = window.as_weak();
-        window.on_find_close(move || {
+        let toggle_find = toggle_find.clone();
+        let recompute_find = recompute_find.clone();
+        let find_step = find_step.clone();
+        let toggle = move || {
             if let Some(w) = weak.upgrade() {
-                w.set_find_open(false);
+                toggle_find(&w, pane);
             }
-        });
+        };
+        let weak_c = window.as_weak();
+        let changed = move |text: SharedString| {
+            if let Some(w) = weak_c.upgrade() {
+                recompute_find(&w, pane, &text);
+            }
+        };
+        let weak_n = window.as_weak();
+        let fs_n = find_step.clone();
+        let next = move || {
+            if let Some(w) = weak_n.upgrade() {
+                fs_n(&w, pane, 1);
+            }
+        };
+        let weak_p = window.as_weak();
+        let prev = move || {
+            if let Some(w) = weak_p.upgrade() {
+                find_step(&w, pane, -1);
+            }
+        };
+        let weak_x = window.as_weak();
+        let close = move || {
+            if let Some(w) = weak_x.upgrade() {
+                set_p_find_open(&w, pane, false);
+            }
+        };
+        if pane == 0 {
+            window.on_toggle_find(toggle);
+            window.on_find_changed(changed);
+            window.on_find_next(next);
+            window.on_find_prev(prev);
+            window.on_find_close(close);
+        } else {
+            window.on_p1_toggle_find(toggle);
+            window.on_p1_find_changed(changed);
+            window.on_p1_find_next(next);
+            window.on_p1_find_prev(prev);
+            window.on_p1_find_close(close);
+        }
     }
 
     // ----- saved/recent queries (sidebar Queries tab) -----
