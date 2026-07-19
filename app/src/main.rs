@@ -2401,8 +2401,21 @@ fn main() -> Result<(), slint::PlatformError> {
                     return true;
                 }
                 if meta {
+                    // ⌘⏎ runs the pane the caret is in. The global window shortcut
+                    // always targets pane 0, so intercept it here (outside the ed
+                    // borrow) and dispatch to the firing pane instead.
+                    if text.as_str() == "\r" || text.as_str() == "\n" {
+                        if let Some(w) = weak.upgrade() {
+                            if pane == 0 {
+                                w.invoke_run_query();
+                            } else {
+                                w.invoke_p1_run();
+                            }
+                        }
+                        return true;
+                    }
                     // Editor-owned cmd combos; everything else bubbles up to the
-                    // window shortcut scope (⌘⏎ run, ⌘S commit, ⌘R refresh, …).
+                    // window shortcut scope (⌘S commit, ⌘R refresh, …).
                     let handled = {
                         let mut ed = ed_state.borrow_mut();
                         match text.as_str() {
