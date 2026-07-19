@@ -590,7 +590,8 @@ fn replaceable_table_tab_index(tabs: &[WorkspaceTab], active_id: Option<&str>) -
 }
 
 fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&str>) {
-    let items: Vec<TabItem> = tabs
+    let left: Vec<&WorkspaceTab> = tabs.iter().filter(|tab| tab.group == 0).collect();
+    let items: Vec<TabItem> = left
         .iter()
         .map(|tab| TabItem {
             kind: tab.kind.clone().into(),
@@ -600,10 +601,24 @@ fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&
         .collect();
     w.set_tabs(ModelRc::from(Rc::new(VecModel::from(items))));
     w.set_active_tab(
-        workspace_tab_index(tabs, active_id)
+        active_id
+            .and_then(|id| left.iter().position(|tab| tab.id == id))
             .map(|i| i as i32)
             .unwrap_or(-1),
     );
+    let right: Vec<&WorkspaceTab> = tabs.iter().filter(|tab| tab.group == 1).collect();
+    let p1_items: Vec<TabItem> = right
+        .iter()
+        .map(|tab| TabItem {
+            kind: tab.kind.clone().into(),
+            title: tab.title.clone().into(),
+            preview: tab.is_preview(),
+        })
+        .collect();
+    w.set_p1_tabs(ModelRc::from(Rc::new(VecModel::from(p1_items))));
+    if right.is_empty() {
+        w.set_p1_active_tab(-1);
+    }
 }
 
 const QUERY_CONSOLE_CAP: usize = 200;
@@ -2169,6 +2184,8 @@ fn main() -> Result<(), slint::PlatformError> {
     let workspace_tabs: Arc<std::sync::Mutex<Vec<WorkspaceTab>>> =
         Arc::new(std::sync::Mutex::new(Vec::new()));
     let active_tab_id: Arc<std::sync::Mutex<Option<String>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let active_p1_tab_id: Arc<std::sync::Mutex<Option<String>>> =
         Arc::new(std::sync::Mutex::new(None));
     let current_connection_id: Arc<std::sync::Mutex<Option<String>>> =
         Arc::new(std::sync::Mutex::new(None));
@@ -3945,6 +3962,115 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         })
     };
+
+    let restore_p1_tab: Rc<dyn Fn(&MainWindow, usize)> = {
+        let tabs = workspace_tabs.clone();
+        let active_id = active_p1_tab_id.clone();
+        let load_editor_text = load_editor_text.clone();
+        let panes = panes.clone();
+        let last_view = last_view.clone();
+        Rc::new(move |w, group_index| {
+            let tab = {
+                let tabs = tabs.lock().unwrap();
+                tabs.iter()
+                    .filter(|tab| tab.group == 1)
+                    .nth(group_index)
+                    .cloned()
+            };
+            let Some(tab) = tab else {
+                return;
+            };
+            *active_id.lock().unwrap() = Some(tab.id.clone());
+            load_editor_text(1, &tab.query_text);
+            *panes[1].results.lock().unwrap() = tab.results.clone();
+            *panes[1].active_result.lock().unwrap() = tab.active_result;
+            set_result_tabs(w, 1, tab.results.len(), tab.active_result);
+            w.set_p1_active_tab(group_index as i32);
+            w.set_split(true);
+            let selected = if tab.kind == "sql" {
+                tab.results.get(tab.active_result).cloned().or(tab.view)
+            } else {
+                tab.view
+            };
+            if let Some(stored) = selected {
+                present_view(
+                    w,
+                    1,
+                    stored.view,
+                    &stored.meta,
+                    &stored.latency,
+                    &last_view,
+                    &panes[1].displayed_grid,
+                    &panes[1].hidden_cols,
+                    &panes[1].sort_state,
+                    &panes[1].col_order,
+                    &panes[1].col_filters,
+                    &panes[1].edit_buf,
+                    &panes[1].browse,
+                );
+            } else {
+                clear_grid(w, 1);
+                set_p_results_meta(w, 1, SharedString::default());
+                set_p_result_status(w, 1, SharedString::default());
+            }
+        })
+    };
+
+    {
+        let restore_p1_tab = restore_p1_tab.clone();
+        let weak = window.as_weak();
+        window.on_select_p1_tab(move |index| {
+            if let Some(w) = weak.upgrade() {
+                restore_p1_tab(&w, index.max(0) as usize);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let tabs = workspace_tabs.clone();
+        let save_active_tab = save_active_tab.clone();
+        let restore_tab = restore_tab.clone();
+        let restore_p1_tab = restore_p1_tab.clone();
+        let active_p1_tab_id = active_p1_tab_id.clone();
+        window.on_move_tab_group(move |index, target| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let target = target.clamp(0, 1) as usize;
+            save_active_tab(&w);
+            let source = if target == 1 { 0 } else { 1 };
+            let moved_id = {
+                let mut tabs = tabs.lock().unwrap();
+                let Some(tab) = tabs
+                    .iter_mut()
+                    .filter(|tab| tab.group == source)
+                    .nth(index.max(0) as usize)
+                else {
+                    return;
+                };
+                tab.group = target;
+                tab.id.clone()
+            };
+            let tabs_guard = tabs.lock().unwrap();
+            set_workspace_tabs(&w, &tabs_guard, Some(&moved_id));
+            drop(tabs_guard);
+            if target == 1 {
+                restore_p1_tab(&w, 0);
+            } else {
+                *active_p1_tab_id.lock().unwrap() = None;
+                let tabs_guard = tabs.lock().unwrap();
+                let index = workspace_tab_index(&tabs_guard, Some(&moved_id));
+                drop(tabs_guard);
+                if let Some(index) = index {
+                    restore_tab(&w, index);
+                }
+                if !tabs.lock().unwrap().iter().any(|tab| tab.group == 1) {
+                    w.set_split(false);
+                    w.set_p1_active_tab(-1);
+                }
+            }
+        });
+    }
 
     // ----- toggle a sidebar group's collapsed state (Feature A) -----
     {

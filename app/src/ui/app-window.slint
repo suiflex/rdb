@@ -339,6 +339,10 @@ in-out property <string> rename-text;
     // ----- tabs + palette -----
     in property <[TabItem]> tabs;
     in-out property <int> active-tab: -1;
+    in property <[TabItem]> p1-tabs;
+    in-out property <int> p1-active-tab: -1;
+    callback select-p1-tab(int);
+    callback move-tab-group(int, int);
     // Dual-pane split for the active SQL tab (right pane + focused pane index).
     in-out property <bool> split: false;
     in-out property <int> active-pane: 0;
@@ -950,6 +954,19 @@ in-out property <string> rename-text;
                                     : (tab-ta.has-hover ? Tokens.card.with-alpha(0.5) : transparent);
                                 border-radius: 0;
                                 tab-ta := TouchArea {
+                                    property <bool> dragging: false;
+                                    moved => {
+                                        if (abs(self.mouse-x - self.pressed-x) > 8px) {
+                                            self.dragging = true;
+                                        }
+                                    }
+                                    pointer-event(e) => {
+                                        if (e.kind == PointerEventKind.down) { self.dragging = false; }
+                                        if (e.kind == PointerEventKind.up && self.dragging
+                                            && self.mouse-x - self.pressed-x > 48px) {
+                                            root.move-tab-group(i, 1);
+                                        }
+                                    }
                                     clicked => {
                                         root.select-tab(i);
                                     }
@@ -1041,6 +1058,57 @@ in-out property <string> rename-text;
                                             size: 11px;
                                             color: close-ta.has-hover ? white : Tokens.text-dim;
                                         }
+                                    }
+                                }
+                            }
+                            if root.p1-tabs.length > 0: Rectangle {
+                                width: 1px;
+                                height: parent.height - Tokens.sp2;
+                                background: Tokens.border-strong;
+                            }
+                            for tab[i] in root.p1-tabs: Rectangle {
+                                width: min(170px, p1-tab-content.preferred-width + 2 * Tokens.sp3);
+                                height: Tokens.doc-tab-h;
+                                background: i == root.p1-active-tab ? Tokens.card
+                                    : (p1-tab-ta.has-hover ? Tokens.card.with-alpha(0.5) : transparent);
+                                p1-tab-ta := TouchArea {
+                                    property <bool> dragging: false;
+                                    moved => {
+                                        if (abs(self.mouse-x - self.pressed-x) > 8px) {
+                                            self.dragging = true;
+                                        }
+                                    }
+                                    pointer-event(e) => {
+                                        if (e.kind == PointerEventKind.down) { self.dragging = false; }
+                                        if (e.kind == PointerEventKind.up && self.dragging
+                                            && self.pressed-x - self.mouse-x > 48px) {
+                                            root.move-tab-group(i, 0);
+                                        }
+                                    }
+                                    clicked => { root.select-p1-tab(i); }
+                                }
+                                if i == root.p1-active-tab: Rectangle {
+                                    y: 0;
+                                    height: 2px;
+                                    width: parent.width;
+                                    background: Tokens.accent;
+                                }
+                                p1-tab-content := HorizontalLayout {
+                                    padding-left: Tokens.sp3;
+                                    padding-right: Tokens.sp2;
+                                    Text {
+                                        vertical-alignment: center;
+                                        text: tab.kind == "sql" ? ">_" : tab.kind == "function" ? "ƒ" : "▦";
+                                        color: Tokens.text-faint;
+                                        font-size: Tokens.font-sm;
+                                    }
+                                    Text {
+                                        vertical-alignment: center;
+                                        text: tab.title;
+                                        color: i == root.p1-active-tab ? Tokens.text : Tokens.text-dim;
+                                        font-size: Tokens.font-sm;
+                                        font-weight: i == root.p1-active-tab ? Tokens.weight-emphasis : 400;
+                                        overflow: elide;
                                     }
                                 }
                             }
