@@ -343,7 +343,9 @@ in-out property <string> rename-text;
     in-out property <int> p1-active-tab: -1;
     callback select-p1-tab(int);
     callback close-p1-tab(int);
+    callback new-tab-in-group(int);
     callback move-tab-group(int, int);
+    in-out property <int> tab-drag-source: -1;
     // Dual-pane split for the active SQL tab (right pane + focused pane index).
     in-out property <bool> split: false;
     in-out property <int> active-pane: 0;
@@ -943,7 +945,8 @@ in-out property <string> rename-text;
                         background: Tokens.chrome;
                         left-group := Rectangle {
                             x: 0;
-                            width: root.split ? (parent.width - 6px) * root.split-ratio : parent.width;
+                            width: (root.split || root.tab-drag-source == 0)
+                                ? (parent.width - 6px) * root.split-ratio : parent.width;
                             height: parent.height;
                             clip: true;
                             HorizontalLayout {
@@ -964,14 +967,22 @@ in-out property <string> rename-text;
                                         }
                                     }
                                     pointer-event(e) => {
-                                        if (e.kind == PointerEventKind.down) { self.dragging = false; }
+                                        if (e.kind == PointerEventKind.down) {
+                                            self.dragging = false;
+                                            root.tab-drag-source = 0;
+                                        }
                                         if (e.kind == PointerEventKind.up && self.dragging
                                             && self.mouse-x - self.pressed-x > 48px) {
                                             root.move-tab-group(i, 1);
                                         }
+                                        if (e.kind == PointerEventKind.up) { root.tab-drag-source = -1; }
                                     }
                                     clicked => {
-                                        if !self.dragging { root.select-tab(i); }
+                                        if !self.dragging {
+                                            root.active-tab = i;
+                                            root.active-pane = 0;
+                                            root.select-tab(i);
+                                        }
                                     }
                                     double-clicked => {
                                         root.pin-tab(i);
@@ -1022,6 +1033,21 @@ in-out property <string> rename-text;
                                         font-italic: tab.preview;
                                         overflow: elide;
                                     }
+                                    Rectangle {
+                                        width: 18px;
+                                        height: 18px;
+                                        y: (parent.height - self.height) / 2;
+                                        border-radius: 4px;
+                                        background: move-ta.has-hover ? Tokens.accent-tint : transparent;
+                                        visible: i == root.active-tab || tab-ta.has-hover;
+                                        move-ta := TouchArea { clicked => { root.move-tab-group(i, 1); } }
+                                        Text {
+                                            text: "⇥";
+                                            color: move-ta.has-hover ? Tokens.accent : Tokens.text-dim;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
                                     // close affordance (active or hovered tab)
                                     Rectangle {
                                         width: 18px;
@@ -1044,15 +1070,31 @@ in-out property <string> rename-text;
                                     }
                                 }
                             }
+                                Rectangle {
+                                    width: 26px;
+                                    height: 26px;
+                                    y: (parent.height - self.height) / 2;
+                                    border-radius: Tokens.radius;
+                                    background: add-ta.has-hover ? Tokens.accent-tint : transparent;
+                                    Text { text: "+"; color: add-ta.has-hover ? Tokens.accent : Tokens.text-dim; horizontal-alignment: center; vertical-alignment: center; font-size: 16px; }
+                                    add-ta := TouchArea { clicked => { root.new-tab-in-group(0); } }
+                                }
                                 Rectangle { horizontal-stretch: 1; }
                             }
                         }
-                        if root.split: Rectangle {
+                        if root.split || root.tab-drag-source == 0: Rectangle {
                             x: (parent.width - 6px) * root.split-ratio + 6px;
                             width: (parent.width - 6px) * (1 - root.split-ratio);
                             height: parent.height;
                             clip: true;
-                            background: Tokens.chrome;
+                            background: root.tab-drag-source == 0 ? Tokens.accent-tint : Tokens.chrome;
+                            if !root.split: Text {
+                                text: "Drop tab here";
+                                color: Tokens.accent;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                font-size: Tokens.font-sm;
+                            }
                             HorizontalLayout {
                                 padding-left: Tokens.sp2;
                                 padding-top: Tokens.doc-tab-row-h - Tokens.doc-tab-h;
@@ -1070,14 +1112,22 @@ in-out property <string> rename-text;
                                         }
                                     }
                                     pointer-event(e) => {
-                                        if (e.kind == PointerEventKind.down) { self.dragging = false; }
+                                        if (e.kind == PointerEventKind.down) {
+                                            self.dragging = false;
+                                            root.tab-drag-source = 1;
+                                        }
                                         if (e.kind == PointerEventKind.up && self.dragging
                                             && self.pressed-x - self.mouse-x > 48px) {
                                             root.move-tab-group(i, 0);
                                         }
+                                        if (e.kind == PointerEventKind.up) { root.tab-drag-source = -1; }
                                     }
                                     clicked => {
-                                        if !self.dragging { root.select-p1-tab(i); }
+                                        if !self.dragging {
+                                            root.p1-active-tab = i;
+                                            root.active-pane = 1;
+                                            root.select-p1-tab(i);
+                                        }
                                     }
                                 }
                                 if i == root.p1-active-tab: Rectangle {
@@ -1108,6 +1158,21 @@ in-out property <string> rename-text;
                                         height: 18px;
                                         y: (parent.height - self.height) / 2;
                                         border-radius: 4px;
+                                        background: p1-move-ta.has-hover ? Tokens.accent-tint : transparent;
+                                        visible: i == root.p1-active-tab || p1-tab-ta.has-hover;
+                                        p1-move-ta := TouchArea { clicked => { root.move-tab-group(i, 0); } }
+                                        Text {
+                                            text: "⇤";
+                                            color: p1-move-ta.has-hover ? Tokens.accent : Tokens.text-dim;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: 18px;
+                                        height: 18px;
+                                        y: (parent.height - self.height) / 2;
+                                        border-radius: 4px;
                                         background: p1-close-ta.has-hover ? Tokens.error : transparent;
                                         visible: i == root.p1-active-tab || p1-tab-ta.has-hover;
                                         p1-close-ta := TouchArea {
@@ -1121,6 +1186,15 @@ in-out property <string> rename-text;
                                     }
                                 }
                             }
+                                if root.split: Rectangle {
+                                    width: 26px;
+                                    height: 26px;
+                                    y: (parent.height - self.height) / 2;
+                                    border-radius: Tokens.radius;
+                                    background: p1-add-ta.has-hover ? Tokens.accent-tint : transparent;
+                                    Text { text: "+"; color: p1-add-ta.has-hover ? Tokens.accent : Tokens.text-dim; horizontal-alignment: center; vertical-alignment: center; font-size: 16px; }
+                                    p1-add-ta := TouchArea { clicked => { root.new-tab-in-group(1); } }
+                                }
                                 Rectangle { horizontal-stretch: 1; }
                             }
                         }

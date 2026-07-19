@@ -3988,6 +3988,45 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let weak = window.as_weak();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        let active_p1_tab_id = active_p1_tab_id.clone();
+        let current_connection_id = current_connection_id.clone();
+        let query_number = query_number.clone();
+        let save_p1_tab = save_p1_tab.clone();
+        let restore_p1_tab = restore_p1_tab.clone();
+        window.on_new_tab_in_group(move |group| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if group == 0 {
+                w.invoke_new_tab();
+                return;
+            }
+            save_p1_tab(&w);
+            let number = query_number.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            let connection = current_connection_id
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or_default();
+            let id = format!("query:{connection}:{number}");
+            let right_index = {
+                let mut tabs = workspace_tabs.lock().unwrap();
+                let mut tab = WorkspaceTab::sql(id.clone(), number);
+                tab.group = 1;
+                tabs.push(tab);
+                let left = active_tab_id.lock().unwrap().clone();
+                set_workspace_tabs(&w, &tabs, left.as_deref());
+                save_query_tabs(&tabs, left.as_deref());
+                tabs.iter().filter(|tab| tab.group == 1).count() - 1
+            };
+            *active_p1_tab_id.lock().unwrap() = Some(id);
+            restore_p1_tab(&w, right_index);
+        });
+    }
+    {
+        let weak = window.as_weak();
         let tabs = workspace_tabs.clone();
         let save_active_tab = save_active_tab.clone();
         let save_p1_tab = save_p1_tab.clone();
