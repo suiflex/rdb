@@ -342,6 +342,7 @@ in-out property <string> rename-text;
     // Dual-pane split for the active SQL tab (right pane + focused pane index).
     in-out property <bool> split: false;
     in-out property <int> active-pane: 0;
+    in-out property <float> split-ratio: 0.5;
     callback toggle-split();
     // Pane 1 (right split pane) mirror state, filled by Rust while split is on.
     in property <[[Span]]> p1-editor-lines;
@@ -1060,6 +1061,7 @@ in-out property <string> rename-text;
                         vertical-stretch: 1;
                         split: root.split;
                         active-pane: root.active-pane;
+                        split-ratio <=> root.split-ratio;
                         toggle-split() => { root.toggle-split(); }
                         p1-editor-lines: root.p1-editor-lines;
                         p1-editor-fold-state: root.p1-editor-fold-state;

@@ -117,6 +117,7 @@ export component WorkArea inherits Rectangle {
     // right. `active-pane` is the focused pane (0 left / 1 right).
     in property <bool> split: false;
     in property <int> active-pane: 0;
+    in-out property <float> split-ratio: 0.5;
     callback toggle-split();
 
     // ----- pane 1 (right split pane) mirror of the per-pane state above -----
@@ -475,7 +476,7 @@ export component WorkArea inherits Rectangle {
             vertical-stretch: 1;
             QueryPane {
             x: 0;
-            width: root.split ? (parent.width - 6px) / 2 : parent.width;
+            width: root.split ? (parent.width - 6px) * root.split-ratio : parent.width;
             height: 100%;
             split: root.split;
             active: root.split && root.active-pane == 0;
@@ -568,16 +569,24 @@ export component WorkArea inherits Rectangle {
 
             // vertical divider between the two panes (SQL split)
             if root.split: Rectangle {
-                x: (parent.width - 6px) / 2;
+                x: (parent.width - 6px) * root.split-ratio;
                 width: 6px;
                 height: 100%;
-                background: Tokens.border-strong;
+                background: divider.has-hover || divider.pressed ? Tokens.accent : Tokens.border-strong;
+                divider := TouchArea {
+                    mouse-cursor: col-resize;
+                    moved => {
+                        root.split-ratio = clamp(
+                            root.split-ratio + (self.mouse-x - self.pressed-x) / root.width,
+                            0.2, 0.8);
+                    }
+                }
             }
 
             // right pane (pane 1) — driven by the p1-* mirror state.
             if root.split: QueryPane {
-                x: (parent.width + 6px) / 2;
-                width: (parent.width - 6px) / 2;
+                x: (parent.width - 6px) * root.split-ratio + 6px;
+                width: (parent.width - 6px) * (1 - root.split-ratio);
                 height: 100%;
                 split: root.split;
                 active: root.split && root.active-pane == 1;

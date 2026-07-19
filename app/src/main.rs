@@ -537,6 +537,7 @@ struct WorkspaceTab {
     // Dual-pane split state for this tab: whether the right pane is open, its
     // editor text, and its last result (single result, no result-tab strip).
     split: bool,
+    split_ratio: f32,
     pane1_query: String,
     pane1_view: Option<StoredResult>,
 }
@@ -557,6 +558,7 @@ impl WorkspaceTab {
             loading: false,
             pinned: true,
             split: false,
+            split_ratio: 0.5,
             pane1_query: String::new(),
             pane1_view: None,
         }
@@ -733,6 +735,16 @@ struct PersistedTab {
     id: String,
     title: String,
     query_text: String,
+    #[serde(default)]
+    split: bool,
+    #[serde(default)]
+    pane1_query: String,
+    #[serde(default = "default_split_ratio")]
+    split_ratio: f32,
+}
+
+fn default_split_ratio() -> f32 {
+    0.5
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -757,6 +769,9 @@ fn save_query_tabs(tabs: &[WorkspaceTab], active: Option<&str>) {
             id: t.id.clone(),
             title: t.title.clone(),
             query_text: t.query_text.clone(),
+            split: t.split,
+            pane1_query: t.pane1_query.clone(),
+            split_ratio: t.split_ratio,
         })
         .collect();
     let active = active
@@ -790,6 +805,9 @@ fn load_query_tabs() -> (Vec<WorkspaceTab>, Option<String>) {
             let mut t = WorkspaceTab::sql(p.id, 0);
             t.title = p.title;
             t.query_text = p.query_text;
+            t.split = p.split;
+            t.pane1_query = p.pane1_query;
+            t.split_ratio = p.split_ratio.clamp(0.2, 0.8);
             t
         })
         .collect();
@@ -3056,6 +3074,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     loading: false,
                     pinned: true,
                     split: false,
+                    split_ratio: 0.5,
                     pane1_query: String::new(),
                     pane1_view: None,
                 });
@@ -3757,6 +3776,7 @@ fn main() -> Result<(), slint::PlatformError> {
             tab.loading = w.get_query_running();
             // Dual-pane split rides with SQL tabs (right-pane text only).
             tab.split = tab.kind == "sql" && w.get_split();
+            tab.split_ratio = w.get_split_ratio().clamp(0.2, 0.8);
             tab.pane1_query = if tab.kind == "sql" {
                 panes[1].ed_state.borrow().text()
             } else {
@@ -3819,6 +3839,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // Restore this tab's dual-pane split, right-pane editor text and its
             // last result so the split survives a tab switch intact.
             w.set_split(tab.split);
+            w.set_split_ratio(tab.split_ratio.clamp(0.2, 0.8));
             w.set_active_pane(0);
             load_editor_text(1, &tab.pane1_query);
             if let Some(stored) = tab.pane1_view.clone() {
@@ -5806,6 +5827,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     loading: true,
                     pinned: false,
                     split: false,
+                    split_ratio: 0.5,
                     pane1_query: String::new(),
                     pane1_view: None,
                 };
@@ -6381,6 +6403,7 @@ fn main() -> Result<(), slint::PlatformError> {
             clear_grid(&w, 0);
             // A fresh tab is never split; clear the right pane too.
             w.set_split(false);
+            w.set_split_ratio(0.5);
             w.set_active_pane(0);
             load_editor_text(1, "");
             clear_grid(&w, 1);
@@ -7782,11 +7805,17 @@ mod tests {
                     id: "query:c:1".into(),
                     title: "Query 1".into(),
                     query_text: "select * from users;".into(),
+                    split: true,
+                    pane1_query: "select * from orders;".into(),
+                    split_ratio: 0.35,
                 },
                 PersistedTab {
                     id: "query:c:2".into(),
                     title: "scratch".into(),
                     query_text: String::new(),
+                    split: false,
+                    pane1_query: String::new(),
+                    split_ratio: 0.5,
                 },
             ],
             active: Some("query:c:2".into()),
@@ -7795,7 +7824,21 @@ mod tests {
         let back: PersistedTabs = serde_json::from_str(&json).unwrap();
         assert_eq!(back.tabs.len(), 2);
         assert_eq!(back.tabs[0].query_text, "select * from users;");
+        assert!(back.tabs[0].split);
+        assert_eq!(back.tabs[0].pane1_query, "select * from orders;");
+        assert_eq!(back.tabs[0].split_ratio, 0.35);
         assert_eq!(back.active.as_deref(), Some("query:c:2"));
+    }
+
+    #[test]
+    fn persisted_tabs_accept_pre_split_files() {
+        let payload: PersistedTabs = serde_json::from_str(
+            r#"{"tabs":[{"id":"query:c:1","title":"Query 1","query_text":"select 1"}],"active":null}"#,
+        )
+        .unwrap();
+        assert!(!payload.tabs[0].split);
+        assert!(payload.tabs[0].pane1_query.is_empty());
+        assert_eq!(payload.tabs[0].split_ratio, 0.5);
     }
 
     #[test]
