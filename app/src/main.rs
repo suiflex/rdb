@@ -3915,6 +3915,7 @@ fn main() -> Result<(), slint::PlatformError> {
         })
     };
 
+    #[allow(clippy::type_complexity)]
     let restore_p1_tab: Rc<dyn Fn(&MainWindow, usize)> = {
         let tabs = workspace_tabs.clone();
         let active_id = active_p1_tab_id.clone();
@@ -5380,7 +5381,6 @@ fn main() -> Result<(), slint::PlatformError> {
                 let active_p1_tab_id = active_p1_tab_id.clone();
                 let stream_timer_stop = stream_timer.clone();
                 let target_id = target_id.clone();
-                let pane = pane;
                 timer.start(
                     slint::TimerMode::Repeated,
                     std::time::Duration::from_millis(50),
