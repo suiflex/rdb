@@ -2031,15 +2031,15 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         }
     };
-    let load_editor_text: Rc<dyn Fn(&str)> = {
-        let ed_state = ed_state.clone();
+    let load_editor_text: Rc<dyn Fn(usize, &str)> = {
+        let panes = panes.clone();
         let sync_editor = sync_editor.clone();
-        Rc::new(move |text: &str| {
-            *ed_state.borrow_mut() = editor::EditorState::from_text(text);
-            sync_editor(0);
+        Rc::new(move |pane: usize, text: &str| {
+            *panes[pane].ed_state.borrow_mut() = editor::EditorState::from_text(text);
+            sync_editor(pane);
         })
     };
-    load_editor_text("");
+    load_editor_text(0, "");
 
     // ----- toggle a statement fold from the gutter arrow -----
     {
@@ -2623,7 +2623,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if active_tab_id.lock().unwrap().is_none() || active_tab_kind(&w) != "sql" {
                 w.invoke_new_tab();
             }
-            load_editor_text(&text);
+            load_editor_text(0, &text);
             w.set_fn_mode(false);
             w.set_active_table(SharedString::default()); // editor mode
             w.set_query_label(SharedString::from(if is_saved {
@@ -2855,7 +2855,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     .and_then(|id| tabs.iter().find(|t| t.id == *id))
                     .map(|t| t.query_text.clone())
                     .unwrap_or_default();
-                load_editor_text(&text);
+                load_editor_text(0, &text);
             }
             if !standby {
                 results.lock().unwrap().clear();
@@ -3353,7 +3353,7 @@ fn main() -> Result<(), slint::PlatformError> {
             when(
                 Rc::new(|w| !w.get_results_meta().is_empty()),
                 Rc::new(move |w| {
-                    load("SELECT * FROM emiten OFFSET 99999");
+                    load(0, "SELECT * FROM emiten OFFSET 99999");
                     w.invoke_run_query();
                 }),
             );
@@ -3375,7 +3375,7 @@ fn main() -> Result<(), slint::PlatformError> {
             when(
                 Rc::new(|w| !w.get_results_meta().is_empty()),
                 Rc::new(move |w| {
-                    load("SELECT 1;\nSELECT * FROM emiten LIMIT 5;");
+                    load(0, "SELECT 1;\nSELECT * FROM emiten LIMIT 5;");
                     w.invoke_run_query();
                 }),
             );
@@ -3453,7 +3453,7 @@ fn main() -> Result<(), slint::PlatformError> {
             set_workspace_tabs(w, &tabs_guard, Some(&tab.id));
             drop(tabs_guard);
 
-            load_editor_text(&tab.query_text);
+            load_editor_text(0, &tab.query_text);
             w.set_fn_mode(tab.kind == "function");
             w.set_query_running(tab.loading);
             w.set_active_table(
@@ -4208,7 +4208,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             .map(|t| t.query_text.clone())
                     })
                     .unwrap_or_default();
-                load_editor_text(&init_text);
+                load_editor_text(0, &init_text);
                 w.set_editor_placeholder(SharedString::from(if mock::mock_mode() {
                     ""
                 } else {
@@ -5224,7 +5224,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(w) = weak.upgrade() {
                 let text = w.get_query_text().to_string();
                 if !text.trim().is_empty() {
-                    load_editor_text(&sql_format::format(&text));
+                    load_editor_text(0, &sql_format::format(&text));
                 }
             }
         });
@@ -5277,7 +5277,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 &st.mongo_filter,
                 &st.col_filters,
             );
-            load_editor_text(&text);
+            load_editor_text(0, &text);
             run_sql(text);
         })
     };
@@ -5930,7 +5930,7 @@ fn main() -> Result<(), slint::PlatformError> {
             set_workspace_tabs(&w, &tabs, Some(&id));
             save_query_tabs(&tabs, Some(&id));
             drop(tabs);
-            load_editor_text("");
+            load_editor_text(0, "");
             // Fresh query tab starts with no result tabs.
             results.lock().unwrap().clear();
             *active_result.lock().unwrap() = 0;
@@ -6137,7 +6137,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 set_workspace_tabs(&w, &tabs, None);
                 save_query_tabs(&tabs, None);
                 drop(tabs);
-                load_editor_text("");
+                load_editor_text(0, "");
                 let limit = browse.lock().unwrap().limit;
                 *browse.lock().unwrap() = BrowseState {
                     limit,
