@@ -2177,6 +2177,26 @@ fn main() -> Result<(), slint::PlatformError> {
     };
     load_editor_text(0, "");
 
+    // ----- toggle the dual-pane split for the active SQL tab -----
+    {
+        let weak = window.as_weak();
+        let sync_editor = sync_editor.clone();
+        window.on_toggle_split(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let now = !w.get_split();
+            w.set_split(now);
+            if now {
+                // Render the right pane's (initially empty) editor + result.
+                sync_editor(1);
+                clear_grid(&w, 1);
+                set_p_result_status(&w, 1, SharedString::default());
+                set_p_results_meta(&w, 1, SharedString::default());
+            }
+        });
+    }
+
     // ----- toggle a statement fold from the gutter arrow -----
     {
         let ed_state = ed_state.clone();

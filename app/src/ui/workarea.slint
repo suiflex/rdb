@@ -117,6 +117,7 @@ export component WorkArea inherits Rectangle {
     // right. `active-pane` is the focused pane (0 left / 1 right).
     in property <bool> split: false;
     in property <int> active-pane: 0;
+    callback toggle-split();
 
     // ----- pane 1 (right split pane) mirror of the per-pane state above -----
     // Pane 0 uses the base properties; Rust fills these only while `split` is on.
@@ -470,11 +471,14 @@ export component WorkArea inherits Rectangle {
         // Browse and SQL tabs render the left pane; function tabs use the view
         // above. A SQL tab can split into two panes side by side; the right pane
         // shows only when `split` is set (wired in a later step).
-        if !root.fn-mode: HorizontalLayout {
+        if !root.fn-mode: Rectangle {
             vertical-stretch: 1;
-            spacing: 0;
             QueryPane {
-            horizontal-stretch: 1;
+            x: 0;
+            width: root.split ? (parent.width - 6px) / 2 : parent.width;
+            height: 100%;
+            split: root.split;
+            toggle-split() => { root.toggle-split(); }
             browse-mode: root.browse-mode;
             browse-editor-open: root.browse-editor-open;
             fn-mode: root.fn-mode;
@@ -563,13 +567,19 @@ export component WorkArea inherits Rectangle {
 
             // vertical divider between the two panes (SQL split)
             if root.split: Rectangle {
+                x: (parent.width - 6px) / 2;
                 width: 6px;
-                background: Tokens.chrome;
+                height: 100%;
+                background: Tokens.border-strong;
             }
 
             // right pane (pane 1) — driven by the p1-* mirror state.
             if root.split: QueryPane {
-                horizontal-stretch: 1;
+                x: (parent.width + 6px) / 2;
+                width: (parent.width - 6px) / 2;
+                height: 100%;
+                split: root.split;
+                toggle-split() => { root.toggle-split(); }
                 // tab-global context shared with the left pane
                 browse-mode: root.browse-mode;
                 browse-editor-open: root.browse-editor-open;

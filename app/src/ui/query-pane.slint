@@ -23,6 +23,9 @@ export component QueryPane inherits Rectangle {
     in property <int> view-mode: 0;
     in property <bool> sql-capable: true;
     in property <bool> read-only: true;
+    // Whether the tab is currently split (drives the toggle button label).
+    in property <bool> split: false;
+    callback toggle-split();
 
     // ----- editor toolbar -----
     in-out property <length> editor-h: 340px;
@@ -323,6 +326,8 @@ export component QueryPane inherits Rectangle {
                     }
                     Rectangle { horizontal-stretch: 1; }
                     TextButton { text: root.editor-collapsed ? "Editor ▸" : "Editor ▾"; clicked => { root.editor-collapsed = !root.editor-collapsed; } }
+                    // Split the SQL tab into two panes (or merge back).
+                    if !root.browse-mode: TextButton { text: root.split ? "Unsplit" : "Split ⇆"; clicked => { root.toggle-split(); } }
                     if !root.browse-mode: TextButton { text: root.filter-open ? "Filter ▲" : "Filter ▼"; clicked => { root.filter-open = !root.filter-open; } }
                     TextButton { text: "Copy"; clicked => { root.copy-results(); } }
                     ExportButton { export(i) => { root.export-results(i); } }
