@@ -85,6 +85,8 @@ export component MainWindow inherits Window {
                     if (root.active-table != "") {
                         root.data-filter-open = true;
                         root.focus-data-filter-tick += 1;
+                    } else if (root.active-pane == 1) {
+                        root.p1-toggle-find();
                     } else {
                         root.toggle-find();
                     }
@@ -522,11 +524,16 @@ in-out property <string> rename-text;
                     return accept;
                 }
                 if (e.text == Key.Return) {
-                    root.run-query();
+                    if (root.active-pane == 1) { root.p1-run(); } else { root.run-query(); }
                     return accept;
                 }
                 if (e.text == "\\") {
                     root.run-new-tab();
+                    return accept;
+                }
+                // ⌘D splits / unsplits the SQL editor into two panes.
+                if (e.text == "d" && root.active-table == "") {
+                    root.toggle-split();
                     return accept;
                 }
                 if (e.text == "s") {
@@ -541,6 +548,8 @@ in-out property <string> rename-text;
                     if (root.active-table != "") {
                         root.data-filter-open = true;
                         root.focus-data-filter-tick += 1;
+                    } else if (root.active-pane == 1) {
+                        root.p1-toggle-find();
                     } else {
                         root.toggle-find();
                     }
