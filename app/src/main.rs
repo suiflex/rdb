@@ -534,6 +534,10 @@ struct WorkspaceTab {
     indexes: Vec<(String, String)>,
     loading: bool,
     pinned: bool,
+    // Dual-pane split state for this tab: whether the right pane is open and its
+    // editor text. Results in the right pane are not persisted (re-run to fill).
+    split: bool,
+    pane1_query: String,
 }
 
 impl WorkspaceTab {
@@ -551,6 +555,8 @@ impl WorkspaceTab {
             indexes: Vec::new(),
             loading: false,
             pinned: true,
+            split: false,
+            pane1_query: String::new(),
         }
     }
 
@@ -2942,6 +2948,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     indexes: Vec::new(),
                     loading: false,
                     pinned: true,
+                    split: false,
+                    pane1_query: String::new(),
                 });
                 *active_tab_id.lock().unwrap() = Some(id.clone());
                 set_workspace_tabs(&w, &tabs, Some(&id));
@@ -3624,6 +3632,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let tabs = workspace_tabs.clone();
         let active_id = active_tab_id.clone();
         let ed_state = ed_state.clone();
+        let panes = panes.clone();
         let browse = browse.clone();
         let results = results.clone();
         let active_result = active_result.clone();
@@ -3638,6 +3647,13 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             tab.query_text = ed_state.borrow().text();
             tab.loading = w.get_query_running();
+            // Dual-pane split rides with SQL tabs (right-pane text only).
+            tab.split = tab.kind == "sql" && w.get_split();
+            tab.pane1_query = if tab.kind == "sql" {
+                panes[1].ed_state.borrow().text()
+            } else {
+                String::new()
+            };
             if tab.kind == "table" {
                 tab.browse = browse.lock().unwrap().clone();
             } else if tab.kind == "sql" {
@@ -3686,6 +3702,14 @@ fn main() -> Result<(), slint::PlatformError> {
             drop(tabs_guard);
 
             load_editor_text(0, &tab.query_text);
+            // Restore this tab's dual-pane split + right-pane editor text; the
+            // right pane's result is not persisted, so clear it (re-run fills it).
+            w.set_split(tab.split);
+            w.set_active_pane(0);
+            load_editor_text(1, &tab.pane1_query);
+            clear_grid(w, 1);
+            set_p_result_status(w, 1, SharedString::default());
+            set_p_results_meta(w, 1, SharedString::default());
             w.set_fn_mode(tab.kind == "function");
             w.set_query_running(tab.loading);
             w.set_active_table(
@@ -5644,6 +5668,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     indexes: Vec::new(),
                     loading: true,
                     pinned: false,
+                    split: false,
+                    pane1_query: String::new(),
                 };
                 let active_id = active_tab_id.lock().unwrap().clone();
                 let mut tabs = workspace_tabs.lock().unwrap();
