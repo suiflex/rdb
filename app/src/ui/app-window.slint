@@ -160,6 +160,7 @@ callback open-rename(int, string);
 callback rename-commit();
 in-out property <bool> rename-modal-open: false;
 in-out property <int> rename-target: -1;
+in-out property <int> rename-group: 0;
 in-out property <string> rename-text;
     callback toggle-group(string);
     callback toggle-favorite(int);          // star/unstar a saved connection
@@ -968,12 +969,14 @@ in-out property <string> rename-text;
                                     moved => {
                                         if (abs(self.mouse-x - self.pressed-x) > 8px) {
                                             self.dragging = true;
+                                            root.tab-drag-source = 0;
                                         }
                                     }
                                     pointer-event(e) => {
                                         if (e.kind == PointerEventKind.down) {
                                             self.dragging = false;
-                                            root.tab-drag-source = 0;
+                                            root.active-tab = i;
+                                            root.active-pane = 0;
                                         }
                                         if (e.kind == PointerEventKind.up && self.dragging
                                             && self.mouse-x - self.pressed-x > 48px) {
@@ -1036,6 +1039,27 @@ in-out property <string> rename-text;
                                         font-weight: i == root.active-tab ? Tokens.weight-emphasis : 400;
                                         font-italic: tab.preview;
                                         overflow: elide;
+                                    }
+                                    Rectangle {
+                                        width: 18px;
+                                        height: 18px;
+                                        y: (parent.height - self.height) / 2;
+                                        border-radius: 4px;
+                                        background: rename-ta.has-hover ? Tokens.card : transparent;
+                                        visible: i == root.active-tab || tab-ta.has-hover;
+                                        rename-ta := TouchArea {
+                                            clicked => {
+                                                root.rename-target = i;
+                                                root.rename-group = 0;
+                                                root.rename-text = tab.title;
+                                                root.rename-modal-open = true;
+                                            }
+                                        }
+                                        AppIcon {
+                                            name: "pencil";
+                                            size: 11px;
+                                            color: rename-ta.has-hover ? Tokens.text : Tokens.text-dim;
+                                        }
                                     }
                                     Rectangle {
                                         width: 18px;
@@ -1113,12 +1137,14 @@ in-out property <string> rename-text;
                                     moved => {
                                         if (abs(self.mouse-x - self.pressed-x) > 8px) {
                                             self.dragging = true;
+                                            root.tab-drag-source = 1;
                                         }
                                     }
                                     pointer-event(e) => {
                                         if (e.kind == PointerEventKind.down) {
                                             self.dragging = false;
-                                            root.tab-drag-source = 1;
+                                            root.p1-active-tab = i;
+                                            root.active-pane = 1;
                                         }
                                         if (e.kind == PointerEventKind.up && self.dragging
                                             && self.pressed-x - self.mouse-x > 48px) {
@@ -1156,6 +1182,27 @@ in-out property <string> rename-text;
                                         font-size: Tokens.font-sm;
                                         font-weight: i == root.p1-active-tab ? Tokens.weight-emphasis : 400;
                                         overflow: elide;
+                                    }
+                                    Rectangle {
+                                        width: 18px;
+                                        height: 18px;
+                                        y: (parent.height - self.height) / 2;
+                                        border-radius: 4px;
+                                        background: p1-rename-ta.has-hover ? Tokens.card : transparent;
+                                        visible: i == root.p1-active-tab || p1-tab-ta.has-hover;
+                                        p1-rename-ta := TouchArea {
+                                            clicked => {
+                                                root.rename-target = i;
+                                                root.rename-group = 1;
+                                                root.rename-text = tab.title;
+                                                root.rename-modal-open = true;
+                                            }
+                                        }
+                                        AppIcon {
+                                            name: "pencil";
+                                            size: 11px;
+                                            color: p1-rename-ta.has-hover ? Tokens.text : Tokens.text-dim;
+                                        }
                                     }
                                     Rectangle {
                                         width: 18px;

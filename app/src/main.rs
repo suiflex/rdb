@@ -5305,6 +5305,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let query_console = query_console.clone();
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
+        let active_p1_tab_id = active_p1_tab_id.clone();
         let panes = panes.clone();
         let last_view = last_view.clone();
         Rc::new(move |pane, sql: String| {
@@ -5322,7 +5323,12 @@ fn main() -> Result<(), slint::PlatformError> {
             let browse = panes[pane].browse.clone();
             let stream_cancel = panes[pane].stream_cancel.clone();
             let stream_timer = panes[pane].stream_timer.clone();
-            let Some(target_id) = active_tab_id.lock().unwrap().clone() else {
+            let active_id = if pane == 1 {
+                &active_p1_tab_id
+            } else {
+                &active_tab_id
+            };
+            let Some(target_id) = active_id.lock().unwrap().clone() else {
                 return;
             };
             // Stop any in-flight stream, then arm a fresh cancel flag.
@@ -5342,11 +5348,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 .find(|t| t.id == target_id)
             {
                 tab.loading = true;
-                if pane == 0 {
-                    tab.query_text = sql.clone();
-                } else {
-                    tab.pane1_query = sql.clone();
-                }
+                tab.query_text = sql.clone();
             }
             set_p_query_running(&w, pane, true);
             set_p_streaming(&w, pane, true);
@@ -5464,17 +5466,16 @@ fn main() -> Result<(), slint::PlatformError> {
                                         .find(|t| t.id == target_id)
                                     {
                                         tab.loading = false;
-                                        if pane == 0 {
-                                            tab.view = Some(sr.clone());
-                                            tab.results = vec![sr.clone()];
-                                            tab.active_result = 0;
-                                        } else {
-                                            tab.pane1_results = vec![sr.clone()];
-                                            tab.pane1_active_result = 0;
-                                        }
+                                        tab.view = Some(sr.clone());
+                                        tab.results = vec![sr.clone()];
+                                        tab.active_result = 0;
                                     }
-                                    if active_tab_id.lock().unwrap().as_deref() == Some(&target_id)
-                                    {
+                                    let active_id = if pane == 1 {
+                                        &active_p1_tab_id
+                                    } else {
+                                        &active_tab_id
+                                    };
+                                    if active_id.lock().unwrap().as_deref() == Some(&target_id) {
                                         *results.lock().unwrap() = vec![sr];
                                         *active_result.lock().unwrap() = 0;
                                         set_result_tabs(&w, pane, 1, 0);
@@ -5510,8 +5511,12 @@ fn main() -> Result<(), slint::PlatformError> {
                                     {
                                         tab.loading = false;
                                     }
-                                    if active_tab_id.lock().unwrap().as_deref() == Some(&target_id)
-                                    {
+                                    let active_id = if pane == 1 {
+                                        &active_p1_tab_id
+                                    } else {
+                                        &active_tab_id
+                                    };
+                                    if active_id.lock().unwrap().as_deref() == Some(&target_id) {
                                         apply_result(
                                             &w,
                                             pane,
@@ -7151,7 +7156,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let panes = panes.clone();
         let last_view = last_view.clone();
         let workspace_tabs = workspace_tabs.clone();
-        let active_tab_id = active_tab_id.clone();
+        let active_p1_tab_id = active_p1_tab_id.clone();
         window.on_p1_select_result_tab(move |i| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -7162,14 +7167,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             *panes[1].active_result.lock().unwrap() = i;
-            if let Some(id) = active_tab_id.lock().unwrap().clone() {
+            if let Some(id) = active_p1_tab_id.lock().unwrap().clone() {
                 if let Some(tab) = workspace_tabs
                     .lock()
                     .unwrap()
                     .iter_mut()
                     .find(|tab| tab.id == id)
                 {
-                    tab.pane1_active_result = i;
+                    tab.active_result = i;
                 }
             }
             w.set_p1_active_result(i as i32);
@@ -7195,7 +7200,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let panes = panes.clone();
         let last_view = last_view.clone();
         let workspace_tabs = workspace_tabs.clone();
-        let active_tab_id = active_tab_id.clone();
+        let active_p1_tab_id = active_p1_tab_id.clone();
         window.on_p1_close_result_tab(move |i| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -7214,15 +7219,15 @@ fn main() -> Result<(), slint::PlatformError> {
                 (rv.len(), *ar, rv.get(*ar).cloned())
             };
             set_result_tabs(&w, 1, count, active);
-            if let Some(id) = active_tab_id.lock().unwrap().clone() {
+            if let Some(id) = active_p1_tab_id.lock().unwrap().clone() {
                 if let Some(tab) = workspace_tabs
                     .lock()
                     .unwrap()
                     .iter_mut()
                     .find(|tab| tab.id == id)
                 {
-                    tab.pane1_results = panes[1].results.lock().unwrap().clone();
-                    tab.pane1_active_result = active;
+                    tab.results = panes[1].results.lock().unwrap().clone();
+                    tab.active_result = active;
                 }
             }
             match sr {
@@ -7395,6 +7400,7 @@ fn main() -> Result<(), slint::PlatformError> {
         window.on_open_rename(move |idx, title| {
             if let Some(w) = weak.upgrade() {
                 w.set_rename_target(idx);
+                w.set_rename_group(0);
                 w.set_rename_text(title);
                 w.set_rename_modal_open(true);
             }
@@ -7409,9 +7415,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let i = w.get_rename_target().max(0) as usize;
+            let group = w.get_rename_group().clamp(0, 1) as usize;
             let name = w.get_rename_text().trim().to_string();
             let mut tabs = workspace_tabs.lock().unwrap();
-            if let Some(tab) = tabs.get_mut(i) {
+            let index = tabs
+                .iter()
+                .enumerate()
+                .filter(|(_, tab)| tab.group == group)
+                .nth(i)
+                .map(|(index, _)| index);
+            if let Some(tab) = index.and_then(|index| tabs.get_mut(index)) {
                 if !name.is_empty() {
                     tab.title = name;
                 }
