@@ -1958,12 +1958,13 @@ fn main() -> Result<(), slint::PlatformError> {
     let folded_heads = panes[0].folded_heads.clone();
     let sync_editor = {
         let weak = window.as_weak();
-        let ed_state = ed_state.clone();
-        let folded_heads = folded_heads.clone();
-        move || {
+        let panes = panes.clone();
+        move |pane: usize| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            let ed_state = panes[pane].ed_state.clone();
+            let folded_heads = panes[pane].folded_heads.clone();
             let ed = ed_state.borrow();
             let sel = ed.selection();
             let lines: Vec<ModelRc<Span>> = ed
@@ -1991,7 +1992,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     ModelRc::from(Rc::new(VecModel::from(spans)))
                 })
                 .collect();
-            w.set_editor_lines(ModelRc::from(Rc::new(VecModel::from(lines))));
+            let lines = ModelRc::from(Rc::new(VecModel::from(lines)));
             // Fold arrows: 1 = open head, 2 = closed head, 0 = plain line.
             // `hidden` blanks out the body lines of a closed statement.
             let n = ed.lines.len();
@@ -2009,11 +2010,25 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 }
             }
-            w.set_editor_line_hidden(ModelRc::from(Rc::new(VecModel::from(hidden))));
-            w.set_editor_fold_state(ModelRc::from(Rc::new(VecModel::from(fold_state))));
-            w.set_cursor_line(ed.line as i32);
-            w.set_cursor_col(ed.col as i32);
-            w.set_query_text(SharedString::from(ed.text()));
+            let hidden = ModelRc::from(Rc::new(VecModel::from(hidden)));
+            let fold_state = ModelRc::from(Rc::new(VecModel::from(fold_state)));
+            if pane == 0 {
+                w.set_editor_lines(lines);
+                w.set_editor_line_hidden(hidden);
+                w.set_editor_fold_state(fold_state);
+                w.set_cursor_line(ed.line as i32);
+                w.set_cursor_col(ed.col as i32);
+                // query-text mirrors the focused editor for tab persistence; the
+                // right pane's text lives in panes[1].ed_state (persisted via
+                // p1-query in a later step).
+                w.set_query_text(SharedString::from(ed.text()));
+            } else {
+                w.set_p1_editor_lines(lines);
+                w.set_p1_editor_line_hidden(hidden);
+                w.set_p1_editor_fold_state(fold_state);
+                w.set_p1_cursor_line(ed.line as i32);
+                w.set_p1_cursor_col(ed.col as i32);
+            }
         }
     };
     let load_editor_text: Rc<dyn Fn(&str)> = {
@@ -2021,7 +2036,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let sync_editor = sync_editor.clone();
         Rc::new(move |text: &str| {
             *ed_state.borrow_mut() = editor::EditorState::from_text(text);
-            sync_editor();
+            sync_editor(0);
         })
     };
     load_editor_text("");
@@ -2055,7 +2070,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 }
             }
-            sync_editor();
+            sync_editor(0);
         });
     }
 
@@ -2118,7 +2133,7 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             w.set_completion_visible(false);
             *completion_ctx.borrow_mut() = (0, Vec::new());
-            sync_editor();
+            sync_editor(0);
         })
     };
     {
@@ -2205,7 +2220,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         _ => {}
                     }
                 }
-                sync_editor();
+                sync_editor(0);
                 return true;
             }
             if meta {
@@ -2258,7 +2273,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 };
                 if handled {
-                    sync_editor();
+                    sync_editor(0);
                 }
                 return handled;
             }
@@ -2334,7 +2349,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
             };
             if handled {
-                sync_editor();
+                sync_editor(0);
                 // Typing/deleting shifts the completion context — recompute.
                 refresh_completion();
             }
@@ -2350,7 +2365,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_completion_visible(false);
             }
             ed_state.borrow_mut().move_to(line, col, false);
-            sync_editor();
+            sync_editor(0);
         });
     }
     {
@@ -2358,7 +2373,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let sync_editor = sync_editor.clone();
         window.on_editor_drag(move |line, col| {
             ed_state.borrow_mut().move_to(line, col, true);
-            sync_editor();
+            sync_editor(0);
         });
     }
     {
@@ -2366,7 +2381,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let sync_editor = sync_editor.clone();
         window.on_editor_select_word(move |line, col| {
             ed_state.borrow_mut().select_word_at(line, col);
-            sync_editor();
+            sync_editor(0);
         });
     }
 
@@ -2382,7 +2397,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let hits = find_hits.borrow();
             if let Some(&(l, s, e)) = hits.get(idx) {
                 ed_state.borrow_mut().set_selection((l, s), (l, e));
-                sync_editor();
+                sync_editor(0);
                 w.set_find_status(SharedString::from(format!("{} / {}", idx + 1, hits.len())));
             } else if w.get_find_text().is_empty() {
                 w.set_find_status(SharedString::default());
