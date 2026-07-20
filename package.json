@@ -1,0 +1,9 @@
+{
+  "name": "rdb-monorepo",
+  "private": true,
+  "description": "Root delegator so Cloudflare Workers Builds (which runs from the repo root) can build and deploy the marketing site in website/.",
+  "scripts": {
+    "build": "npm --prefix website ci && npm --prefix website run build",
+    "deploy": "wrangler deploy"
+  }
+}
