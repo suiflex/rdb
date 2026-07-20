@@ -469,11 +469,16 @@ struct StoredResult {
     latency: String,
 }
 
-/// The live editor + result state a single query pane owns independently. A SQL
-/// tab can show up to two of these side by side (dual-pane split), so everything
-/// that must not be shared between panes — the editor buffer, folds, completion,
-/// find hits, result set, grid view/sort/filter, and streaming — lives here.
-struct PaneRuntime {
+/// The live editor + result state a single **workspace tab group** owns
+/// independently. The workspace has two groups (left = 0, right = 1); each holds
+/// its own editor buffer, folds, completion, find hits, result set, grid
+/// view/sort/filter, and streaming. Held as `groups[0/1]` (the local binding is
+/// still named `panes` in some places for historical reasons).
+///
+/// Naming note: the Slint side still uses `p1-*` property/callback names for
+/// group 1 (e.g. `p1-cells`, `on_p1_run`). Those are compatibility plumbing —
+/// "p1" means "group 1" — kept to avoid renaming ~170 UI bindings in one pass.
+struct GroupRuntime {
     ed_state: Rc<RefCell<editor::EditorState>>,
     folded_heads: Rc<RefCell<HashSet<usize>>>,
     completion_ctx: Rc<RefCell<(usize, Vec<String>)>>,
@@ -492,7 +497,7 @@ struct PaneRuntime {
     stream_timer: Rc<RefCell<Option<slint::Timer>>>,
 }
 
-impl PaneRuntime {
+impl GroupRuntime {
     fn new() -> Self {
         Self {
             ed_state: Rc::new(RefCell::new(editor::EditorState::from_text(""))),
@@ -2250,7 +2255,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // Up to two independent editor+result panes per SQL tab (dual-pane split).
     // Only pane 0 is wired for now; the alias bindings below bind the existing
     // single-pane code to pane 0 so behavior is unchanged.
-    let panes: Rc<[PaneRuntime; 2]> = Rc::new([PaneRuntime::new(), PaneRuntime::new()]);
+    let panes: Rc<[GroupRuntime; 2]> = Rc::new([GroupRuntime::new(), GroupRuntime::new()]);
     // Browse-mode pagination state (open container + page window + pk).
     let browse = panes[0].browse.clone();
     // Buffered, uncommitted grid edits (⌘S commits, Esc/Discard drops).
@@ -2278,7 +2283,7 @@ fn main() -> Result<(), slint::PlatformError> {
         Arc::new(std::sync::Mutex::new(Vec::new()));
     let active_tab_id: Arc<std::sync::Mutex<Option<String>>> =
         Arc::new(std::sync::Mutex::new(None));
-    let active_p1_tab_id: Arc<std::sync::Mutex<Option<String>>> =
+    let active_group1_tab_id: Arc<std::sync::Mutex<Option<String>>> =
         Arc::new(std::sync::Mutex::new(None));
     let current_connection_id: Arc<std::sync::Mutex<Option<String>>> =
         Arc::new(std::sync::Mutex::new(None));
@@ -3898,7 +3903,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // left group; otherwise a drag could move an older snapshot.
     let save_p1_tab: Rc<dyn Fn(&MainWindow)> = {
         let tabs = workspace_tabs.clone();
-        let active_id = active_p1_tab_id.clone();
+        let active_id = active_group1_tab_id.clone();
         let panes = panes.clone();
         Rc::new(move |w| {
             let Some(id) = active_id.lock().unwrap().clone() else {
@@ -3932,7 +3937,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let restore_tab_for_pane: Rc<dyn Fn(&MainWindow, usize)> = {
         let tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
-        let active_p1_tab_id = active_p1_tab_id.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
         let load_editor_text = load_editor_text.clone();
         let panes = panes.clone();
         let last_view = last_view.clone();
@@ -3949,7 +3954,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if pane == 0 {
                 *active_tab_id.lock().unwrap() = Some(tab.id.clone());
             } else {
-                *active_p1_tab_id.lock().unwrap() = Some(tab.id.clone());
+                *active_group1_tab_id.lock().unwrap() = Some(tab.id.clone());
             }
             {
                 // Keep the group-0 selection stable when restoring the right group.
@@ -4075,7 +4080,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
-        let active_p1_tab_id = active_p1_tab_id.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
         let current_connection_id = current_connection_id.clone();
         let query_number = query_number.clone();
         let save_p1_tab = save_p1_tab.clone();
@@ -4106,7 +4111,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 save_query_tabs(&w, &tabs, left.as_deref());
                 tabs.iter().filter(|tab| tab.group == 1).count() - 1
             };
-            *active_p1_tab_id.lock().unwrap() = Some(id);
+            *active_group1_tab_id.lock().unwrap() = Some(id);
             restore_p1_tab(&w, right_index);
         });
     }
@@ -4117,7 +4122,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let save_p1_tab = save_p1_tab.clone();
         let restore_tab = restore_tab.clone();
         let restore_p1_tab = restore_p1_tab.clone();
-        let active_p1_tab_id = active_p1_tab_id.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
         let active_tab_id = active_tab_id.clone();
         window.on_move_tab_group(move |index, target| {
             let Some(w) = weak.upgrade() else {
@@ -4161,7 +4166,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(index) = right_index {
                 restore_p1_tab(&w, index);
             } else {
-                *active_p1_tab_id.lock().unwrap() = None;
+                *active_group1_tab_id.lock().unwrap() = None;
                 w.set_p1_active_tab(-1);
             }
         });
@@ -4749,7 +4754,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let browse = browse.clone();
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
-        let active_p1_tab_id = active_p1_tab_id.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
         let current_connection_id = current_connection_id.clone();
         let query_console = query_console.clone();
         let results = results.clone();
@@ -4806,7 +4811,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     .filter(|id| kept.iter().any(|t| t.id == *id))
                     .or_else(|| kept.first().map(|t| t.id.clone()));
                 // Connection switch keeps the in-memory focus + right-group tab.
-                let active_p1 = active_p1_tab_id
+                let active_p1 = active_group1_tab_id
                     .lock()
                     .unwrap()
                     .clone()
@@ -4815,7 +4820,7 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             *workspace_tabs.lock().unwrap() = init_tabs;
             *active_tab_id.lock().unwrap() = init_active.clone();
-            *active_p1_tab_id.lock().unwrap() = init_active_p1.clone();
+            *active_group1_tab_id.lock().unwrap() = init_active_p1.clone();
             results.lock().unwrap().clear();
             *last_view.lock().unwrap() = None;
             edit_buf.lock().unwrap().clear();
@@ -5164,7 +5169,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let panes = panes.clone();
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
-        let active_p1_tab_id = active_p1_tab_id.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
         let query_console = query_console.clone();
         Rc::new(move |pane: usize, sql: String| {
             // Per-pane live state; pane 1 (right split) uses its own buffers so a
@@ -5180,7 +5185,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let active_result = panes[pane].active_result.clone();
             let result_new_tab = panes[pane].result_new_tab.clone();
             let active_id = if pane == 1 {
-                &active_p1_tab_id
+                &active_group1_tab_id
             } else {
                 &active_tab_id
             };
@@ -5210,7 +5215,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let active_result = active_result.clone();
             let workspace_tabs = workspace_tabs.clone();
             let active_tab_id = active_tab_id.clone();
-            let active_p1_tab_id = active_p1_tab_id.clone();
+            let active_group1_tab_id = active_group1_tab_id.clone();
             let query_console = query_console.clone();
             // ⌘\ set this; consume it so the next plain run replaces again.
             let new_tab = result_new_tab.swap(false, std::sync::atomic::Ordering::SeqCst);
@@ -5294,7 +5299,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     if let Some(w) = weak2.upgrade() {
                         sync_query_console(&w, &query_console);
                         let active_id = if pane == 1 {
-                            &active_p1_tab_id
+                            &active_group1_tab_id
                         } else {
                             &active_tab_id
                         };
@@ -5412,7 +5417,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let query_console = query_console.clone();
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
-        let active_p1_tab_id = active_p1_tab_id.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
         let panes = panes.clone();
         let last_view = last_view.clone();
         Rc::new(move |pane, sql: String| {
@@ -5431,7 +5436,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let stream_cancel = panes[pane].stream_cancel.clone();
             let stream_timer = panes[pane].stream_timer.clone();
             let active_id = if pane == 1 {
-                &active_p1_tab_id
+                &active_group1_tab_id
             } else {
                 &active_tab_id
             };
@@ -5490,7 +5495,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let results = results.clone();
                 let active_result = active_result.clone();
                 let active_tab_id = active_tab_id.clone();
-                let active_p1_tab_id = active_p1_tab_id.clone();
+                let active_group1_tab_id = active_group1_tab_id.clone();
                 let stream_timer_stop = stream_timer.clone();
                 let target_id = target_id.clone();
                 timer.start(
@@ -5578,7 +5583,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                         tab.active_result = 0;
                                     }
                                     let active_id = if pane == 1 {
-                                        &active_p1_tab_id
+                                        &active_group1_tab_id
                                     } else {
                                         &active_tab_id
                                     };
@@ -5619,7 +5624,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                         tab.loading = false;
                                     }
                                     let active_id = if pane == 1 {
-                                        &active_p1_tab_id
+                                        &active_group1_tab_id
                                     } else {
                                         &active_tab_id
                                     };
@@ -7261,7 +7266,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let panes = panes.clone();
         let last_view = last_view.clone();
         let workspace_tabs = workspace_tabs.clone();
-        let active_p1_tab_id = active_p1_tab_id.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
         window.on_p1_select_result_tab(move |i| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -7272,7 +7277,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             *panes[1].active_result.lock().unwrap() = i;
-            if let Some(id) = active_p1_tab_id.lock().unwrap().clone() {
+            if let Some(id) = active_group1_tab_id.lock().unwrap().clone() {
                 if let Some(tab) = workspace_tabs
                     .lock()
                     .unwrap()
@@ -7305,7 +7310,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let panes = panes.clone();
         let last_view = last_view.clone();
         let workspace_tabs = workspace_tabs.clone();
-        let active_p1_tab_id = active_p1_tab_id.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
         window.on_p1_close_result_tab(move |i| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -7324,7 +7329,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 (rv.len(), *ar, rv.get(*ar).cloned())
             };
             set_result_tabs(&w, 1, count, active);
-            if let Some(id) = active_p1_tab_id.lock().unwrap().clone() {
+            if let Some(id) = active_group1_tab_id.lock().unwrap().clone() {
                 if let Some(tab) = workspace_tabs
                     .lock()
                     .unwrap()
@@ -7460,7 +7465,7 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let workspace_tabs = workspace_tabs.clone();
-        let active_p1_tab_id = active_p1_tab_id.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
         let save_p1_tab = save_p1_tab.clone();
         let restore_p1_tab = restore_p1_tab.clone();
         let active_tab_id = active_tab_id.clone();
@@ -7491,7 +7496,7 @@ fn main() -> Result<(), slint::PlatformError> {
             save_query_tabs(&w, &tabs, active.as_deref());
             drop(tabs);
             if remaining == 0 {
-                *active_p1_tab_id.lock().unwrap() = None;
+                *active_group1_tab_id.lock().unwrap() = None;
                 load_editor_text(1, "");
                 clear_grid(&w, 1);
             } else {
