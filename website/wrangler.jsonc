@@ -1,0 +1,12 @@
+// Cloudflare Workers (static assets) config for the marketing site.
+// Workers Builds runs from root directory `website`:
+//   build:  npm ci && npm run build
+//   deploy: npx wrangler deploy
+{
+  "name": "rdbs",
+  "compatibility_date": "2026-07-20",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page"
+  }
+}

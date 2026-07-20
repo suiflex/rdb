@@ -58,23 +58,24 @@ Then regenerate the social image: crop `workspace.png` to 1200x630 as
 
 ## Deployment
 
-Hosted on Cloudflare Pages; canonical home is `https://rdbs.suiflex.dev`
-(root base). One-time setup in the Cloudflare dashboard:
+Hosted on Cloudflare Workers (static assets, `wrangler.jsonc`); canonical
+home is `https://rdbs.suiflex.dev` (root base). Workers Builds settings for
+the `rdbs` service in the Cloudflare dashboard:
 
-1. Workers & Pages > Create > Pages > connect the `suiflex/rdb` repo.
-2. Production branch `develop`, root directory `website`,
-   build command `npm run build`, output directory `dist`.
-3. Custom domains > add `rdbs.suiflex.dev` (DNS record is created
-   automatically when the zone is on Cloudflare).
+- Git repository: `suiflex/rdb`, branch `develop`
+- Root directory: `website`
+- Build command: `npm ci && npm run build`
+- Deploy command: `npx wrangler deploy`
+- Domains & Routes: add `rdbs.suiflex.dev`
 
-Every push to `develop` that touches `website/` then deploys automatically;
-PRs get preview URLs. `.github/workflows/website.yml` runs build + tests as
-a CI check. `public/_headers` sets caching and security headers.
+`.github/workflows/website.yml` runs build + tests as a CI check.
+`public/_headers` sets caching and security headers; 404s are served from
+the built `404.html`.
 
-Manual deploy without the Git integration:
+Manual deploy from a local checkout:
 
 ```bash
-npm run build && npx wrangler pages deploy dist --project-name rdbs-website
+npm run build && npx wrangler deploy
 ```
 
 Two env vars retarget the build for another host or a subpath preview:
