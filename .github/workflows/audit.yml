@@ -28,7 +28,11 @@ jobs:
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          # quick-xml is a Linux-only, build-time transitive dep of
-          # wayland-scanner (winit/Slint stack) pinned at 0.39 upstream — not
-          # upgradable from here. Revisit when winit bumps it.
-          ignore: RUSTSEC-2026-0194,RUSTSEC-2026-0195
+          # All ignored advisories are transitive through the Slint UI stack
+          # with no upgrade path from this workspace. Revisit when Slint bumps.
+          #   0194/0195 quick-xml   — wayland-scanner (winit), pinned 0.39
+          #   2024-0436 paste       — rav1e -> image (unmaintained proc-macro)
+          #   2026-0206 rustybuzz   — usvg -> resvg (unmaintained)
+          #   2026-0192 ttf-parser  — fontdb -> usvg (unmaintained)
+          #   2025-0141 bincode     — typed-index-collections (unmaintained)
+          ignore: RUSTSEC-2026-0194,RUSTSEC-2026-0195,RUSTSEC-2024-0436,RUSTSEC-2026-0206,RUSTSEC-2026-0192,RUSTSEC-2025-0141
