@@ -1,0 +1,36 @@
+---
+import { Image } from "astro:assets";
+import type { ImageMetadata } from "astro";
+
+/**
+ * Real application screenshot, captured from the RDBS mock harness
+ * (RDB_MOCK=1, seeded sample data, no credentials). No fake chrome is added:
+ * the frame is a plain border so the pixels stay honest.
+ */
+interface Props {
+  src: ImageMetadata;
+  alt: string;
+  priority?: boolean;
+  class?: string;
+  sizes?: string;
+}
+const {
+  src,
+  alt,
+  priority = false,
+  class: className = "",
+  sizes = "(min-width: 1100px) 1024px, 94vw",
+} = Astro.props;
+---
+
+<figure class={`overflow-hidden rounded-xl border border-line bg-panel shadow-[0_24px_80px_-32px_rgba(74,222,128,0.14)] ${className}`}>
+  <Image
+    src={src}
+    alt={alt}
+    widths={[640, 1024, 1600, 2048]}
+    sizes={sizes}
+    loading={priority ? "eager" : "lazy"}
+    fetchpriority={priority ? "high" : "auto"}
+    class="block h-auto w-full"
+  />
+</figure>

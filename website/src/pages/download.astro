@@ -1,0 +1,198 @@
+---
+import Base from "../layouts/Base.astro";
+import CodeBlock from "../components/CodeBlock.astro";
+import { REPO_LINKS, url } from "../config";
+import release from "../data/release.json";
+
+type Asset = (typeof release.assets)[number];
+
+const byName = new Map(release.assets.map((a) => [a.name, a]));
+const mb = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`;
+
+interface Row {
+  label: string;
+  arch: string;
+  asset: Asset;
+}
+
+interface Platform {
+  id: string;
+  name: string;
+  hint: string;
+  rows: Row[];
+}
+
+function row(label: string, arch: string, name: string): Row | null {
+  const asset = byName.get(name);
+  return asset ? { label, arch, asset } : null;
+}
+
+const platforms: Platform[] = [
+  {
+    id: "macos",
+    name: "macOS",
+    hint: "Open the .dmg and drag RDBS to Applications.",
+    rows: [
+      row("Disk image", "Apple Silicon", "rdb-aarch64-apple-darwin.dmg"),
+      row("Disk image", "Intel", "rdb-x86_64-apple-darwin.dmg"),
+      row("Archive (.tar.gz)", "Apple Silicon", "rdb-aarch64-apple-darwin.tar.gz"),
+      row("Archive (.tar.gz)", "Intel", "rdb-x86_64-apple-darwin.tar.gz"),
+    ].filter((r): r is Row => r !== null),
+  },
+  {
+    id: "windows",
+    name: "Windows",
+    hint: "Standalone executable. Unzip (or download the .exe) and run rdb.exe.",
+    rows: [
+      row("Executable", "x64", "rdb-x86_64-pc-windows-msvc.exe"),
+      row("Executable", "ARM64", "rdb-aarch64-pc-windows-msvc.exe"),
+      row("Archive (.zip)", "x64", "rdb-x86_64-pc-windows-msvc.zip"),
+      row("Archive (.zip)", "ARM64", "rdb-aarch64-pc-windows-msvc.zip"),
+    ].filter((r): r is Row => r !== null),
+  },
+  {
+    id: "linux",
+    name: "Linux",
+    hint: "Download, chmod +x, and run. Needs glibc and the usual desktop libraries.",
+    rows: [
+      row("Binary", "x64", "rdb-x86_64-unknown-linux-gnu"),
+      row("Binary", "ARM64", "rdb-aarch64-unknown-linux-gnu"),
+      row("Archive (.tar.gz)", "x64", "rdb-x86_64-unknown-linux-gnu.tar.gz"),
+      row("Archive (.tar.gz)", "ARM64", "rdb-aarch64-unknown-linux-gnu.tar.gz"),
+    ].filter((r): r is Row => r !== null),
+  },
+];
+---
+
+<Base
+  title="Download RDBS for macOS, Windows, and Linux"
+  description={`Download RDBS ${release.tag}, the free open-source database client, for macOS, Windows, and Linux. Direct binaries with SHA-256 checksums, plus Homebrew, npm, and Scoop.`}
+  path="/download"
+>
+  <section class="mx-auto max-w-4xl px-4 pt-16 pb-8 sm:px-6">
+    <h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">
+      Download RDBS
+    </h1>
+    <p class="mt-4 text-lg text-fg-2">
+      Latest stable release
+      <span class="font-mono text-fg">{release.tag}</span>, published {release.published}.
+      Free under the MIT license.
+    </p>
+    <p class="mt-2 text-sm text-fg-3">
+      Release notes and older versions live on
+      <a href={REPO_LINKS.releases} rel="noopener" class="underline decoration-line underline-offset-4 hover:text-fg">GitHub Releases</a>.
+    </p>
+  </section>
+
+  <section class="mx-auto max-w-4xl space-y-6 px-4 pb-16 sm:px-6" aria-label="Downloads by platform">
+    {
+      platforms.map((platform) => (
+        <section
+          id={platform.id}
+          data-platform={platform.id}
+          class="rounded-xl border border-line bg-panel p-6 data-detected:border-accent/50"
+        >
+          <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 class="font-display text-2xl font-semibold tracking-tight">{platform.name}</h2>
+            <span hidden class="detected-badge font-mono text-xs text-accent">your platform</span>
+          </div>
+          <p class="mt-1 text-sm text-fg-3">{platform.hint}</p>
+          <ul class="mt-5 divide-y divide-line">
+            {platform.rows.map((r) => (
+              <li class="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
+                <a
+                  href={r.asset.url}
+                  class="rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-accent-ink transition-colors hover:bg-accent-soft"
+                >
+                  Download
+                </a>
+                <span class="text-sm">{r.label}</span>
+                <span class="rounded border border-line px-1.5 py-0.5 font-mono text-xs text-fg-2">{r.arch}</span>
+                <span class="font-mono text-xs text-fg-3">{mb(r.asset.size)}</span>
+                <button
+                  type="button"
+                  class="sha-btn ml-auto rounded-lg border border-line px-2 py-1 font-mono text-xs text-fg-3 transition-colors hover:border-line-2 hover:text-fg"
+                  data-sha={r.asset.sha256}
+                  title={`SHA-256: ${r.asset.sha256}`}
+                  aria-label={`sha256 ${r.asset.sha256.slice(0, 8)}, copy full checksum for ${r.asset.name}`}
+                >
+                  sha256 {r.asset.sha256.slice(0, 8)}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))
+    }
+  </section>
+
+  <section class="border-t border-line">
+    <div class="mx-auto max-w-4xl px-4 py-16 sm:px-6">
+      <h2 class="font-display text-2xl font-semibold tracking-tight">Or use a package manager</h2>
+      <div class="mt-6 space-y-4">
+        <div>
+          <h3 class="mb-2 font-mono text-xs text-fg-3">Homebrew (macOS / Linux)</h3>
+          <CodeBlock code="brew install suiflex/tap/rdb" label="Homebrew install" />
+        </div>
+        <div>
+          <h3 class="mb-2 font-mono text-xs text-fg-3">npm (all platforms)</h3>
+          <CodeBlock code="npm i -g @suiflex/rdb" label="npm install" />
+        </div>
+        <div>
+          <h3 class="mb-2 font-mono text-xs text-fg-3">Scoop (Windows)</h3>
+          <CodeBlock
+            code="scoop bucket add suiflex https://github.com/suiflex/scoop-bucket && scoop install rdb"
+            label="Scoop install"
+          />
+        </div>
+        <div>
+          <h3 class="mb-2 font-mono text-xs text-fg-3">Install script (macOS / Linux)</h3>
+          <CodeBlock
+            code="curl -fsSL https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install.sh | bash"
+            label="install script"
+          />
+        </div>
+      </div>
+      <p class="mt-8 text-sm text-fg-3">
+        Prefer to compile it yourself? The
+        <a href={url("/docs")} class="underline decoration-line underline-offset-4 hover:text-fg">build-from-source guide</a>
+        covers prerequisites for every platform. Verify any download by
+        comparing its SHA-256 checksum with the value shown above.
+      </p>
+    </div>
+  </section>
+</Base>
+
+<script>
+  // Progressive enhancement: highlight the visitor's platform. All
+  // platforms stay visible and downloadable regardless.
+  const ua = navigator.userAgent;
+  const detected = /Mac/i.test(ua)
+    ? "macos"
+    : /Win/i.test(ua)
+      ? "windows"
+      : /Linux|X11/i.test(ua)
+        ? "linux"
+        : null;
+  if (detected) {
+    const section = document.querySelector<HTMLElement>(`[data-platform="${detected}"]`);
+    if (section) {
+      // Highlight only; reordering the DOM here would cause layout shift.
+      section.setAttribute("data-detected", "");
+      section.querySelector<HTMLElement>(".detected-badge")?.removeAttribute("hidden");
+    }
+  }
+
+  for (const btn of document.querySelectorAll<HTMLButtonElement>(".sha-btn")) {
+    const short = btn.textContent;
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(btn.dataset.sha ?? "");
+        btn.textContent = "copied";
+        setTimeout(() => (btn.textContent = short), 1600);
+      } catch {
+        /* title attribute already shows the full checksum */
+      }
+    });
+  }
+</script>

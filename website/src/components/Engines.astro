@@ -1,0 +1,44 @@
+---
+import {
+  siPostgresql,
+  siMysql,
+  siRedis,
+  siMongodb,
+  siSqlite,
+  siApachecassandra,
+} from "simple-icons";
+import { REPO_LINKS } from "../config";
+
+const engines = [
+  { icon: siPostgresql, name: "PostgreSQL", detail: "via tokio-postgres" },
+  { icon: siMysql, name: "MySQL / MariaDB", detail: "via mysql_async" },
+  { icon: siRedis, name: "Redis", detail: "commands and key browsing" },
+  { icon: siMongodb, name: "MongoDB", detail: "JSON document queries" },
+  { icon: siSqlite, name: "SQLite", detail: "local files, zero setup" },
+  { icon: siApachecassandra, name: "Cassandra", detail: "via the scylla driver" },
+];
+---
+
+<ul class="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-3">
+  {
+    engines.map((engine) => (
+      <li class="flex items-center gap-3 bg-panel px-4 py-4 transition-colors hover:bg-panel-2 sm:px-5">
+        <svg viewBox="0 0 24 24" class="h-6 w-6 shrink-0 fill-fg-2" aria-hidden="true">
+          <path d={engine.icon.path} />
+        </svg>
+        <div class="min-w-0">
+          <p class="truncate text-sm font-medium">{engine.name}</p>
+          <p class="truncate font-mono text-xs text-fg-3">{engine.detail}</p>
+        </div>
+      </li>
+    ))
+  }
+</ul>
+<p class="mt-4 text-sm text-fg-3">
+  All six ship in the current release. ClickHouse, BigQuery, and Oracle are
+  <a
+    href={REPO_LINKS.vision}
+    rel="noopener"
+    class="text-fg-2 underline decoration-line underline-offset-4 hover:text-fg">planned next</a
+  >.
+</p>

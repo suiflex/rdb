@@ -1,0 +1,86 @@
+---
+import Base from "../layouts/Base.astro";
+import { REPO_LINKS } from "../config";
+---
+
+<Base
+  title="RDBS privacy"
+  description="How RDBS handles your data: no account, no telemetry, credentials in your OS keychain, and a single optional update check you can turn off."
+  path="/privacy"
+>
+  <section class="mx-auto max-w-3xl px-4 pt-16 pb-20 sm:px-6">
+    <h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">Privacy</h1>
+    <p class="mt-4 text-lg leading-relaxed text-fg-2">
+      RDBS is a local desktop application. This page describes everything it
+      does with your data. It is short because there is not much to describe.
+    </p>
+
+    <div class="prose-rdbs mt-10 space-y-8 text-sm leading-relaxed text-fg-2">
+      <section>
+        <h2 class="font-display text-xl font-semibold text-fg">No account, no tracking</h2>
+        <p class="mt-2">
+          RDBS requires no sign-up and has no cloud backend. It contains no
+          analytics, no usage tracking, and no crash reporting. The
+          application works fully offline.
+        </p>
+      </section>
+
+      <section>
+        <h2 class="font-display text-xl font-semibold text-fg">Your queries and data</h2>
+        <p class="mt-2">
+          Queries travel directly between the application and the database
+          servers you configure, using each engine's native protocol. Query
+          text, results, and schema information are never sent to any other
+          party.
+        </p>
+      </section>
+
+      <section>
+        <h2 class="font-display text-xl font-semibold text-fg">Credentials</h2>
+        <p class="mt-2">
+          Connection passwords are stored in your operating system's secret
+          store: Keychain on macOS, libsecret on Linux, Credential Manager on
+          Windows. On systems without a keychain, they fall back to a local
+          file encrypted with AES-GCM. Saved connection metadata (host, port,
+          username) is stored as plain JSON on your machine; passwords are
+          never written to it and never included in connection exports.
+        </p>
+      </section>
+
+      <section>
+        <h2 class="font-display text-xl font-semibold text-fg">The one network call</h2>
+        <p class="mt-2">
+          At most once a day, RDBS makes a single HTTPS request to the GitHub
+          Releases API to check whether a newer version exists. No identifier
+          or usage data is attached; it is a plain HTTP GET. You can disable
+          this check in Settings, and the app never downloads or installs
+          updates by itself.
+        </p>
+      </section>
+
+      <section>
+        <h2 class="font-display text-xl font-semibold text-fg">This website</h2>
+        <p class="mt-2">
+          This site is static files. It sets no cookies, runs no analytics,
+          and embeds no third-party scripts. Download links point to GitHub
+          Releases, which is operated by GitHub under
+          <a
+            href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement"
+            rel="noopener"
+            class="underline decoration-line underline-offset-4 hover:text-fg">GitHub's privacy statement</a
+          >.
+        </p>
+      </section>
+
+      <section>
+        <h2 class="font-display text-xl font-semibold text-fg">Verify it</h2>
+        <p class="mt-2">
+          Claims like these are only worth something if you can check them.
+          The entire codebase is public:
+          <a href={REPO_LINKS.readme} rel="noopener" class="underline decoration-line underline-offset-4 hover:text-fg">read the source</a>
+          or search it for network calls yourself.
+        </p>
+      </section>
+    </div>
+  </section>
+</Base>

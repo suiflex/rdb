@@ -1,0 +1,38 @@
+---
+/** One-line shell command with a copy button. */
+interface Props {
+  code: string;
+  label: string;
+}
+const { code, label } = Astro.props;
+---
+
+<div
+  class="copy-block flex items-center gap-3 rounded-lg border border-line bg-code px-4 py-3"
+>
+  <code class="min-w-0 flex-1 overflow-x-auto font-mono text-[13px] whitespace-nowrap text-fg-2">
+    <span class="select-none text-fg-3">$ </span>{code}
+  </code>
+  <button
+    type="button"
+    class="copy-btn shrink-0 rounded-lg border border-line px-2.5 py-1.5 font-mono text-xs text-fg-2 transition-colors hover:border-line-2 hover:text-fg"
+    data-code={code}
+    aria-label={`Copy ${label} command`}
+  >
+    copy
+  </button>
+</div>
+
+<script>
+  for (const btn of document.querySelectorAll<HTMLButtonElement>(".copy-btn")) {
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(btn.dataset.code ?? "");
+        btn.textContent = "copied";
+      } catch {
+        btn.textContent = "failed";
+      }
+      setTimeout(() => (btn.textContent = "copy"), 1600);
+    });
+  }
+</script>
