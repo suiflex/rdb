@@ -5,7 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 
 // Canonical home is the custom subdomain (public/CNAME points GitHub Pages
 // at it). SITE_URL / SITE_BASE override for previews or a different host.
-const site = process.env.SITE_URL ?? "https://rdbs.suiflex.dev";
+const site = process.env.SITE_URL ?? "https://rdb.suiflex.dev";
 const base = process.env.SITE_BASE ?? "/";
 
 export default defineConfig({
