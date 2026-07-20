@@ -3,7 +3,7 @@
 //   build:  npm run build      (delegates to website/, see package.json)
 //   deploy: npx wrangler deploy
 {
-  "name": "rdbs",
+  "name": "rdb",
   "compatibility_date": "2026-07-20",
   "assets": {
     "directory": "./website/dist",

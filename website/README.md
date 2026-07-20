@@ -1,6 +1,6 @@
-# RDBS website
+# RDB website
 
-Marketing site for RDBS, the open-source database manager in this repo.
+Marketing site for RDB, the open-source database manager in this repo.
 Static site built with [Astro](https://astro.build) and Tailwind CSS v4.
 
 ## Requirements
@@ -59,16 +59,16 @@ Then regenerate the social image: crop `workspace.png` to 1200x630 as
 ## Deployment
 
 Hosted on Cloudflare Workers (static assets); canonical home is
-`https://rdbs.suiflex.dev` (root base). Workers Builds runs from the repo
+`https://rdb.suiflex.dev` (root base). Workers Builds runs from the repo
 root, so the wrangler config and a build delegator live there
 (`../wrangler.jsonc`, `../package.json`), not in `website/`. Dashboard
-settings for the `rdbs` service:
+settings for the `rdb` service:
 
 - Git repository: `suiflex/rdb`, branch `develop`
 - Root directory: `/` (repo root)
 - Build command: `npm run build` (delegates into `website/`)
 - Deploy command: `npx wrangler deploy`
-- Domains & Routes: add `rdbs.suiflex.dev`
+- Domains & Routes: add `rdb.suiflex.dev`
 
 `.github/workflows/website.yml` runs build + tests as a CI check.
 `public/_headers` sets caching and security headers; 404s are served from

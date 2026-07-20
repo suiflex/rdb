@@ -1,5 +1,5 @@
 /** Single source of truth for names, links, and nav. */
-export const PRODUCT = "RDBS";
+export const PRODUCT = "RDB";
 export const TAGLINE = "Fast, lightweight, open-source database management for everyone.";
 
 export const GITHUB = "https://github.com/suiflex/rdb";

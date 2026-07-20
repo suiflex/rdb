@@ -15,7 +15,7 @@ const dmgMb = macDmg ? (macDmg.size / 1_000_000).toFixed(1) : null;
 const structuredData = {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
-  name: "RDBS",
+  name: "RDB",
   applicationCategory: "DeveloperApplication",
   operatingSystem: "macOS, Windows, Linux",
   offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
@@ -26,8 +26,8 @@ const structuredData = {
 ---
 
 <Base
-  title="RDBS: fast, lightweight, open-source database management"
-  description="RDBS is a free, open-source desktop database client for PostgreSQL, MySQL, Redis, MongoDB, SQLite, and Cassandra. One native Rust binary for macOS, Windows, and Linux."
+  title="RDB: fast, lightweight, open-source database management"
+  description="RDB is a free, open-source desktop database client for PostgreSQL, MySQL, Redis, MongoDB, SQLite, and Cassandra. One native Rust binary for macOS, Windows, and Linux."
   path="/"
 >
   <script type="application/ld+json" set:html={JSON.stringify(structuredData)} slot="head" />
@@ -40,7 +40,7 @@ const structuredData = {
         <span class="text-accent">heavyweight</span> client.
       </h1>
       <p class="mt-5 max-w-xl text-lg leading-relaxed text-fg-2">
-        RDBS is a free, open-source desktop client for PostgreSQL, MySQL,
+        RDB is a free, open-source desktop client for PostgreSQL, MySQL,
         Redis, MongoDB, SQLite, and Cassandra. One native Rust binary.
       </p>
       <div class="mt-8 flex flex-wrap items-center gap-3">
@@ -48,7 +48,7 @@ const structuredData = {
           href={url("/download")}
           class="rounded-lg bg-accent px-5 py-3 font-semibold text-accent-ink transition-colors hover:bg-accent-soft"
         >
-          Download RDBS
+          Download RDB
         </a>
         <a
           href={GITHUB}
@@ -68,7 +68,7 @@ const structuredData = {
   <section class="mx-auto max-w-6xl px-4 pb-24 sm:px-6" aria-label="Product screenshot">
     <Screenshot
       src={shotWorkspace}
-      alt="RDBS workspace: schema sidebar on the left, a tabbed SQL editor, and a results grid showing rows from a PostgreSQL table"
+      alt="RDB workspace: schema sidebar on the left, a tabbed SQL editor, and a results grid showing rows from a PostgreSQL table"
       priority
     />
   </section>
@@ -82,7 +82,7 @@ const structuredData = {
             Six engines, one window.
           </h2>
           <p class="mt-4 leading-relaxed text-fg-2">
-            Stop juggling one client per database. RDBS speaks each engine's
+            Stop juggling one client per database. RDB speaks each engine's
             native protocol through its own Rust driver, so the same sidebar,
             editor, and grid work everywhere.
           </p>
@@ -128,7 +128,7 @@ const structuredData = {
     <div class="mx-auto grid max-w-6xl gap-10 px-4 py-20 sm:px-6 lg:grid-cols-[1.4fr_1fr] lg:items-center lg:gap-16">
       <Screenshot
         src={shotSql}
-        alt="RDBS SQL editor running a query, with syntax highlighting and a results grid below"
+        alt="RDB SQL editor running a query, with syntax highlighting and a results grid below"
         sizes="(min-width: 1024px) 640px, 94vw"
         class="order-last lg:order-first"
       />
@@ -159,7 +159,7 @@ const structuredData = {
         </h2>
         <p class="mt-4 leading-relaxed text-fg-2">
           Run <code class="rounded bg-code px-1.5 py-0.5 font-mono text-sm">SELECT * FROM huge_table</code>
-          and keep working. RDBS loads rows in batches as you scroll and
+          and keep working. RDB loads rows in batches as you scroll and
           virtualizes the grid, so a million-row result never lands in memory
           all at once.
         </p>
@@ -185,7 +185,7 @@ const structuredData = {
           </div>
           <Screenshot
             src={shotPalette}
-            alt="RDBS command palette open over the workspace, listing saved PostgreSQL, MySQL, Redis, and MongoDB connections"
+            alt="RDB command palette open over the workspace, listing saved PostgreSQL, MySQL, Redis, and MongoDB connections"
             sizes="(min-width: 1024px) 640px, 94vw"
             class="mx-6 mb-0 translate-y-2 rounded-b-none border-b-0"
           />
@@ -219,7 +219,7 @@ const structuredData = {
           Built in the open.
         </h2>
         <p class="mt-4 leading-relaxed text-fg-2">
-          RDBS is MIT licensed and developed entirely on GitHub. Read the
+          RDB is MIT licensed and developed entirely on GitHub. Read the
           code, report a bug, or help shape what comes next: every engine is
           a self-contained Rust crate behind one
           <code class="rounded bg-code px-1.5 py-0.5 font-mono text-sm">Driver</code>
@@ -239,7 +239,7 @@ const structuredData = {
             { label: "Good first issues", note: "a gentle place to start", href: REPO_LINKS.goodFirstIssues },
             { label: "Contributing guide", note: "setup, style, PR flow", href: REPO_LINKS.contributing },
             { label: "Discussions", note: "questions and ideas", href: REPO_LINKS.discussions },
-            { label: "Roadmap", note: "where RDBS is headed", href: REPO_LINKS.vision },
+            { label: "Roadmap", note: "where RDB is headed", href: REPO_LINKS.vision },
             { label: "Releases", note: "binaries and notes", href: REPO_LINKS.releases },
           ].map((item) => (
             <li>
@@ -266,7 +266,7 @@ const structuredData = {
           No account. No telemetry.
         </h2>
         <p class="mt-4 leading-relaxed text-fg-2">
-          RDBS is a local tool. Your queries travel between you and your
+          RDB is a local tool. Your queries travel between you and your
           database, and nowhere else.
         </p>
       </div>
@@ -286,14 +286,14 @@ const structuredData = {
   <section class="border-t border-line">
     <div class="mx-auto max-w-6xl px-4 py-24 text-center sm:px-6">
       <h2 class="font-display text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
-        Download RDBS and connect to your first database.
+        Download RDB and connect to your first database.
       </h2>
       <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
         <a
           href={url("/download")}
           class="rounded-lg bg-accent px-5 py-3 font-semibold text-accent-ink transition-colors hover:bg-accent-soft"
         >
-          Download RDBS
+          Download RDB
         </a>
         <a
           href={GITHUB}

@@ -4,22 +4,22 @@ import { REPO_LINKS } from "../config";
 ---
 
 <Base
-  title="RDBS privacy"
-  description="How RDBS handles your data: no account, no telemetry, credentials in your OS keychain, and a single optional update check you can turn off."
+  title="RDB privacy"
+  description="How RDB handles your data: no account, no telemetry, credentials in your OS keychain, and a single optional update check you can turn off."
   path="/privacy"
 >
   <section class="mx-auto max-w-3xl px-4 pt-16 pb-20 sm:px-6">
     <h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">Privacy</h1>
     <p class="mt-4 text-lg leading-relaxed text-fg-2">
-      RDBS is a local desktop application. This page describes everything it
+      RDB is a local desktop application. This page describes everything it
       does with your data. It is short because there is not much to describe.
     </p>
 
-    <div class="prose-rdbs mt-10 space-y-8 text-sm leading-relaxed text-fg-2">
+    <div class="prose-rdb mt-10 space-y-8 text-sm leading-relaxed text-fg-2">
       <section>
         <h2 class="font-display text-xl font-semibold text-fg">No account, no tracking</h2>
         <p class="mt-2">
-          RDBS requires no sign-up and has no cloud backend. It contains no
+          RDB requires no sign-up and has no cloud backend. It contains no
           analytics, no usage tracking, and no crash reporting. The
           application works fully offline.
         </p>
@@ -50,7 +50,7 @@ import { REPO_LINKS } from "../config";
       <section>
         <h2 class="font-display text-xl font-semibold text-fg">The one network call</h2>
         <p class="mt-2">
-          At most once a day, RDBS makes a single HTTPS request to the GitHub
+          At most once a day, RDB makes a single HTTPS request to the GitHub
           Releases API to check whether a newer version exists. No identifier
           or usage data is attached; it is a plain HTTP GET. You can disable
           this check in Settings, and the app never downloads or installs

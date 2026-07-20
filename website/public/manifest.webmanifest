@@ -1,6 +1,6 @@
 {
-  "name": "RDBS",
-  "short_name": "RDBS",
+  "name": "RDB",
+  "short_name": "RDB",
   "description": "Fast, lightweight, open-source database management for everyone.",
   "start_url": "./",
   "display": "browser",

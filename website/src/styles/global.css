@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /*
-  RDBS design tokens. One dark theme, locked for the whole site.
+  RDB design tokens. One dark theme, locked for the whole site.
   Accent is the product's brand green (see assets/brand/logo-mark.svg).
   Radius rule: interactive elements 8px, panels/media 12px. Nothing else.
 */
