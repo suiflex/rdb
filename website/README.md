@@ -58,13 +58,15 @@ Then regenerate the social image: crop `workspace.png` to 1200x630 as
 
 ## Deployment
 
-Hosted on Cloudflare Workers (static assets, `wrangler.jsonc`); canonical
-home is `https://rdbs.suiflex.dev` (root base). Workers Builds settings for
-the `rdbs` service in the Cloudflare dashboard:
+Hosted on Cloudflare Workers (static assets); canonical home is
+`https://rdbs.suiflex.dev` (root base). Workers Builds runs from the repo
+root, so the wrangler config and a build delegator live there
+(`../wrangler.jsonc`, `../package.json`), not in `website/`. Dashboard
+settings for the `rdbs` service:
 
 - Git repository: `suiflex/rdb`, branch `develop`
-- Root directory: `website`
-- Build command: `npm ci && npm run build`
+- Root directory: `/` (repo root)
+- Build command: `npm run build` (delegates into `website/`)
 - Deploy command: `npx wrangler deploy`
 - Domains & Routes: add `rdbs.suiflex.dev`
 
@@ -72,7 +74,7 @@ the `rdbs` service in the Cloudflare dashboard:
 `public/_headers` sets caching and security headers; 404s are served from
 the built `404.html`.
 
-Manual deploy from a local checkout:
+Manual deploy from a local checkout (run at the repo root):
 
 ```bash
 npm run build && npx wrangler deploy

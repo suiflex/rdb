@@ -26,3 +26,6 @@ docs/superpowers
 *.tmp
 *.swp
 *.swo
+
+# Node (root delegator + website build)
+node_modules/
