@@ -11,6 +11,7 @@ import {
 } from "components.slint";
 import { ScrollView, ComboBox } from "std-widgets.slint";
 import { AppIcon } from "icons.slint";
+import { QueryPane } from "query-pane.slint";
 
 export component WorkArea inherits Rectangle {
     // ----- editor / results state (wired 1:1 from MainWindow) -----
@@ -112,6 +113,103 @@ export component WorkArea inherits Rectangle {
     in-out property <string> limit-text;
     // Draggable height of the SQL editor pane (session-local).
     in-out property <length> editor-h: 340px;
+    // Dual-pane split (SQL tabs only): show a second editor+result pane on the
+    // right. `active-pane` is the focused pane (0 left / 1 right).
+    in property <bool> split: false;
+    in property <int> active-pane: 0;
+    in-out property <float> split-ratio: 0.5;
+    callback toggle-split();
+
+    // ----- pane 1 (right split pane) mirror of the per-pane state above -----
+    // Pane 0 uses the base properties; Rust fills these only while `split` is on.
+    in property <[[Span]]> p1-editor-lines;
+    in property <[int]> p1-editor-fold-state;
+    in property <[bool]> p1-editor-line-hidden;
+    in property <string> p1-editor-placeholder;
+    in property <int> p1-cursor-line;
+    in property <int> p1-cursor-col;
+    in-out property <bool> p1-editor-collapsed;
+    in-out property <length> p1-editor-h: 340px;
+    in property <[PaletteItem]> p1-completion-items;
+    in property <bool> p1-completion-visible;
+    in property <int> p1-completion-selected;
+    in property <bool> p1-find-open;
+    in property <string> p1-find-text;
+    in property <string> p1-find-status;
+    in property <bool> p1-query-running;
+    in property <bool> p1-streaming;
+    in-out property <string> p1-limit-text;
+    in property <string> p1-active-table;
+    in property <int> p1-page-start;
+    in property <int> p1-page-end;
+    in property <int> p1-total-rows: -1;
+    in property <bool> p1-can-prev;
+    in property <bool> p1-can-next;
+    in property <bool> p1-read-only: true;
+    in-out property <bool> p1-show-structure: false;
+    in property <string> p1-query-label;
+    in property <string> p1-results-meta;
+    in property <[string]> p1-result-tabs;
+    in property <int> p1-active-result;
+    in-out property <int> p1-sql-view-mode;
+    in-out property <bool> p1-filter-open;
+    in property <[GridColumn]> p1-columns;
+    in property <[GridCell]> p1-cells;
+    in property <int> p1-col-count;
+    in property <[length]> p1-col-widths;
+    in property <int> p1-result-kind;
+    in property <string> p1-result-status;
+    in property <bool> p1-status-error;
+    in property <int> p1-grid-sort-col: -1;
+    in property <bool> p1-grid-sort-asc: true;
+    in property <[string]> p1-grid-col-filters;
+    in-out property <int> p1-selected-row;
+    in-out property <int> p1-selected-col: -1;
+    in property <int> p1-editing-row: -1;
+    in property <int> p1-editing-col: -1;
+    in-out property <string> p1-editing-value;
+    in property <int> p1-scroll-grid-tick;
+    in property <int> p1-doc-view;
+    in property <[DocRow]> p1-doc-tree;
+    in property <[StructField]> p1-structure-columns;
+    in property <[IndexRow]> p1-index-rows;
+    in property <[ChartBar]> p1-chart-bars;
+    // Pane 1 callbacks carry no pane arg here; they are wired to pane-1 handlers
+    // on MainWindow (a later step). Left unhandled = no-op until then.
+    callback p1-run();
+    callback p1-run-selection();
+    callback p1-format-sql();
+    callback p1-explain-query();
+    callback p1-cancel-stream();
+    callback p1-set-limit(string);
+    callback p1-prev-page();
+    callback p1-next-page();
+    callback p1-refresh-page();
+    callback p1-find-changed(string);
+    callback p1-find-next();
+    callback p1-find-prev();
+    callback p1-find-close();
+    callback p1-toggle-fold(int);
+    callback p1-editor-key(string, bool, bool, bool) -> bool;
+    callback p1-editor-press(int, int);
+    callback p1-editor-drag(int, int);
+    callback p1-editor-select-word(int, int);
+    callback p1-completion-choose(int);
+    callback p1-select-result-tab(int);
+    callback p1-close-result-tab(int);
+    callback p1-copy-results();
+    callback p1-export-results(int);
+    callback p1-sort-col(int);
+    callback p1-reorder-col(int, length);
+    callback p1-set-col-filter(int, string);
+    callback p1-resize-col(int, length);
+    callback p1-select-cell(int, int);
+    callback p1-edit-cell(int, int);
+    callback p1-cell-edited(int, int, string);
+    callback p1-cell-advance(int, int, string, bool);
+    callback p1-stage-cell(int, int, string);
+    callback p1-edit-cancelled();
+    callback p1-toggle-doc-node(string);
     // Browse chrome shows whenever a table is open in this tab.
     property <bool> browse-mode: root.active-table != "";
     // Footer view segments: 0 Data · 1 Structure · 2 Indexes
@@ -171,7 +269,7 @@ export component WorkArea inherits Rectangle {
         spacing: 0;
 
         // ================= browse toolbar =================
-        if root.browse-mode: Rectangle {
+        if root.browse-mode && !root.split: Rectangle {
             height: 42px;
             background: Tokens.canvas;
             HorizontalLayout {
@@ -292,7 +390,7 @@ export component WorkArea inherits Rectangle {
 
         // One TablePlus-style condition row. Apply and Enter share the same
         // callback; the toolbar and footer no longer expose duplicate triggers.
-        if root.browse-mode && root.filter-open: Rectangle {
+        if root.browse-mode && !root.split && root.filter-open: Rectangle {
             property <int> focus-tick: root.focus-filter-tick;
             changed focus-tick => { filter-value.focus-input(); }
             height: 38px;
@@ -381,613 +479,219 @@ export component WorkArea inherits Rectangle {
             }
         }
 
-        // ================= empty state (nothing open) =================
-        // ================= SQL editor (non-browse tabs) =================
-        // Also shown over a browse grid when the user opens "Query ▸".
-        if (!root.browse-mode || root.browse-editor-open) && !root.fn-mode: Rectangle {
-            vertical-stretch: 0.0;
-            preferred-height: root.editor-h;
-            background: Tokens.canvas;
-            VerticalLayout {
-                width: 100%;
-                height: 100%;
-                spacing: 0;
-                HorizontalLayout {
-                    height: 44px;
-                    padding-left: Tokens.sp3;
-                    padding-right: Tokens.sp3;
-                    spacing: Tokens.sp2;
-                    VerticalLayout {
-                        alignment: center;
-                        PrimaryButton {
-                            text: root.query-running ? "Running…" : "▶ Run  ⌘⏎";
-                            height: 28px;
-                            enabled: !root.query-running;
-                            clicked => { root.run(); }
-                        }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        SecondaryButton { text: "Run Selection"; height: 28px; clicked => { root.run-selection(); } }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        visible: root.sql-capable;
-                        SecondaryButton { text: "Format"; height: 28px; clicked => { root.format-sql(); } }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        visible: root.sql-capable;
-                        SecondaryButton {
-                            text: "Explain";
-                            height: 28px;
-                            clicked => { root.explain-query(); }
-                        }
-                    }
-                    // Row limit for manual queries: a number caps the result;
-                    // "No limit" streams the whole table in progressively.
-                    VerticalLayout {
-                        alignment: center;
-                        visible: root.sql-capable;
-                        HorizontalLayout {
-                            spacing: Tokens.sp1;
-                            VerticalLayout {
-                                alignment: center;
-                                Text {
-                                    text: "Limit";
-                                    color: Tokens.text-faint;
-                                    font-size: Tokens.font-sm;
-                                }
-                            }
-                            Rectangle {
-                                width: 78px;
-                                height: 28px;
-                                border-radius: Tokens.radius;
-                                border-width: 1px;
-                                border-color: Tokens.border-strong;
-                                background: Tokens.card;
-                                TextInput {
-                                    width: parent.width;
-                                    text <=> root.limit-text;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                    single-line: true;
-                                    color: Tokens.text;
-                                    font-family: Tokens.mono;
-                                    font-size: Tokens.font-sm;
-                                    accepted => { root.set-limit(self.text); }
-                                }
-                            }
-                        }
-                    }
-                    if root.streaming: VerticalLayout {
-                        alignment: center;
-                        SecondaryButton {
-                            text: "✕ Cancel";
-                            height: 28px;
-                            clicked => { root.cancel-stream(); }
-                        }
-                    }
-                    Rectangle { horizontal-stretch: 1; }
-                    Text {
-                        text: root.query-label;
-                        color: Tokens.text-faint;
-                        font-size: Tokens.font-sm;
-                        vertical-alignment: center;
-                    }
-                }
-                // find bar (⌘F): input + match count + prev/next + close
-                if root.find-open: Rectangle {
-                    height: 36px;
-                    background: Tokens.chrome;
-                    // Focus the input one tick after the bar mounts. Calling
-                    // .focus() from the input's own `init` recurses through the
-                    // layout geometry solver (Slint 1.16); a deferred Timer
-                    // avoids it. `did-focus` resets on every reopen because the
-                    // conditional recreates this element.
-                    property <bool> did-focus;
-                    Timer {
-                        interval: 16ms;
-                        running: !parent.did-focus;
-                        triggered => { find-input.focus(); parent.did-focus = true; }
-                    }
-                    HorizontalLayout {
-                        padding-left: Tokens.sp3;
-                        padding-right: Tokens.sp3;
-                        spacing: Tokens.sp2;
-                        VerticalLayout {
-                            alignment: center;
-                            Rectangle {
-                                width: 240px;
-                                height: 26px;
-                                border-radius: Tokens.radius;
-                                border-width: 1px;
-                                border-color: Tokens.border-strong;
-                                background: Tokens.card;
-                                find-input := TextInput {
-                                    x: Tokens.sp2;
-                                    width: parent.width - 2 * Tokens.sp2;
-                                    vertical-alignment: center;
-                                    text: root.find-text;
-                                    color: Tokens.text;
-                                    font-family: Tokens.mono;
-                                    font-size: Tokens.font-sm;
-                                    single-line: true;
-                                    edited => { root.find-changed(self.text); }
-                                    accepted => { root.find-next(); }
-                                    key-pressed(e) => {
-                                        if (e.text == Key.Escape) { root.find-close(); return accept; }
-                                        return reject;
-                                    }
-                                }
-                            }
-                        }
-                        Text {
-                            text: root.find-status;
-                            color: Tokens.text-faint;
-                            font-size: Tokens.font-sm;
-                            font-family: Tokens.mono;
-                            vertical-alignment: center;
-                        }
-                        Rectangle { horizontal-stretch: 1; }
-                        VerticalLayout {
-                            alignment: center;
-                            SecondaryButton { text: "‹ Prev"; height: 26px; clicked => { root.find-prev(); } }
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            SecondaryButton { text: "Next ›"; height: 26px; clicked => { root.find-next(); } }
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            SecondaryButton { text: "✕"; height: 26px; clicked => { root.find-close(); } }
-                        }
-                    }
-                }
-                if !root.editor-collapsed: CodeEditor {
-                    vertical-stretch: 1;
-                    lines: root.editor-lines;
-                    fold-state: root.editor-fold-state;
-                    line-hidden: root.editor-line-hidden;
-                    toggle-fold(l) => { root.toggle-fold(l); }
-                    placeholder: root.editor-placeholder;
-                    cursor-line: root.cursor-line;
-                    cursor-col: root.cursor-col;
-                    completion-items: root.completion-items;
-                    completion-visible: root.completion-visible;
-                    completion-selected: root.completion-selected;
-                    completion-choose(i) => { root.completion-choose(i); }
-                    edit-key(t, cmd, alt, shift) => { root.editor-key(t, cmd, alt, shift) }
-                    press-pos(l, c) => { root.editor-press(l, c); }
-                    drag-pos(l, c) => { root.editor-drag(l, c); }
-                    select-word(l, c) => { root.editor-select-word(l, c); }
-                }
-                Rectangle { height: 1px; background: Tokens.border; }
-                // results header strip
-                HorizontalLayout {
-                    height: 34px;
-                    padding-left: Tokens.sp3;
-                    padding-right: Tokens.sp3;
-                    spacing: Tokens.sp2;
-                    Text {
-                        text: "Results";
-                        color: Tokens.text;
-                        font-size: Tokens.font-sm;
-                        font-weight: Tokens.weight-emphasis;
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        text: root.results-meta;
-                        color: Tokens.text-faint;
-                        font-size: Tokens.font-sm;
-                        font-family: Tokens.mono;
-                        vertical-alignment: center;
-                    }
-                    Rectangle { horizontal-stretch: 1; }
-                    TextButton { text: root.editor-collapsed ? "Editor ▸" : "Editor ▾"; clicked => { root.editor-collapsed = !root.editor-collapsed; } }
-                    if !root.browse-mode: TextButton { text: root.filter-open ? "Filter ▲" : "Filter ▼"; clicked => { root.filter-open = !root.filter-open; } }
-                    TextButton { text: "Copy"; clicked => { root.copy-results(); } }
-                    ExportButton { export(i) => { root.export-results(i); } }
-                    TextButton { text: "Chart"; clicked => { root.sql-view-mode = 2; } }
-                }
-                // result tabs — appear once ⌘\ has spawned a second result
-                if root.result-tabs.length > 1: HorizontalLayout {
-                    height: 30px;
-                    padding-left: Tokens.sp3;
-                    padding-right: Tokens.sp3;
-                    spacing: Tokens.sp1;
-                    alignment: start;
-                    for name[i] in root.result-tabs: Rectangle {
-                        height: 24px;
-                        width: rl.preferred-width + 2 * Tokens.sp2 + 18px;
-                        border-radius: Tokens.radius;
-                        background: i == root.active-result ? Tokens.accent-tint
-                            : rta.has-hover ? Tokens.chrome : transparent;
-                        rta := TouchArea { clicked => { root.select-result-tab(i); } }
-                        HorizontalLayout {
-                            padding-left: Tokens.sp2;
-                            padding-right: Tokens.sp1;
-                            spacing: Tokens.sp1;
-                            rl := Text {
-                                text: name;
-                                color: i == root.active-result ? Tokens.on-tint : Tokens.text-dim;
-                                font-size: Tokens.font-sm;
-                                vertical-alignment: center;
-                            }
-                            Rectangle {
-                                width: 16px;
-                                Text {
-                                    text: "×";
-                                    color: Tokens.text-faint;
-                                    vertical-alignment: center;
-                                    horizontal-alignment: center;
-                                }
-                                TouchArea { clicked => { root.close-result-tab(i); } }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // draggable splitter: grow/shrink the editor vs the results (SQL tabs)
-        if (!root.browse-mode || root.browse-editor-open) && !root.fn-mode && !root.results-collapsed: Rectangle {
-            height: 6px;
-            background: split-ta.has-hover || split-ta.pressed ? Tokens.accent : Tokens.chrome;
-            split-ta := TouchArea {
-                mouse-cursor: row-resize;
-                moved => {
-                    root.editor-h = clamp(
-                        root.editor-h + (self.mouse-y - self.pressed-y),
-                        120px, root.height - 200px);
-                }
-            }
-        }
-
-        // The per-column filter inputs live inside TabularGrid (aligned to the
-        // columns) and are toggled by `filter-open`; see the "Filter" button.
-
-        // ================= result body =================
-        if !root.fn-mode && !root.results-collapsed: body := Rectangle {
-            property <bool> detail-shown: root.detail-visible && root.view-mode == 0
-                && root.result-kind == 0 && root.col-count > 0 && root.selected-row >= 0
-                && (root.selected-row + 1) * root.col-count <= root.cells.length;
-            property <length> detail-w: min(320px, max(240px, self.width * 0.32));
+        // ================= query pane(s) (editor + results) =================
+        // Browse and SQL tabs render the left pane; function tabs use the view
+        // above. A SQL tab can split into two panes side by side; the right pane
+        // shows only when `split` is set (wired in a later step).
+        if !root.fn-mode: Rectangle {
             vertical-stretch: 1;
-            background: Tokens.canvas;
+            QueryPane {
+            x: 0;
+            width: root.split ? (parent.width - 6px) * root.split-ratio : parent.width;
+            height: 100%;
+            split: root.split;
+            active: root.split && root.active-pane == 0;
+            toggle-split() => { root.toggle-split(); }
+            browse-mode: root.browse-mode;
+            table-name: root.active-table;
+            refresh-page() => { root.refresh-page(); }
+            browse-editor-open: root.browse-editor-open;
+            fn-mode: root.fn-mode;
+            results-collapsed: root.results-collapsed;
+            detail-visible: root.detail-visible;
+            detail-left: root.detail-left;
+            view-mode: root.view-mode;
+            sql-capable: root.sql-capable;
+            read-only: root.read-only;
+            editor-h <=> root.editor-h;
+            query-running: root.query-running;
+            streaming: root.streaming;
+            limit-text <=> root.limit-text;
+            query-label: root.query-label;
+            run() => { root.run(); }
+            run-selection() => { root.run-selection(); }
+            format-sql() => { root.format-sql(); }
+            explain-query() => { root.explain-query(); }
+            cancel-stream() => { root.cancel-stream(); }
+            set-limit(t) => { root.set-limit(t); }
+            find-open: root.find-open;
+            find-text: root.find-text;
+            find-status: root.find-status;
+            find-changed(t) => { root.find-changed(t); }
+            find-next() => { root.find-next(); }
+            find-prev() => { root.find-prev(); }
+            find-close() => { root.find-close(); }
+            editor-collapsed <=> root.editor-collapsed;
+            editor-lines: root.editor-lines;
+            editor-fold-state: root.editor-fold-state;
+            editor-line-hidden: root.editor-line-hidden;
+            editor-placeholder: root.editor-placeholder;
+            cursor-line: root.cursor-line;
+            cursor-col: root.cursor-col;
+            toggle-fold(l) => { root.toggle-fold(l); }
+            editor-key(t, cmd, alt, shift) => { root.editor-key(t, cmd, alt, shift) }
+            editor-press(l, c) => { root.editor-press(l, c); }
+            editor-drag(l, c) => { root.editor-drag(l, c); }
+            editor-select-word(l, c) => { root.editor-select-word(l, c); }
+            completion-items: root.completion-items;
+            completion-visible: root.completion-visible;
+            completion-selected: root.completion-selected;
+            completion-choose(i) => { root.completion-choose(i); }
+            results-meta: root.results-meta;
+            filter-open <=> root.filter-open;
+            sql-view-mode <=> root.sql-view-mode;
+            result-tabs: root.result-tabs;
+            active-result: root.active-result;
+            select-result-tab(i) => { root.select-result-tab(i); }
+            close-result-tab(i) => { root.close-result-tab(i); }
+            copy-results() => { root.copy-results(); }
+            export-results(i) => { root.export-results(i); }
+            columns: root.columns;
+            cells: root.cells;
+            col-count: root.col-count;
+            col-widths: root.col-widths;
+            result-kind: root.result-kind;
+            result-status: root.result-status;
+            status-error: root.status-error;
+            grid-sort-col: root.grid-sort-col;
+            grid-sort-asc: root.grid-sort-asc;
+            grid-col-filters: root.grid-col-filters;
+            selected-row <=> root.selected-row;
+            selected-col <=> root.selected-col;
+            editing-row: root.editing-row;
+            editing-col: root.editing-col;
+            editing-value <=> root.editing-value;
+            scroll-grid-tick: root.scroll-grid-tick;
+            sort-col(i) => { root.sort-col(i); }
+            reorder-col(i, x) => { root.reorder-col(i, x); }
+            set-col-filter(i, t) => { root.set-col-filter(i, t); }
+            resize-col(i, d) => { root.resize-col(i, d); }
+            select-cell(r, c) => { root.select-cell(r, c); }
+            edit-cell(r, c) => { root.edit-cell(r, c); }
+            cell-edited(r, c, t) => { root.cell-edited(r, c, t); }
+            cell-advance(r, c, t, fwd) => { root.cell-advance(r, c, t, fwd); }
+            stage-cell(r, c, t) => { root.stage-cell(r, c, t); }
+            edit-cancelled() => { root.edit-cancelled(); }
+            doc-view: root.doc-view;
+            doc-tree: root.doc-tree;
+            toggle-doc-node(p) => { root.toggle-doc-node(p); }
+            structure-columns: root.structure-columns;
+            index-rows: root.index-rows;
+            chart-bars: root.chart-bars;
+            }
 
-            // Data grid — SQL/KeyValue, and Mongo documents in grid view.
-            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0) && (root.result-kind == 0 || root.result-kind == 2 || (root.result-kind == 1 && root.doc-view == 0)): TabularGrid {
-                x: (body.detail-shown && root.detail-left) ? body.detail-w + 1px : 0;
-                width: body.detail-shown ? body.width - body.detail-w - 1px : body.width;
+            // vertical divider between the two panes (SQL split)
+            if root.split: Rectangle {
+                x: (parent.width - 6px) * root.split-ratio;
+                width: 6px;
                 height: 100%;
-                columns: root.columns;
-                cells: root.cells;
-                col-count: root.col-count;
-                col-widths: root.col-widths;
-                sorted-col: root.grid-sort-col;
-                sort-asc: root.grid-sort-asc;
-                sort-col(i) => { root.sort-col(i); }
-                reorder-col(i, x) => { root.reorder-col(i, x); }
-                filter-open: root.filter-open;
-                col-filter-values: root.grid-col-filters;
-                set-col-filter(i, t) => { root.set-col-filter(i, t); }
-                selected-row <=> root.selected-row;
-                selected-col <=> root.selected-col;
-                editing-row: root.editing-row;
-                editing-col: root.editing-col;
-                editing-value <=> root.editing-value;
-                resize-col(i, d) => { root.resize-col(i, d); }
-                select-cell(r, c) => { root.select-cell(r, c); }
-                edit-cell(r, c) => { root.edit-cell(r, c); }
-                cell-edited(r, c, t) => { root.cell-edited(r, c, t); }
-                cell-advance(r, c, t, fwd) => { root.cell-advance(r, c, t, fwd); }
-                edit-cancelled() => { root.edit-cancelled(); }
-                scroll-grid-tick: root.scroll-grid-tick;
+                background: divider.has-hover || divider.pressed ? Tokens.accent : Tokens.border-strong;
+                divider := TouchArea {
+                    mouse-cursor: col-resize;
+                    moved => {
+                        root.split-ratio = clamp(
+                            root.split-ratio + (self.mouse-x - self.pressed-x) / root.width,
+                            0.2, 0.8);
+                    }
+                }
             }
 
-            if body.detail-shown: Rectangle {
-                x: root.detail-left ? 0 : body.width - body.detail-w;
-                width: body.detail-w;
+            // right pane (pane 1) — driven by the p1-* mirror state.
+            if root.split: QueryPane {
+                x: (parent.width - 6px) * root.split-ratio + 6px;
+                width: (parent.width - 6px) * (1 - root.split-ratio);
                 height: 100%;
-                background: Tokens.card;
-                border-width: 1px;
-                border-color: Tokens.border;
-
-                VerticalLayout {
-                    spacing: 0;
-                    Rectangle {
-                        height: 40px;
-                        background: Tokens.chrome;
-                        HorizontalLayout {
-                            padding-left: Tokens.sp3;
-                            padding-right: Tokens.sp3;
-                            Text {
-                                text: "Details";
-                                color: Tokens.text;
-                                font-size: Tokens.font-sm;
-                                font-weight: 600;
-                                vertical-alignment: center;
-                            }
-                            Rectangle { horizontal-stretch: 1; }
-                            Text {
-                                text: "Row " + (root.selected-row + 1);
-                                color: Tokens.text-faint;
-                                font-family: Tokens.mono;
-                                font-size: Tokens.font-xs;
-                                vertical-alignment: center;
-                            }
-                        }
-                    }
-                    Rectangle { height: 1px; background: Tokens.border; }
-                    ScrollView {
-                        vertical-stretch: 1;
-                        VerticalLayout {
-                            padding: Tokens.sp3;
-                            spacing: Tokens.sp3;
-                            for c in root.col-count: Rectangle {
-                                property <GridCell> detail-cell: root.cells[root.selected-row * root.col-count + c];
-                                height: 96px;
-                                VerticalLayout {
-                                    spacing: Tokens.sp1;
-                                    HorizontalLayout {
-                                        Text {
-                                            text: root.columns[c].name;
-                                            color: Tokens.text-dim;
-                                            font-family: Tokens.mono;
-                                            font-size: Tokens.font-xs;
-                                            overflow: elide;
-                                        }
-                                        Rectangle { horizontal-stretch: 1; }
-                                        Text {
-                                            text: root.columns[c].type-name;
-                                            color: Tokens.text-faint;
-                                            font-family: Tokens.mono;
-                                            font-size: Tokens.font-xs;
-                                        }
-                                    }
-                                    Rectangle {
-                                        vertical-stretch: 1;
-                                        clip: true;
-                                        border-radius: Tokens.radius;
-                                        border-width: 1px;
-                                        border-color: detail-input.has-focus ? Tokens.accent : Tokens.border-strong;
-                                        background: Tokens.canvas;
-                                        detail-input := TextInput {
-                                            x: Tokens.sp2;
-                                            y: Tokens.sp2;
-                                            width: parent.width - 2 * Tokens.sp2;
-                                            height: parent.height - 2 * Tokens.sp2;
-                                            text: detail-cell.is-null ? "" : detail-cell.text;
-                                            enabled: !root.read-only;
-                                            single-line: false;
-                                            wrap: word-wrap;
-                                            vertical-alignment: top;
-                                            color: root.read-only ? Tokens.text-dim : Tokens.text;
-                                            font-family: Tokens.mono;
-                                            font-size: Tokens.font-sm;
-                                            edited => { root.stage-cell(root.selected-row, c, self.text); }
-                                        }
-                                        if detail-cell.is-null && detail-input.text == "": Text {
-                                            x: Tokens.sp2;
-                                            y: Tokens.sp2;
-                                            text: "NULL";
-                                            color: Tokens.text-ghost;
-                                            font-family: Tokens.mono;
-                                            font-size: Tokens.font-sm;
-                                            font-italic: true;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // empty result: distinct from an error, distinct from loading
-            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0)
-                && root.result-kind == 0 && root.cells.length == 0
-                && !root.status-error && !root.query-running: VerticalLayout {
-                alignment: center;
-                spacing: Tokens.sp2;
-                Text {
-                    text: "No rows";
-                    color: Tokens.text-dim;
-                    font-size: Tokens.font-md;
-                    horizontal-alignment: center;
-                }
-                Text {
-                    text: root.browse-mode && !root.read-only
-                        ? "Table is empty — “+ Row” inserts one"
-                        : "The query returned no rows";
-                    color: Tokens.text-faint;
-                    font-size: Tokens.font-sm;
-                    horizontal-alignment: center;
-                }
-            }
-
-            // in-flight query indicator
-            if root.query-running: VerticalLayout {
-                alignment: center;
-                Text {
-                    text: "Running…";
-                    color: Tokens.text-dim;
-                    font-size: Tokens.font-md;
-                    horizontal-alignment: center;
-                }
-            }
-
-            // Documents (Mongo) — JSON tree view (grid view uses TabularGrid above).
-            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0) && root.result-kind == 1 && root.doc-view == 1: ScrollView {
-                width: 100%;
-                height: 100%;
-                VerticalLayout {
-                    padding: Tokens.sp3;
-                    spacing: 0;
-                    alignment: start;
-                    for row in root.doc-tree: Rectangle {
-                        height: 22px;
-                        // Whole branch row is clickable to fold/unfold; leaves inert.
-                        background: row-ta.has-hover && row.expandable ? Tokens.card : transparent;
-                        row-ta := TouchArea {
-                            enabled: row.expandable;
-                            clicked => { root.toggle-doc-node(row.path); }
-                        }
-                        HorizontalLayout {
-                            padding-left: row.depth * 16px;
-                            spacing: Tokens.sp1;
-                            alignment: start;
-                            // fold caret (branches only)
-                            Text {
-                                width: 14px;
-                                text: row.expandable ? (row.expanded ? "▾" : "▸") : "";
-                                color: Tokens.text-dim;
-                                font-size: Tokens.font-xs;
-                                vertical-alignment: center;
-                            }
-                            Text {
-                                width: 200px;
-                                text: row.key + ":";
-                                color: Tokens.accent;
-                                font-family: Tokens.mono;
-                                font-size: Tokens.font-sm;
-                                overflow: elide;
-                                vertical-alignment: center;
-                            }
-                            Text {
-                                text: row.preview;
-                                color: row.expandable ? Tokens.text-dim : Tokens.text;
-                                font-family: Tokens.mono;
-                                font-size: Tokens.font-sm;
-                                horizontal-alignment: left;
-                                overflow: elide;
-                                vertical-alignment: center;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Affected-rows toast
-            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0) && root.result-kind == 3: Text {
-                text: root.result-status;
-                color: root.status-error ? Tokens.error : Tokens.text-dim;
-                font-size: Tokens.font-md;
-            }
-
-            // Structure view
-            if root.view-mode == 1: ScrollView {
-                width: 100%;
-                height: 100%;
-                VerticalLayout {
-                    width: parent.visible-width;
-                    padding: Tokens.sp3;
-                    spacing: 0;
-                    alignment: start;
-                    HorizontalLayout {
-                        height: Tokens.grid-header-h;
-                        Text { width: 220px; text: "column"; color: Tokens.text; font-family: Tokens.mono; font-size: Tokens.font-sm; font-weight: 600; vertical-alignment: center; }
-                        Text { width: 180px; text: "type"; color: Tokens.text; font-family: Tokens.mono; font-size: Tokens.font-sm; font-weight: 600; vertical-alignment: center; }
-                        Text { text: "nullable"; color: Tokens.text; font-family: Tokens.mono; font-size: Tokens.font-sm; font-weight: 600; vertical-alignment: center; }
-                    }
-                    Rectangle { height: 1px; background: Tokens.border-strong; }
-                    for f in root.structure-columns: HorizontalLayout {
-                        height: Tokens.grid-row-h;
-                        Text { width: 220px; text: f.name; color: Tokens.text; font-family: Tokens.mono; font-size: Tokens.font-sm; vertical-alignment: center; }
-                        Text { width: 180px; text: f.type-name; color: Tokens.text-dim; font-family: Tokens.mono; font-size: Tokens.font-sm; vertical-alignment: center; }
-                        Text { text: f.nullable ? "YES" : "NO"; color: f.nullable ? Tokens.text-faint : Tokens.text-dim; font-family: Tokens.mono; font-size: Tokens.font-sm; vertical-alignment: center; }
-                    }
-                }
-            }
-
-            // Indexes view (from engine catalogs; empty for engines without them)
-            if root.view-mode == 2 && root.index-rows.length == 0: Text {
-                text: "No indexes to show";
-                color: Tokens.text-faint;
-                font-size: Tokens.font-md;
-            }
-            if root.view-mode == 2 && root.index-rows.length > 0: ScrollView {
-                width: 100%;
-                height: 100%;
-                VerticalLayout {
-                    width: parent.visible-width;
-                    padding: Tokens.sp3;
-                    spacing: 0;
-                    alignment: start;
-                    HorizontalLayout {
-                        height: Tokens.grid-header-h;
-                        Text { width: 220px; text: "index"; color: Tokens.text; font-family: Tokens.mono; font-size: Tokens.font-sm; font-weight: 600; vertical-alignment: center; }
-                        Text { text: "definition"; color: Tokens.text; font-family: Tokens.mono; font-size: Tokens.font-sm; font-weight: 600; vertical-alignment: center; }
-                    }
-                    Rectangle { height: 1px; background: Tokens.border-strong; }
-                    for ix in root.index-rows: HorizontalLayout {
-                        height: Tokens.grid-row-h;
-                        Text { width: 220px; text: ix.name; color: Tokens.text; font-family: Tokens.mono; font-size: Tokens.font-sm; vertical-alignment: center; overflow: elide; }
-                        Text { text: ix.definition; color: Tokens.text-dim; font-family: Tokens.mono; font-size: Tokens.font-sm; vertical-alignment: center; overflow: elide; }
-                    }
-                }
-            }
-
-            // Message view (SQL footer segment)
-            if !root.browse-mode && root.view-mode == 0 && root.sql-view-mode == 1: VerticalLayout {
-                padding: Tokens.sp3;
-                alignment: start;
-                Text {
-                    text: root.result-status == "" ? "No messages" : root.result-status;
-                    color: root.status-error ? Tokens.error : Tokens.text-dim;
-                    font-size: Tokens.font-md;
-                }
-            }
-
-            // Chart view: horizontal bars, first text column vs first numeric column
-            if !root.browse-mode && root.view-mode == 0 && root.sql-view-mode == 2: ScrollView {
-                width: 100%;
-                height: 100%;
-                VerticalLayout {
-                    width: parent.visible-width;
-                    padding: Tokens.sp3;
-                    spacing: Tokens.sp1;
-                    alignment: start;
-                    if root.chart-bars.length == 0: Text {
-                        text: "Nothing to chart — the result needs a numeric column";
-                        color: Tokens.text-faint;
-                        font-size: Tokens.font-md;
-                    }
-                    for bar in root.chart-bars: HorizontalLayout {
-                        height: 20px;
-                        spacing: Tokens.sp2;
-                        Text {
-                            width: 160px;
-                            text: bar.label;
-                            color: Tokens.text-dim;
-                            font-size: Tokens.font-sm;
-                            font-family: Tokens.mono;
-                            overflow: elide;
-                            vertical-alignment: center;
-                        }
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            Rectangle {
-                                x: 0;
-                                width: parent.width * bar.frac;
-                                height: 14px;
-                                y: (parent.height - self.height) / 2;
-                                border-radius: 3px;
-                                background: Tokens.accent;
-                            }
-                        }
-                        Text {
-                            width: 100px;
-                            text: bar.value;
-                            color: Tokens.text;
-                            font-size: Tokens.font-sm;
-                            font-family: Tokens.mono;
-                            horizontal-alignment: right;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
+                split: root.split;
+                active: root.split && root.active-pane == 1;
+                toggle-split() => { root.toggle-split(); }
+                refresh-page() => { root.p1-refresh-page(); }
+                // Each workspace group owns its browse state.
+                browse-mode: root.p1-active-table != "";
+                table-name: root.p1-active-table;
+                browse-editor-open: root.browse-editor-open;
+                fn-mode: root.fn-mode;
+                results-collapsed: root.results-collapsed;
+                detail-visible: root.detail-visible;
+                detail-left: root.detail-left;
+                view-mode: root.p1-show-structure ? 1 : 0;
+                sql-capable: root.sql-capable;
+                read-only: root.p1-read-only;
+                // per-pane state
+                editor-h <=> root.p1-editor-h;
+                query-running: root.p1-query-running;
+                streaming: root.p1-streaming;
+                limit-text <=> root.p1-limit-text;
+                query-label: root.p1-query-label;
+                run() => { root.p1-run(); }
+                run-selection() => { root.p1-run-selection(); }
+                format-sql() => { root.p1-format-sql(); }
+                explain-query() => { root.p1-explain-query(); }
+                cancel-stream() => { root.p1-cancel-stream(); }
+                set-limit(t) => { root.p1-set-limit(t); }
+                find-open: root.p1-find-open;
+                find-text: root.p1-find-text;
+                find-status: root.p1-find-status;
+                find-changed(t) => { root.p1-find-changed(t); }
+                find-next() => { root.p1-find-next(); }
+                find-prev() => { root.p1-find-prev(); }
+                find-close() => { root.p1-find-close(); }
+                editor-collapsed <=> root.p1-editor-collapsed;
+                editor-lines: root.p1-editor-lines;
+                editor-fold-state: root.p1-editor-fold-state;
+                editor-line-hidden: root.p1-editor-line-hidden;
+                editor-placeholder: root.p1-editor-placeholder;
+                cursor-line: root.p1-cursor-line;
+                cursor-col: root.p1-cursor-col;
+                toggle-fold(l) => { root.p1-toggle-fold(l); }
+                editor-key(t, cmd, alt, shift) => { root.p1-editor-key(t, cmd, alt, shift) }
+                editor-press(l, c) => { root.p1-editor-press(l, c); }
+                editor-drag(l, c) => { root.p1-editor-drag(l, c); }
+                editor-select-word(l, c) => { root.p1-editor-select-word(l, c); }
+                completion-items: root.p1-completion-items;
+                completion-visible: root.p1-completion-visible;
+                completion-selected: root.p1-completion-selected;
+                completion-choose(i) => { root.p1-completion-choose(i); }
+                results-meta: root.p1-results-meta;
+                filter-open <=> root.p1-filter-open;
+                sql-view-mode <=> root.p1-sql-view-mode;
+                result-tabs: root.p1-result-tabs;
+                active-result: root.p1-active-result;
+                select-result-tab(i) => { root.p1-select-result-tab(i); }
+                close-result-tab(i) => { root.p1-close-result-tab(i); }
+                copy-results() => { root.p1-copy-results(); }
+                export-results(i) => { root.p1-export-results(i); }
+                columns: root.p1-columns;
+                cells: root.p1-cells;
+                col-count: root.p1-col-count;
+                col-widths: root.p1-col-widths;
+                result-kind: root.p1-result-kind;
+                result-status: root.p1-result-status;
+                status-error: root.p1-status-error;
+                grid-sort-col: root.p1-grid-sort-col;
+                grid-sort-asc: root.p1-grid-sort-asc;
+                grid-col-filters: root.p1-grid-col-filters;
+                selected-row <=> root.p1-selected-row;
+                selected-col <=> root.p1-selected-col;
+                editing-row: root.p1-editing-row;
+                editing-col: root.p1-editing-col;
+                editing-value <=> root.p1-editing-value;
+                scroll-grid-tick: root.p1-scroll-grid-tick;
+                sort-col(i) => { root.p1-sort-col(i); }
+                reorder-col(i, x) => { root.p1-reorder-col(i, x); }
+                set-col-filter(i, t) => { root.p1-set-col-filter(i, t); }
+                resize-col(i, d) => { root.p1-resize-col(i, d); }
+                select-cell(r, c) => { root.p1-select-cell(r, c); }
+                edit-cell(r, c) => { root.p1-edit-cell(r, c); }
+                cell-edited(r, c, t) => { root.p1-cell-edited(r, c, t); }
+                cell-advance(r, c, t, fwd) => { root.p1-cell-advance(r, c, t, fwd); }
+                stage-cell(r, c, t) => { root.p1-stage-cell(r, c, t); }
+                edit-cancelled() => { root.p1-edit-cancelled(); }
+                doc-view: root.p1-doc-view;
+                doc-tree: root.p1-doc-tree;
+                toggle-doc-node(p) => { root.p1-toggle-doc-node(p); }
+                structure-columns: root.p1-structure-columns;
+                index-rows: root.p1-index-rows;
+                chart-bars: root.p1-chart-bars;
             }
         }
 
@@ -1016,8 +720,8 @@ export component WorkArea inherits Rectangle {
         }
 
         // ================= footer strip (34px) =================
-        Rectangle { height: 1px; background: Tokens.border; }
-        Rectangle {
+        if !root.split: Rectangle { height: 1px; background: Tokens.border; }
+        if !root.split: Rectangle {
             height: Tokens.status-bar-h;
             background: Tokens.chrome;
             HorizontalLayout {
@@ -1184,6 +888,62 @@ export component WorkArea inherits Rectangle {
                         font-family: Tokens.mono;
                         vertical-alignment: center;
                     }
+                }
+            }
+        }
+        if root.split: Rectangle {
+            height: 1px;
+            background: Tokens.border;
+        }
+        if root.split: Rectangle {
+            height: Tokens.status-bar-h;
+            background: Tokens.chrome;
+            left-footer := Rectangle {
+                x: 0;
+                width: (parent.width - 6px) * root.split-ratio;
+                height: parent.height;
+                background: Tokens.chrome;
+                HorizontalLayout {
+                    padding-left: Tokens.sp3;
+                    padding-right: Tokens.sp3;
+                    spacing: Tokens.sp3;
+                    if root.browse-mode: UnderlineSegment { text: "Data"; active: !root.show-structure; clicked => { root.show-structure = false; } }
+                    if root.browse-mode: UnderlineSegment { text: "Structure"; active: root.show-structure; clicked => { root.show-structure = true; } }
+                    if !root.browse-mode: UnderlineSegment { text: "Data"; active: root.sql-view-mode == 0; clicked => { root.sql-view-mode = 0; } }
+                    if !root.browse-mode: UnderlineSegment { text: "Message"; active: root.sql-view-mode == 1; clicked => { root.sql-view-mode = 1; } }
+                    if !root.browse-mode: UnderlineSegment { text: "Chart"; active: root.sql-view-mode == 2; clicked => { root.sql-view-mode = 2; } }
+                    Rectangle { horizontal-stretch: 1; }
+                    if root.browse-mode: Text { text: root.total-rows >= 0 ? root.page-start + "–" + root.page-end + " of " + root.total-rows : root.page-start + "–" + root.page-end; color: Tokens.text-dim; font-size: Tokens.font-sm; }
+                    if root.browse-mode: TextButton { text: "‹"; clicked => { root.prev-page(); } }
+                    if root.browse-mode: TextButton { text: "›"; clicked => { root.next-page(); } }
+                    Text { text: root.result-status; color: root.status-error ? Tokens.error : Tokens.text-dim; font-size: Tokens.font-sm; vertical-alignment: center; overflow: elide; }
+                }
+            }
+            Rectangle {
+                x: (parent.width - 6px) * root.split-ratio;
+                width: 6px;
+                height: parent.height;
+                background: Tokens.border-strong;
+            }
+            right-footer := Rectangle {
+                x: (parent.width - 6px) * root.split-ratio + 6px;
+                width: (parent.width - 6px) * (1 - root.split-ratio);
+                height: parent.height;
+                background: Tokens.chrome;
+                HorizontalLayout {
+                    padding-left: Tokens.sp3;
+                    padding-right: Tokens.sp3;
+                    spacing: Tokens.sp3;
+                    if root.p1-active-table != "": UnderlineSegment { text: "Data"; active: !root.p1-show-structure; clicked => { root.p1-show-structure = false; } }
+                    if root.p1-active-table != "": UnderlineSegment { text: "Structure"; active: root.p1-show-structure; clicked => { root.p1-show-structure = true; } }
+                    if root.p1-active-table == "": UnderlineSegment { text: "Data"; active: root.p1-sql-view-mode == 0; clicked => { root.p1-sql-view-mode = 0; } }
+                    if root.p1-active-table == "": UnderlineSegment { text: "Message"; active: root.p1-sql-view-mode == 1; clicked => { root.p1-sql-view-mode = 1; } }
+                    if root.p1-active-table == "": UnderlineSegment { text: "Chart"; active: root.p1-sql-view-mode == 2; clicked => { root.p1-sql-view-mode = 2; } }
+                    Rectangle { horizontal-stretch: 1; }
+                    if root.p1-active-table != "": Text { text: root.p1-total-rows >= 0 ? root.p1-page-start + "–" + root.p1-page-end + " of " + root.p1-total-rows : root.p1-page-start + "–" + root.p1-page-end; color: Tokens.text-dim; font-size: Tokens.font-sm; }
+                    if root.p1-active-table != "": TextButton { text: "‹"; clicked => { root.p1-prev-page(); } }
+                    if root.p1-active-table != "": TextButton { text: "›"; clicked => { root.p1-next-page(); } }
+                    Text { text: root.p1-result-status; color: root.p1-status-error ? Tokens.error : Tokens.text-dim; font-size: Tokens.font-sm; vertical-alignment: center; overflow: elide; }
                 }
             }
         }

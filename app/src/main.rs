@@ -469,6 +469,60 @@ struct StoredResult {
     latency: String,
 }
 
+/// The live editor + result state a single **workspace tab group** owns
+/// independently. The workspace has two groups (left = 0, right = 1); each holds
+/// its own editor buffer, folds, completion, find hits, result set, grid
+/// view/sort/filter, and streaming. Held as `groups[0/1]` (the local binding is
+/// still named `panes` in some places for historical reasons).
+///
+/// Naming note: the Slint side still uses `p1-*` property/callback names for
+/// group 1 (e.g. `p1-cells`, `on_p1_run`). Those are compatibility plumbing —
+/// "p1" means "group 1" — kept to avoid renaming ~170 UI bindings in one pass.
+struct GroupRuntime {
+    ed_state: Rc<RefCell<editor::EditorState>>,
+    folded_heads: Rc<RefCell<HashSet<usize>>>,
+    completion_ctx: Rc<RefCell<(usize, Vec<String>)>>,
+    find_hits: Rc<RefCell<Vec<(usize, usize, usize)>>>,
+    edit_buf: Arc<std::sync::Mutex<model::EditBuffer>>,
+    results: Arc<std::sync::Mutex<Vec<StoredResult>>>,
+    active_result: Arc<std::sync::Mutex<usize>>,
+    result_new_tab: Arc<std::sync::atomic::AtomicBool>,
+    displayed_grid: Arc<std::sync::Mutex<Option<model::GridModel>>>,
+    browse: Arc<std::sync::Mutex<BrowseState>>,
+    hidden_cols: Arc<std::sync::Mutex<HashSet<usize>>>,
+    sort_state: Arc<std::sync::Mutex<(i32, bool)>>,
+    col_order: Arc<std::sync::Mutex<Vec<usize>>>,
+    col_filters: Arc<std::sync::Mutex<Vec<String>>>,
+    stream_cancel: Rc<RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>>,
+    stream_timer: Rc<RefCell<Option<slint::Timer>>>,
+}
+
+impl GroupRuntime {
+    fn new() -> Self {
+        Self {
+            ed_state: Rc::new(RefCell::new(editor::EditorState::from_text(""))),
+            folded_heads: Rc::new(RefCell::new(HashSet::new())),
+            completion_ctx: Rc::new(RefCell::new((0, Vec::new()))),
+            find_hits: Rc::new(RefCell::new(Vec::new())),
+            edit_buf: Arc::new(std::sync::Mutex::new(model::EditBuffer::default())),
+            results: Arc::new(std::sync::Mutex::new(Vec::new())),
+            active_result: Arc::new(std::sync::Mutex::new(0)),
+            result_new_tab: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            displayed_grid: Arc::new(std::sync::Mutex::new(None)),
+            browse: Arc::new(std::sync::Mutex::new(BrowseState {
+                limit: 300,
+                ..Default::default()
+            })),
+            hidden_cols: Arc::new(std::sync::Mutex::new(HashSet::new())),
+            sort_state: Arc::new(std::sync::Mutex::new((-1, true))),
+            col_order: Arc::new(std::sync::Mutex::new(Vec::new())),
+            col_filters: Arc::new(std::sync::Mutex::new(Vec::new())),
+            stream_cancel: Rc::new(RefCell::new(None)),
+            stream_timer: Rc::new(RefCell::new(None)),
+        }
+    }
+}
+
 /// Rust-owned document state. Slint only renders this list; an empty list and
 /// `active_tab_id == None` are a real empty workspace, not a synthetic query.
 #[derive(Clone)]
@@ -485,6 +539,13 @@ struct WorkspaceTab {
     indexes: Vec<(String, String)>,
     loading: bool,
     pinned: bool,
+    // Workspace group that owns this tab: 0 is left, 1 is right.
+    group: usize,
+    // Dual-pane split state for this tab. Right-pane results stay in memory
+    // like the left pane; only the SQL text is persisted to disk.
+    split: bool,
+    split_ratio: f32,
+    pane1_query: String,
 }
 
 impl WorkspaceTab {
@@ -502,6 +563,10 @@ impl WorkspaceTab {
             indexes: Vec::new(),
             loading: false,
             pinned: true,
+            group: 0,
+            split: false,
+            split_ratio: 0.5,
+            pane1_query: String::new(),
         }
     }
 
@@ -525,8 +590,85 @@ fn replaceable_table_tab_index(tabs: &[WorkspaceTab], active_id: Option<&str>) -
     tab.is_preview().then_some(index)
 }
 
+/// Absolute `tabs` index of the `group_index`-th tab in `group` (i.e. that
+/// group's tab-strip position → the underlying vector index). None if out of
+/// range. Inverse of [`group_relative_index`].
+fn abs_index_for_group(tabs: &[WorkspaceTab], group: usize, group_index: usize) -> Option<usize> {
+    tabs.iter()
+        .enumerate()
+        .filter(|(_, t)| t.group == group)
+        .nth(group_index)
+        .map(|(abs, _)| abs)
+}
+
+/// Position of the tab at absolute index `abs` within its own group's tab strip.
+fn group_relative_index(tabs: &[WorkspaceTab], abs: usize) -> usize {
+    let group = tabs[abs].group;
+    tabs[..abs].iter().filter(|t| t.group == group).count()
+}
+
+#[cfg(test)]
+mod group_tests {
+    use super::{
+        abs_index_for_group, group_relative_index, replaceable_table_tab_index,
+        workspace_tab_index, WorkspaceTab,
+    };
+
+    fn tab(id: &str, group: usize) -> WorkspaceTab {
+        let mut t = WorkspaceTab::sql(id.into(), 0);
+        t.group = group;
+        t
+    }
+
+    #[test]
+    fn abs_and_relative_index_are_inverse() {
+        // Interleaved groups: L R L R L.
+        let tabs = vec![
+            tab("a", 0),
+            tab("b", 1),
+            tab("c", 0),
+            tab("d", 1),
+            tab("e", 0),
+        ];
+        // Left strip = a(0), c(2), e(4); right strip = b(1), d(3).
+        assert_eq!(abs_index_for_group(&tabs, 0, 0), Some(0));
+        assert_eq!(abs_index_for_group(&tabs, 0, 1), Some(2));
+        assert_eq!(abs_index_for_group(&tabs, 0, 2), Some(4));
+        assert_eq!(abs_index_for_group(&tabs, 0, 3), None);
+        assert_eq!(abs_index_for_group(&tabs, 1, 0), Some(1));
+        assert_eq!(abs_index_for_group(&tabs, 1, 1), Some(3));
+        assert_eq!(abs_index_for_group(&tabs, 1, 2), None);
+        assert_eq!(group_relative_index(&tabs, 4), 2);
+        assert_eq!(group_relative_index(&tabs, 3), 1);
+        // Round-trip: every absolute index maps back to itself.
+        for (abs, t) in tabs.iter().enumerate() {
+            let gi = group_relative_index(&tabs, abs);
+            assert_eq!(abs_index_for_group(&tabs, t.group, gi), Some(abs));
+        }
+    }
+
+    #[test]
+    fn workspace_tab_index_finds_by_id() {
+        let tabs = vec![tab("a", 0), tab("b", 1)];
+        assert_eq!(workspace_tab_index(&tabs, Some("b")), Some(1));
+        assert_eq!(workspace_tab_index(&tabs, Some("x")), None);
+        assert_eq!(workspace_tab_index(&tabs, None), None);
+    }
+
+    #[test]
+    fn replaceable_table_tab_only_for_unpinned_table() {
+        let mut t = WorkspaceTab::sql("t".into(), 0);
+        t.kind = "table".into();
+        t.pinned = false; // an unpinned table tab is a "preview"
+        assert_eq!(replaceable_table_tab_index(&[t], Some("t")), Some(0));
+        // A SQL tab is never replaceable.
+        assert_eq!(replaceable_table_tab_index(&[tab("s", 0)], Some("s")), None);
+    }
+}
+
 fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&str>) {
-    let items: Vec<TabItem> = tabs
+    let left: Vec<&WorkspaceTab> = tabs.iter().filter(|tab| tab.group == 0).collect();
+    let items: Vec<TabItem> = left
         .iter()
         .map(|tab| TabItem {
             kind: tab.kind.clone().into(),
@@ -536,10 +678,25 @@ fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&
         .collect();
     w.set_tabs(ModelRc::from(Rc::new(VecModel::from(items))));
     w.set_active_tab(
-        workspace_tab_index(tabs, active_id)
+        active_id
+            .and_then(|id| left.iter().position(|tab| tab.id == id))
             .map(|i| i as i32)
             .unwrap_or(-1),
     );
+    let right: Vec<&WorkspaceTab> = tabs.iter().filter(|tab| tab.group == 1).collect();
+    let p1_items: Vec<TabItem> = right
+        .iter()
+        .map(|tab| TabItem {
+            kind: tab.kind.clone().into(),
+            title: tab.title.clone().into(),
+            preview: tab.is_preview(),
+        })
+        .collect();
+    w.set_p1_tabs(ModelRc::from(Rc::new(VecModel::from(p1_items))));
+    w.set_split(!right.is_empty());
+    if right.is_empty() {
+        w.set_p1_active_tab(-1);
+    }
 }
 
 const QUERY_CONSOLE_CAP: usize = 200;
@@ -676,17 +833,35 @@ struct PersistedTab {
     id: String,
     title: String,
     query_text: String,
+    #[serde(default)]
+    group: usize,
+    #[serde(default)]
+    split: bool,
+    #[serde(default)]
+    pane1_query: String,
+    #[serde(default = "default_split_ratio")]
+    split_ratio: f32,
+}
+
+fn default_split_ratio() -> f32 {
+    0.5
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 struct PersistedTabs {
     tabs: Vec<PersistedTab>,
     active: Option<String>,
+    // Active tab in the right group and which group was focused last session.
+    #[serde(default)]
+    active_p1: Option<String>,
+    #[serde(default)]
+    active_group: usize,
 }
 
-/// Persist the SQL tabs (kind == "sql") and the active tab id. Best-effort;
-/// I/O errors are ignored. Skipped in mock mode.
-fn save_query_tabs(tabs: &[WorkspaceTab], active: Option<&str>) {
+/// Persist the SQL tabs (kind == "sql") plus each group's active tab and the
+/// focused group (read from the window). Best-effort; I/O errors are ignored.
+/// Skipped in mock mode.
+fn save_query_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active: Option<&str>) {
     if mock::mock_mode() {
         return;
     }
@@ -700,12 +875,28 @@ fn save_query_tabs(tabs: &[WorkspaceTab], active: Option<&str>) {
             id: t.id.clone(),
             title: t.title.clone(),
             query_text: t.query_text.clone(),
+            group: t.group.min(1),
+            split: t.split,
+            pane1_query: t.pane1_query.clone(),
+            split_ratio: t.split_ratio,
         })
         .collect();
     let active = active
         .filter(|id| sql.iter().any(|t| t.id == *id))
         .map(|s| s.to_string());
-    let payload = PersistedTabs { tabs: sql, active };
+    // Right-group active tab: map the p1 strip index back to a tab id.
+    let active_p1 = tabs
+        .iter()
+        .filter(|t| t.group == 1)
+        .nth(w.get_p1_active_tab().max(0) as usize)
+        .filter(|t| t.kind == "sql")
+        .map(|t| t.id.clone());
+    let payload = PersistedTabs {
+        tabs: sql,
+        active,
+        active_p1,
+        active_group: (w.get_active_pane().max(0) as usize).min(1),
+    };
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
@@ -715,16 +906,17 @@ fn save_query_tabs(tabs: &[WorkspaceTab], active: Option<&str>) {
 }
 
 /// Load persisted SQL tabs into fresh `WorkspaceTab`s (empty results/browse).
-/// Returns the tabs and the active tab id (if it still exists).
-fn load_query_tabs() -> (Vec<WorkspaceTab>, Option<String>) {
+/// Returns the tabs, each group's active tab id (if it still exists), and the
+/// focused group.
+fn load_query_tabs() -> (Vec<WorkspaceTab>, Option<String>, Option<String>, usize) {
     let Ok(path) = rdb_connstore::ConnStore::query_tabs_path() else {
-        return (Vec::new(), None);
+        return (Vec::new(), None, None, 0);
     };
     let Some(payload): Option<PersistedTabs> = std::fs::read_to_string(path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
     else {
-        return (Vec::new(), None);
+        return (Vec::new(), None, None, 0);
     };
     let tabs: Vec<WorkspaceTab> = payload
         .tabs
@@ -733,11 +925,17 @@ fn load_query_tabs() -> (Vec<WorkspaceTab>, Option<String>) {
             let mut t = WorkspaceTab::sql(p.id, 0);
             t.title = p.title;
             t.query_text = p.query_text;
+            t.group = p.group.min(1);
+            t.split = p.split;
+            t.pane1_query = p.pane1_query;
+            t.split_ratio = p.split_ratio.clamp(0.2, 0.8);
             t
         })
         .collect();
-    let active = payload.active.filter(|id| tabs.iter().any(|t| t.id == *id));
-    (tabs, active)
+    let exists = |id: &String| tabs.iter().any(|t| t.id == *id);
+    let active = payload.active.filter(|id| exists(id));
+    let active_p1 = payload.active_p1.filter(|id| exists(id));
+    (tabs, active, active_p1, payload.active_group.min(1))
 }
 
 fn page_bounds(page: u64, limit: u64, total: Option<u64>, shown: u64) -> (u64, u64, bool, bool) {
@@ -1023,7 +1221,7 @@ enum StreamMsg {
 }
 
 /// Push a flat `GridModel` into the window's grid columns/cells properties.
-fn push_grid(w: &MainWindow, g: &model::GridModel) {
+fn push_grid(w: &MainWindow, pane: usize, g: &model::GridModel) {
     let cols: Vec<GridColumn> = g
         .columns
         .iter()
@@ -1042,14 +1240,14 @@ fn push_grid(w: &MainWindow, g: &model::GridModel) {
             });
         }
     }
-    w.set_grid_col_count(cols.len() as i32);
-    w.set_grid_columns(ModelRc::from(Rc::new(VecModel::from(cols))));
-    w.set_grid_cells(ModelRc::from(Rc::new(VecModel::from(flat))));
+    set_p_col_count(w, pane, cols.len() as i32);
+    set_p_columns(w, pane, ModelRc::from(Rc::new(VecModel::from(cols))));
+    set_p_cells(w, pane, ModelRc::from(Rc::new(VecModel::from(flat))));
 }
 
 /// Update only the row cells (not columns/widths), so the per-column filter
 /// inputs keep focus while the user types. Columns are assumed unchanged.
-fn set_grid_cells_only(w: &MainWindow, g: &model::GridModel) {
+fn set_grid_cells_only(w: &MainWindow, pane: usize, g: &model::GridModel) {
     let mut flat: Vec<GridCell> = Vec::new();
     for row in &g.rows {
         for cell in row {
@@ -1060,14 +1258,23 @@ fn set_grid_cells_only(w: &MainWindow, g: &model::GridModel) {
             });
         }
     }
-    w.set_grid_cells(ModelRc::from(Rc::new(VecModel::from(flat))));
-    w.set_result_status(SharedString::from(format!("{} rows", g.rows.len())));
+    set_p_cells(w, pane, ModelRc::from(Rc::new(VecModel::from(flat))));
+    set_p_result_status(
+        w,
+        pane,
+        SharedString::from(format!("{} rows", g.rows.len())),
+    );
 }
 
 /// Push `g` with the buffer's pending edits overlaid: changed cells show the
 /// new text (state 1), delete-marked rows state 2, insert rows appended as
 /// state-3 rows at the bottom.
-fn paint_grid_with_edits(w: &MainWindow, g: &model::GridModel, buf: &model::EditBuffer) {
+fn paint_grid_with_edits(
+    w: &MainWindow,
+    pane: usize,
+    g: &model::GridModel,
+    buf: &model::EditBuffer,
+) {
     let ncols = g.columns.len();
     let mut flat: Vec<GridCell> = Vec::with_capacity((g.rows.len() + buf.inserts.len()) * ncols);
     for (r, row) in g.rows.iter().enumerate() {
@@ -1097,7 +1304,7 @@ fn paint_grid_with_edits(w: &MainWindow, g: &model::GridModel, buf: &model::Edit
             });
         }
     }
-    w.set_grid_cells(ModelRc::from(Rc::new(VecModel::from(flat))));
+    set_p_cells(w, pane, ModelRc::from(Rc::new(VecModel::from(flat))));
 }
 
 /// The grid a view displays, if it has one (for edit-buffer bookkeeping).
@@ -1122,10 +1329,258 @@ fn guard_pending_edits(w: &MainWindow, edit_buf: &std::sync::Mutex<model::EditBu
 }
 
 /// Clear the tabular grid properties (used by non-tabular result kinds).
-fn clear_grid(w: &MainWindow) {
-    w.set_grid_col_count(0);
-    w.set_grid_columns(ModelRc::from(Rc::new(VecModel::<GridColumn>::default())));
-    w.set_grid_cells(ModelRc::from(Rc::new(VecModel::<GridCell>::default())));
+fn clear_grid(w: &MainWindow, pane: usize) {
+    set_p_col_count(w, pane, 0);
+    set_p_columns(
+        w,
+        pane,
+        ModelRc::from(Rc::new(VecModel::<GridColumn>::default())),
+    );
+    set_p_cells(
+        w,
+        pane,
+        ModelRc::from(Rc::new(VecModel::<GridCell>::default())),
+    );
+}
+
+// ----- per-pane result setters: pane 0 writes the base properties, pane 1 the
+// p1-* mirror. Workspace groups render independently, including table chrome.
+fn set_p_cells(w: &MainWindow, pane: usize, m: ModelRc<GridCell>) {
+    if pane == 0 {
+        w.set_grid_cells(m);
+    } else {
+        w.set_p1_cells(m);
+    }
+}
+fn set_p_columns(w: &MainWindow, pane: usize, m: ModelRc<GridColumn>) {
+    if pane == 0 {
+        w.set_grid_columns(m);
+    } else {
+        w.set_p1_columns(m);
+    }
+}
+fn set_p_col_count(w: &MainWindow, pane: usize, n: i32) {
+    if pane == 0 {
+        w.set_grid_col_count(n);
+    } else {
+        w.set_p1_col_count(n);
+    }
+}
+fn set_p_col_widths(w: &MainWindow, pane: usize, m: ModelRc<f32>) {
+    if pane == 0 {
+        w.set_grid_col_widths(m);
+    } else {
+        w.set_p1_col_widths(m);
+    }
+}
+fn set_p_result_kind(w: &MainWindow, pane: usize, k: i32) {
+    if pane == 0 {
+        w.set_result_kind(k);
+    } else {
+        w.set_p1_result_kind(k);
+    }
+}
+fn set_p_result_status(w: &MainWindow, pane: usize, s: SharedString) {
+    if pane == 0 {
+        w.set_result_status(s);
+    } else {
+        w.set_p1_result_status(s);
+    }
+}
+fn set_p_status_error(w: &MainWindow, pane: usize, b: bool) {
+    if pane == 0 {
+        w.set_status_error(b);
+    } else {
+        w.set_p1_status_error(b);
+    }
+}
+fn set_p_active_table(w: &MainWindow, pane: usize, table: SharedString) {
+    if pane == 0 {
+        w.set_active_table(table);
+    } else {
+        w.set_p1_active_table(table);
+    }
+}
+fn set_p_total_rows(w: &MainWindow, pane: usize, total: i32) {
+    if pane == 0 {
+        w.set_total_rows(total);
+    } else {
+        w.set_p1_total_rows(total);
+    }
+}
+fn set_p_page_bounds(w: &MainWindow, pane: usize, start: i32, end: i32, prev: bool, next: bool) {
+    if pane == 0 {
+        w.set_page_start(start);
+        w.set_page_end(end);
+        w.set_can_prev(prev);
+        w.set_can_next(next);
+    } else {
+        w.set_p1_page_start(start);
+        w.set_p1_page_end(end);
+        w.set_p1_can_prev(prev);
+        w.set_p1_can_next(next);
+    }
+}
+fn set_p_read_only(w: &MainWindow, pane: usize, read_only: bool) {
+    if pane == 0 {
+        w.set_grid_read_only(read_only);
+    } else {
+        w.set_p1_grid_read_only(read_only);
+    }
+}
+fn set_p_index_rows(w: &MainWindow, pane: usize, rows: ModelRc<IndexRow>) {
+    if pane == 0 {
+        w.set_index_rows(rows);
+    } else {
+        w.set_p1_index_rows(rows);
+    }
+}
+fn set_p_results_meta(w: &MainWindow, pane: usize, s: SharedString) {
+    if pane == 0 {
+        w.set_results_meta(s);
+    } else {
+        w.set_p1_results_meta(s);
+    }
+}
+fn set_p_chart_bars(w: &MainWindow, pane: usize, m: ModelRc<ChartBar>) {
+    if pane == 0 {
+        w.set_chart_bars(m);
+    } else {
+        w.set_p1_chart_bars(m);
+    }
+}
+fn set_p_grid_sort(w: &MainWindow, pane: usize, col: i32, asc: bool) {
+    if pane == 0 {
+        w.set_grid_sort_col(col);
+        w.set_grid_sort_asc(asc);
+    } else {
+        w.set_p1_grid_sort_col(col);
+        w.set_p1_grid_sort_asc(asc);
+    }
+}
+fn set_p_grid_col_filters(w: &MainWindow, pane: usize, m: ModelRc<SharedString>) {
+    if pane == 0 {
+        w.set_grid_col_filters(m);
+    } else {
+        w.set_p1_grid_col_filters(m);
+    }
+}
+fn set_p_editing(w: &MainWindow, pane: usize, row: i32, col: i32) {
+    if pane == 0 {
+        w.set_editing_row(row);
+        w.set_editing_col(col);
+    } else {
+        w.set_p1_editing_row(row);
+        w.set_p1_editing_col(col);
+    }
+}
+fn set_p_doc_tree(w: &MainWindow, pane: usize, m: ModelRc<DocRow>) {
+    if pane == 0 {
+        w.set_doc_tree(m);
+    } else {
+        w.set_p1_doc_tree(m);
+    }
+}
+fn set_p_query_running(w: &MainWindow, pane: usize, b: bool) {
+    if pane == 0 {
+        w.set_query_running(b);
+    } else {
+        w.set_p1_query_running(b);
+    }
+}
+fn set_p_streaming(w: &MainWindow, pane: usize, b: bool) {
+    if pane == 0 {
+        w.set_streaming(b);
+    } else {
+        w.set_p1_streaming(b);
+    }
+}
+fn set_p_completion_items(w: &MainWindow, pane: usize, m: ModelRc<PaletteItem>) {
+    if pane == 0 {
+        w.set_completion_items(m);
+    } else {
+        w.set_p1_completion_items(m);
+    }
+}
+fn set_p_completion_visible(w: &MainWindow, pane: usize, b: bool) {
+    if pane == 0 {
+        w.set_completion_visible(b);
+    } else {
+        w.set_p1_completion_visible(b);
+    }
+}
+fn get_p_completion_visible(w: &MainWindow, pane: usize) -> bool {
+    if pane == 0 {
+        w.get_completion_visible()
+    } else {
+        w.get_p1_completion_visible()
+    }
+}
+fn set_p_completion_selected(w: &MainWindow, pane: usize, i: i32) {
+    if pane == 0 {
+        w.set_completion_selected(i);
+    } else {
+        w.set_p1_completion_selected(i);
+    }
+}
+fn get_p_completion_selected(w: &MainWindow, pane: usize) -> i32 {
+    if pane == 0 {
+        w.get_completion_selected()
+    } else {
+        w.get_p1_completion_selected()
+    }
+}
+fn p_completion_count(w: &MainWindow, pane: usize) -> i32 {
+    if pane == 0 {
+        w.get_completion_items().row_count() as i32
+    } else {
+        w.get_p1_completion_items().row_count() as i32
+    }
+}
+fn set_p_find_open(w: &MainWindow, pane: usize, b: bool) {
+    if pane == 0 {
+        w.set_find_open(b);
+    } else {
+        w.set_p1_find_open(b);
+    }
+}
+fn get_p_find_open(w: &MainWindow, pane: usize) -> bool {
+    if pane == 0 {
+        w.get_find_open()
+    } else {
+        w.get_p1_find_open()
+    }
+}
+fn set_p_find_text(w: &MainWindow, pane: usize, s: SharedString) {
+    if pane == 0 {
+        w.set_find_text(s);
+    } else {
+        w.set_p1_find_text(s);
+    }
+}
+fn get_p_find_text(w: &MainWindow, pane: usize) -> String {
+    if pane == 0 {
+        w.get_find_text().to_string()
+    } else {
+        w.get_p1_find_text().to_string()
+    }
+}
+fn set_p_find_status(w: &MainWindow, pane: usize, s: SharedString) {
+    if pane == 0 {
+        w.set_find_status(s);
+    } else {
+        w.set_p1_find_status(s);
+    }
+}
+fn get_p_cursor(w: &MainWindow, pane: usize) -> (usize, usize) {
+    if pane == 0 {
+        (w.get_cursor_line() as usize, w.get_cursor_col() as usize)
+    } else {
+        (
+            w.get_p1_cursor_line() as usize,
+            w.get_p1_cursor_col() as usize,
+        )
+    }
 }
 
 /// Return a copy of `g` keeping only rows where some cell matches `needle`
@@ -1440,13 +1895,18 @@ thread_local! {
     /// Full JSON-tree nodes + collapsed paths for the currently displayed Mongo
     /// document result. The Slint event loop is single-threaded, so a
     /// thread_local suffices; no cross-tab persistence is needed.
-    static DOC_TREE: std::cell::RefCell<(Vec<model::DocNode>, HashSet<String>)> =
-        std::cell::RefCell::new((Vec::new(), HashSet::new()));
+    static DOC_TREES: std::cell::RefCell<[(Vec<model::DocNode>, HashSet<String>); 2]> =
+        std::cell::RefCell::new(Default::default());
 }
 
 /// Compute the visible JSON-tree rows for the current collapse state and push
 /// them to the window.
-fn push_doc_tree(w: &MainWindow, full: &[model::DocNode], collapsed: &HashSet<String>) {
+fn push_doc_tree(
+    w: &MainWindow,
+    pane: usize,
+    full: &[model::DocNode],
+    collapsed: &HashSet<String>,
+) {
     let rows: Vec<DocRow> = model::visible_doc_rows(full, collapsed)
         .into_iter()
         .map(|(n, expanded)| DocRow {
@@ -1458,36 +1918,41 @@ fn push_doc_tree(w: &MainWindow, full: &[model::DocNode], collapsed: &HashSet<St
             path: SharedString::from(n.path.clone()),
         })
         .collect();
-    w.set_doc_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
+    set_p_doc_tree(w, pane, ModelRc::from(Rc::new(VecModel::from(rows))));
 }
 
 /// Push a `ResultView` into the window, selecting the per-kind result region
 /// via `result-kind` (0 Table, 1 Documents, 3 Affected).
-fn apply_result(w: &MainWindow, view: model::ResultView) {
+fn apply_result(w: &MainWindow, pane: usize, view: model::ResultView) {
     match view {
         model::ResultView::Table(g) => {
-            w.set_result_kind(0);
+            set_p_result_kind(w, pane, 0);
             w.set_doc_json(SharedString::default());
-            push_grid(w, &g);
-            w.set_result_status(SharedString::from(format!("{} rows", g.rows.len())));
+            push_grid(w, pane, &g);
+            set_p_result_status(
+                w,
+                pane,
+                SharedString::from(format!("{} rows", g.rows.len())),
+            );
         }
         model::ResultView::Documents(d) => {
-            w.set_result_kind(1);
+            set_p_result_kind(w, pane, 1);
             w.set_doc_json(SharedString::from(d.json));
-            push_grid(w, &d.grid);
-            w.set_result_status(SharedString::from(format!(
-                "{} documents",
-                d.grid.rows.len()
-            )));
+            push_grid(w, pane, &d.grid);
+            set_p_result_status(
+                w,
+                pane,
+                SharedString::from(format!("{} documents", d.grid.rows.len())),
+            );
             let collapsed = model::default_doc_collapsed(&d.tree);
-            push_doc_tree(w, &d.tree, &collapsed);
-            DOC_TREE.with(|s| *s.borrow_mut() = (d.tree, collapsed));
+            push_doc_tree(w, pane, &d.tree, &collapsed);
+            DOC_TREES.with(|s| s.borrow_mut()[pane] = (d.tree, collapsed));
         }
         model::ResultView::Affected(status) => {
-            w.set_result_kind(3);
+            set_p_result_kind(w, pane, 3);
             w.set_doc_json(SharedString::default());
-            clear_grid(w);
-            w.set_result_status(SharedString::from(status));
+            clear_grid(w, pane);
+            set_p_result_status(w, pane, SharedString::from(status));
         }
     }
 }
@@ -1499,6 +1964,7 @@ fn apply_result(w: &MainWindow, view: model::ResultView) {
 #[allow(clippy::too_many_arguments)]
 fn present_view(
     w: &MainWindow,
+    pane: usize,
     v: model::ResultView,
     meta: &str,
     latency: &str,
@@ -1527,12 +1993,15 @@ fn present_view(
     *col_order.lock().unwrap() = (0..ncols).collect();
     *sort_state.lock().unwrap() = (-1, true);
     *col_filters.lock().unwrap() = vec![String::new(); ncols];
-    w.set_grid_sort_col(-1);
-    w.set_grid_sort_asc(true);
-    w.set_grid_col_filters(ModelRc::from(Rc::new(VecModel::from(vec![
+    set_p_grid_sort(w, pane, -1, true);
+    set_p_grid_col_filters(
+        w,
+        pane,
+        ModelRc::from(Rc::new(VecModel::from(vec![
             SharedString::default();
             ncols
-        ]))));
+        ]))),
+    );
     let colnames: Vec<SharedString> = match &v {
         model::ResultView::Table(g) => g
             .columns
@@ -1569,12 +2038,13 @@ fn present_view(
         b.table = st.table.clone();
         b.pk_cols = st.pk_cols.clone();
     }
-    w.set_pending_count(0);
-    w.set_editing_row(-1);
-    w.set_editing_col(-1);
-    w.set_status_error(false);
+    if pane == 0 {
+        w.set_pending_count(0);
+    }
+    set_p_editing(w, pane, -1, -1);
+    set_p_status_error(w, pane, false);
     w.set_status_latency(SharedString::from(latency));
-    w.set_results_meta(SharedString::from(meta));
+    set_p_results_meta(w, pane, SharedString::from(meta));
     let widths: Vec<f32> = match &v {
         model::ResultView::Table(g) => g
             .columns
@@ -1583,7 +2053,7 @@ fn present_view(
             .collect(),
         _ => vec![140.0; ncols],
     };
-    w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(widths))));
+    set_p_col_widths(w, pane, ModelRc::from(Rc::new(VecModel::from(widths))));
     let bars: Vec<ChartBar> = match &v {
         model::ResultView::Table(g) => model::chart_data(g)
             .into_iter()
@@ -1595,26 +2065,29 @@ fn present_view(
             .collect(),
         _ => Vec::new(),
     };
-    w.set_chart_bars(ModelRc::from(Rc::new(VecModel::from(bars))));
-    apply_result(w, v);
+    set_p_chart_bars(w, pane, ModelRc::from(Rc::new(VecModel::from(bars))));
+    apply_result(w, pane, v);
     let st = browse.lock().unwrap().clone();
     if st.table.is_some() {
         let (start, end, prev, next) = page_bounds(st.page, st.limit, st.total, shown);
-        w.set_page_start(start as i32);
-        w.set_page_end(end as i32);
-        w.set_total_rows(st.total.map(|t| t as i32).unwrap_or(-1));
-        w.set_can_prev(prev);
-        w.set_can_next(next);
+        set_p_page_bounds(w, pane, start as i32, end as i32, prev, next);
+        set_p_total_rows(w, pane, st.total.map(|t| t as i32).unwrap_or(-1));
     }
 }
 
 /// Set the result-tab strip labels ("Result 1", …) and active index.
-fn set_result_tabs(w: &MainWindow, count: usize, active: usize) {
+fn set_result_tabs(w: &MainWindow, pane: usize, count: usize, active: usize) {
     let labels: Vec<SharedString> = (1..=count)
         .map(|n| SharedString::from(format!("Result {n}")))
         .collect();
-    w.set_result_tabs(ModelRc::from(Rc::new(VecModel::from(labels))));
-    w.set_active_result(active as i32);
+    let labels = ModelRc::from(Rc::new(VecModel::from(labels)));
+    if pane == 0 {
+        w.set_result_tabs(labels);
+        w.set_active_result(active as i32);
+    } else {
+        w.set_p1_result_tabs(labels);
+        w.set_p1_active_result(active as i32);
+    }
 }
 
 #[cfg(test)]
@@ -1818,49 +2291,38 @@ fn main() -> Result<(), slint::PlatformError> {
     // Sidebar tree filter text. Arc<Mutex> so lazy-load tasks can read it.
     let sidebar_filter: Arc<std::sync::Mutex<String>> =
         Arc::new(std::sync::Mutex::new(String::new()));
+    // Up to two independent editor+result panes per SQL tab (dual-pane split).
+    // Only pane 0 is wired for now; the alias bindings below bind the existing
+    // single-pane code to pane 0 so behavior is unchanged.
+    let panes: Rc<[GroupRuntime; 2]> = Rc::new([GroupRuntime::new(), GroupRuntime::new()]);
     // Browse-mode pagination state (open container + page window + pk).
-    let browse: Arc<std::sync::Mutex<BrowseState>> = Arc::new(std::sync::Mutex::new(BrowseState {
-        limit: 300,
-        ..Default::default()
-    }));
-    // Streaming ("No limit") state, UI-thread only. `stream_cancel` is the flag
-    // the Cancel button (and a new run) flips to stop the producer; `stream_timer`
-    // is the UI-thread drain timer that appends batches to the grid.
-    let stream_cancel: Rc<std::cell::RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>> =
-        Rc::new(std::cell::RefCell::new(None));
-    let stream_timer: Rc<std::cell::RefCell<Option<slint::Timer>>> =
-        Rc::new(std::cell::RefCell::new(None));
+    let browse = panes[0].browse.clone();
     // Buffered, uncommitted grid edits (⌘S commits, Esc/Discard drops).
-    let edit_buf: Arc<std::sync::Mutex<model::EditBuffer>> =
-        Arc::new(std::sync::Mutex::new(model::EditBuffer::default()));
+    let edit_buf = panes[0].edit_buf.clone();
     // The grid currently on screen (post client-side filter): edit-buffer row
     // indices refer to THIS grid, and its cells carry the pre-edit pk values.
-    let displayed_grid: Arc<std::sync::Mutex<Option<model::GridModel>>> =
-        Arc::new(std::sync::Mutex::new(None));
+    let displayed_grid = panes[0].displayed_grid.clone();
     // Column indices (into the last result) hidden via the Columns popup.
-    let hidden_cols: Arc<std::sync::Mutex<HashSet<usize>>> =
-        Arc::new(std::sync::Mutex::new(HashSet::new()));
+    let hidden_cols = panes[0].hidden_cols.clone();
     // Client-side sort: ORIGINAL column index (-1 = none) + ascending flag.
-    let sort_state: Arc<std::sync::Mutex<(i32, bool)>> =
-        Arc::new(std::sync::Mutex::new((-1, true)));
+    let sort_state = panes[0].sort_state.clone();
     // Display order of columns as ORIGINAL indices (drag-to-reorder). Reset to
     // 0..ncols on every fresh result.
-    let col_order: Arc<std::sync::Mutex<Vec<usize>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let col_order = panes[0].col_order.clone();
     // Per-column filter boxes, raw text indexed by ORIGINAL column. Empty =
     // no filter. Reset to blanks on every fresh result.
-    let col_filters: Arc<std::sync::Mutex<Vec<String>>> =
-        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let col_filters = panes[0].col_filters.clone();
     // Result tabs for the SQL editor: cached results + the active index. ⌘\
     // sets `result_new_tab` so the next run appends instead of replacing.
-    let results: Arc<std::sync::Mutex<Vec<StoredResult>>> =
-        Arc::new(std::sync::Mutex::new(Vec::new()));
-    let active_result: Arc<std::sync::Mutex<usize>> = Arc::new(std::sync::Mutex::new(0));
-    let result_new_tab = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let results = panes[0].results.clone();
+    let active_result = panes[0].active_result.clone();
     // One Rust source of truth for document identity and state. The UI index is
     // derived from `active_tab_id`; it is -1 while this Option is None.
     let workspace_tabs: Arc<std::sync::Mutex<Vec<WorkspaceTab>>> =
         Arc::new(std::sync::Mutex::new(Vec::new()));
     let active_tab_id: Arc<std::sync::Mutex<Option<String>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let active_group1_tab_id: Arc<std::sync::Mutex<Option<String>>> =
         Arc::new(std::sync::Mutex::new(None));
     let current_connection_id: Arc<std::sync::Mutex<Option<String>>> =
         Arc::new(std::sync::Mutex::new(None));
@@ -1909,20 +2371,18 @@ fn main() -> Result<(), slint::PlatformError> {
     window.set_schema_tree(ModelRc::from(Rc::new(VecModel::<TreeNode>::default())));
 
     // ----- SQL editor: Rust-owned buffer + lexer feeding the span model -----
-    let ed_state: Rc<RefCell<editor::EditorState>> =
-        Rc::new(RefCell::new(editor::EditorState::from_text("")));
-    // Statement head lines the user has folded closed. Kept by line index and
-    // re-validated against the current statement spans on every render, so an
-    // edit that shifts lines can only unfold — never hide the wrong lines.
-    let folded_heads: Rc<RefCell<HashSet<usize>>> = Rc::new(RefCell::new(HashSet::new()));
+    let ed_state = panes[0].ed_state.clone();
+    // Statement head lines the user has folded closed live per-pane in
+    // `panes[*].folded_heads`; sync_editor + the fold toggle read them by pane.
     let sync_editor = {
         let weak = window.as_weak();
-        let ed_state = ed_state.clone();
-        let folded_heads = folded_heads.clone();
-        move || {
+        let panes = panes.clone();
+        move |pane: usize| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            let ed_state = panes[pane].ed_state.clone();
+            let folded_heads = panes[pane].folded_heads.clone();
             let ed = ed_state.borrow();
             let sel = ed.selection();
             let lines: Vec<ModelRc<Span>> = ed
@@ -1950,7 +2410,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     ModelRc::from(Rc::new(VecModel::from(spans)))
                 })
                 .collect();
-            w.set_editor_lines(ModelRc::from(Rc::new(VecModel::from(lines))));
+            let lines = ModelRc::from(Rc::new(VecModel::from(lines)));
             // Fold arrows: 1 = open head, 2 = closed head, 0 = plain line.
             // `hidden` blanks out the body lines of a closed statement.
             let n = ed.lines.len();
@@ -1968,29 +2428,45 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 }
             }
-            w.set_editor_line_hidden(ModelRc::from(Rc::new(VecModel::from(hidden))));
-            w.set_editor_fold_state(ModelRc::from(Rc::new(VecModel::from(fold_state))));
-            w.set_cursor_line(ed.line as i32);
-            w.set_cursor_col(ed.col as i32);
-            w.set_query_text(SharedString::from(ed.text()));
+            let hidden = ModelRc::from(Rc::new(VecModel::from(hidden)));
+            let fold_state = ModelRc::from(Rc::new(VecModel::from(fold_state)));
+            if pane == 0 {
+                w.set_editor_lines(lines);
+                w.set_editor_line_hidden(hidden);
+                w.set_editor_fold_state(fold_state);
+                w.set_cursor_line(ed.line as i32);
+                w.set_cursor_col(ed.col as i32);
+                // query-text mirrors the focused editor for tab persistence; the
+                // right pane's text lives in panes[1].ed_state (persisted via
+                // p1-query in a later step).
+                w.set_query_text(SharedString::from(ed.text()));
+            } else {
+                w.set_p1_editor_lines(lines);
+                w.set_p1_editor_line_hidden(hidden);
+                w.set_p1_editor_fold_state(fold_state);
+                w.set_p1_cursor_line(ed.line as i32);
+                w.set_p1_cursor_col(ed.col as i32);
+            }
         }
     };
-    let load_editor_text: Rc<dyn Fn(&str)> = {
-        let ed_state = ed_state.clone();
+    #[allow(clippy::type_complexity)]
+    let load_editor_text: Rc<dyn Fn(usize, &str)> = {
+        let panes = panes.clone();
         let sync_editor = sync_editor.clone();
-        Rc::new(move |text: &str| {
-            *ed_state.borrow_mut() = editor::EditorState::from_text(text);
-            sync_editor();
+        Rc::new(move |pane: usize, text: &str| {
+            *panes[pane].ed_state.borrow_mut() = editor::EditorState::from_text(text);
+            sync_editor(pane);
         })
     };
-    load_editor_text("");
+    load_editor_text(0, "");
 
     // ----- toggle a statement fold from the gutter arrow -----
     {
-        let ed_state = ed_state.clone();
-        let folded_heads = folded_heads.clone();
+        let panes = panes.clone();
         let sync_editor = sync_editor.clone();
-        window.on_toggle_fold(move |line| {
+        let fold: Rc<dyn Fn(usize, i32)> = Rc::new(move |pane: usize, line: i32| {
+            let ed_state = panes[pane].ed_state.clone();
+            let folded_heads = panes[pane].folded_heads.clone();
             let head = line.max(0) as usize;
             let now_closed = {
                 let mut f = folded_heads.borrow_mut();
@@ -2014,29 +2490,35 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 }
             }
-            sync_editor();
+            sync_editor(pane);
+        });
+        window.on_toggle_fold({
+            let fold = fold.clone();
+            move |line| fold(0, line)
+        });
+        window.on_p1_toggle_fold({
+            let fold = fold.clone();
+            move |line| fold(1, line)
         });
     }
 
     // ----- SQL autocomplete: recompute popup, accept a choice -----
     // completion_ctx = (word char length to replace, candidate labels).
-    let completion_ctx: Rc<RefCell<(usize, Vec<String>)>> = Rc::new(RefCell::new((0, Vec::new())));
-    let refresh_completion: Rc<dyn Fn()> = {
+    let refresh_completion: Rc<dyn Fn(usize)> = {
         let weak = window.as_weak();
-        let ed_state = ed_state.clone();
+        let panes = panes.clone();
         let completion_nodes = completion_nodes.clone();
-        let completion_ctx = completion_ctx.clone();
-        Rc::new(move || {
+        Rc::new(move |pane| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let before = ed_state.borrow().before_cursor_doc();
+            let before = panes[pane].ed_state.borrow().before_cursor_doc();
             let schema = w.get_schema_name().to_string();
             let (word_len, cands) =
                 completion::suggest(&before, &completion_nodes.lock().unwrap(), &schema);
             if cands.is_empty() {
-                w.set_completion_visible(false);
-                *completion_ctx.borrow_mut() = (0, Vec::new());
+                set_p_completion_visible(&w, pane, false);
+                *panes[pane].completion_ctx.borrow_mut() = (0, Vec::new());
                 return;
             }
             let items: Vec<PaletteItem> = cands
@@ -2048,410 +2530,492 @@ fn main() -> Result<(), slint::PlatformError> {
                     local: false,
                 })
                 .collect();
-            *completion_ctx.borrow_mut() =
+            *panes[pane].completion_ctx.borrow_mut() =
                 (word_len, cands.iter().map(|c| c.label.clone()).collect());
-            w.set_completion_items(ModelRc::from(Rc::new(VecModel::from(items))));
-            w.set_completion_selected(0);
-            w.set_completion_visible(true);
+            set_p_completion_items(&w, pane, ModelRc::from(Rc::new(VecModel::from(items))));
+            set_p_completion_selected(&w, pane, 0);
+            set_p_completion_visible(&w, pane, true);
         })
     };
-    let accept_completion: Rc<dyn Fn(i32)> = {
+    let accept_completion: Rc<dyn Fn(usize, i32)> = {
         let weak = window.as_weak();
-        let ed_state = ed_state.clone();
+        let panes = panes.clone();
         let sync_editor = sync_editor.clone();
-        let completion_ctx = completion_ctx.clone();
-        Rc::new(move |idx: i32| {
+        Rc::new(move |pane, idx| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let (word_len, labels) = completion_ctx.borrow().clone();
+            let (word_len, labels) = panes[pane].completion_ctx.borrow().clone();
             let Some(label) = labels.get(idx.max(0) as usize).cloned() else {
                 return;
             };
             {
-                let mut ed = ed_state.borrow_mut();
+                let mut ed = panes[pane].ed_state.borrow_mut();
                 for _ in 0..word_len {
                     ed.backspace();
                 }
                 ed.insert(&label);
             }
-            w.set_completion_visible(false);
-            *completion_ctx.borrow_mut() = (0, Vec::new());
-            sync_editor();
+            set_p_completion_visible(&w, pane, false);
+            *panes[pane].completion_ctx.borrow_mut() = (0, Vec::new());
+            sync_editor(pane);
         })
     };
     {
         let accept = accept_completion.clone();
-        window.on_completion_choose(move |i| accept(i));
+        window.on_completion_choose(move |i| accept(0, i));
     }
     {
-        let ed_state = ed_state.clone();
+        let accept = accept_completion.clone();
+        window.on_p1_completion_choose(move |i| accept(1, i));
+    }
+    {
+        let panes = panes.clone();
         let sync_editor = sync_editor.clone();
         let weak = window.as_weak();
         let refresh_completion = refresh_completion.clone();
         let accept_completion = accept_completion.clone();
         let cur_engine = cur_engine.clone();
-        window.on_editor_key(move |text, meta, alt, shift| {
-            // While the autocomplete popup is open it owns nav / accept / close.
-            if let Some(w) = weak.upgrade() {
-                if w.get_completion_visible() {
-                    let n = w.get_completion_items().row_count() as i32;
-                    match text.as_str() {
-                        "\u{f700}" if n > 0 => {
-                            w.set_completion_selected((w.get_completion_selected() - 1 + n) % n);
-                            return true;
-                        }
-                        "\u{f701}" if n > 0 => {
-                            w.set_completion_selected((w.get_completion_selected() + 1) % n);
-                            return true;
-                        }
-                        "\t" | "\n" | "\r" => {
-                            accept_completion(w.get_completion_selected());
-                            return true;
-                        }
-                        "\u{1b}" => {
-                            w.set_completion_visible(false);
-                            return true;
-                        }
-                        _ => {}
+        // Shared editor-key handler for both split panes; `pane` selects which
+        // editor buffer and completion popup it drives.
+        #[allow(clippy::type_complexity)]
+        let edit_key: Rc<dyn Fn(usize, SharedString, bool, bool, bool) -> bool> = Rc::new(
+            move |pane: usize, text: SharedString, meta: bool, alt: bool, shift: bool| {
+                let ed_state = panes[pane].ed_state.clone();
+                // Typing in a pane focuses it, so global shortcuts (⌘F/⌘⏎) land
+                // on the pane the caret is really in.
+                if let Some(w) = weak.upgrade() {
+                    if w.get_active_pane() != pane as i32 {
+                        w.set_active_pane(pane as i32);
                     }
                 }
-            }
-            // Cursor motion first: arrows / home / end, with macOS ⌘ (line &
-            // document) and ⌥ (word) semantics. shift extends the selection.
-            if matches!(
-                text.as_str(),
-                "\u{f700}" | "\u{f701}" | "\u{f702}" | "\u{f703}" | "\u{f729}" | "\u{f72b}"
-            ) {
-                {
-                    let mut ed = ed_state.borrow_mut();
-                    ed.set_selecting(shift);
-                    match text.as_str() {
-                        "\u{f702}" => {
-                            if alt {
-                                ed.move_word(-1)
-                            } else if meta {
-                                ed.home()
-                            } else {
-                                ed.move_cursor(0, -1)
+                // While the autocomplete popup is open it owns nav / accept / close.
+                if let Some(w) = weak.upgrade() {
+                    if get_p_completion_visible(&w, pane) {
+                        let n = p_completion_count(&w, pane);
+                        match text.as_str() {
+                            "\u{f700}" if n > 0 => {
+                                set_p_completion_selected(
+                                    &w,
+                                    pane,
+                                    (get_p_completion_selected(&w, pane) - 1 + n) % n,
+                                );
+                                return true;
                             }
-                        }
-                        "\u{f703}" => {
-                            if alt {
-                                ed.move_word(1)
-                            } else if meta {
-                                ed.end()
-                            } else {
-                                ed.move_cursor(0, 1)
+                            "\u{f701}" if n > 0 => {
+                                set_p_completion_selected(
+                                    &w,
+                                    pane,
+                                    (get_p_completion_selected(&w, pane) + 1) % n,
+                                );
+                                return true;
                             }
-                        }
-                        "\u{f700}" => {
-                            if meta {
-                                ed.move_doc_start()
-                            } else {
-                                ed.move_cursor(-1, 0)
+                            "\t" | "\n" | "\r" => {
+                                accept_completion(pane, get_p_completion_selected(&w, pane));
+                                return true;
                             }
-                        }
-                        "\u{f701}" => {
-                            if meta {
-                                ed.move_doc_end()
-                            } else {
-                                ed.move_cursor(1, 0)
+                            "\u{1b}" => {
+                                set_p_completion_visible(&w, pane, false);
+                                return true;
                             }
+                            _ => {}
                         }
-                        "\u{f729}" => ed.home(),
-                        "\u{f72b}" => ed.end(),
-                        _ => {}
                     }
                 }
-                sync_editor();
-                return true;
-            }
-            if meta {
-                // Editor-owned cmd combos; everything else bubbles up to the
-                // window shortcut scope (⌘⏎ run, ⌘S commit, ⌘R refresh, …).
+                // Cursor motion first: arrows / home / end, with macOS ⌘ (line &
+                // document) and ⌥ (word) semantics. shift extends the selection.
+                if matches!(
+                    text.as_str(),
+                    "\u{f700}" | "\u{f701}" | "\u{f702}" | "\u{f703}" | "\u{f729}" | "\u{f72b}"
+                ) {
+                    {
+                        let mut ed = ed_state.borrow_mut();
+                        ed.set_selecting(shift);
+                        match text.as_str() {
+                            "\u{f702}" => {
+                                if alt {
+                                    ed.move_word(-1)
+                                } else if meta {
+                                    ed.home()
+                                } else {
+                                    ed.move_cursor(0, -1)
+                                }
+                            }
+                            "\u{f703}" => {
+                                if alt {
+                                    ed.move_word(1)
+                                } else if meta {
+                                    ed.end()
+                                } else {
+                                    ed.move_cursor(0, 1)
+                                }
+                            }
+                            "\u{f700}" => {
+                                if meta {
+                                    ed.move_doc_start()
+                                } else {
+                                    ed.move_cursor(-1, 0)
+                                }
+                            }
+                            "\u{f701}" => {
+                                if meta {
+                                    ed.move_doc_end()
+                                } else {
+                                    ed.move_cursor(1, 0)
+                                }
+                            }
+                            "\u{f729}" => ed.home(),
+                            "\u{f72b}" => ed.end(),
+                            _ => {}
+                        }
+                    }
+                    sync_editor(pane);
+                    return true;
+                }
+                if meta {
+                    // ⌘⏎ runs the pane the caret is in. The global window shortcut
+                    // always targets pane 0, so intercept it here (outside the ed
+                    // borrow) and dispatch to the firing pane instead.
+                    if text.as_str() == "\r" || text.as_str() == "\n" {
+                        if let Some(w) = weak.upgrade() {
+                            if pane == 0 {
+                                w.invoke_run_query();
+                            } else {
+                                w.invoke_p1_run();
+                            }
+                        }
+                        return true;
+                    }
+                    // Editor-owned cmd combos; everything else bubbles up to the
+                    // window shortcut scope (⌘S commit, ⌘R refresh, …).
+                    let handled = {
+                        let mut ed = ed_state.borrow_mut();
+                        match text.as_str() {
+                            "a" => {
+                                ed.select_all();
+                                true
+                            }
+                            "c" => {
+                                // no selection → copy the statement under the cursor
+                                let t =
+                                    ed.selected_text().unwrap_or_else(|| ed.current_statement());
+                                clip_set(&t);
+                                true
+                            }
+                            "x" => {
+                                if let Some(t) = ed.selected_text() {
+                                    clip_set(&t);
+                                    ed.cut_selection();
+                                }
+                                true
+                            }
+                            "v" => {
+                                if let Some(t) = clip_get() {
+                                    ed.insert(&t.replace("\r\n", "\n"));
+                                }
+                                true
+                            }
+                            "z" if shift => {
+                                ed.redo();
+                                true
+                            }
+                            "z" => {
+                                ed.undo();
+                                true
+                            }
+                            "/" => {
+                                // Comment marker follows the connected engine's query
+                                // language; default to SQL when not yet connected.
+                                let engine = cur_engine
+                                    .borrow()
+                                    .unwrap_or(rdb_connstore::Engine::Postgres);
+                                ed.toggle_comment(crate::query_parse::comment_prefix(engine));
+                                true
+                            }
+                            _ => false,
+                        }
+                    };
+                    if handled {
+                        sync_editor(pane);
+                    }
+                    return handled;
+                }
                 let handled = {
                     let mut ed = ed_state.borrow_mut();
-                    match text.as_str() {
-                        "a" => {
-                            ed.select_all();
-                            true
-                        }
-                        "c" => {
-                            // no selection → copy the statement under the cursor
-                            let t = ed.selected_text().unwrap_or_else(|| ed.current_statement());
-                            clip_set(&t);
-                            true
-                        }
-                        "x" => {
-                            if let Some(t) = ed.selected_text() {
-                                clip_set(&t);
-                                ed.cut_selection();
+                    // movement keys: shift extends the selection, plain drops it
+                    if matches!(
+                        text.as_str(),
+                        "\u{f700}" | "\u{f701}" | "\u{f702}" | "\u{f703}" | "\u{f729}" | "\u{f72b}"
+                    ) {
+                        ed.set_selecting(shift);
+                    }
+                    let mut it = text.chars();
+                    match (it.next(), it.next()) {
+                        (Some(c), None) => match c {
+                            '\u{8}' => {
+                                ed.backspace();
+                                true
                             }
-                            true
-                        }
-                        "v" => {
-                            if let Some(t) = clip_get() {
-                                ed.insert(&t.replace("\r\n", "\n"));
+                            '\u{7f}' => {
+                                ed.delete();
+                                true
                             }
-                            true
-                        }
-                        "z" if shift => {
-                            ed.redo();
-                            true
-                        }
-                        "z" => {
-                            ed.undo();
-                            true
-                        }
-                        "/" => {
-                            // Comment marker follows the connected engine's query
-                            // language; default to SQL when not yet connected.
-                            let engine = cur_engine
-                                .borrow()
-                                .unwrap_or(rdb_connstore::Engine::Postgres);
-                            ed.toggle_comment(crate::query_parse::comment_prefix(engine));
+                            '\n' | '\r' => {
+                                ed.newline();
+                                true
+                            }
+                            '\t' => {
+                                ed.insert("  ");
+                                true
+                            }
+                            // Esc clears the selection; without one it bubbles
+                            // up (modal close).
+                            '\u{1b}' if ed.selection().is_some() => {
+                                ed.set_selecting(false);
+                                true
+                            }
+                            '\u{f700}' => {
+                                ed.move_cursor(-1, 0);
+                                true
+                            }
+                            '\u{f701}' => {
+                                ed.move_cursor(1, 0);
+                                true
+                            }
+                            '\u{f702}' => {
+                                ed.move_cursor(0, -1);
+                                true
+                            }
+                            '\u{f703}' => {
+                                ed.move_cursor(0, 1);
+                                true
+                            }
+                            '\u{f729}' => {
+                                ed.home();
+                                true
+                            }
+                            '\u{f72b}' => {
+                                ed.end();
+                                true
+                            }
+                            c if !c.is_control() => {
+                                ed.insert(&c.to_string());
+                                true
+                            }
+                            _ => false,
+                        },
+                        (Some(_), Some(_)) if !text.starts_with('\u{f700}') => {
+                            ed.insert(&text);
                             true
                         }
                         _ => false,
                     }
                 };
                 if handled {
-                    sync_editor();
+                    sync_editor(pane);
+                    // Typing/deleting shifts this pane's completion context.
+                    refresh_completion(pane);
                 }
-                return handled;
-            }
-            let handled = {
-                let mut ed = ed_state.borrow_mut();
-                // movement keys: shift extends the selection, plain drops it
-                if matches!(
-                    text.as_str(),
-                    "\u{f700}" | "\u{f701}" | "\u{f702}" | "\u{f703}" | "\u{f729}" | "\u{f72b}"
-                ) {
-                    ed.set_selecting(shift);
-                }
-                let mut it = text.chars();
-                match (it.next(), it.next()) {
-                    (Some(c), None) => match c {
-                        '\u{8}' => {
-                            ed.backspace();
-                            true
-                        }
-                        '\u{7f}' => {
-                            ed.delete();
-                            true
-                        }
-                        '\n' | '\r' => {
-                            ed.newline();
-                            true
-                        }
-                        '\t' => {
-                            ed.insert("  ");
-                            true
-                        }
-                        // Esc clears the selection; without one it bubbles
-                        // up (modal close).
-                        '\u{1b}' if ed.selection().is_some() => {
-                            ed.set_selecting(false);
-                            true
-                        }
-                        '\u{f700}' => {
-                            ed.move_cursor(-1, 0);
-                            true
-                        }
-                        '\u{f701}' => {
-                            ed.move_cursor(1, 0);
-                            true
-                        }
-                        '\u{f702}' => {
-                            ed.move_cursor(0, -1);
-                            true
-                        }
-                        '\u{f703}' => {
-                            ed.move_cursor(0, 1);
-                            true
-                        }
-                        '\u{f729}' => {
-                            ed.home();
-                            true
-                        }
-                        '\u{f72b}' => {
-                            ed.end();
-                            true
-                        }
-                        c if !c.is_control() => {
-                            ed.insert(&c.to_string());
-                            true
-                        }
-                        _ => false,
-                    },
-                    (Some(_), Some(_)) if !text.starts_with('\u{f700}') => {
-                        ed.insert(&text);
-                        true
-                    }
-                    _ => false,
-                }
-            };
-            if handled {
-                sync_editor();
-                // Typing/deleting shifts the completion context — recompute.
-                refresh_completion();
-            }
-            handled
+                handled
+            },
+        );
+        window.on_editor_key({
+            let edit_key = edit_key.clone();
+            move |text, meta, alt, shift| edit_key(0, text, meta, alt, shift)
+        });
+        window.on_p1_editor_key({
+            let edit_key = edit_key.clone();
+            move |text, meta, alt, shift| edit_key(1, text, meta, alt, shift)
         });
     }
     {
-        let ed_state = ed_state.clone();
+        let panes = panes.clone();
         let sync_editor = sync_editor.clone();
         let weak = window.as_weak();
-        window.on_editor_press(move |line, col| {
+        let press: Rc<dyn Fn(usize, i32, i32)> = Rc::new(move |pane, line, col| {
             if let Some(w) = weak.upgrade() {
-                w.set_completion_visible(false);
+                // Clicking a pane focuses it: drives the accent + which pane
+                // global shortcuts fall back to.
+                w.set_active_pane(pane as i32);
+                set_p_completion_visible(&w, pane, false);
             }
-            ed_state.borrow_mut().move_to(line, col, false);
-            sync_editor();
+            panes[pane].ed_state.borrow_mut().move_to(line, col, false);
+            sync_editor(pane);
+        });
+        window.on_editor_press({
+            let press = press.clone();
+            move |line, col| press(0, line, col)
+        });
+        window.on_p1_editor_press({
+            let press = press.clone();
+            move |line, col| press(1, line, col)
         });
     }
     {
-        let ed_state = ed_state.clone();
+        let panes = panes.clone();
         let sync_editor = sync_editor.clone();
-        window.on_editor_drag(move |line, col| {
-            ed_state.borrow_mut().move_to(line, col, true);
-            sync_editor();
+        let drag: Rc<dyn Fn(usize, i32, i32)> = Rc::new(move |pane, line, col| {
+            panes[pane].ed_state.borrow_mut().move_to(line, col, true);
+            sync_editor(pane);
+        });
+        window.on_editor_drag({
+            let drag = drag.clone();
+            move |line, col| drag(0, line, col)
+        });
+        window.on_p1_editor_drag({
+            let drag = drag.clone();
+            move |line, col| drag(1, line, col)
         });
     }
     {
-        let ed_state = ed_state.clone();
+        let panes = panes.clone();
         let sync_editor = sync_editor.clone();
-        window.on_editor_select_word(move |line, col| {
-            ed_state.borrow_mut().select_word_at(line, col);
-            sync_editor();
+        let select_word: Rc<dyn Fn(usize, i32, i32)> = Rc::new(move |pane, line, col| {
+            panes[pane].ed_state.borrow_mut().select_word_at(line, col);
+            sync_editor(pane);
+        });
+        window.on_editor_select_word({
+            let select_word = select_word.clone();
+            move |line, col| select_word(0, line, col)
+        });
+        window.on_p1_editor_select_word({
+            let select_word = select_word.clone();
+            move |line, col| select_word(1, line, col)
         });
     }
 
-    // ----- find-in-editor (⌘F) -----
-    let find_hits: Rc<RefCell<Vec<(usize, usize, usize)>>> = Rc::new(RefCell::new(Vec::new()));
-    // Select the find hit at `idx` and refresh the "n / total" readout.
+    // ----- find-in-editor (⌘F), per pane -----
+    // Select the find hit at `idx` in `pane` and refresh the "n / total" readout.
     #[allow(clippy::type_complexity)]
-    let show_find: Rc<dyn Fn(&MainWindow, usize)> = {
-        let ed_state = ed_state.clone();
+    let show_find: Rc<dyn Fn(&MainWindow, usize, usize)> = {
+        let panes = panes.clone();
         let sync_editor = sync_editor.clone();
-        let find_hits = find_hits.clone();
-        Rc::new(move |w: &MainWindow, idx: usize| {
-            let hits = find_hits.borrow();
+        Rc::new(move |w: &MainWindow, pane: usize, idx: usize| {
+            let hits = panes[pane].find_hits.borrow();
             if let Some(&(l, s, e)) = hits.get(idx) {
-                ed_state.borrow_mut().set_selection((l, s), (l, e));
-                sync_editor();
-                w.set_find_status(SharedString::from(format!("{} / {}", idx + 1, hits.len())));
-            } else if w.get_find_text().is_empty() {
-                w.set_find_status(SharedString::default());
+                panes[pane]
+                    .ed_state
+                    .borrow_mut()
+                    .set_selection((l, s), (l, e));
+                sync_editor(pane);
+                set_p_find_status(
+                    w,
+                    pane,
+                    SharedString::from(format!("{} / {}", idx + 1, hits.len())),
+                );
+            } else if get_p_find_text(w, pane).is_empty() {
+                set_p_find_status(w, pane, SharedString::default());
             } else {
-                w.set_find_status(SharedString::from("no matches"));
+                set_p_find_status(w, pane, SharedString::from("no matches"));
             }
         })
     };
     // Recompute matches for `needle`, jump to the first at/after the cursor.
     #[allow(clippy::type_complexity)]
-    let recompute_find: Rc<dyn Fn(&MainWindow, &str)> = {
-        let ed_state = ed_state.clone();
-        let find_hits = find_hits.clone();
+    let recompute_find: Rc<dyn Fn(&MainWindow, usize, &str)> = {
+        let panes = panes.clone();
         let show_find = show_find.clone();
-        Rc::new(move |w: &MainWindow, needle: &str| {
+        Rc::new(move |w: &MainWindow, pane: usize, needle: &str| {
             let (cur, hits) = {
-                let ed = ed_state.borrow();
+                let ed = panes[pane].ed_state.borrow();
                 ((ed.line, ed.col), editor::find_matches(&ed.lines, needle))
             };
             let idx = hits
                 .iter()
                 .position(|&(l, s, _)| (l, s) >= cur)
                 .unwrap_or(0);
-            *find_hits.borrow_mut() = hits;
-            show_find(w, idx);
+            *panes[pane].find_hits.borrow_mut() = hits;
+            show_find(w, pane, idx);
         })
     };
-    {
-        let weak = window.as_weak();
-        let ed_state = ed_state.clone();
+    // ⌘F: open/close the find bar for a pane; seed from the selection.
+    #[allow(clippy::type_complexity)]
+    let toggle_find: Rc<dyn Fn(&MainWindow, usize)> = {
+        let panes = panes.clone();
         let recompute_find = recompute_find.clone();
-        window.on_toggle_find(move || {
-            let Some(w) = weak.upgrade() else { return };
-            let opening = !w.get_find_open();
-            w.set_find_open(opening);
+        Rc::new(move |w: &MainWindow, pane: usize| {
+            let opening = !get_p_find_open(w, pane);
+            set_p_find_open(w, pane, opening);
             if opening {
-                // Seed with the current single-line selection, if any.
-                if let Some(sel) = ed_state.borrow().selected_text() {
+                if let Some(sel) = panes[pane].ed_state.borrow().selected_text() {
                     if !sel.contains('\n') && !sel.is_empty() {
-                        w.set_find_text(SharedString::from(sel));
+                        set_p_find_text(w, pane, SharedString::from(sel));
                     }
                 }
-                let needle = w.get_find_text().to_string();
-                recompute_find(&w, &needle);
+                let needle = get_p_find_text(w, pane);
+                recompute_find(w, pane, &needle);
             }
-        });
-    }
-    {
-        let weak = window.as_weak();
-        let recompute_find = recompute_find.clone();
-        window.on_find_changed(move |text| {
-            if let Some(w) = weak.upgrade() {
-                recompute_find(&w, &text);
-            }
-        });
-    }
-    {
-        let weak = window.as_weak();
-        let find_hits = find_hits.clone();
+        })
+    };
+    // Step to the next/previous hit in a pane.
+    #[allow(clippy::type_complexity)]
+    let find_step: Rc<dyn Fn(&MainWindow, usize, i32)> = {
+        let panes = panes.clone();
         let show_find = show_find.clone();
-        let step = |w: &MainWindow, find_hits: &RefCell<Vec<(usize, usize, usize)>>, dir: i32| {
-            let n = find_hits.borrow().len();
-            if n == 0 {
-                return None;
-            }
-            // Where are we now? The current caret sits at a hit's end.
-            let cur = (w.get_cursor_line() as usize, w.get_cursor_col() as usize);
-            let hits = find_hits.borrow();
-            let here = hits
-                .iter()
-                .position(|&(l, _, e)| (l, e) == cur)
-                .unwrap_or(0);
-            Some(((here as i32 + dir).rem_euclid(n as i32)) as usize)
-        };
-        let show_find2 = show_find.clone();
-        window.on_find_next(move || {
-            if let Some(w) = weak.upgrade() {
-                if let Some(i) = step(&w, &find_hits, 1) {
-                    show_find2(&w, i);
-                }
-            }
-        });
-    }
-    {
-        let weak = window.as_weak();
-        let find_hits = find_hits.clone();
-        let show_find = show_find.clone();
-        window.on_find_prev(move || {
-            let Some(w) = weak.upgrade() else { return };
-            let n = find_hits.borrow().len();
+        Rc::new(move |w: &MainWindow, pane: usize, dir: i32| {
+            let n = panes[pane].find_hits.borrow().len();
             if n == 0 {
                 return;
             }
-            let cur = (w.get_cursor_line() as usize, w.get_cursor_col() as usize);
-            let here = find_hits
+            let cur = get_p_cursor(w, pane);
+            let here = panes[pane]
+                .find_hits
                 .borrow()
                 .iter()
                 .position(|&(l, _, e)| (l, e) == cur)
                 .unwrap_or(0);
-            let i = ((here as i32 - 1).rem_euclid(n as i32)) as usize;
-            show_find(&w, i);
-        });
-    }
-    {
+            let i = ((here as i32 + dir).rem_euclid(n as i32)) as usize;
+            show_find(w, pane, i);
+        })
+    };
+    for pane in [0usize, 1usize] {
         let weak = window.as_weak();
-        window.on_find_close(move || {
+        let toggle_find = toggle_find.clone();
+        let recompute_find = recompute_find.clone();
+        let find_step = find_step.clone();
+        let toggle = move || {
             if let Some(w) = weak.upgrade() {
-                w.set_find_open(false);
+                toggle_find(&w, pane);
             }
-        });
+        };
+        let weak_c = window.as_weak();
+        let changed = move |text: SharedString| {
+            if let Some(w) = weak_c.upgrade() {
+                recompute_find(&w, pane, &text);
+            }
+        };
+        let weak_n = window.as_weak();
+        let fs_n = find_step.clone();
+        let next = move || {
+            if let Some(w) = weak_n.upgrade() {
+                fs_n(&w, pane, 1);
+            }
+        };
+        let weak_p = window.as_weak();
+        let prev = move || {
+            if let Some(w) = weak_p.upgrade() {
+                find_step(&w, pane, -1);
+            }
+        };
+        let weak_x = window.as_weak();
+        let close = move || {
+            if let Some(w) = weak_x.upgrade() {
+                set_p_find_open(&w, pane, false);
+            }
+        };
+        if pane == 0 {
+            window.on_toggle_find(toggle);
+            window.on_find_changed(changed);
+            window.on_find_next(next);
+            window.on_find_prev(prev);
+            window.on_find_close(close);
+        } else {
+            window.on_p1_toggle_find(toggle);
+            window.on_p1_find_changed(changed);
+            window.on_p1_find_next(next);
+            window.on_p1_find_prev(prev);
+            window.on_p1_find_close(close);
+        }
     }
 
     // ----- saved/recent queries (sidebar Queries tab) -----
@@ -2567,7 +3131,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if active_tab_id.lock().unwrap().is_none() || active_tab_kind(&w) != "sql" {
                 w.invoke_new_tab();
             }
-            load_editor_text(&text);
+            load_editor_text(0, &text);
             w.set_fn_mode(false);
             w.set_active_table(SharedString::default()); // editor mode
             w.set_query_label(SharedString::from(if is_saved {
@@ -2654,6 +3218,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     indexes: Vec::new(),
                     loading: false,
                     pinned: true,
+                    group: 0,
+                    split: false,
+                    split_ratio: 0.5,
+                    pane1_query: String::new(),
                 });
                 *active_tab_id.lock().unwrap() = Some(id.clone());
                 set_workspace_tabs(&w, &tabs, Some(&id));
@@ -2799,12 +3367,12 @@ fn main() -> Result<(), slint::PlatformError> {
                     .and_then(|id| tabs.iter().find(|t| t.id == *id))
                     .map(|t| t.query_text.clone())
                     .unwrap_or_default();
-                load_editor_text(&text);
+                load_editor_text(0, &text);
             }
             if !standby {
                 results.lock().unwrap().clear();
                 *displayed_grid.lock().unwrap() = None;
-                clear_grid(&w);
+                clear_grid(&w, 0);
             }
             expanded_tables.lock().unwrap().clear();
             *collapsed_categories.borrow_mut() = default_collapsed_cats();
@@ -3297,7 +3865,7 @@ fn main() -> Result<(), slint::PlatformError> {
             when(
                 Rc::new(|w| !w.get_results_meta().is_empty()),
                 Rc::new(move |w| {
-                    load("SELECT * FROM emiten OFFSET 99999");
+                    load(0, "SELECT * FROM emiten OFFSET 99999");
                     w.invoke_run_query();
                 }),
             );
@@ -3319,7 +3887,7 @@ fn main() -> Result<(), slint::PlatformError> {
             when(
                 Rc::new(|w| !w.get_results_meta().is_empty()),
                 Rc::new(move |w| {
-                    load("SELECT 1;\nSELECT * FROM emiten LIMIT 5;");
+                    load(0, "SELECT 1;\nSELECT * FROM emiten LIMIT 5;");
                     w.invoke_run_query();
                 }),
             );
@@ -3365,47 +3933,83 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             // Persist SQL scratch tabs so they survive a restart. Cheap JSON
             // write; fires on switch/new/close/run, which is when text changes.
-            save_query_tabs(&tabs, Some(&id));
+            save_query_tabs(w, &tabs, Some(&id));
+        })
+    };
+
+    // The second workspace group has its own live editor/result runtime. Save
+    // it before selecting, closing, or moving one of its tabs just like the
+    // left group; otherwise a drag could move an older snapshot.
+    let save_p1_tab: Rc<dyn Fn(&MainWindow)> = {
+        let tabs = workspace_tabs.clone();
+        let active_id = active_group1_tab_id.clone();
+        let panes = panes.clone();
+        Rc::new(move |w| {
+            let Some(id) = active_id.lock().unwrap().clone() else {
+                return;
+            };
+            let mut tabs = tabs.lock().unwrap();
+            let Some(tab) = tabs.iter_mut().find(|tab| tab.id == id) else {
+                return;
+            };
+            tab.query_text = panes[1].ed_state.borrow().text();
+            tab.loading = w.get_p1_query_running();
+            if tab.kind == "sql" {
+                tab.results = panes[1].results.lock().unwrap().clone();
+                tab.active_result = *panes[1].active_result.lock().unwrap();
+            }
+            save_query_tabs(w, &tabs, None);
         })
     };
 
     #[allow(clippy::type_complexity)]
-    let restore_tab: Rc<dyn Fn(&MainWindow, usize)> = {
+    // Restore a tab into a group's runtime (`pane` 0 left / 1 right). `group_index`
+    // is the position within that group's tab strip. Both groups share this path;
+    // per-group runtime state lives in `panes[pane]`. Chrome that is still a shared
+    // MainWindow property (fn-mode/active-table/pagination footer/indexes) is only
+    // painted for the left group until it is mirrored per-group.
+    // Restore the tab at absolute index `abs_index` into ITS group's runtime
+    // (`pane` = tab.group). `group_index` (position within that group's strip) is
+    // derived. Per-group runtime state lives in `panes[pane]`; chrome that is still
+    // a shared MainWindow property is only painted for the left group for now.
+    #[allow(clippy::type_complexity)]
+    let restore_tab_for_pane: Rc<dyn Fn(&MainWindow, usize)> = {
         let tabs = workspace_tabs.clone();
-        let active_id = active_tab_id.clone();
+        let active_tab_id = active_tab_id.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
         let load_editor_text = load_editor_text.clone();
-        let browse = browse.clone();
-        let results = results.clone();
-        let active_result = active_result.clone();
+        let panes = panes.clone();
         let last_view = last_view.clone();
-        let displayed_grid = displayed_grid.clone();
-        let hidden_cols = hidden_cols.clone();
-        let sort_state = sort_state.clone();
-        let col_order = col_order.clone();
-        let col_filters = col_filters.clone();
-        let edit_buf = edit_buf.clone();
-        Rc::new(move |w, index| {
-            let tab = {
+        Rc::new(move |w, abs_index| {
+            let (tab, pane, group_index) = {
                 let tabs = tabs.lock().unwrap();
-                let Some(tab) = tabs.get(index).cloned() else {
+                let Some(tab) = tabs.get(abs_index).cloned() else {
                     return;
                 };
-                tab
+                let pane = tab.group.min(1);
+                let group_index = group_relative_index(&tabs, abs_index);
+                (tab, pane, group_index)
             };
-            *active_id.lock().unwrap() = Some(tab.id.clone());
-            let tabs_guard = tabs.lock().unwrap();
-            set_workspace_tabs(w, &tabs_guard, Some(&tab.id));
-            drop(tabs_guard);
+            if pane == 0 {
+                *active_tab_id.lock().unwrap() = Some(tab.id.clone());
+            } else {
+                *active_group1_tab_id.lock().unwrap() = Some(tab.id.clone());
+            }
+            {
+                // Keep the group-0 selection stable when restoring the right group.
+                let tabs_guard = tabs.lock().unwrap();
+                let left_active = active_tab_id.lock().unwrap().clone();
+                set_workspace_tabs(w, &tabs_guard, left_active.as_deref());
+            }
+            w.set_active_pane(pane as i32);
+            if pane == 1 {
+                w.set_p1_active_tab(group_index as i32);
+            }
 
-            load_editor_text(&tab.query_text);
-            w.set_fn_mode(tab.kind == "function");
-            w.set_query_running(tab.loading);
-            w.set_active_table(
-                tab.table
-                    .as_ref()
-                    .map(|table| SharedString::from(table.name.clone()))
-                    .unwrap_or_default(),
-            );
+            load_editor_text(pane, &tab.query_text);
+
+            // Per-group browse state (drives that group's pagination + edits).
+            let browse = &panes[pane].browse;
             if tab.kind == "table" {
                 *browse.lock().unwrap() = tab.browse.clone();
             } else {
@@ -3415,8 +4019,23 @@ fn main() -> Result<(), slint::PlatformError> {
                     ..Default::default()
                 };
             }
-            w.set_total_rows(tab.browse.total.map(|n| n as i32).unwrap_or(-1));
-            w.set_grid_read_only(tab.browse.pk_cols.is_empty());
+
+            // Function source is still a left-group view; table chrome is fully
+            // group-local so moving a table keeps its toolbar and footer.
+            if pane == 0 {
+                w.set_fn_mode(tab.kind == "function");
+                w.set_query_running(tab.loading);
+            }
+            set_p_active_table(
+                w,
+                pane,
+                tab.table
+                    .as_ref()
+                    .map(|table| SharedString::from(table.name.clone()))
+                    .unwrap_or_default(),
+            );
+            set_p_total_rows(w, pane, tab.browse.total.map(|n| n as i32).unwrap_or(-1));
+            set_p_read_only(w, pane, tab.browse.pk_cols.is_empty());
             let index_rows: Vec<IndexRow> = tab
                 .indexes
                 .iter()
@@ -3426,40 +4045,174 @@ fn main() -> Result<(), slint::PlatformError> {
                     definition: definition.into(),
                 })
                 .collect();
-            w.set_index_rows(ModelRc::from(Rc::new(VecModel::from(index_rows))));
+            set_p_index_rows(w, pane, ModelRc::from(Rc::new(VecModel::from(index_rows))));
 
-            *results.lock().unwrap() = tab.results.clone();
-            *active_result.lock().unwrap() = tab.active_result;
-            set_result_tabs(w, tab.results.len(), tab.active_result);
+            *panes[pane].results.lock().unwrap() = tab.results.clone();
+            *panes[pane].active_result.lock().unwrap() = tab.active_result;
+            set_result_tabs(w, pane, tab.results.len(), tab.active_result);
             let selected = if tab.kind == "sql" {
-                tab.results.get(tab.active_result).cloned().or(tab.view)
+                tab.results
+                    .get(tab.active_result)
+                    .cloned()
+                    .or(tab.view.clone())
             } else {
-                tab.view
+                tab.view.clone()
             };
             if let Some(stored) = selected {
                 present_view(
                     w,
+                    pane,
                     stored.view,
                     &stored.meta,
                     &stored.latency,
                     &last_view,
-                    &displayed_grid,
-                    &hidden_cols,
-                    &sort_state,
-                    &col_order,
-                    &col_filters,
-                    &edit_buf,
-                    &browse,
+                    &panes[pane].displayed_grid,
+                    &panes[pane].hidden_cols,
+                    &panes[pane].sort_state,
+                    &panes[pane].col_order,
+                    &panes[pane].col_filters,
+                    &panes[pane].edit_buf,
+                    &panes[pane].browse,
                 );
             } else {
                 *last_view.lock().unwrap() = None;
-                *displayed_grid.lock().unwrap() = None;
-                clear_grid(w);
-                w.set_results_meta(SharedString::default());
-                w.set_result_status(SharedString::default());
+                *panes[pane].displayed_grid.lock().unwrap() = None;
+                clear_grid(w, pane);
+                set_p_results_meta(w, pane, SharedString::default());
+                set_p_result_status(w, pane, SharedString::default());
             }
         })
     };
+
+    // `restore_tab` takes an absolute `workspace_tabs` index (what most callers
+    // already compute). The UI select handlers pass a group-relative strip index
+    // and convert it before calling.
+    #[allow(clippy::type_complexity)]
+    let restore_tab: Rc<dyn Fn(&MainWindow, usize)> = restore_tab_for_pane.clone();
+
+    // `restore_p1_tab` takes a group-1 strip index and maps it to the absolute
+    // index the shared restore expects.
+    #[allow(clippy::type_complexity)]
+    let restore_p1_tab: Rc<dyn Fn(&MainWindow, usize)> = {
+        let f = restore_tab_for_pane.clone();
+        let tabs = workspace_tabs.clone();
+        Rc::new(move |w, group1_index| {
+            let abs = {
+                let tabs = tabs.lock().unwrap();
+                abs_index_for_group(&tabs, 1, group1_index)
+            };
+            if let Some(abs) = abs {
+                f(w, abs);
+            }
+        })
+    };
+
+    {
+        let restore_p1_tab = restore_p1_tab.clone();
+        let save_p1_tab = save_p1_tab.clone();
+        let weak = window.as_weak();
+        window.on_select_p1_tab(move |index| {
+            if let Some(w) = weak.upgrade() {
+                save_p1_tab(&w);
+                restore_p1_tab(&w, index.max(0) as usize);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
+        let current_connection_id = current_connection_id.clone();
+        let query_number = query_number.clone();
+        let save_p1_tab = save_p1_tab.clone();
+        let restore_p1_tab = restore_p1_tab.clone();
+        window.on_new_tab_in_group(move |group| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if group == 0 {
+                w.invoke_new_tab();
+                return;
+            }
+            save_p1_tab(&w);
+            let number = query_number.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            let connection = current_connection_id
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or_default();
+            let id = format!("query:{connection}:{number}");
+            let right_index = {
+                let mut tabs = workspace_tabs.lock().unwrap();
+                let mut tab = WorkspaceTab::sql(id.clone(), number);
+                tab.group = 1;
+                tabs.push(tab);
+                let left = active_tab_id.lock().unwrap().clone();
+                set_workspace_tabs(&w, &tabs, left.as_deref());
+                save_query_tabs(&w, &tabs, left.as_deref());
+                tabs.iter().filter(|tab| tab.group == 1).count() - 1
+            };
+            *active_group1_tab_id.lock().unwrap() = Some(id);
+            restore_p1_tab(&w, right_index);
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let tabs = workspace_tabs.clone();
+        let save_active_tab = save_active_tab.clone();
+        let save_p1_tab = save_p1_tab.clone();
+        let restore_tab = restore_tab.clone();
+        let restore_p1_tab = restore_p1_tab.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
+        let active_tab_id = active_tab_id.clone();
+        window.on_move_tab_group(move |index, target| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let target = target.clamp(0, 1) as usize;
+            save_active_tab(&w);
+            save_p1_tab(&w);
+            let source = if target == 1 { 0 } else { 1 };
+            let moved_id = {
+                let mut tabs = tabs.lock().unwrap();
+                if source == 0 && tabs.iter().filter(|tab| tab.group == 0).count() == 1 {
+                    return;
+                }
+                let Some(tab) = tabs
+                    .iter_mut()
+                    .filter(|tab| tab.group == source)
+                    .nth(index.max(0) as usize)
+                else {
+                    return;
+                };
+                tab.group = target;
+                tab.id.clone()
+            };
+            let (left_index, right_index, left_id) = {
+                let tabs = tabs.lock().unwrap();
+                let left_index = tabs.iter().position(|tab| tab.group == 0);
+                let left_id = left_index.map(|index| tabs[index].id.clone());
+                let right_index = tabs
+                    .iter()
+                    .filter(|tab| tab.group == 1)
+                    .position(|tab| tab.id == moved_id)
+                    .or_else(|| tabs.iter().filter(|tab| tab.group == 1).position(|_| true));
+                set_workspace_tabs(&w, &tabs, left_id.as_deref());
+                (left_index, right_index, left_id)
+            };
+            *active_tab_id.lock().unwrap() = left_id;
+            if let Some(index) = left_index {
+                restore_tab(&w, index);
+            }
+            if let Some(index) = right_index {
+                restore_p1_tab(&w, index);
+            } else {
+                *active_group1_tab_id.lock().unwrap() = None;
+                w.set_p1_active_tab(-1);
+            }
+        });
+    }
 
     // ----- toggle a sidebar group's collapsed state (Feature A) -----
     {
@@ -3615,7 +4368,7 @@ fn main() -> Result<(), slint::PlatformError> {
             *active_tab_id.lock().unwrap() = None;
             *current_connection_id.lock().unwrap() = None;
             set_workspace_tabs(&w, &[], None);
-            clear_grid(&w);
+            clear_grid(&w, 0);
             *cur_engine.borrow_mut() = None;
             expanded_tables.lock().unwrap().clear();
             loaded_dbs.lock().unwrap().clear();
@@ -3678,7 +4431,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
             );
             *displayed_grid.lock().unwrap() = view_grid(&filtered);
-            apply_result(&w, filtered);
+            apply_result(&w, 0, filtered);
         });
     }
 
@@ -3773,9 +4526,9 @@ fn main() -> Result<(), slint::PlatformError> {
             // Columns are unchanged, so update only the cells — replacing the
             // columns model would rebuild (and unfocus) the filter inputs.
             if let model::ResultView::Table(g) = &filtered {
-                set_grid_cells_only(&w, g);
+                set_grid_cells_only(&w, 0, g);
             } else {
-                apply_result(&w, filtered);
+                apply_result(&w, 0, filtered);
             }
         });
     }
@@ -3840,7 +4593,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
             );
             *displayed_grid.lock().unwrap() = view_grid(&sorted);
-            apply_result(&w, sorted);
+            apply_result(&w, 0, sorted);
         });
     }
 
@@ -3943,7 +4696,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
             );
             *displayed_grid.lock().unwrap() = view_grid(&transformed);
-            apply_result(&w, transformed);
+            apply_result(&w, 0, transformed);
         });
     }
 
@@ -4017,7 +4770,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(widths))));
             }
             *displayed_grid.lock().unwrap() = view_grid(&transformed);
-            apply_result(&w, transformed);
+            apply_result(&w, 0, transformed);
         });
     }
 
@@ -4043,6 +4796,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let browse = browse.clone();
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
         let current_connection_id = current_connection_id.clone();
         let query_console = query_console.clone();
         let results = results.clone();
@@ -4076,7 +4830,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // without losing their queries.
             let restore = !tabs_restored.get() || db_ovr.is_some();
             tabs_restored.set(true);
-            let (init_tabs, init_active) = if restore {
+            let (init_tabs, init_active, init_active_p1, init_active_group) = if restore {
                 load_query_tabs()
             } else {
                 // Retain the SQL scratch tabs (with their results) so switching
@@ -4098,10 +4852,17 @@ fn main() -> Result<(), slint::PlatformError> {
                     .clone()
                     .filter(|id| kept.iter().any(|t| t.id == *id))
                     .or_else(|| kept.first().map(|t| t.id.clone()));
-                (kept, active)
+                // Connection switch keeps the in-memory focus + right-group tab.
+                let active_p1 = active_group1_tab_id
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .filter(|id| kept.iter().any(|t| t.id == *id));
+                (kept, active, active_p1, 0usize)
             };
             *workspace_tabs.lock().unwrap() = init_tabs;
             *active_tab_id.lock().unwrap() = init_active.clone();
+            *active_group1_tab_id.lock().unwrap() = init_active_p1.clone();
             results.lock().unwrap().clear();
             *last_view.lock().unwrap() = None;
             edit_buf.lock().unwrap().clear();
@@ -4116,7 +4877,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let tabs = workspace_tabs.lock().unwrap();
                     set_workspace_tabs(&w, &tabs, init_active.as_deref());
                 }
-                clear_grid(&w);
+                clear_grid(&w, 0);
                 sync_query_console(&w, &query_console);
                 w.set_selected_conn(idx);
                 // Show progress + clear any prior failure immediately.
@@ -4152,7 +4913,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             .map(|t| t.query_text.clone())
                     })
                     .unwrap_or_default();
-                load_editor_text(&init_text);
+                load_editor_text(0, &init_text);
                 w.set_editor_placeholder(SharedString::from(if mock::mock_mode() {
                     ""
                 } else {
@@ -4180,6 +4941,19 @@ fn main() -> Result<(), slint::PlatformError> {
                 if let Some(idx) = active_idx {
                     restore_tab(&w, idx);
                 }
+                // Restore the right group's active tab, then land on the group
+                // that was focused last session.
+                if let Some(p1_id) = init_active_p1.as_deref() {
+                    let p1_idx = workspace_tabs
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .position(|t| t.id == p1_id);
+                    if let Some(idx) = p1_idx {
+                        restore_tab(&w, idx);
+                    }
+                }
+                w.set_active_pane(init_active_group as i32);
             }
             // Fresh connection: nothing browsed, nothing expanded.
             *cur_engine.borrow_mut() = Some(sc.engine);
@@ -4428,26 +5202,36 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- shared query runner: parse text for the live engine, run it, push
     // the result (grid / documents / error) back to the UI. Used by both the
     // Run button and table clicks. -----
-    let run_sql: Rc<dyn Fn(String)> = {
+    #[allow(clippy::type_complexity)]
+    let run_sql: Rc<dyn Fn(usize, String)> = {
         let weak = window.as_weak();
         let rt = rt.clone();
         let current = current.clone();
         let last_view = last_view.clone();
-        let browse = browse.clone();
-        let edit_buf = edit_buf.clone();
-        let displayed_grid = displayed_grid.clone();
-        let hidden_cols = hidden_cols.clone();
-        let sort_state = sort_state.clone();
-        let col_order = col_order.clone();
-        let col_filters = col_filters.clone();
-        let results = results.clone();
-        let active_result = active_result.clone();
-        let result_new_tab = result_new_tab.clone();
+        let panes = panes.clone();
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
         let query_console = query_console.clone();
-        Rc::new(move |sql: String| {
-            let Some(target_id) = active_tab_id.lock().unwrap().clone() else {
+        Rc::new(move |pane: usize, sql: String| {
+            // Per-pane live state; pane 1 (right split) uses its own buffers so a
+            // run in one pane never disturbs the other.
+            let browse = panes[pane].browse.clone();
+            let edit_buf = panes[pane].edit_buf.clone();
+            let displayed_grid = panes[pane].displayed_grid.clone();
+            let hidden_cols = panes[pane].hidden_cols.clone();
+            let sort_state = panes[pane].sort_state.clone();
+            let col_order = panes[pane].col_order.clone();
+            let col_filters = panes[pane].col_filters.clone();
+            let results = panes[pane].results.clone();
+            let active_result = panes[pane].active_result.clone();
+            let result_new_tab = panes[pane].result_new_tab.clone();
+            let active_id = if pane == 1 {
+                &active_group1_tab_id
+            } else {
+                &active_tab_id
+            };
+            let Some(target_id) = active_id.lock().unwrap().clone() else {
                 return;
             };
             if let Some(tab) = workspace_tabs
@@ -4473,6 +5257,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let active_result = active_result.clone();
             let workspace_tabs = workspace_tabs.clone();
             let active_tab_id = active_tab_id.clone();
+            let active_group1_tab_id = active_group1_tab_id.clone();
             let query_console = query_console.clone();
             // ⌘\ set this; consume it so the next plain run replaces again.
             let new_tab = result_new_tab.swap(false, std::sync::atomic::Ordering::SeqCst);
@@ -4480,7 +5265,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // no `use(...)` run against it, matching what the user sees browsing.
             let mut cur_db = String::new();
             if let Some(w) = weak.upgrade() {
-                w.set_query_running(true);
+                set_p_query_running(&w, pane, true);
                 // Don't force the SQL console open on every run — the eye toggle
                 // owns its visibility. Re-opening it here ignored a user who just
                 // hid it. The console still updates in place when it is open.
@@ -4555,10 +5340,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
                         sync_query_console(&w, &query_console);
-                        let is_active =
-                            active_tab_id.lock().unwrap().as_deref() == Some(&target_id);
+                        let active_id = if pane == 1 {
+                            &active_group1_tab_id
+                        } else {
+                            &active_tab_id
+                        };
+                        let is_active = active_id.lock().unwrap().as_deref() == Some(&target_id);
                         if is_active {
-                            w.set_query_running(false);
+                            set_p_query_running(&w, pane, false);
                         }
                         match (view, err) {
                             (Some(v), _) => {
@@ -4578,41 +5367,46 @@ fn main() -> Result<(), slint::PlatformError> {
                                     meta: meta.clone(),
                                     latency: latency.clone(),
                                 };
-                                let (tab_results, tab_active, is_browse) = {
-                                    let mut tabs = workspace_tabs.lock().unwrap();
-                                    let Some(tab) = tabs.iter_mut().find(|tab| tab.id == target_id)
-                                    else {
-                                        return;
-                                    };
-                                    tab.loading = false;
-                                    tab.view = Some(sr.clone());
-                                    let is_browse = tab.kind == "table";
-                                    if is_browse {
-                                        tab.results.clear();
-                                        tab.active_result = 0;
-                                    } else if new_tab || tab.results.is_empty() {
-                                        tab.results.push(sr);
-                                        tab.active_result = tab.results.len() - 1;
-                                    } else {
-                                        if tab.active_result >= tab.results.len() {
-                                            tab.active_result = 0;
-                                        }
-                                        tab.results[tab.active_result] = sr;
-                                    }
-                                    (tab.results.clone(), tab.active_result, is_browse)
+                                let mut tabs = workspace_tabs.lock().unwrap();
+                                let Some(tab) = tabs.iter_mut().find(|tab| tab.id == target_id)
+                                else {
+                                    return;
                                 };
+                                tab.loading = false;
+                                tab.view = Some(sr.clone());
+                                let is_browse = tab.kind == "table";
+                                if is_browse {
+                                    tab.results.clear();
+                                    tab.active_result = 0;
+                                } else if new_tab || tab.results.is_empty() {
+                                    tab.results.push(sr);
+                                    tab.active_result = tab.results.len() - 1;
+                                } else {
+                                    if tab.active_result >= tab.results.len() {
+                                        tab.active_result = 0;
+                                    }
+                                    tab.results[tab.active_result] = sr;
+                                }
+                                let tab_results = tab.results.clone();
+                                let tab_active = tab.active_result;
                                 if !is_active {
                                     return;
                                 }
                                 *results.lock().unwrap() = tab_results;
                                 *active_result.lock().unwrap() = tab_active;
                                 if is_browse {
-                                    set_result_tabs(&w, 0, 0);
+                                    set_result_tabs(&w, pane, 0, 0);
                                 } else {
-                                    set_result_tabs(&w, results.lock().unwrap().len(), tab_active);
+                                    set_result_tabs(
+                                        &w,
+                                        pane,
+                                        results.lock().unwrap().len(),
+                                        tab_active,
+                                    );
                                 }
                                 present_view(
                                     &w,
+                                    pane,
                                     v,
                                     &meta,
                                     &latency,
@@ -4641,6 +5435,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 *last_view.lock().unwrap() = None;
                                 apply_result(
                                     &w,
+                                    pane,
                                     model::ResultView::Affected(format!("error: {e}")),
                                 );
                             }
@@ -4657,30 +5452,37 @@ fn main() -> Result<(), slint::PlatformError> {
     // progressively and stays cancelable instead of freezing. The query text
     // reaches the driver verbatim — clean log, no injected LIMIT. A UI-thread
     // timer drains batches into the grid; an off-thread task does the fetch. -----
-    let run_stream: Rc<dyn Fn(String)> = {
+    let run_stream: Rc<dyn Fn(usize, String)> = {
         let weak = window.as_weak();
         let rt = rt.clone();
         let current = current.clone();
         let query_console = query_console.clone();
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
-        let results = results.clone();
-        let active_result = active_result.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
+        let panes = panes.clone();
         let last_view = last_view.clone();
-        let displayed_grid = displayed_grid.clone();
-        let hidden_cols = hidden_cols.clone();
-        let sort_state = sort_state.clone();
-        let col_order = col_order.clone();
-        let col_filters = col_filters.clone();
-        let edit_buf = edit_buf.clone();
-        let browse = browse.clone();
-        let stream_cancel = stream_cancel.clone();
-        let stream_timer = stream_timer.clone();
-        Rc::new(move |sql: String| {
+        Rc::new(move |pane, sql: String| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let Some(target_id) = active_tab_id.lock().unwrap().clone() else {
+            let results = panes[pane].results.clone();
+            let active_result = panes[pane].active_result.clone();
+            let displayed_grid = panes[pane].displayed_grid.clone();
+            let hidden_cols = panes[pane].hidden_cols.clone();
+            let sort_state = panes[pane].sort_state.clone();
+            let col_order = panes[pane].col_order.clone();
+            let col_filters = panes[pane].col_filters.clone();
+            let edit_buf = panes[pane].edit_buf.clone();
+            let browse = panes[pane].browse.clone();
+            let stream_cancel = panes[pane].stream_cancel.clone();
+            let stream_timer = panes[pane].stream_timer.clone();
+            let active_id = if pane == 1 {
+                &active_group1_tab_id
+            } else {
+                &active_tab_id
+            };
+            let Some(target_id) = active_id.lock().unwrap().clone() else {
                 return;
             };
             // Stop any in-flight stream, then arm a fresh cancel flag.
@@ -4702,12 +5504,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 tab.loading = true;
                 tab.query_text = sql.clone();
             }
-            w.set_query_running(true);
-            w.set_streaming(true);
+            set_p_query_running(&w, pane, true);
+            set_p_streaming(&w, pane, true);
             w.set_grid_read_only(true);
-            clear_grid(&w);
-            w.set_result_status(SharedString::from("streaming…"));
-            w.set_results_meta(SharedString::default());
+            clear_grid(&w, pane);
+            set_p_result_status(&w, pane, SharedString::from("streaming…"));
+            set_p_results_meta(&w, pane, SharedString::default());
 
             // UI-thread accumulator (for filter/sort/export after the stream) and
             // the live cell model we push each batch into.
@@ -4735,6 +5537,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let results = results.clone();
                 let active_result = active_result.clone();
                 let active_tab_id = active_tab_id.clone();
+                let active_group1_tab_id = active_group1_tab_id.clone();
                 let stream_timer_stop = stream_timer.clone();
                 let target_id = target_id.clone();
                 timer.start(
@@ -4754,12 +5557,14 @@ fn main() -> Result<(), slint::PlatformError> {
                                             type_name: c.type_name.clone().into(),
                                         })
                                         .collect();
-                                    w.set_grid_col_count(gcols.len() as i32);
-                                    w.set_grid_columns(ModelRc::from(Rc::new(VecModel::from(
-                                        gcols,
-                                    ))));
+                                    set_p_col_count(&w, pane, gcols.len() as i32);
+                                    set_p_columns(
+                                        &w,
+                                        pane,
+                                        ModelRc::from(Rc::new(VecModel::from(gcols))),
+                                    );
                                     let vm = Rc::new(VecModel::<GridCell>::default());
-                                    w.set_grid_cells(ModelRc::from(vm.clone()));
+                                    set_p_cells(&w, pane, ModelRc::from(vm.clone()));
                                     *cells_model.borrow_mut() = Some(vm);
                                     *accum.borrow_mut() = model::GridModel {
                                         columns: cols,
@@ -4784,10 +5589,14 @@ fn main() -> Result<(), slint::PlatformError> {
                                             }
                                             acc.rows.push(vmrow);
                                         }
-                                        w.set_result_status(SharedString::from(format!(
-                                            "loaded {}",
-                                            acc.rows.len()
-                                        )));
+                                        set_p_result_status(
+                                            &w,
+                                            pane,
+                                            SharedString::from(format!(
+                                                "loaded {}",
+                                                acc.rows.len()
+                                            )),
+                                        );
                                     }
                                 }
                                 Ok(StreamMsg::Done { capped, elapsed_ms }) => {
@@ -4815,13 +5624,18 @@ fn main() -> Result<(), slint::PlatformError> {
                                         tab.results = vec![sr.clone()];
                                         tab.active_result = 0;
                                     }
-                                    if active_tab_id.lock().unwrap().as_deref() == Some(&target_id)
-                                    {
+                                    let active_id = if pane == 1 {
+                                        &active_group1_tab_id
+                                    } else {
+                                        &active_tab_id
+                                    };
+                                    if active_id.lock().unwrap().as_deref() == Some(&target_id) {
                                         *results.lock().unwrap() = vec![sr];
                                         *active_result.lock().unwrap() = 0;
-                                        set_result_tabs(&w, 1, 0);
+                                        set_result_tabs(&w, pane, 1, 0);
                                         present_view(
                                             &w,
+                                            pane,
                                             view,
                                             &meta,
                                             &latency,
@@ -4834,8 +5648,8 @@ fn main() -> Result<(), slint::PlatformError> {
                                             &edit_buf,
                                             &browse,
                                         );
-                                        w.set_query_running(false);
-                                        w.set_streaming(false);
+                                        set_p_query_running(&w, pane, false);
+                                        set_p_streaming(&w, pane, false);
                                     }
                                     if let Some(t) = stream_timer_stop.borrow().as_ref() {
                                         t.stop();
@@ -4851,14 +5665,19 @@ fn main() -> Result<(), slint::PlatformError> {
                                     {
                                         tab.loading = false;
                                     }
-                                    if active_tab_id.lock().unwrap().as_deref() == Some(&target_id)
-                                    {
+                                    let active_id = if pane == 1 {
+                                        &active_group1_tab_id
+                                    } else {
+                                        &active_tab_id
+                                    };
+                                    if active_id.lock().unwrap().as_deref() == Some(&target_id) {
                                         apply_result(
                                             &w,
+                                            pane,
                                             model::ResultView::Affected(format!("error: {e}")),
                                         );
-                                        w.set_query_running(false);
-                                        w.set_streaming(false);
+                                        set_p_query_running(&w, pane, false);
+                                        set_p_streaming(&w, pane, false);
                                     }
                                     if let Some(t) = stream_timer_stop.borrow().as_ref() {
                                         t.stop();
@@ -4867,8 +5686,8 @@ fn main() -> Result<(), slint::PlatformError> {
                                 }
                                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
                                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                                    w.set_query_running(false);
-                                    w.set_streaming(false);
+                                    set_p_query_running(&w, pane, false);
+                                    set_p_streaming(&w, pane, false);
                                     if let Some(t) = stream_timer_stop.borrow().as_ref() {
                                         t.stop();
                                     }
@@ -4992,15 +5811,56 @@ fn main() -> Result<(), slint::PlatformError> {
                         .map(|e| is_bare_select(e, &text))
                         .unwrap_or(false);
                 if stream {
-                    run_stream(text);
+                    run_stream(0, text);
                 } else {
-                    run_sql(text);
+                    run_sql(0, text);
                 }
                 if w.get_sidebar_mode() != 0 {
                     rebuild_query_tree("");
                 }
             }
         });
+    }
+
+    // ----- run query in the right split pane -----
+    {
+        let run_sql = run_sql.clone();
+        let run_stream = run_stream.clone();
+        let panes = panes.clone();
+        let cur_engine = cur_engine.clone();
+        let weak = window.as_weak();
+        let recent_queries = recent_queries.clone();
+        let run_p1 = move || {
+            let text = {
+                let ed = panes[1].ed_state.borrow();
+                ed.selected_text()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| ed.current_statement())
+            };
+            if text.is_empty() {
+                return;
+            }
+            record_recent(&recent_queries, &text);
+            let stream = weak
+                .upgrade()
+                .map(|w| {
+                    panes[1].browse.lock().unwrap().limit == 0
+                        && cur_engine
+                            .borrow()
+                            .map(|e| is_bare_select(e, &text))
+                            .unwrap_or(false)
+                        && active_tab_kind(&w) != "table"
+                })
+                .unwrap_or(false);
+            if stream {
+                run_stream(1, text);
+            } else {
+                run_sql(1, text);
+            }
+        };
+        window.on_p1_run(run_p1.clone());
+        window.on_p1_run_selection(run_p1);
     }
 
     // ----- Copy results (TSV → clipboard) / Export CSV (~/Downloads) -----
@@ -5111,9 +5971,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 record_recent(&recent_queries, &stmt);
                 if stream {
-                    run_stream(stmt);
+                    run_stream(0, stmt);
                 } else {
-                    run_sql(stmt);
+                    run_sql(0, stmt);
                 }
             }
         });
@@ -5122,13 +5982,323 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- Cancel a running stream ("No limit" fetch) -----
     {
         let weak = window.as_weak();
-        let stream_cancel = stream_cancel.clone();
+        let panes = panes.clone();
         window.on_cancel_stream(move || {
-            if let Some(c) = stream_cancel.borrow().as_ref() {
+            if let Some(c) = panes[0].stream_cancel.borrow().as_ref() {
                 c.store(true, std::sync::atomic::Ordering::SeqCst);
             }
             if let Some(w) = weak.upgrade() {
-                w.set_streaming(false);
+                set_p_streaming(&w, 0, false);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_reorder_col(move |from, local_x| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let from = from.max(0) as usize;
+            let mut widths: Vec<f32> = w.get_p1_col_widths().iter().collect();
+            if from >= widths.len() {
+                return;
+            }
+            let drop = widths.iter().take(from).sum::<f32>() + local_x;
+            let mut acc = 0.0;
+            let mut target = widths.len() - 1;
+            for (index, width) in widths.iter().enumerate() {
+                if drop < acc + width {
+                    target = index;
+                    break;
+                }
+                acc += width;
+            }
+            if target == from {
+                return;
+            }
+            let hidden = panes[1].hidden_cols.lock().unwrap().clone();
+            {
+                let mut order = panes[1].col_order.lock().unwrap();
+                let visible: Vec<usize> = order
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .filter(|(_, index)| !hidden.contains(index))
+                    .map(|(position, _)| position)
+                    .collect();
+                let (Some(&from_position), Some(&to_position)) =
+                    (visible.get(from), visible.get(target))
+                else {
+                    return;
+                };
+                let value = order.remove(from_position);
+                order.insert(
+                    if to_position > from_position {
+                        to_position - 1
+                    } else {
+                        to_position
+                    },
+                    value,
+                );
+            }
+            let width = widths.remove(from);
+            widths.insert(if target > from { target - 1 } else { target }, width);
+            set_p_col_widths(&w, 1, ModelRc::from(Rc::new(VecModel::from(widths))));
+            let view = {
+                let results = panes[1].results.lock().unwrap();
+                let active = *panes[1].active_result.lock().unwrap();
+                results.get(active).map(|result| result.view.clone())
+            };
+            let Some(view) = view else {
+                return;
+            };
+            let order = panes[1].col_order.lock().unwrap().clone();
+            let filters = panes[1].col_filters.lock().unwrap().clone();
+            let (sort_col, ascending) = *panes[1].sort_state.lock().unwrap();
+            let reordered = compute_view(
+                &view, "", "", "", &filters, &hidden, &order, sort_col, ascending,
+            );
+            *panes[1].displayed_grid.lock().unwrap() = view_grid(&reordered);
+            apply_result(&w, 1, reordered);
+        });
+    }
+
+    // ----- right-pane grid interactions -----
+    {
+        let weak = window.as_weak();
+        window.on_p1_select_cell(move |row, col| {
+            if let Some(w) = weak.upgrade() {
+                w.set_p1_selected_row(row);
+                w.set_p1_selected_col(col);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_p1_edit_cell(move |row, col| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if w.get_grid_read_only() || row < 0 || col < 0 {
+                set_p_result_status(&w, 1, SharedString::from("read-only result"));
+                return;
+            }
+            let count = w.get_p1_col_count();
+            let value = if count > 0 {
+                w.get_p1_cells()
+                    .row_data((row * count + col) as usize)
+                    .filter(|cell| !cell.is_null)
+                    .map(|cell| cell.text)
+                    .unwrap_or_default()
+            } else {
+                SharedString::default()
+            };
+            w.set_p1_editing_value(value);
+            set_p_editing(&w, 1, row, col);
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_stage_cell(move |row, col, text| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if w.get_grid_read_only() || row < 0 || col < 0 {
+                return;
+            }
+            let base = panes[1]
+                .displayed_grid
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|grid| grid.rows.len())
+                .unwrap_or(0);
+            panes[1].edit_buf.lock().unwrap().set_cell(
+                base,
+                row as usize,
+                col as usize,
+                text.to_string(),
+            );
+            let count = w.get_p1_col_count();
+            if count > 0 {
+                let index = (row * count + col) as usize;
+                let cells = w.get_p1_cells();
+                if let Some(mut cell) = cells.row_data(index) {
+                    cell.text = text;
+                    cell.is_null = false;
+                    cell.state = 1;
+                    cells.set_row_data(index, cell);
+                }
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_cell_edited(move |row, col, text| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let base = panes[1]
+                .displayed_grid
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|grid| grid.rows.len())
+                .unwrap_or(0);
+            panes[1].edit_buf.lock().unwrap().set_cell(
+                base,
+                row.max(0) as usize,
+                col.max(0) as usize,
+                text.to_string(),
+            );
+            set_p_editing(&w, 1, -1, -1);
+            if let Some(grid) = panes[1].displayed_grid.lock().unwrap().as_ref() {
+                let edits = panes[1].edit_buf.lock().unwrap();
+                paint_grid_with_edits(&w, 1, grid, &edits);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_p1_edit_cancelled(move || {
+            if let Some(w) = weak.upgrade() {
+                set_p_editing(&w, 1, -1, -1);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_p1_cell_advance(move |row, col, text, forward| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let count = w.get_p1_col_count();
+            if count <= 0 {
+                set_p_editing(&w, 1, -1, -1);
+                return;
+            }
+            w.invoke_p1_cell_edited(row, col, text);
+            let next = if forward { col + 1 } else { col - 1 };
+            let (next_row, next_col) = if next >= count {
+                (row + 1, 0)
+            } else if next < 0 {
+                (row - 1, count - 1)
+            } else {
+                (row, next)
+            };
+            w.set_p1_selected_row(next_row);
+            w.set_p1_selected_col(next_col);
+            set_p_editing(&w, 1, next_row, next_col);
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_p1_resize_col(move |i, delta| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let mut widths: Vec<f32> = w.get_p1_col_widths().iter().collect();
+            if let Some(width) = widths.get_mut(i.max(0) as usize) {
+                *width = (*width + delta).clamp(60.0, 1000.0);
+                w.set_p1_col_widths(ModelRc::from(Rc::new(VecModel::from(widths))));
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_sort_col(move |display_col| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let view = {
+                let results = panes[1].results.lock().unwrap();
+                let active = *panes[1].active_result.lock().unwrap();
+                results.get(active).map(|result| result.view.clone())
+            };
+            let Some(view) = view else {
+                return;
+            };
+            let hidden = panes[1].hidden_cols.lock().unwrap().clone();
+            let order = panes[1].col_order.lock().unwrap().clone();
+            let visible: Vec<usize> = order
+                .iter()
+                .copied()
+                .filter(|index| !hidden.contains(index))
+                .collect();
+            let Some(&original) = visible.get(display_col.max(0) as usize) else {
+                return;
+            };
+            let (sort_col, ascending) = {
+                let mut sort = panes[1].sort_state.lock().unwrap();
+                if sort.0 == original as i32 {
+                    sort.1 = !sort.1;
+                } else {
+                    *sort = (original as i32, true);
+                }
+                *sort
+            };
+            let filters = panes[1].col_filters.lock().unwrap().clone();
+            let sorted = compute_view(
+                &view, "", "", "", &filters, &hidden, &order, sort_col, ascending,
+            );
+            *panes[1].displayed_grid.lock().unwrap() = view_grid(&sorted);
+            set_p_grid_sort(&w, 1, display_col, ascending);
+            apply_result(&w, 1, sorted);
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_set_col_filter(move |display_col, text| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let view = {
+                let results = panes[1].results.lock().unwrap();
+                let active = *panes[1].active_result.lock().unwrap();
+                results.get(active).map(|result| result.view.clone())
+            };
+            let Some(view) = view else {
+                return;
+            };
+            let hidden = panes[1].hidden_cols.lock().unwrap().clone();
+            let order = panes[1].col_order.lock().unwrap().clone();
+            let visible: Vec<usize> = order
+                .iter()
+                .copied()
+                .filter(|index| !hidden.contains(index))
+                .collect();
+            let Some(&original) = visible.get(display_col.max(0) as usize) else {
+                return;
+            };
+            let filters = {
+                let mut filters = panes[1].col_filters.lock().unwrap();
+                if let Some(filter) = filters.get_mut(original) {
+                    *filter = text.to_string();
+                }
+                filters.clone()
+            };
+            let (sort_col, ascending) = *panes[1].sort_state.lock().unwrap();
+            let filtered = compute_view(
+                &view, "", "", "", &filters, &hidden, &order, sort_col, ascending,
+            );
+            *panes[1].displayed_grid.lock().unwrap() = view_grid(&filtered);
+            apply_result(&w, 1, filtered);
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_cancel_stream(move || {
+            if let Some(c) = panes[1].stream_cancel.borrow().as_ref() {
+                c.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            if let Some(w) = weak.upgrade() {
+                set_p_streaming(&w, 1, false);
             }
         });
     }
@@ -5153,10 +6323,37 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_grid_read_only(true);
             }
             if trimmed.to_uppercase().starts_with("EXPLAIN") {
-                run_sql(trimmed.to_string());
+                run_sql(0, trimmed.to_string());
             } else {
-                run_sql(format!("EXPLAIN {trimmed}"));
+                run_sql(0, format!("EXPLAIN {trimmed}"));
             }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let run_sql = run_sql.clone();
+        let panes = panes.clone();
+        window.on_p1_explain_query(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if !w.get_sql_capable() {
+                return;
+            }
+            let text = panes[1].ed_state.borrow().text();
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                return;
+            }
+            w.set_grid_read_only(true);
+            run_sql(
+                1,
+                if trimmed.to_uppercase().starts_with("EXPLAIN") {
+                    trimmed.to_string()
+                } else {
+                    format!("EXPLAIN {trimmed}")
+                },
+            );
         });
     }
 
@@ -5168,8 +6365,18 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(w) = weak.upgrade() {
                 let text = w.get_query_text().to_string();
                 if !text.trim().is_empty() {
-                    load_editor_text(&sql_format::format(&text));
+                    load_editor_text(0, &sql_format::format(&text));
                 }
+            }
+        });
+    }
+    {
+        let load_editor_text = load_editor_text.clone();
+        let panes = panes.clone();
+        window.on_p1_format_sql(move || {
+            let text = panes[1].ed_state.borrow().text();
+            if !text.trim().is_empty() {
+                load_editor_text(1, &sql_format::format(&text));
             }
         });
     }
@@ -5193,16 +6400,17 @@ fn main() -> Result<(), slint::PlatformError> {
         Rc::new(move |w: &MainWindow| guard_pending_edits(w, &edit_buf))
     };
 
-    let run_browse: Rc<dyn Fn()> = {
+    let run_browse: Rc<dyn Fn(usize)> = {
         let cur_engine = cur_engine.clone();
-        let browse = browse.clone();
+        let panes = panes.clone();
         let run_sql = run_sql.clone();
         let load_editor_text = load_editor_text.clone();
-        Rc::new(move || {
+        Rc::new(move |pane| {
             let Some(engine) = *cur_engine.borrow() else {
                 return;
             };
-            let st = browse.lock().unwrap().clone();
+            let pane = pane.min(1);
+            let st = panes[pane].browse.lock().unwrap().clone();
             let Some(table) = st.table else {
                 return;
             };
@@ -5221,12 +6429,15 @@ fn main() -> Result<(), slint::PlatformError> {
                 &st.mongo_filter,
                 &st.col_filters,
             );
-            load_editor_text(&text);
-            run_sql(text);
+            load_editor_text(pane, &text);
+            run_sql(pane, text);
         })
     };
     // Wire the deferred handle so per-column browse filters can re-query.
-    *browse_trigger.borrow_mut() = Some(run_browse.clone());
+    *browse_trigger.borrow_mut() = Some(Rc::new({
+        let run_browse = run_browse.clone();
+        move || run_browse(0)
+    }));
 
     {
         let weak = window.as_weak();
@@ -5315,6 +6526,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     indexes: Vec::new(),
                     loading: true,
                     pinned: false,
+                    group: 0,
+                    split: false,
+                    split_ratio: 0.5,
+                    pane1_query: String::new(),
                 };
                 let active_id = active_tab_id.lock().unwrap().clone();
                 let mut tabs = workspace_tabs.lock().unwrap();
@@ -5336,9 +6551,9 @@ fn main() -> Result<(), slint::PlatformError> {
             *last_view.lock().unwrap() = None;
             *displayed_grid.lock().unwrap() = None;
             results.lock().unwrap().clear();
-            set_result_tabs(&w, 0, 0);
-            clear_grid(&w);
-            run_browse();
+            set_result_tabs(&w, 0, 0, 0);
+            clear_grid(&w, 0);
+            run_browse(0);
 
             // Fetch total + primary key off-thread; footer updates when done.
             let weak2 = weak.clone();
@@ -5439,7 +6654,13 @@ fn main() -> Result<(), slint::PlatformError> {
         window.on_pin_tab(move |index| {
             let active = active_tab_id.lock().unwrap().clone();
             let mut tabs = workspace_tabs.lock().unwrap();
-            if let Some(tab) = tabs.get_mut(index as usize) {
+            let index = tabs
+                .iter()
+                .enumerate()
+                .filter(|(_, tab)| tab.group == 0)
+                .nth(index.max(0) as usize)
+                .map(|(index, _)| index);
+            if let Some(tab) = index.and_then(|index| tabs.get_mut(index)) {
                 tab.pinned = true;
                 if let Some(w) = weak.upgrade() {
                     set_workspace_tabs(&w, &tabs, active.as_deref());
@@ -5465,7 +6686,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 st.page -= 1;
             }
-            run_browse();
+            run_browse(0);
         });
     }
     {
@@ -5478,7 +6699,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             }
             browse.lock().unwrap().page += 1;
-            run_browse();
+            run_browse(0);
         });
     }
     {
@@ -5492,7 +6713,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if weak.upgrade().is_some_and(|w| guard_pending(&w)) {
                 return;
             }
-            run_browse();
+            run_browse(0);
             // Re-count in the background so the total tracks external writes.
             let table = browse.lock().unwrap().table.clone();
             let Some(table) = table else { return };
@@ -5550,7 +6771,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     st.page = 0;
                 }
                 echo(&w, 0);
-                run_browse();
+                run_browse(0);
                 return;
             }
             // The manual field may contain dot separators — keep digits only.
@@ -5565,8 +6786,60 @@ fn main() -> Result<(), slint::PlatformError> {
                 st.page = 0;
             }
             echo(&w, l);
-            run_browse();
+            run_browse(0);
         });
+    }
+
+    {
+        let panes = panes.clone();
+        let run_browse = run_browse.clone();
+        window.on_p1_set_limit(move |text| {
+            let lower = text.trim().to_ascii_lowercase();
+            let limit = if lower.is_empty()
+                || lower == "0"
+                || lower == "all"
+                || lower == "none"
+                || lower.contains("no limit")
+            {
+                0
+            } else {
+                let digits: String = text.chars().filter(|c| c.is_ascii_digit()).collect();
+                let Some(limit) = digits.parse::<u64>().ok().map(|n| n.clamp(1, 10_000)) else {
+                    return;
+                };
+                limit
+            };
+            let mut browse = panes[1].browse.lock().unwrap();
+            browse.limit = limit;
+            browse.page = 0;
+            drop(browse);
+            run_browse(1);
+        });
+    }
+    {
+        let panes = panes.clone();
+        let run_browse = run_browse.clone();
+        window.on_p1_prev_page(move || {
+            let mut browse = panes[1].browse.lock().unwrap();
+            if browse.page == 0 {
+                return;
+            }
+            browse.page -= 1;
+            drop(browse);
+            run_browse(1);
+        });
+    }
+    {
+        let panes = panes.clone();
+        let run_browse = run_browse.clone();
+        window.on_p1_next_page(move || {
+            panes[1].browse.lock().unwrap().page += 1;
+            run_browse(1);
+        });
+    }
+    {
+        let run_browse = run_browse.clone();
+        window.on_p1_refresh_page(move || run_browse(1));
     }
 
     // ----- Mongo browse filter bar (Compass-style filter document) -----
@@ -5597,7 +6870,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 st.mongo_filter = trimmed.to_string();
                 st.page = 0;
             }
-            run_browse();
+            run_browse(0);
         });
     }
 
@@ -5608,14 +6881,31 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            DOC_TREE.with(|s| {
+            DOC_TREES.with(|s| {
                 let mut st = s.borrow_mut();
-                let (full, collapsed) = &mut *st;
+                let (full, collapsed) = &mut st[0];
                 let p = path.to_string();
                 if !collapsed.remove(&p) {
                     collapsed.insert(p);
                 }
-                push_doc_tree(&w, full, collapsed);
+                push_doc_tree(&w, 0, full, collapsed);
+            });
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_p1_toggle_doc_node(move |path| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            DOC_TREES.with(|s| {
+                let mut st = s.borrow_mut();
+                let (full, collapsed) = &mut st[1];
+                let p = path.to_string();
+                if !collapsed.remove(&p) {
+                    collapsed.insert(p);
+                }
+                push_doc_tree(&w, 1, full, collapsed);
             });
         });
     }
@@ -5872,9 +7162,9 @@ fn main() -> Result<(), slint::PlatformError> {
             tabs.push(WorkspaceTab::sql(id.clone(), number));
             *active_tab_id.lock().unwrap() = Some(id.clone());
             set_workspace_tabs(&w, &tabs, Some(&id));
-            save_query_tabs(&tabs, Some(&id));
+            save_query_tabs(&w, &tabs, Some(&id));
             drop(tabs);
-            load_editor_text("");
+            load_editor_text(0, "");
             // Fresh query tab starts with no result tabs.
             results.lock().unwrap().clear();
             *active_result.lock().unwrap() = 0;
@@ -5884,8 +7174,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 ..Default::default()
             };
             *last_view.lock().unwrap() = None;
-            set_result_tabs(&w, 0, 0);
-            clear_grid(&w);
+            set_result_tabs(&w, 0, 0, 0);
+            clear_grid(&w, 0);
+            w.set_active_pane(0);
             w.set_active_table(SharedString::default());
             w.set_fn_mode(false);
             w.set_query_running(false);
@@ -5896,16 +7187,16 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- ⌘\: run the current statement into a NEW result tab -----
     {
         let weak = window.as_weak();
-        let ed_state = ed_state.clone();
+        let panes = panes.clone();
         let run_sql = run_sql.clone();
         let recent_queries = recent_queries.clone();
-        let result_new_tab = result_new_tab.clone();
         window.on_run_new_tab(move || {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            let pane = w.get_active_pane().clamp(0, 1) as usize;
             let stmt = {
-                let ed = ed_state.borrow();
+                let ed = panes[pane].ed_state.borrow();
                 ed.selected_text()
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
@@ -5915,10 +7206,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             }
             // Same editor; the run lands in an appended result tab.
-            result_new_tab.store(true, std::sync::atomic::Ordering::SeqCst);
-            w.set_grid_read_only(true);
+            panes[pane]
+                .result_new_tab
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            if pane == 0 {
+                w.set_grid_read_only(true);
+            }
             record_recent(&recent_queries, &stmt);
-            run_sql(stmt);
+            run_sql(pane, stmt);
         });
     }
 
@@ -5960,6 +7255,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_active_result(i as i32);
             present_view(
                 &w,
+                0,
                 sr.view,
                 &sr.meta,
                 &sr.latency,
@@ -6005,7 +7301,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 (rv.len(), *ar, rv.get(*ar).cloned())
             };
-            set_result_tabs(&w, count, active);
+            set_result_tabs(&w, 0, count, active);
             if let Some(id) = active_tab_id.lock().unwrap().clone() {
                 if let Some(tab) = workspace_tabs
                     .lock()
@@ -6020,6 +7316,7 @@ fn main() -> Result<(), slint::PlatformError> {
             match sr {
                 Some(sr) => present_view(
                     &w,
+                    0,
                     sr.view,
                     &sr.meta,
                     &sr.latency,
@@ -6033,8 +7330,111 @@ fn main() -> Result<(), slint::PlatformError> {
                     &browse,
                 ),
                 None => {
-                    clear_grid(&w);
+                    clear_grid(&w, 0);
                     *last_view.lock().unwrap() = None;
+                }
+            }
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        let last_view = last_view.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
+        window.on_p1_select_result_tab(move |i| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let i = i.max(0) as usize;
+            let sr = panes[1].results.lock().unwrap().get(i).cloned();
+            let Some(sr) = sr else {
+                return;
+            };
+            *panes[1].active_result.lock().unwrap() = i;
+            if let Some(id) = active_group1_tab_id.lock().unwrap().clone() {
+                if let Some(tab) = workspace_tabs
+                    .lock()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|tab| tab.id == id)
+                {
+                    tab.active_result = i;
+                }
+            }
+            w.set_p1_active_result(i as i32);
+            present_view(
+                &w,
+                1,
+                sr.view,
+                &sr.meta,
+                &sr.latency,
+                &last_view,
+                &panes[1].displayed_grid,
+                &panes[1].hidden_cols,
+                &panes[1].sort_state,
+                &panes[1].col_order,
+                &panes[1].col_filters,
+                &panes[1].edit_buf,
+                &panes[1].browse,
+            );
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        let last_view = last_view.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
+        window.on_p1_close_result_tab(move |i| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let i = i.max(0) as usize;
+            let (count, active, sr) = {
+                let mut rv = panes[1].results.lock().unwrap();
+                if i >= rv.len() {
+                    return;
+                }
+                rv.remove(i);
+                let mut ar = panes[1].active_result.lock().unwrap();
+                if *ar >= rv.len() {
+                    *ar = rv.len().saturating_sub(1);
+                }
+                (rv.len(), *ar, rv.get(*ar).cloned())
+            };
+            set_result_tabs(&w, 1, count, active);
+            if let Some(id) = active_group1_tab_id.lock().unwrap().clone() {
+                if let Some(tab) = workspace_tabs
+                    .lock()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|tab| tab.id == id)
+                {
+                    tab.results = panes[1].results.lock().unwrap().clone();
+                    tab.active_result = active;
+                }
+            }
+            match sr {
+                Some(sr) => present_view(
+                    &w,
+                    1,
+                    sr.view,
+                    &sr.meta,
+                    &sr.latency,
+                    &last_view,
+                    &panes[1].displayed_grid,
+                    &panes[1].hidden_cols,
+                    &panes[1].sort_state,
+                    &panes[1].col_order,
+                    &panes[1].col_filters,
+                    &panes[1].edit_buf,
+                    &panes[1].browse,
+                ),
+                None => {
+                    clear_grid(&w, 1);
+                    set_p_results_meta(&w, 1, SharedString::default());
                 }
             }
         });
@@ -6066,11 +7466,21 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             }
             let remove_at = if requested >= 0 {
-                requested as usize
+                tabs.iter()
+                    .enumerate()
+                    .filter(|(_, tab)| tab.group == 0)
+                    .nth(requested as usize)
+                    .map(|(index, _)| index)
+                    .unwrap_or(tabs.len())
             } else {
                 workspace_tab_index(&tabs, active_tab_id.lock().unwrap().as_deref()).unwrap_or(0)
             };
             if remove_at >= tabs.len() {
+                return;
+            }
+            if tabs.iter().filter(|tab| tab.group == 0).count() == 1
+                && tabs.iter().any(|tab| tab.group == 1)
+            {
                 return;
             }
             let removed_active =
@@ -6079,9 +7489,9 @@ fn main() -> Result<(), slint::PlatformError> {
             if tabs.is_empty() {
                 *active_tab_id.lock().unwrap() = None;
                 set_workspace_tabs(&w, &tabs, None);
-                save_query_tabs(&tabs, None);
+                save_query_tabs(&w, &tabs, None);
                 drop(tabs);
-                load_editor_text("");
+                load_editor_text(0, "");
                 let limit = browse.lock().unwrap().limit;
                 *browse.lock().unwrap() = BrowseState {
                     limit,
@@ -6090,7 +7500,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 results.lock().unwrap().clear();
                 *last_view.lock().unwrap() = None;
                 *displayed_grid.lock().unwrap() = None;
-                clear_grid(&w);
+                clear_grid(&w, 0);
                 w.set_active_table(SharedString::default());
                 w.set_fn_mode(false);
                 w.set_query_running(false);
@@ -6098,17 +7508,76 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             }
             if removed_active {
-                let next = remove_at.min(tabs.len() - 1);
+                let next = tabs
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, tab)| tab.group == 0)
+                    .nth(requested.max(0) as usize)
+                    .map(|(index, _)| index)
+                    .or_else(|| {
+                        tabs.iter()
+                            .enumerate()
+                            .find(|(_, tab)| tab.group == 0)
+                            .map(|(index, _)| index)
+                    });
                 drop(tabs);
-                restore_tab(&w, next);
+                if let Some(next) = next {
+                    restore_tab(&w, next);
+                }
             } else {
                 let active = active_tab_id.lock().unwrap().clone();
                 set_workspace_tabs(&w, &tabs, active.as_deref());
             }
             save_query_tabs(
+                &w,
                 &workspace_tabs.lock().unwrap(),
                 active_tab_id.lock().unwrap().as_deref(),
             );
+        });
+    }
+
+    // Closing a right-group tab uses the right group's filtered index. When its
+    // last tab closes, `set_workspace_tabs` removes the whole second group.
+    {
+        let weak = window.as_weak();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
+        let save_p1_tab = save_p1_tab.clone();
+        let restore_p1_tab = restore_p1_tab.clone();
+        let active_tab_id = active_tab_id.clone();
+        window.on_close_p1_tab(move |requested| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if requested < 0 {
+                return;
+            }
+            save_p1_tab(&w);
+            let remove_at = {
+                let tabs = workspace_tabs.lock().unwrap();
+                tabs.iter()
+                    .enumerate()
+                    .filter(|(_, tab)| tab.group == 1)
+                    .nth(requested as usize)
+                    .map(|(index, _)| index)
+            };
+            let Some(remove_at) = remove_at else {
+                return;
+            };
+            let mut tabs = workspace_tabs.lock().unwrap();
+            tabs.remove(remove_at);
+            let remaining = tabs.iter().filter(|tab| tab.group == 1).count();
+            let active = active_tab_id.lock().unwrap().clone();
+            set_workspace_tabs(&w, &tabs, active.as_deref());
+            save_query_tabs(&w, &tabs, active.as_deref());
+            drop(tabs);
+            if remaining == 0 {
+                *active_group1_tab_id.lock().unwrap() = None;
+                load_editor_text(1, "");
+                clear_grid(&w, 1);
+            } else {
+                restore_p1_tab(&w, requested.min((remaining - 1) as i32) as usize);
+            }
         });
     }
 
@@ -6118,6 +7587,7 @@ fn main() -> Result<(), slint::PlatformError> {
         window.on_open_rename(move |idx, title| {
             if let Some(w) = weak.upgrade() {
                 w.set_rename_target(idx);
+                w.set_rename_group(0);
                 w.set_rename_text(title);
                 w.set_rename_modal_open(true);
             }
@@ -6132,16 +7602,23 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let i = w.get_rename_target().max(0) as usize;
+            let group = w.get_rename_group().clamp(0, 1) as usize;
             let name = w.get_rename_text().trim().to_string();
             let mut tabs = workspace_tabs.lock().unwrap();
-            if let Some(tab) = tabs.get_mut(i) {
+            let index = tabs
+                .iter()
+                .enumerate()
+                .filter(|(_, tab)| tab.group == group)
+                .nth(i)
+                .map(|(index, _)| index);
+            if let Some(tab) = index.and_then(|index| tabs.get_mut(index)) {
                 if !name.is_empty() {
                     tab.title = name;
                 }
             }
             let active = active_tab_id.lock().unwrap().clone();
             set_workspace_tabs(&w, &tabs, active.as_deref());
-            save_query_tabs(&tabs, active.as_deref());
+            save_query_tabs(&w, &tabs, active.as_deref());
         });
     }
 
@@ -6156,14 +7633,24 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            if idx < 0 || idx as usize >= workspace_tabs.lock().unwrap().len() {
+            if idx < 0 {
                 return;
             }
             if guard_pending(&w) {
                 return;
             }
             save_active_tab(&w);
-            restore_tab(&w, idx as usize);
+            let index = workspace_tabs
+                .lock()
+                .unwrap()
+                .iter()
+                .enumerate()
+                .filter(|(_, tab)| tab.group == 0)
+                .nth(idx as usize)
+                .map(|(index, _)| index);
+            if let Some(index) = index {
+                restore_tab(&w, index);
+            }
         });
     }
 
@@ -6205,7 +7692,7 @@ fn main() -> Result<(), slint::PlatformError> {
         Rc::new(move |w: &MainWindow| {
             let buf = edit_buf.lock().unwrap();
             if let Some(g) = displayed_grid.lock().unwrap().as_ref() {
-                paint_grid_with_edits(w, g, &buf);
+                paint_grid_with_edits(w, 0, g, &buf);
             }
             w.set_pending_count(buf.pending_count() as i32);
         })
@@ -7280,20 +8767,46 @@ mod tests {
                     id: "query:c:1".into(),
                     title: "Query 1".into(),
                     query_text: "select * from users;".into(),
+                    group: 1,
+                    split: true,
+                    pane1_query: "select * from orders;".into(),
+                    split_ratio: 0.35,
                 },
                 PersistedTab {
                     id: "query:c:2".into(),
                     title: "scratch".into(),
                     query_text: String::new(),
+                    group: 0,
+                    split: false,
+                    pane1_query: String::new(),
+                    split_ratio: 0.5,
                 },
             ],
             active: Some("query:c:2".into()),
+            active_p1: Some("query:c:1".into()),
+            active_group: 1,
         };
         let json = serde_json::to_string(&payload).unwrap();
         let back: PersistedTabs = serde_json::from_str(&json).unwrap();
         assert_eq!(back.tabs.len(), 2);
         assert_eq!(back.tabs[0].query_text, "select * from users;");
+        assert_eq!(back.tabs[0].group, 1);
+        assert!(back.tabs[0].split);
+        assert_eq!(back.tabs[0].pane1_query, "select * from orders;");
+        assert_eq!(back.tabs[0].split_ratio, 0.35);
         assert_eq!(back.active.as_deref(), Some("query:c:2"));
+    }
+
+    #[test]
+    fn persisted_tabs_accept_pre_split_files() {
+        let payload: PersistedTabs = serde_json::from_str(
+            r#"{"tabs":[{"id":"query:c:1","title":"Query 1","query_text":"select 1"}],"active":null}"#,
+        )
+        .unwrap();
+        assert!(!payload.tabs[0].split);
+        assert_eq!(payload.tabs[0].group, 0);
+        assert!(payload.tabs[0].pane1_query.is_empty());
+        assert_eq!(payload.tabs[0].split_ratio, 0.5);
     }
 
     #[test]
