@@ -770,11 +770,17 @@ fn default_split_ratio() -> f32 {
 struct PersistedTabs {
     tabs: Vec<PersistedTab>,
     active: Option<String>,
+    // Active tab in the right group and which group was focused last session.
+    #[serde(default)]
+    active_p1: Option<String>,
+    #[serde(default)]
+    active_group: usize,
 }
 
-/// Persist the SQL tabs (kind == "sql") and the active tab id. Best-effort;
-/// I/O errors are ignored. Skipped in mock mode.
-fn save_query_tabs(tabs: &[WorkspaceTab], active: Option<&str>) {
+/// Persist the SQL tabs (kind == "sql") plus each group's active tab and the
+/// focused group (read from the window). Best-effort; I/O errors are ignored.
+/// Skipped in mock mode.
+fn save_query_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active: Option<&str>) {
     if mock::mock_mode() {
         return;
     }
@@ -797,7 +803,19 @@ fn save_query_tabs(tabs: &[WorkspaceTab], active: Option<&str>) {
     let active = active
         .filter(|id| sql.iter().any(|t| t.id == *id))
         .map(|s| s.to_string());
-    let payload = PersistedTabs { tabs: sql, active };
+    // Right-group active tab: map the p1 strip index back to a tab id.
+    let active_p1 = tabs
+        .iter()
+        .filter(|t| t.group == 1)
+        .nth(w.get_p1_active_tab().max(0) as usize)
+        .filter(|t| t.kind == "sql")
+        .map(|t| t.id.clone());
+    let payload = PersistedTabs {
+        tabs: sql,
+        active,
+        active_p1,
+        active_group: (w.get_active_pane().max(0) as usize).min(1),
+    };
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
@@ -807,16 +825,17 @@ fn save_query_tabs(tabs: &[WorkspaceTab], active: Option<&str>) {
 }
 
 /// Load persisted SQL tabs into fresh `WorkspaceTab`s (empty results/browse).
-/// Returns the tabs and the active tab id (if it still exists).
-fn load_query_tabs() -> (Vec<WorkspaceTab>, Option<String>) {
+/// Returns the tabs, each group's active tab id (if it still exists), and the
+/// focused group.
+fn load_query_tabs() -> (Vec<WorkspaceTab>, Option<String>, Option<String>, usize) {
     let Ok(path) = rdb_connstore::ConnStore::query_tabs_path() else {
-        return (Vec::new(), None);
+        return (Vec::new(), None, None, 0);
     };
     let Some(payload): Option<PersistedTabs> = std::fs::read_to_string(path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
     else {
-        return (Vec::new(), None);
+        return (Vec::new(), None, None, 0);
     };
     let tabs: Vec<WorkspaceTab> = payload
         .tabs
@@ -832,8 +851,10 @@ fn load_query_tabs() -> (Vec<WorkspaceTab>, Option<String>) {
             t
         })
         .collect();
-    let active = payload.active.filter(|id| tabs.iter().any(|t| t.id == *id));
-    (tabs, active)
+    let exists = |id: &String| tabs.iter().any(|t| t.id == *id);
+    let active = payload.active.filter(|id| exists(id));
+    let active_p1 = payload.active_p1.filter(|id| exists(id));
+    (tabs, active, active_p1, payload.active_group.min(1))
 }
 
 fn page_bounds(page: u64, limit: u64, total: Option<u64>, shown: u64) -> (u64, u64, bool, bool) {
@@ -3792,7 +3813,7 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             // Persist SQL scratch tabs so they survive a restart. Cheap JSON
             // write; fires on switch/new/close/run, which is when text changes.
-            save_query_tabs(&tabs, Some(&id));
+            save_query_tabs(w, &tabs, Some(&id));
         })
     };
 
@@ -3817,7 +3838,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 tab.results = panes[1].results.lock().unwrap().clone();
                 tab.active_result = *panes[1].active_result.lock().unwrap();
             }
-            save_query_tabs(&tabs, None);
+            save_query_tabs(w, &tabs, None);
         })
     };
 
@@ -4010,7 +4031,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 tabs.push(tab);
                 let left = active_tab_id.lock().unwrap().clone();
                 set_workspace_tabs(&w, &tabs, left.as_deref());
-                save_query_tabs(&tabs, left.as_deref());
+                save_query_tabs(&w, &tabs, left.as_deref());
                 tabs.iter().filter(|tab| tab.group == 1).count() - 1
             };
             *active_p1_tab_id.lock().unwrap() = Some(id);
@@ -4656,6 +4677,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let browse = browse.clone();
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
+        let active_p1_tab_id = active_p1_tab_id.clone();
         let current_connection_id = current_connection_id.clone();
         let query_console = query_console.clone();
         let results = results.clone();
@@ -4689,7 +4711,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // without losing their queries.
             let restore = !tabs_restored.get() || db_ovr.is_some();
             tabs_restored.set(true);
-            let (init_tabs, init_active) = if restore {
+            let (init_tabs, init_active, init_active_p1, init_active_group) = if restore {
                 load_query_tabs()
             } else {
                 // Retain the SQL scratch tabs (with their results) so switching
@@ -4711,10 +4733,17 @@ fn main() -> Result<(), slint::PlatformError> {
                     .clone()
                     .filter(|id| kept.iter().any(|t| t.id == *id))
                     .or_else(|| kept.first().map(|t| t.id.clone()));
-                (kept, active)
+                // Connection switch keeps the in-memory focus + right-group tab.
+                let active_p1 = active_p1_tab_id
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .filter(|id| kept.iter().any(|t| t.id == *id));
+                (kept, active, active_p1, 0usize)
             };
             *workspace_tabs.lock().unwrap() = init_tabs;
             *active_tab_id.lock().unwrap() = init_active.clone();
+            *active_p1_tab_id.lock().unwrap() = init_active_p1.clone();
             results.lock().unwrap().clear();
             *last_view.lock().unwrap() = None;
             edit_buf.lock().unwrap().clear();
@@ -4793,6 +4822,19 @@ fn main() -> Result<(), slint::PlatformError> {
                 if let Some(idx) = active_idx {
                     restore_tab(&w, idx);
                 }
+                // Restore the right group's active tab, then land on the group
+                // that was focused last session.
+                if let Some(p1_id) = init_active_p1.as_deref() {
+                    let p1_idx = workspace_tabs
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .position(|t| t.id == p1_id);
+                    if let Some(idx) = p1_idx {
+                        restore_tab(&w, idx);
+                    }
+                }
+                w.set_active_pane(init_active_group as i32);
             }
             // Fresh connection: nothing browsed, nothing expanded.
             *cur_engine.borrow_mut() = Some(sc.engine);
@@ -6967,7 +7009,7 @@ fn main() -> Result<(), slint::PlatformError> {
             tabs.push(WorkspaceTab::sql(id.clone(), number));
             *active_tab_id.lock().unwrap() = Some(id.clone());
             set_workspace_tabs(&w, &tabs, Some(&id));
-            save_query_tabs(&tabs, Some(&id));
+            save_query_tabs(&w, &tabs, Some(&id));
             drop(tabs);
             load_editor_text(0, "");
             // Fresh query tab starts with no result tabs.
@@ -7294,7 +7336,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if tabs.is_empty() {
                 *active_tab_id.lock().unwrap() = None;
                 set_workspace_tabs(&w, &tabs, None);
-                save_query_tabs(&tabs, None);
+                save_query_tabs(&w, &tabs, None);
                 drop(tabs);
                 load_editor_text(0, "");
                 let limit = browse.lock().unwrap().limit;
@@ -7334,6 +7376,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 set_workspace_tabs(&w, &tabs, active.as_deref());
             }
             save_query_tabs(
+                &w,
                 &workspace_tabs.lock().unwrap(),
                 active_tab_id.lock().unwrap().as_deref(),
             );
@@ -7373,7 +7416,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let remaining = tabs.iter().filter(|tab| tab.group == 1).count();
             let active = active_tab_id.lock().unwrap().clone();
             set_workspace_tabs(&w, &tabs, active.as_deref());
-            save_query_tabs(&tabs, active.as_deref());
+            save_query_tabs(&w, &tabs, active.as_deref());
             drop(tabs);
             if remaining == 0 {
                 *active_p1_tab_id.lock().unwrap() = None;
@@ -7422,7 +7465,7 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             let active = active_tab_id.lock().unwrap().clone();
             set_workspace_tabs(&w, &tabs, active.as_deref());
-            save_query_tabs(&tabs, active.as_deref());
+            save_query_tabs(&w, &tabs, active.as_deref());
         });
     }
 
@@ -8587,6 +8630,8 @@ mod tests {
                 },
             ],
             active: Some("query:c:2".into()),
+            active_p1: Some("query:c:1".into()),
+            active_group: 1,
         };
         let json = serde_json::to_string(&payload).unwrap();
         let back: PersistedTabs = serde_json::from_str(&json).unwrap();
