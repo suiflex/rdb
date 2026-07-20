@@ -3822,43 +3822,53 @@ fn main() -> Result<(), slint::PlatformError> {
     };
 
     #[allow(clippy::type_complexity)]
-    let restore_tab: Rc<dyn Fn(&MainWindow, usize)> = {
+    // Restore a tab into a group's runtime (`pane` 0 left / 1 right). `group_index`
+    // is the position within that group's tab strip. Both groups share this path;
+    // per-group runtime state lives in `panes[pane]`. Chrome that is still a shared
+    // MainWindow property (fn-mode/active-table/pagination footer/indexes) is only
+    // painted for the left group until it is mirrored per-group.
+    // Restore the tab at absolute index `abs_index` into ITS group's runtime
+    // (`pane` = tab.group). `group_index` (position within that group's strip) is
+    // derived. Per-group runtime state lives in `panes[pane]`; chrome that is still
+    // a shared MainWindow property is only painted for the left group for now.
+    #[allow(clippy::type_complexity)]
+    let restore_tab_for_pane: Rc<dyn Fn(&MainWindow, usize)> = {
         let tabs = workspace_tabs.clone();
-        let active_id = active_tab_id.clone();
+        let active_tab_id = active_tab_id.clone();
+        let active_p1_tab_id = active_p1_tab_id.clone();
         let load_editor_text = load_editor_text.clone();
-        let browse = browse.clone();
-        let results = results.clone();
-        let active_result = active_result.clone();
+        let panes = panes.clone();
         let last_view = last_view.clone();
-        let displayed_grid = displayed_grid.clone();
-        let hidden_cols = hidden_cols.clone();
-        let sort_state = sort_state.clone();
-        let col_order = col_order.clone();
-        let col_filters = col_filters.clone();
-        let edit_buf = edit_buf.clone();
-        Rc::new(move |w, index| {
-            let tab = {
+        Rc::new(move |w, abs_index| {
+            let (tab, pane, group_index) = {
                 let tabs = tabs.lock().unwrap();
-                let Some(tab) = tabs.get(index).cloned() else {
+                let Some(tab) = tabs.get(abs_index).cloned() else {
                     return;
                 };
-                tab
+                let pane = tab.group.min(1);
+                let group_index = tabs[..abs_index].iter().filter(|t| t.group == pane).count();
+                (tab, pane, group_index)
             };
-            *active_id.lock().unwrap() = Some(tab.id.clone());
-            let tabs_guard = tabs.lock().unwrap();
-            set_workspace_tabs(w, &tabs_guard, Some(&tab.id));
-            drop(tabs_guard);
+            if pane == 0 {
+                *active_tab_id.lock().unwrap() = Some(tab.id.clone());
+            } else {
+                *active_p1_tab_id.lock().unwrap() = Some(tab.id.clone());
+            }
+            {
+                // Keep the group-0 selection stable when restoring the right group.
+                let tabs_guard = tabs.lock().unwrap();
+                let left_active = active_tab_id.lock().unwrap().clone();
+                set_workspace_tabs(w, &tabs_guard, left_active.as_deref());
+            }
+            w.set_active_pane(pane as i32);
+            if pane == 1 {
+                w.set_p1_active_tab(group_index as i32);
+            }
 
-            load_editor_text(0, &tab.query_text);
-            w.set_active_pane(0);
-            w.set_fn_mode(tab.kind == "function");
-            w.set_query_running(tab.loading);
-            w.set_active_table(
-                tab.table
-                    .as_ref()
-                    .map(|table| SharedString::from(table.name.clone()))
-                    .unwrap_or_default(),
-            );
+            load_editor_text(pane, &tab.query_text);
+
+            // Per-group browse state (drives that group's pagination + edits).
+            let browse = &panes[pane].browse;
             if tab.kind == "table" {
                 *browse.lock().unwrap() = tab.browse.clone();
             } else {
@@ -3868,103 +3878,91 @@ fn main() -> Result<(), slint::PlatformError> {
                     ..Default::default()
                 };
             }
-            w.set_total_rows(tab.browse.total.map(|n| n as i32).unwrap_or(-1));
-            w.set_grid_read_only(tab.browse.pk_cols.is_empty());
-            let index_rows: Vec<IndexRow> = tab
-                .indexes
-                .iter()
-                .cloned()
-                .map(|(name, definition)| IndexRow {
-                    name: name.into(),
-                    definition: definition.into(),
-                })
-                .collect();
-            w.set_index_rows(ModelRc::from(Rc::new(VecModel::from(index_rows))));
 
-            *results.lock().unwrap() = tab.results.clone();
-            *active_result.lock().unwrap() = tab.active_result;
-            set_result_tabs(w, 0, tab.results.len(), tab.active_result);
+            // Shared MainWindow chrome — left group only for now.
+            if pane == 0 {
+                w.set_fn_mode(tab.kind == "function");
+                w.set_query_running(tab.loading);
+                w.set_active_table(
+                    tab.table
+                        .as_ref()
+                        .map(|table| SharedString::from(table.name.clone()))
+                        .unwrap_or_default(),
+                );
+                w.set_total_rows(tab.browse.total.map(|n| n as i32).unwrap_or(-1));
+                w.set_grid_read_only(tab.browse.pk_cols.is_empty());
+                let index_rows: Vec<IndexRow> = tab
+                    .indexes
+                    .iter()
+                    .cloned()
+                    .map(|(name, definition)| IndexRow {
+                        name: name.into(),
+                        definition: definition.into(),
+                    })
+                    .collect();
+                w.set_index_rows(ModelRc::from(Rc::new(VecModel::from(index_rows))));
+            }
+
+            *panes[pane].results.lock().unwrap() = tab.results.clone();
+            *panes[pane].active_result.lock().unwrap() = tab.active_result;
+            set_result_tabs(w, pane, tab.results.len(), tab.active_result);
             let selected = if tab.kind == "sql" {
-                tab.results.get(tab.active_result).cloned().or(tab.view)
+                tab.results
+                    .get(tab.active_result)
+                    .cloned()
+                    .or(tab.view.clone())
             } else {
-                tab.view
+                tab.view.clone()
             };
             if let Some(stored) = selected {
                 present_view(
                     w,
-                    0,
+                    pane,
                     stored.view,
                     &stored.meta,
                     &stored.latency,
                     &last_view,
-                    &displayed_grid,
-                    &hidden_cols,
-                    &sort_state,
-                    &col_order,
-                    &col_filters,
-                    &edit_buf,
-                    &browse,
+                    &panes[pane].displayed_grid,
+                    &panes[pane].hidden_cols,
+                    &panes[pane].sort_state,
+                    &panes[pane].col_order,
+                    &panes[pane].col_filters,
+                    &panes[pane].edit_buf,
+                    &panes[pane].browse,
                 );
             } else {
                 *last_view.lock().unwrap() = None;
-                *displayed_grid.lock().unwrap() = None;
-                clear_grid(w, 0);
-                w.set_results_meta(SharedString::default());
-                w.set_result_status(SharedString::default());
+                *panes[pane].displayed_grid.lock().unwrap() = None;
+                clear_grid(w, pane);
+                set_p_results_meta(w, pane, SharedString::default());
+                set_p_result_status(w, pane, SharedString::default());
             }
         })
     };
 
+    // `restore_tab` takes an absolute `workspace_tabs` index (what most callers
+    // already compute). The UI select handlers pass a group-relative strip index
+    // and convert it before calling.
+    #[allow(clippy::type_complexity)]
+    let restore_tab: Rc<dyn Fn(&MainWindow, usize)> = restore_tab_for_pane.clone();
+
+    // `restore_p1_tab` takes a group-1 strip index and maps it to the absolute
+    // index the shared restore expects.
     #[allow(clippy::type_complexity)]
     let restore_p1_tab: Rc<dyn Fn(&MainWindow, usize)> = {
+        let f = restore_tab_for_pane.clone();
         let tabs = workspace_tabs.clone();
-        let active_id = active_p1_tab_id.clone();
-        let load_editor_text = load_editor_text.clone();
-        let panes = panes.clone();
-        let last_view = last_view.clone();
-        Rc::new(move |w, group_index| {
-            let tab = {
+        Rc::new(move |w, group1_index| {
+            let abs = {
                 let tabs = tabs.lock().unwrap();
                 tabs.iter()
-                    .filter(|tab| tab.group == 1)
-                    .nth(group_index)
-                    .cloned()
+                    .enumerate()
+                    .filter(|(_, t)| t.group == 1)
+                    .nth(group1_index)
+                    .map(|(abs, _)| abs)
             };
-            let Some(tab) = tab else {
-                return;
-            };
-            *active_id.lock().unwrap() = Some(tab.id.clone());
-            load_editor_text(1, &tab.query_text);
-            *panes[1].results.lock().unwrap() = tab.results.clone();
-            *panes[1].active_result.lock().unwrap() = tab.active_result;
-            set_result_tabs(w, 1, tab.results.len(), tab.active_result);
-            w.set_p1_active_tab(group_index as i32);
-            w.set_active_pane(1);
-            let selected = if tab.kind == "sql" {
-                tab.results.get(tab.active_result).cloned().or(tab.view)
-            } else {
-                tab.view
-            };
-            if let Some(stored) = selected {
-                present_view(
-                    w,
-                    1,
-                    stored.view,
-                    &stored.meta,
-                    &stored.latency,
-                    &last_view,
-                    &panes[1].displayed_grid,
-                    &panes[1].hidden_cols,
-                    &panes[1].sort_state,
-                    &panes[1].col_order,
-                    &panes[1].col_filters,
-                    &panes[1].edit_buf,
-                    &panes[1].browse,
-                );
-            } else {
-                clear_grid(w, 1);
-                set_p_results_meta(w, 1, SharedString::default());
-                set_p_result_status(w, 1, SharedString::default());
+            if let Some(abs) = abs {
+                f(w, abs);
             }
         })
     };
