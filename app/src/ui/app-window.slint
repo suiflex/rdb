@@ -370,6 +370,14 @@ in-out property <string> rename-text;
     in property <bool> p1-query-running;
     in property <bool> p1-streaming;
     in-out property <string> p1-limit-text;
+    in property <string> p1-active-table;
+    in property <int> p1-page-start;
+    in property <int> p1-page-end;
+    in property <int> p1-total-rows: -1;
+    in property <bool> p1-can-prev;
+    in property <bool> p1-can-next;
+    in property <bool> p1-grid-read-only: true;
+    in-out property <bool> p1-show-structure: false;
     in property <string> p1-query-label;
     in property <string> p1-results-meta;
     in property <[string]> p1-result-tabs;
@@ -403,6 +411,9 @@ in-out property <string> rename-text;
     callback p1-explain-query();
     callback p1-cancel-stream();
     callback p1-set-limit(string);
+    callback p1-prev-page();
+    callback p1-next-page();
+    callback p1-refresh-page();
     callback p1-toggle-find();
     callback p1-find-changed(string);
     callback p1-find-next();
@@ -1279,6 +1290,14 @@ in-out property <string> rename-text;
                         p1-query-running: root.p1-query-running;
                         p1-streaming: root.p1-streaming;
                         p1-limit-text <=> root.p1-limit-text;
+                        p1-active-table: root.p1-active-table;
+                        p1-page-start: root.p1-page-start;
+                        p1-page-end: root.p1-page-end;
+                        p1-total-rows: root.p1-total-rows;
+                        p1-can-prev: root.p1-can-prev;
+                        p1-can-next: root.p1-can-next;
+                        p1-read-only: root.p1-grid-read-only;
+                        p1-show-structure <=> root.p1-show-structure;
                         p1-query-label: root.p1-query-label;
                         p1-results-meta: root.p1-results-meta;
                         p1-result-tabs: root.p1-result-tabs;
@@ -1312,6 +1331,9 @@ in-out property <string> rename-text;
                         p1-explain-query() => { root.p1-explain-query(); }
                         p1-cancel-stream() => { root.p1-cancel-stream(); }
                         p1-set-limit(t) => { root.p1-set-limit(t); }
+                        p1-prev-page() => { root.p1-prev-page(); }
+                        p1-next-page() => { root.p1-next-page(); }
+                        p1-refresh-page() => { root.p1-refresh-page(); }
                         p1-find-changed(t) => { root.p1-find-changed(t); }
                         p1-find-next() => { root.p1-find-next(); }
                         p1-find-prev() => { root.p1-find-prev(); }

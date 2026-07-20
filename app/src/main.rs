@@ -1344,8 +1344,7 @@ fn clear_grid(w: &MainWindow, pane: usize) {
 }
 
 // ----- per-pane result setters: pane 0 writes the base properties, pane 1 the
-// p1-* mirror. Only genuinely per-pane props are routed; tab-global props
-// (browse paging, filter chrome, status latency) always use the base setter.
+// p1-* mirror. Workspace groups render independently, including table chrome.
 fn set_p_cells(w: &MainWindow, pane: usize, m: ModelRc<GridCell>) {
     if pane == 0 {
         w.set_grid_cells(m);
@@ -1393,6 +1392,47 @@ fn set_p_status_error(w: &MainWindow, pane: usize, b: bool) {
         w.set_status_error(b);
     } else {
         w.set_p1_status_error(b);
+    }
+}
+fn set_p_active_table(w: &MainWindow, pane: usize, table: SharedString) {
+    if pane == 0 {
+        w.set_active_table(table);
+    } else {
+        w.set_p1_active_table(table);
+    }
+}
+fn set_p_total_rows(w: &MainWindow, pane: usize, total: i32) {
+    if pane == 0 {
+        w.set_total_rows(total);
+    } else {
+        w.set_p1_total_rows(total);
+    }
+}
+fn set_p_page_bounds(w: &MainWindow, pane: usize, start: i32, end: i32, prev: bool, next: bool) {
+    if pane == 0 {
+        w.set_page_start(start);
+        w.set_page_end(end);
+        w.set_can_prev(prev);
+        w.set_can_next(next);
+    } else {
+        w.set_p1_page_start(start);
+        w.set_p1_page_end(end);
+        w.set_p1_can_prev(prev);
+        w.set_p1_can_next(next);
+    }
+}
+fn set_p_read_only(w: &MainWindow, pane: usize, read_only: bool) {
+    if pane == 0 {
+        w.set_grid_read_only(read_only);
+    } else {
+        w.set_p1_grid_read_only(read_only);
+    }
+}
+fn set_p_index_rows(w: &MainWindow, pane: usize, rows: ModelRc<IndexRow>) {
+    if pane == 0 {
+        w.set_index_rows(rows);
+    } else {
+        w.set_p1_index_rows(rows);
     }
 }
 fn set_p_results_meta(w: &MainWindow, pane: usize, s: SharedString) {
@@ -1998,7 +2038,9 @@ fn present_view(
         b.table = st.table.clone();
         b.pk_cols = st.pk_cols.clone();
     }
-    w.set_pending_count(0);
+    if pane == 0 {
+        w.set_pending_count(0);
+    }
     set_p_editing(w, pane, -1, -1);
     set_p_status_error(w, pane, false);
     w.set_status_latency(SharedString::from(latency));
@@ -2028,11 +2070,8 @@ fn present_view(
     let st = browse.lock().unwrap().clone();
     if st.table.is_some() {
         let (start, end, prev, next) = page_bounds(st.page, st.limit, st.total, shown);
-        w.set_page_start(start as i32);
-        w.set_page_end(end as i32);
-        w.set_total_rows(st.total.map(|t| t as i32).unwrap_or(-1));
-        w.set_can_prev(prev);
-        w.set_can_next(next);
+        set_p_page_bounds(w, pane, start as i32, end as i32, prev, next);
+        set_p_total_rows(w, pane, st.total.map(|t| t as i32).unwrap_or(-1));
     }
 }
 
@@ -3981,29 +4020,32 @@ fn main() -> Result<(), slint::PlatformError> {
                 };
             }
 
-            // Shared MainWindow chrome — left group only for now.
+            // Function source is still a left-group view; table chrome is fully
+            // group-local so moving a table keeps its toolbar and footer.
             if pane == 0 {
                 w.set_fn_mode(tab.kind == "function");
                 w.set_query_running(tab.loading);
-                w.set_active_table(
-                    tab.table
-                        .as_ref()
-                        .map(|table| SharedString::from(table.name.clone()))
-                        .unwrap_or_default(),
-                );
-                w.set_total_rows(tab.browse.total.map(|n| n as i32).unwrap_or(-1));
-                w.set_grid_read_only(tab.browse.pk_cols.is_empty());
-                let index_rows: Vec<IndexRow> = tab
-                    .indexes
-                    .iter()
-                    .cloned()
-                    .map(|(name, definition)| IndexRow {
-                        name: name.into(),
-                        definition: definition.into(),
-                    })
-                    .collect();
-                w.set_index_rows(ModelRc::from(Rc::new(VecModel::from(index_rows))));
             }
+            set_p_active_table(
+                w,
+                pane,
+                tab.table
+                    .as_ref()
+                    .map(|table| SharedString::from(table.name.clone()))
+                    .unwrap_or_default(),
+            );
+            set_p_total_rows(w, pane, tab.browse.total.map(|n| n as i32).unwrap_or(-1));
+            set_p_read_only(w, pane, tab.browse.pk_cols.is_empty());
+            let index_rows: Vec<IndexRow> = tab
+                .indexes
+                .iter()
+                .cloned()
+                .map(|(name, definition)| IndexRow {
+                    name: name.into(),
+                    definition: definition.into(),
+                })
+                .collect();
+            set_p_index_rows(w, pane, ModelRc::from(Rc::new(VecModel::from(index_rows))));
 
             *panes[pane].results.lock().unwrap() = tab.results.clone();
             *panes[pane].active_result.lock().unwrap() = tab.active_result;
@@ -6358,16 +6400,17 @@ fn main() -> Result<(), slint::PlatformError> {
         Rc::new(move |w: &MainWindow| guard_pending_edits(w, &edit_buf))
     };
 
-    let run_browse: Rc<dyn Fn()> = {
+    let run_browse: Rc<dyn Fn(usize)> = {
         let cur_engine = cur_engine.clone();
-        let browse = browse.clone();
+        let panes = panes.clone();
         let run_sql = run_sql.clone();
         let load_editor_text = load_editor_text.clone();
-        Rc::new(move || {
+        Rc::new(move |pane| {
             let Some(engine) = *cur_engine.borrow() else {
                 return;
             };
-            let st = browse.lock().unwrap().clone();
+            let pane = pane.min(1);
+            let st = panes[pane].browse.lock().unwrap().clone();
             let Some(table) = st.table else {
                 return;
             };
@@ -6386,12 +6429,15 @@ fn main() -> Result<(), slint::PlatformError> {
                 &st.mongo_filter,
                 &st.col_filters,
             );
-            load_editor_text(0, &text);
-            run_sql(0, text);
+            load_editor_text(pane, &text);
+            run_sql(pane, text);
         })
     };
     // Wire the deferred handle so per-column browse filters can re-query.
-    *browse_trigger.borrow_mut() = Some(run_browse.clone());
+    *browse_trigger.borrow_mut() = Some(Rc::new({
+        let run_browse = run_browse.clone();
+        move || run_browse(0)
+    }));
 
     {
         let weak = window.as_weak();
@@ -6507,7 +6553,7 @@ fn main() -> Result<(), slint::PlatformError> {
             results.lock().unwrap().clear();
             set_result_tabs(&w, 0, 0, 0);
             clear_grid(&w, 0);
-            run_browse();
+            run_browse(0);
 
             // Fetch total + primary key off-thread; footer updates when done.
             let weak2 = weak.clone();
@@ -6640,7 +6686,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 st.page -= 1;
             }
-            run_browse();
+            run_browse(0);
         });
     }
     {
@@ -6653,7 +6699,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             }
             browse.lock().unwrap().page += 1;
-            run_browse();
+            run_browse(0);
         });
     }
     {
@@ -6667,7 +6713,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if weak.upgrade().is_some_and(|w| guard_pending(&w)) {
                 return;
             }
-            run_browse();
+            run_browse(0);
             // Re-count in the background so the total tracks external writes.
             let table = browse.lock().unwrap().table.clone();
             let Some(table) = table else { return };
@@ -6725,7 +6771,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     st.page = 0;
                 }
                 echo(&w, 0);
-                run_browse();
+                run_browse(0);
                 return;
             }
             // The manual field may contain dot separators — keep digits only.
@@ -6740,12 +6786,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 st.page = 0;
             }
             echo(&w, l);
-            run_browse();
+            run_browse(0);
         });
     }
 
     {
         let panes = panes.clone();
+        let run_browse = run_browse.clone();
         window.on_p1_set_limit(move |text| {
             let lower = text.trim().to_ascii_lowercase();
             let limit = if lower.is_empty()
@@ -6762,8 +6809,37 @@ fn main() -> Result<(), slint::PlatformError> {
                 };
                 limit
             };
-            panes[1].browse.lock().unwrap().limit = limit;
+            let mut browse = panes[1].browse.lock().unwrap();
+            browse.limit = limit;
+            browse.page = 0;
+            drop(browse);
+            run_browse(1);
         });
+    }
+    {
+        let panes = panes.clone();
+        let run_browse = run_browse.clone();
+        window.on_p1_prev_page(move || {
+            let mut browse = panes[1].browse.lock().unwrap();
+            if browse.page == 0 {
+                return;
+            }
+            browse.page -= 1;
+            drop(browse);
+            run_browse(1);
+        });
+    }
+    {
+        let panes = panes.clone();
+        let run_browse = run_browse.clone();
+        window.on_p1_next_page(move || {
+            panes[1].browse.lock().unwrap().page += 1;
+            run_browse(1);
+        });
+    }
+    {
+        let run_browse = run_browse.clone();
+        window.on_p1_refresh_page(move || run_browse(1));
     }
 
     // ----- Mongo browse filter bar (Compass-style filter document) -----
@@ -6794,7 +6870,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 st.mongo_filter = trimmed.to_string();
                 st.page = 0;
             }
-            run_browse();
+            run_browse(0);
         });
     }
 

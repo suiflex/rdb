@@ -139,6 +139,14 @@ export component WorkArea inherits Rectangle {
     in property <bool> p1-query-running;
     in property <bool> p1-streaming;
     in-out property <string> p1-limit-text;
+    in property <string> p1-active-table;
+    in property <int> p1-page-start;
+    in property <int> p1-page-end;
+    in property <int> p1-total-rows: -1;
+    in property <bool> p1-can-prev;
+    in property <bool> p1-can-next;
+    in property <bool> p1-read-only: true;
+    in-out property <bool> p1-show-structure: false;
     in property <string> p1-query-label;
     in property <string> p1-results-meta;
     in property <[string]> p1-result-tabs;
@@ -174,6 +182,9 @@ export component WorkArea inherits Rectangle {
     callback p1-explain-query();
     callback p1-cancel-stream();
     callback p1-set-limit(string);
+    callback p1-prev-page();
+    callback p1-next-page();
+    callback p1-refresh-page();
     callback p1-find-changed(string);
     callback p1-find-next();
     callback p1-find-prev();
@@ -258,7 +269,7 @@ export component WorkArea inherits Rectangle {
         spacing: 0;
 
         // ================= browse toolbar =================
-        if root.browse-mode: Rectangle {
+        if root.browse-mode && !root.split: Rectangle {
             height: 42px;
             background: Tokens.canvas;
             HorizontalLayout {
@@ -379,7 +390,7 @@ export component WorkArea inherits Rectangle {
 
         // One TablePlus-style condition row. Apply and Enter share the same
         // callback; the toolbar and footer no longer expose duplicate triggers.
-        if root.browse-mode && root.filter-open: Rectangle {
+        if root.browse-mode && !root.split && root.filter-open: Rectangle {
             property <int> focus-tick: root.focus-filter-tick;
             changed focus-tick => { filter-value.focus-input(); }
             height: 38px;
@@ -482,6 +493,8 @@ export component WorkArea inherits Rectangle {
             active: root.split && root.active-pane == 0;
             toggle-split() => { root.toggle-split(); }
             browse-mode: root.browse-mode;
+            table-name: root.active-table;
+            refresh-page() => { root.refresh-page(); }
             browse-editor-open: root.browse-editor-open;
             fn-mode: root.fn-mode;
             results-collapsed: root.results-collapsed;
@@ -591,16 +604,18 @@ export component WorkArea inherits Rectangle {
                 split: root.split;
                 active: root.split && root.active-pane == 1;
                 toggle-split() => { root.toggle-split(); }
-                // tab-global context shared with the left pane
-                browse-mode: root.browse-mode;
+                refresh-page() => { root.p1-refresh-page(); }
+                // Each workspace group owns its browse state.
+                browse-mode: root.p1-active-table != "";
+                table-name: root.p1-active-table;
                 browse-editor-open: root.browse-editor-open;
                 fn-mode: root.fn-mode;
                 results-collapsed: root.results-collapsed;
                 detail-visible: root.detail-visible;
                 detail-left: root.detail-left;
-                view-mode: root.view-mode;
+                view-mode: root.p1-show-structure ? 1 : 0;
                 sql-capable: root.sql-capable;
-                read-only: root.read-only;
+                read-only: root.p1-read-only;
                 // per-pane state
                 editor-h <=> root.p1-editor-h;
                 query-running: root.p1-query-running;
@@ -892,10 +907,15 @@ export component WorkArea inherits Rectangle {
                     padding-left: Tokens.sp3;
                     padding-right: Tokens.sp3;
                     spacing: Tokens.sp3;
-                    UnderlineSegment { text: "Data"; active: root.sql-view-mode == 0; clicked => { root.sql-view-mode = 0; } }
-                    UnderlineSegment { text: "Message"; active: root.sql-view-mode == 1; clicked => { root.sql-view-mode = 1; } }
-                    UnderlineSegment { text: "Chart"; active: root.sql-view-mode == 2; clicked => { root.sql-view-mode = 2; } }
+                    if root.browse-mode: UnderlineSegment { text: "Data"; active: !root.show-structure; clicked => { root.show-structure = false; } }
+                    if root.browse-mode: UnderlineSegment { text: "Structure"; active: root.show-structure; clicked => { root.show-structure = true; } }
+                    if !root.browse-mode: UnderlineSegment { text: "Data"; active: root.sql-view-mode == 0; clicked => { root.sql-view-mode = 0; } }
+                    if !root.browse-mode: UnderlineSegment { text: "Message"; active: root.sql-view-mode == 1; clicked => { root.sql-view-mode = 1; } }
+                    if !root.browse-mode: UnderlineSegment { text: "Chart"; active: root.sql-view-mode == 2; clicked => { root.sql-view-mode = 2; } }
                     Rectangle { horizontal-stretch: 1; }
+                    if root.browse-mode: Text { text: root.total-rows >= 0 ? root.page-start + "–" + root.page-end + " of " + root.total-rows : root.page-start + "–" + root.page-end; color: Tokens.text-dim; font-size: Tokens.font-sm; }
+                    if root.browse-mode: TextButton { text: "‹"; clicked => { root.prev-page(); } }
+                    if root.browse-mode: TextButton { text: "›"; clicked => { root.next-page(); } }
                     Text { text: root.result-status; color: root.status-error ? Tokens.error : Tokens.text-dim; font-size: Tokens.font-sm; vertical-alignment: center; overflow: elide; }
                 }
             }
@@ -914,10 +934,15 @@ export component WorkArea inherits Rectangle {
                     padding-left: Tokens.sp3;
                     padding-right: Tokens.sp3;
                     spacing: Tokens.sp3;
-                    UnderlineSegment { text: "Data"; active: root.p1-sql-view-mode == 0; clicked => { root.p1-sql-view-mode = 0; } }
-                    UnderlineSegment { text: "Message"; active: root.p1-sql-view-mode == 1; clicked => { root.p1-sql-view-mode = 1; } }
-                    UnderlineSegment { text: "Chart"; active: root.p1-sql-view-mode == 2; clicked => { root.p1-sql-view-mode = 2; } }
+                    if root.p1-active-table != "": UnderlineSegment { text: "Data"; active: !root.p1-show-structure; clicked => { root.p1-show-structure = false; } }
+                    if root.p1-active-table != "": UnderlineSegment { text: "Structure"; active: root.p1-show-structure; clicked => { root.p1-show-structure = true; } }
+                    if root.p1-active-table == "": UnderlineSegment { text: "Data"; active: root.p1-sql-view-mode == 0; clicked => { root.p1-sql-view-mode = 0; } }
+                    if root.p1-active-table == "": UnderlineSegment { text: "Message"; active: root.p1-sql-view-mode == 1; clicked => { root.p1-sql-view-mode = 1; } }
+                    if root.p1-active-table == "": UnderlineSegment { text: "Chart"; active: root.p1-sql-view-mode == 2; clicked => { root.p1-sql-view-mode = 2; } }
                     Rectangle { horizontal-stretch: 1; }
+                    if root.p1-active-table != "": Text { text: root.p1-total-rows >= 0 ? root.p1-page-start + "–" + root.p1-page-end + " of " + root.p1-total-rows : root.p1-page-start + "–" + root.p1-page-end; color: Tokens.text-dim; font-size: Tokens.font-sm; }
+                    if root.p1-active-table != "": TextButton { text: "‹"; clicked => { root.p1-prev-page(); } }
+                    if root.p1-active-table != "": TextButton { text: "›"; clicked => { root.p1-next-page(); } }
                     Text { text: root.p1-result-status; color: root.p1-status-error ? Tokens.error : Tokens.text-dim; font-size: Tokens.font-sm; vertical-alignment: center; overflow: elide; }
                 }
             }
