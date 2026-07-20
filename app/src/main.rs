@@ -585,6 +585,82 @@ fn replaceable_table_tab_index(tabs: &[WorkspaceTab], active_id: Option<&str>) -
     tab.is_preview().then_some(index)
 }
 
+/// Absolute `tabs` index of the `group_index`-th tab in `group` (i.e. that
+/// group's tab-strip position → the underlying vector index). None if out of
+/// range. Inverse of [`group_relative_index`].
+fn abs_index_for_group(tabs: &[WorkspaceTab], group: usize, group_index: usize) -> Option<usize> {
+    tabs.iter()
+        .enumerate()
+        .filter(|(_, t)| t.group == group)
+        .nth(group_index)
+        .map(|(abs, _)| abs)
+}
+
+/// Position of the tab at absolute index `abs` within its own group's tab strip.
+fn group_relative_index(tabs: &[WorkspaceTab], abs: usize) -> usize {
+    let group = tabs[abs].group;
+    tabs[..abs].iter().filter(|t| t.group == group).count()
+}
+
+#[cfg(test)]
+mod group_tests {
+    use super::{
+        abs_index_for_group, group_relative_index, replaceable_table_tab_index,
+        workspace_tab_index, WorkspaceTab,
+    };
+
+    fn tab(id: &str, group: usize) -> WorkspaceTab {
+        let mut t = WorkspaceTab::sql(id.into(), 0);
+        t.group = group;
+        t
+    }
+
+    #[test]
+    fn abs_and_relative_index_are_inverse() {
+        // Interleaved groups: L R L R L.
+        let tabs = vec![
+            tab("a", 0),
+            tab("b", 1),
+            tab("c", 0),
+            tab("d", 1),
+            tab("e", 0),
+        ];
+        // Left strip = a(0), c(2), e(4); right strip = b(1), d(3).
+        assert_eq!(abs_index_for_group(&tabs, 0, 0), Some(0));
+        assert_eq!(abs_index_for_group(&tabs, 0, 1), Some(2));
+        assert_eq!(abs_index_for_group(&tabs, 0, 2), Some(4));
+        assert_eq!(abs_index_for_group(&tabs, 0, 3), None);
+        assert_eq!(abs_index_for_group(&tabs, 1, 0), Some(1));
+        assert_eq!(abs_index_for_group(&tabs, 1, 1), Some(3));
+        assert_eq!(abs_index_for_group(&tabs, 1, 2), None);
+        assert_eq!(group_relative_index(&tabs, 4), 2);
+        assert_eq!(group_relative_index(&tabs, 3), 1);
+        // Round-trip: every absolute index maps back to itself.
+        for (abs, t) in tabs.iter().enumerate() {
+            let gi = group_relative_index(&tabs, abs);
+            assert_eq!(abs_index_for_group(&tabs, t.group, gi), Some(abs));
+        }
+    }
+
+    #[test]
+    fn workspace_tab_index_finds_by_id() {
+        let tabs = vec![tab("a", 0), tab("b", 1)];
+        assert_eq!(workspace_tab_index(&tabs, Some("b")), Some(1));
+        assert_eq!(workspace_tab_index(&tabs, Some("x")), None);
+        assert_eq!(workspace_tab_index(&tabs, None), None);
+    }
+
+    #[test]
+    fn replaceable_table_tab_only_for_unpinned_table() {
+        let mut t = WorkspaceTab::sql("t".into(), 0);
+        t.kind = "table".into();
+        t.pinned = false; // an unpinned table tab is a "preview"
+        assert_eq!(replaceable_table_tab_index(&[t], Some("t")), Some(0));
+        // A SQL tab is never replaceable.
+        assert_eq!(replaceable_table_tab_index(&[tab("s", 0)], Some("s")), None);
+    }
+}
+
 fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&str>) {
     let left: Vec<&WorkspaceTab> = tabs.iter().filter(|tab| tab.group == 0).collect();
     let items: Vec<TabItem> = left
@@ -3867,7 +3943,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     return;
                 };
                 let pane = tab.group.min(1);
-                let group_index = tabs[..abs_index].iter().filter(|t| t.group == pane).count();
+                let group_index = group_relative_index(&tabs, abs_index);
                 (tab, pane, group_index)
             };
             if pane == 0 {
@@ -3976,11 +4052,7 @@ fn main() -> Result<(), slint::PlatformError> {
         Rc::new(move |w, group1_index| {
             let abs = {
                 let tabs = tabs.lock().unwrap();
-                tabs.iter()
-                    .enumerate()
-                    .filter(|(_, t)| t.group == 1)
-                    .nth(group1_index)
-                    .map(|(abs, _)| abs)
+                abs_index_for_group(&tabs, 1, group1_index)
             };
             if let Some(abs) = abs {
                 f(w, abs);
