@@ -1,0 +1,16 @@
+{
+  "name": "RDBS",
+  "short_name": "RDBS",
+  "description": "Fast, lightweight, open-source database management for everyone.",
+  "start_url": "./",
+  "display": "browser",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

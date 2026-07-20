@@ -1,0 +1,142 @@
+---
+import Base from "../layouts/Base.astro";
+import Engines from "../components/Engines.astro";
+import Screenshot from "../components/Screenshot.astro";
+import { REPO_LINKS, url } from "../config";
+import shotSql from "../assets/shots/sql.png";
+import shotConnections from "../assets/shots/connections.png";
+
+const groups = [
+  {
+    title: "Connections",
+    intro: "Getting in should be the easy part.",
+    items: [
+      ["Saved connections", "Organize connections into groups, star favorites, and drag to reorder."],
+      ["Paste a URL", "Drop in a postgres:// or mongodb:// DSN and the form fills itself."],
+      ["Test before saving", "One click verifies credentials against the live server."],
+      ["Import and export", "Move your connection list between machines as JSON or CSV. Passwords stay in the keychain and are never exported."],
+    ],
+  },
+  {
+    title: "SQL editor",
+    intro: "Built like an editor, not a form field.",
+    items: [
+      ["Syntax highlighting", "A per-line lexer keeps highlighting instant, even in long scripts."],
+      ["Multi-statement scripts", "Run a whole script; execution stops at the first error and tells you which statement failed."],
+      ["Run selection", "Select part of a script and execute just that."],
+      ["Format and explain", "Reformat messy SQL, or prefix any query with its execution plan."],
+      ["Split panes and tab groups", "Two editors side by side, each with its own tabs, results, and running query."],
+      ["Find", "Case-insensitive search inside the editor with match stepping."],
+    ],
+  },
+  {
+    title: "Data grid",
+    intro: "Browse millions of rows without babysitting a spinner.",
+    items: [
+      ["Batched loading", "Rows stream in as you scroll instead of loading the entire result up front."],
+      ["Virtualized rendering", "Only visible cells are drawn, so huge results stay smooth."],
+      ["Server-side filters", "Column filters compile to WHERE clauses and run on the database, not in the app."],
+      ["Safe editing", "Edit cells with a pending-changes model: review, commit, or roll back. Tables without a primary key stay read-only, and the grid tells you why."],
+      ["Export results", "CSV or JSON through your OS's native save dialog."],
+    ],
+  },
+  {
+    title: "Navigation",
+    intro: "The whole app is reachable from the keyboard.",
+    items: [
+      ["Schema sidebar", "Databases, tables, collections, keys, and columns in one tree. Dock it left or right, or collapse it to an icon rail."],
+      ["Command palette", "Cmd+K fuzzy-searches connections and schema objects."],
+      ["One-click browse", "Click any table to auto-run a SELECT * or find and land in the grid."],
+      ["Light and dark", "Both themes ship; pick one or follow the system."],
+    ],
+  },
+];
+---
+
+<Base
+  title="RDBS features: editor, data grid, and six database engines"
+  description="What ships in RDBS today: a real SQL editor with split panes, a virtualized data grid with server-side filters, keychain-backed credentials, and support for six database engines."
+  path="/features"
+>
+  <section class="mx-auto max-w-6xl px-4 pt-16 pb-12 sm:px-6">
+    <h1 class="max-w-2xl font-display text-4xl font-semibold tracking-tight sm:text-5xl">
+      Everything here ships today.
+    </h1>
+    <p class="mt-4 max-w-xl text-lg leading-relaxed text-fg-2">
+      No roadmap promises on this page. If a feature is listed, it is in the
+      current release and you can try it in the next five minutes.
+    </p>
+  </section>
+
+  <section class="mx-auto max-w-6xl px-4 pb-8 sm:px-6" aria-label="Screenshots">
+    <div class="grid gap-6 lg:grid-cols-2">
+      <Screenshot
+        src={shotConnections}
+        alt="RDBS connection picker with saved PostgreSQL, MySQL, and Redis connections organized in groups"
+        sizes="(min-width: 1024px) 560px, 94vw"
+        priority
+      />
+      <Screenshot
+        src={shotSql}
+        alt="RDBS SQL editor with a query and its results grid"
+        sizes="(min-width: 1024px) 560px, 94vw"
+        priority
+      />
+    </div>
+  </section>
+
+  {
+    groups.map((group, i) => (
+      <section class:list={["border-line", i === 0 ? "" : "border-t"]}>
+        <div class="mx-auto grid max-w-6xl gap-6 px-4 py-14 sm:px-6 lg:grid-cols-[280px_1fr] lg:gap-16">
+          <div>
+            <h2 class="font-display text-2xl font-semibold tracking-tight">{group.title}</h2>
+            <p class="mt-2 text-sm text-fg-3">{group.intro}</p>
+          </div>
+          <dl class="grid gap-x-10 gap-y-6 sm:grid-cols-2">
+            {group.items.map(([term, detail]) => (
+              <div>
+                <dt class="text-sm font-semibold">{term}</dt>
+                <dd class="mt-1 text-sm leading-relaxed text-fg-2">{detail}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      </section>
+    ))
+  }
+
+  <section id="databases" class="border-t border-line bg-panel">
+    <div class="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+      <div class="max-w-2xl">
+        <h2 class="font-display text-3xl font-semibold tracking-tight">Supported databases</h2>
+        <p class="mt-4 leading-relaxed text-fg-2">
+          Each engine is its own Rust driver crate speaking the native
+          protocol. All six below are stable and included in every download.
+        </p>
+      </div>
+      <div class="mt-8 max-w-3xl">
+        <Engines />
+      </div>
+      <p class="mt-6 text-sm text-fg-3">
+        Want an engine that is not listed?
+        <a href={REPO_LINKS.newIssue} rel="noopener" class="underline decoration-line underline-offset-4 hover:text-fg">Open a feature request</a>
+        or read <a href={url("/open-source")} class="underline decoration-line underline-offset-4 hover:text-fg">how drivers are added</a>.
+      </p>
+    </div>
+  </section>
+
+  <section class="border-t border-line">
+    <div class="mx-auto max-w-6xl px-4 py-20 text-center sm:px-6">
+      <h2 class="font-display text-3xl font-semibold tracking-tight">See it on your own data.</h2>
+      <div class="mt-8">
+        <a
+          href={url("/download")}
+          class="inline-block rounded-lg bg-accent px-5 py-3 font-semibold text-accent-ink transition-colors hover:bg-accent-soft"
+        >
+          Download RDBS
+        </a>
+      </div>
+    </div>
+  </section>
+</Base>

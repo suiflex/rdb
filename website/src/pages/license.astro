@@ -1,0 +1,29 @@
+---
+import { readFileSync } from "node:fs";
+import Base from "../layouts/Base.astro";
+import { REPO_LINKS } from "../config";
+
+// The real license file from the repository root, embedded at build time.
+const licenseText = readFileSync(new URL("../../../LICENSE", import.meta.url), "utf-8").trim();
+---
+
+<Base
+  title="RDBS license"
+  description="RDBS is released under the MIT license: free to use, modify, and redistribute, commercially or otherwise."
+  path="/license"
+>
+  <section class="mx-auto max-w-3xl px-4 pt-16 pb-20 sm:px-6">
+    <h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">License</h1>
+    <p class="mt-4 text-lg leading-relaxed text-fg-2">
+      RDBS is released under the MIT license. In practice that means you can
+      use it at work, modify it, and redistribute it, free of charge. The
+      only condition is keeping the copyright notice.
+    </p>
+    <pre
+      class="mt-10 overflow-x-auto rounded-xl border border-line bg-code p-6 font-mono text-xs leading-relaxed whitespace-pre-wrap text-fg-2">{licenseText}</pre>
+    <p class="mt-6 text-sm text-fg-3">
+      Canonical copy:
+      <a href={REPO_LINKS.license} rel="noopener" class="underline decoration-line underline-offset-4 hover:text-fg">LICENSE in the repository</a>.
+    </p>
+  </section>
+</Base>

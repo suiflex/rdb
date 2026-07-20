@@ -1,0 +1,106 @@
+---
+import Base from "../layouts/Base.astro";
+import CodeBlock from "../components/CodeBlock.astro";
+import { GITHUB, REPO_LINKS, url } from "../config";
+
+const guides = [
+  {
+    title: "Add a connection",
+    body: "Click New Connection, pick an engine, and fill in host and credentials. Or paste a connection URL and the form fills itself. Test verifies against the live server before you save.",
+  },
+  {
+    title: "Connect and query",
+    body: "Click a saved connection and the schema loads in the sidebar. Type SQL, a Redis command, or a MongoDB JSON operation, then press Cmd+Enter (Ctrl+Enter on Windows and Linux) to run.",
+  },
+  {
+    title: "Browse a table",
+    body: "Click any table or collection in the sidebar to run a SELECT * or find automatically. Filter columns, edit cells, and commit or roll back your pending changes.",
+  },
+  {
+    title: "Jump anywhere",
+    body: "Cmd+K opens the command palette: fuzzy-search every saved connection and schema object without touching the mouse.",
+  },
+];
+---
+
+<Base
+  title="RDBS documentation"
+  description="Get started with RDBS: install it, add your first connection, run queries, and build from source. Full documentation lives in the GitHub repository."
+  path="/docs"
+>
+  <section class="mx-auto max-w-4xl px-4 pt-16 pb-12 sm:px-6">
+    <h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">Documentation</h1>
+    <p class="mt-4 max-w-xl text-lg leading-relaxed text-fg-2">
+      Enough to get productive in five minutes. The full reference lives in
+      the repository and grows with every release.
+    </p>
+  </section>
+
+  <section class="mx-auto max-w-4xl px-4 pb-14 sm:px-6" aria-label="Quick start">
+    <h2 class="font-display text-2xl font-semibold tracking-tight">Quick start</h2>
+    <ol class="mt-6 space-y-6">
+      {
+        guides.map((guide, i) => (
+          <li class="flex gap-5">
+            <span
+              class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-panel font-mono text-sm text-accent"
+              aria-hidden="true"
+            >
+              {i + 1}
+            </span>
+            <div>
+              <h3 class="font-semibold">{guide.title}</h3>
+              <p class="mt-1 max-w-xl text-sm leading-relaxed text-fg-2">{guide.body}</p>
+            </div>
+          </li>
+        ))
+      }
+    </ol>
+  </section>
+
+  <section class="border-t border-line">
+    <div class="mx-auto max-w-4xl px-4 py-14 sm:px-6">
+      <h2 class="font-display text-2xl font-semibold tracking-tight">Build from source</h2>
+      <p class="mt-3 max-w-xl text-sm leading-relaxed text-fg-2">
+        You need stable Rust with rustfmt and clippy. Linux additionally needs
+        the Slint system packages listed in the README.
+      </p>
+      <div class="mt-5 space-y-3">
+        <CodeBlock code="git clone https://github.com/suiflex/rdb && cd rdb" label="clone" />
+        <CodeBlock code="cargo build --release -p rdb" label="release build" />
+      </div>
+    </div>
+  </section>
+
+  <section class="border-t border-line bg-panel">
+    <div class="mx-auto max-w-4xl px-4 py-14 sm:px-6">
+      <h2 class="font-display text-2xl font-semibold tracking-tight">Go deeper</h2>
+      <ul class="mt-6 grid gap-3 sm:grid-cols-2">
+        {
+          [
+            { label: "README", note: "install options, usage, crate layout", href: REPO_LINKS.readme },
+            { label: "Vision and roadmap", note: "principles and what comes next", href: REPO_LINKS.vision },
+            { label: "Contributing guide", note: "dev setup and PR workflow", href: REPO_LINKS.contributing },
+            { label: "Release notes", note: "what changed in each version", href: REPO_LINKS.releases },
+          ].map((item) => (
+            <li>
+              <a
+                href={item.href}
+                rel="noopener"
+                class="block rounded-xl border border-line bg-ink px-4 py-3.5 transition-colors hover:border-line-2"
+              >
+                <span class="block text-sm font-medium">{item.label}</span>
+                <span class="block text-xs text-fg-3">{item.note}</span>
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+      <p class="mt-6 text-sm text-fg-3">
+        Something missing or unclear?
+        <a href={REPO_LINKS.newIssue} rel="noopener" class="underline decoration-line underline-offset-4 hover:text-fg">Open an issue</a>
+        on <a href={GITHUB} rel="noopener" class="underline decoration-line underline-offset-4 hover:text-fg">GitHub</a>.
+      </p>
+    </div>
+  </section>
+</Base>

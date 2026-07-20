@@ -1,0 +1,117 @@
+---
+import Base from "../layouts/Base.astro";
+import CodeBlock from "../components/CodeBlock.astro";
+import { GITHUB, REPO_LINKS } from "../config";
+
+const crates = [
+  ["rdb", "the desktop app (Slint UI)"],
+  ["rdb-core", "Driver trait, Query, ResultSet, Schema"],
+  ["rdb-connstore", "saved connections, OS keychain, AES-GCM"],
+  ["rdb-driver-postgres", "PostgreSQL via tokio-postgres"],
+  ["rdb-driver-mysql", "MySQL/MariaDB via mysql_async"],
+  ["rdb-driver-redis", "Redis via the redis crate"],
+  ["rdb-driver-mongo", "MongoDB via the mongodb crate"],
+  ["rdb-driver-sqlite", "SQLite via rusqlite"],
+  ["rdb-driver-cassandra", "Cassandra via scylla"],
+];
+---
+
+<Base
+  title="Contribute to RDBS"
+  description="RDBS is MIT-licensed and built in the open. Read the code, report a bug, pick up a good first issue, or add a driver for your favorite database."
+  path="/open-source"
+>
+  <section class="mx-auto max-w-4xl px-4 pt-16 pb-12 sm:px-6">
+    <h1 class="max-w-2xl font-display text-4xl font-semibold tracking-tight sm:text-5xl">
+      Built in the open. Yours to shape.
+    </h1>
+    <p class="mt-4 max-w-xl text-lg leading-relaxed text-fg-2">
+      Every line of RDBS is public and MIT licensed. Read the code, report a
+      bug, or help decide what comes next.
+    </p>
+    <div class="mt-8 flex flex-wrap gap-3">
+      <a
+        href={GITHUB}
+        rel="noopener"
+        class="rounded-lg bg-accent px-5 py-3 font-semibold text-accent-ink transition-colors hover:bg-accent-soft"
+      >
+        Browse the source
+      </a>
+      <a
+        href={REPO_LINKS.goodFirstIssues}
+        rel="noopener"
+        class="rounded-lg border border-line px-5 py-3 font-semibold transition-colors hover:border-line-2 hover:bg-panel"
+      >
+        Good first issues
+      </a>
+    </div>
+  </section>
+
+  <section class="border-t border-line">
+    <div class="mx-auto grid max-w-4xl gap-10 px-4 py-14 sm:px-6 md:grid-cols-2">
+      <div>
+        <h2 class="font-display text-2xl font-semibold tracking-tight">Ways to help</h2>
+        <ul class="mt-5 space-y-4 text-sm leading-relaxed text-fg-2">
+          <li>
+            <strong class="text-fg">Report what breaks.</strong>
+            A clear reproduction in an
+            <a href={REPO_LINKS.newIssue} rel="noopener" class="underline decoration-line underline-offset-4 hover:text-fg">issue</a>
+            is one of the most useful contributions there is.
+          </li>
+          <li>
+            <strong class="text-fg">Fix or build something.</strong>
+            The <a href={REPO_LINKS.contributing} rel="noopener" class="underline decoration-line underline-offset-4 hover:text-fg">contributing guide</a>
+            covers setup, code style, and the PR flow. Conventional commits
+            drive the release automation.
+          </li>
+          <li>
+            <strong class="text-fg">Add a database.</strong>
+            Engines are self-contained crates implementing one
+            <code class="rounded bg-code px-1.5 py-0.5 font-mono text-xs">Driver</code>
+            trait. If you know an engine's wire protocol or its Rust client
+            library, you can bring it to RDBS.
+          </li>
+          <li>
+            <strong class="text-fg">Join the discussion.</strong>
+            Questions and design ideas live in
+            <a href={REPO_LINKS.discussions} rel="noopener" class="underline decoration-line underline-offset-4 hover:text-fg">GitHub Discussions</a>;
+            direction is documented in the
+            <a href={REPO_LINKS.vision} rel="noopener" class="underline decoration-line underline-offset-4 hover:text-fg">vision doc</a>.
+          </li>
+        </ul>
+      </div>
+      <div>
+        <h2 class="font-display text-2xl font-semibold tracking-tight">How the code is laid out</h2>
+        <ul class="mt-5 divide-y divide-line rounded-xl border border-line bg-panel">
+          {
+            crates.map(([name, desc]) => (
+              <li class="flex items-baseline gap-3 px-4 py-2.5">
+                <code class="shrink-0 font-mono text-xs text-accent">{name}</code>
+                <span class="text-xs text-fg-3">{desc}</span>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="border-t border-line bg-panel">
+    <div class="mx-auto max-w-4xl px-4 py-14 sm:px-6">
+      <h2 class="font-display text-2xl font-semibold tracking-tight">Run it from source</h2>
+      <p class="mt-3 max-w-xl text-sm leading-relaxed text-fg-2">
+        Stable Rust is the only hard requirement; <code class="rounded bg-code px-1.5 py-0.5 font-mono text-xs">make help</code>
+        lists the build, lint, and test targets used in CI.
+      </p>
+      <div class="mt-5 space-y-3">
+        <CodeBlock code="git clone https://github.com/suiflex/rdb && cd rdb" label="clone" />
+        <CodeBlock code="make all   # fmt-check + lint + test + build" label="CI gate" />
+      </div>
+      <p class="mt-6 text-sm text-fg-3">
+        Security reports go through the
+        <a href={REPO_LINKS.security} rel="noopener" class="underline decoration-line underline-offset-4 hover:text-fg">security policy</a>,
+        not public issues.
+      </p>
+    </div>
+  </section>
+</Base>

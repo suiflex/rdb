@@ -1,0 +1,35 @@
+---
+import Base from "../layouts/Base.astro";
+import { url } from "../config";
+---
+
+<Base
+  title="Page not found: RDBS"
+  description="This page does not exist. Head back to the RDBS homepage or the downloads page."
+  path="/404"
+>
+  <section class="mx-auto flex max-w-3xl flex-col items-start px-4 py-28 sm:px-6">
+    <p class="font-mono text-sm text-error">ERROR 404: relation "this_page" does not exist</p>
+    <h1 class="mt-4 font-display text-4xl font-semibold tracking-tight sm:text-5xl">
+      Nothing at this address.
+    </h1>
+    <p class="mt-4 max-w-md text-lg leading-relaxed text-fg-2">
+      The page moved, never existed, or was mistyped. The useful places are
+      one click away.
+    </p>
+    <div class="mt-8 flex flex-wrap gap-3">
+      <a
+        href={url("/")}
+        class="rounded-lg bg-accent px-5 py-3 font-semibold text-accent-ink transition-colors hover:bg-accent-soft"
+      >
+        Back to homepage
+      </a>
+      <a
+        href={url("/download")}
+        class="rounded-lg border border-line px-5 py-3 font-semibold transition-colors hover:border-line-2 hover:bg-panel"
+      >
+        Downloads
+      </a>
+    </div>
+  </section>
+</Base>

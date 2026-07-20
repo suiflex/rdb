@@ -1,0 +1,58 @@
+---
+import "../styles/global.css";
+import "@fontsource-variable/space-grotesk";
+import "@fontsource/ibm-plex-mono/400.css";
+import "@fontsource/ibm-plex-mono/500.css";
+import Nav from "../components/Nav.astro";
+import Footer from "../components/Footer.astro";
+import { PRODUCT, url } from "../config";
+
+interface Props {
+  title: string;
+  description: string;
+  /** Path of the page, e.g. "/features". Used for the canonical URL. */
+  path: string;
+  ogImage?: string;
+}
+
+const { title, description, path, ogImage } = Astro.props;
+const canonical = new URL(url(path === "/" ? "/" : path), Astro.site);
+const ogImageUrl = new URL(ogImage ?? url("/og.png"), Astro.site);
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" type="image/svg+xml" href={url("/favicon.svg")} />
+    <link rel="manifest" href={url("/manifest.webmanifest")} />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="generator" content={Astro.generator} />
+    <link rel="sitemap" href={url("/sitemap-index.xml")} />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={PRODUCT} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImageUrl} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImageUrl} />
+
+    <slot name="head" />
+  </head>
+  <body class="bg-ink text-fg antialiased">
+    <a href="#main" class="skip-link">Skip to content</a>
+    <Nav />
+    <main id="main">
+      <slot />
+    </main>
+    <Footer />
+  </body>
+</html>

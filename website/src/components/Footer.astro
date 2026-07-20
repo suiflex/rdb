@@ -1,0 +1,52 @@
+---
+import Logo from "./Logo.astro";
+import { FOOTER, GITHUB, PRODUCT, url } from "../config";
+
+const year = new Date().getFullYear();
+---
+
+<footer class="border-t border-line">
+  <div class="mx-auto max-w-6xl px-4 py-14 sm:px-6">
+    <div class="grid gap-10 sm:grid-cols-2 lg:grid-cols-5">
+      <div class="lg:col-span-2">
+        <a href={url("/")} class="flex items-center gap-2.5 font-display text-lg font-semibold tracking-tight">
+          <Logo class="h-7 w-7 rounded-[7px] ring-1 ring-line" />
+          {PRODUCT}
+        </a>
+        <p class="mt-4 max-w-xs text-sm leading-relaxed text-fg-3">
+          Free and open-source database management. One native binary for
+          macOS, Windows, and Linux, built in Rust.
+        </p>
+      </div>
+      {
+        Object.entries(FOOTER).map(([heading, items]) => (
+          <nav aria-label={heading}>
+            <h2 class="font-display text-sm font-semibold">{heading}</h2>
+            <ul class="mt-4 space-y-2.5">
+              {items.map((item) => (
+                <li>
+                  <a
+                    href={item.external ? item.href : url(item.href)}
+                    rel={item.external ? "noopener" : undefined}
+                    class="text-sm text-fg-2 transition-colors hover:text-fg"
+                  >
+                    {item.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        ))
+      }
+    </div>
+    <div class="mt-12 flex flex-col justify-between gap-3 border-t border-line pt-6 text-sm text-fg-3 sm:flex-row">
+      <p>MIT licensed. Copyright {year} the RDBS contributors.</p>
+      <p>
+        Built in the open at
+        <a href={GITHUB} rel="noopener" class="text-fg-2 underline decoration-line underline-offset-4 hover:text-fg">
+          suiflex/rdb
+        </a>
+      </p>
+    </div>
+  </div>
+</footer>

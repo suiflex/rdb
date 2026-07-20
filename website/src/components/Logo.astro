@@ -1,0 +1,22 @@
+---
+interface Props {
+  class?: string;
+}
+const { class: className = "h-6 w-6" } = Astro.props;
+---
+
+<!-- RDBS brand mark: database cylinder with a relation node (assets/brand/logo-mark.svg) -->
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 32 32"
+  class={className}
+  aria-hidden="true"
+>
+  <rect width="32" height="32" rx="7" fill="#0a0a0a"></rect>
+  <path d="M7 11 V21 A9 2.6 0 0 0 25 21 V11 Z" fill="#4ade80" fill-opacity="0.7"></path>
+  <ellipse cx="16" cy="11" rx="9" ry="2.6" fill="#4ade80"></ellipse>
+  <path d="M7 15 A9 2.6 0 0 0 25 15" fill="none" stroke="#0a0a0a" stroke-opacity="0.6" stroke-width="0.9"></path>
+  <path d="M7 18 A9 2.6 0 0 0 25 18" fill="none" stroke="#0a0a0a" stroke-opacity="0.6" stroke-width="0.9"></path>
+  <path d="M24.5 11 H27" stroke="#4ade80" stroke-opacity="0.55" stroke-width="0.9" stroke-linecap="round"></path>
+  <circle cx="28" cy="11" r="1.6" fill="#4ade80"></circle>
+</svg>

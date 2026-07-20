@@ -1,0 +1,311 @@
+---
+import Base from "../layouts/Base.astro";
+import Engines from "../components/Engines.astro";
+import Screenshot from "../components/Screenshot.astro";
+import CodeBlock from "../components/CodeBlock.astro";
+import { GITHUB, REPO_LINKS, url } from "../config";
+import release from "../data/release.json";
+import shotWorkspace from "../assets/shots/workspace.png";
+import shotSql from "../assets/shots/sql.png";
+import shotPalette from "../assets/shots/palette.png";
+
+const macDmg = release.assets.find((a) => a.name === "rdb-aarch64-apple-darwin.dmg");
+const dmgMb = macDmg ? (macDmg.size / 1_000_000).toFixed(1) : null;
+
+const structuredData = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "RDBS",
+  applicationCategory: "DeveloperApplication",
+  operatingSystem: "macOS, Windows, Linux",
+  offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+  license: "https://opensource.org/license/mit",
+  softwareVersion: release.tag.replace(/^v/, ""),
+  downloadUrl: REPO_LINKS.releases,
+};
+---
+
+<Base
+  title="RDBS: fast, lightweight, open-source database management"
+  description="RDBS is a free, open-source desktop database client for PostgreSQL, MySQL, Redis, MongoDB, SQLite, and Cassandra. One native Rust binary for macOS, Windows, and Linux."
+  path="/"
+>
+  <script type="application/ld+json" set:html={JSON.stringify(structuredData)} slot="head" />
+
+  <!-- Hero -->
+  <section class="mx-auto max-w-6xl px-4 pt-16 pb-10 sm:px-6 sm:pt-20">
+    <div class="max-w-3xl">
+      <h1 class="font-display text-4xl font-semibold tracking-tight text-balance sm:text-5xl lg:text-6xl">
+        Your database, without the
+        <span class="text-accent">heavyweight</span> client.
+      </h1>
+      <p class="mt-5 max-w-xl text-lg leading-relaxed text-fg-2">
+        RDBS is a free, open-source desktop client for PostgreSQL, MySQL,
+        Redis, MongoDB, SQLite, and Cassandra. One native Rust binary.
+      </p>
+      <div class="mt-8 flex flex-wrap items-center gap-3">
+        <a
+          href={url("/download")}
+          class="rounded-lg bg-accent px-5 py-3 font-semibold text-accent-ink transition-colors hover:bg-accent-soft"
+        >
+          Download RDBS
+        </a>
+        <a
+          href={GITHUB}
+          rel="noopener"
+          class="rounded-lg border border-line px-5 py-3 font-semibold text-fg transition-colors hover:border-line-2 hover:bg-panel"
+        >
+          View on GitHub
+        </a>
+      </div>
+      <p class="mt-6 font-mono text-xs text-fg-3">
+        {release.tag} for macOS, Windows, and Linux. MIT licensed.
+      </p>
+    </div>
+  </section>
+
+  <!-- Product showcase: real screenshot from the mock-data harness -->
+  <section class="mx-auto max-w-6xl px-4 pb-24 sm:px-6" aria-label="Product screenshot">
+    <Screenshot
+      src={shotWorkspace}
+      alt="RDBS workspace: schema sidebar on the left, a tabbed SQL editor, and a results grid showing rows from a PostgreSQL table"
+      priority
+    />
+  </section>
+
+  <!-- Supported databases -->
+  <section id="databases" class="border-t border-line">
+    <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+      <div class="grid gap-10 lg:grid-cols-[1fr_1.4fr] lg:gap-16">
+        <div>
+          <h2 class="font-display text-3xl font-semibold tracking-tight">
+            Six engines, one window.
+          </h2>
+          <p class="mt-4 leading-relaxed text-fg-2">
+            Stop juggling one client per database. RDBS speaks each engine's
+            native protocol through its own Rust driver, so the same sidebar,
+            editor, and grid work everywhere.
+          </p>
+        </div>
+        <Engines />
+      </div>
+    </div>
+  </section>
+
+  <!-- Lightweight -->
+  <section class="border-t border-line">
+    <div class="mx-auto grid max-w-6xl gap-10 px-4 py-20 sm:px-6 lg:grid-cols-2 lg:items-center lg:gap-16">
+      <div>
+        <h2 class="font-display text-3xl font-semibold tracking-tight">
+          Lightweight by design.
+        </h2>
+        <p class="mt-4 leading-relaxed text-fg-2">
+          No Electron, no bundled browser, no background services. The UI is
+          GPU-rendered by <a href="https://slint.dev" rel="noopener" class="underline decoration-line underline-offset-4 hover:text-fg">Slint</a>
+          and the whole app compiles to a single small binary that starts
+          instantly and stays out of your memory.
+        </p>
+      </div>
+      <dl class="grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-line bg-line text-center">
+        <div class="bg-panel px-3 py-6">
+          <dt class="font-mono text-xs text-fg-3">macOS download</dt>
+          <dd class="mt-2 font-display text-2xl font-semibold text-accent">{dmgMb} MB</dd>
+        </div>
+        <div class="bg-panel px-3 py-6">
+          <dt class="font-mono text-xs text-fg-3">runtime deps</dt>
+          <dd class="mt-2 font-display text-2xl font-semibold text-accent">none</dd>
+        </div>
+        <div class="bg-panel px-3 py-6">
+          <dt class="font-mono text-xs text-fg-3">UI stack</dt>
+          <dd class="mt-2 font-display text-2xl font-semibold text-accent">native</dd>
+        </div>
+      </dl>
+    </div>
+  </section>
+
+  <!-- Query editor -->
+  <section class="border-t border-line">
+    <div class="mx-auto grid max-w-6xl gap-10 px-4 py-20 sm:px-6 lg:grid-cols-[1.4fr_1fr] lg:items-center lg:gap-16">
+      <Screenshot
+        src={shotSql}
+        alt="RDBS SQL editor running a query, with syntax highlighting and a results grid below"
+        sizes="(min-width: 1024px) 640px, 94vw"
+        class="order-last lg:order-first"
+      />
+      <div>
+        <h2 class="font-display text-3xl font-semibold tracking-tight">
+          Query without friction.
+        </h2>
+        <p class="mt-4 leading-relaxed text-fg-2">
+          A real editor, not a text box: syntax highlighting, multi-statement
+          runs, selection execution, find, and SQL formatting. Split the
+          editor into panes and keep one query running while you write the next.
+        </p>
+        <ul class="mt-6 space-y-2 font-mono text-sm text-fg-2">
+          <li><kbd class="rounded border border-line bg-code px-1.5 py-0.5 text-xs">⌘ Enter</kbd> run query</li>
+          <li><kbd class="rounded border border-line bg-code px-1.5 py-0.5 text-xs">⌘ F</kbd> find in editor</li>
+          <li><kbd class="rounded border border-line bg-code px-1.5 py-0.5 text-xs">⌘ K</kbd> jump anywhere</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Large results -->
+  <section class="border-t border-line bg-panel">
+    <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+      <div class="mx-auto max-w-2xl text-center">
+        <h2 class="font-display text-3xl font-semibold tracking-tight">
+          Big tables don't freeze the app.
+        </h2>
+        <p class="mt-4 leading-relaxed text-fg-2">
+          Run <code class="rounded bg-code px-1.5 py-0.5 font-mono text-sm">SELECT * FROM huge_table</code>
+          and keep working. RDBS loads rows in batches as you scroll and
+          virtualizes the grid, so a million-row result never lands in memory
+          all at once.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Everyday features bento -->
+  <section class="border-t border-line">
+    <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+      <h2 class="font-display text-3xl font-semibold tracking-tight">
+        The everyday things, done right.
+      </h2>
+      <div class="mt-10 grid gap-4 lg:grid-cols-3">
+        <div class="overflow-hidden rounded-xl border border-line bg-panel lg:col-span-2">
+          <div class="p-6">
+            <h3 class="font-display text-lg font-semibold">Command palette</h3>
+            <p class="mt-2 max-w-md text-sm leading-relaxed text-fg-2">
+              Press <kbd class="rounded border border-line bg-code px-1.5 py-0.5 font-mono text-xs">⌘ K</kbd>
+              and fuzzy-search every saved connection, table, and collection.
+              Your hands never leave the keyboard.
+            </p>
+          </div>
+          <Screenshot
+            src={shotPalette}
+            alt="RDBS command palette open over the workspace, listing saved PostgreSQL, MySQL, Redis, and MongoDB connections"
+            sizes="(min-width: 1024px) 640px, 94vw"
+            class="mx-6 mb-0 translate-y-2 rounded-b-none border-b-0"
+          />
+        </div>
+        <div class="grid gap-4">
+          <div class="rounded-xl border border-line bg-panel p-6">
+            <h3 class="font-display text-lg font-semibold">Credentials in your keychain</h3>
+            <p class="mt-2 text-sm leading-relaxed text-fg-2">
+              Passwords go to the OS keychain (Keychain, libsecret, Credential
+              Manager), with an AES-GCM encrypted file as the headless
+              fallback. Never plaintext config.
+            </p>
+          </div>
+          <div class="rounded-xl border border-line bg-panel p-6">
+            <h3 class="font-display text-lg font-semibold">Filter and export</h3>
+            <p class="mt-2 text-sm leading-relaxed text-fg-2">
+              Per-column filters compile to server-side WHERE clauses. Export
+              results as CSV or JSON through the native save dialog.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Open source -->
+  <section class="border-t border-line">
+    <div class="mx-auto grid max-w-6xl gap-10 px-4 py-20 sm:px-6 lg:grid-cols-2 lg:gap-16">
+      <div>
+        <h2 class="font-display text-3xl font-semibold tracking-tight">
+          Built in the open.
+        </h2>
+        <p class="mt-4 leading-relaxed text-fg-2">
+          RDBS is MIT licensed and developed entirely on GitHub. Read the
+          code, report a bug, or help shape what comes next: every engine is
+          a self-contained Rust crate behind one
+          <code class="rounded bg-code px-1.5 py-0.5 font-mono text-sm">Driver</code>
+          trait, so there is a clear path to adding your favorite database.
+        </p>
+        <div class="mt-6">
+          <CodeBlock
+            code="git clone https://github.com/suiflex/rdb && cd rdb && cargo build --release -p rdb"
+            label="build from source"
+          />
+        </div>
+      </div>
+      <ul class="grid content-start gap-3 sm:grid-cols-2">
+        {
+          [
+            { label: "Source code", note: "the whole app, MIT licensed", href: GITHUB },
+            { label: "Good first issues", note: "a gentle place to start", href: REPO_LINKS.goodFirstIssues },
+            { label: "Contributing guide", note: "setup, style, PR flow", href: REPO_LINKS.contributing },
+            { label: "Discussions", note: "questions and ideas", href: REPO_LINKS.discussions },
+            { label: "Roadmap", note: "where RDBS is headed", href: REPO_LINKS.vision },
+            { label: "Releases", note: "binaries and notes", href: REPO_LINKS.releases },
+          ].map((item) => (
+            <li>
+              <a
+                href={item.href}
+                rel="noopener"
+                class="block rounded-xl border border-line bg-panel px-4 py-3.5 transition-colors hover:border-line-2 hover:bg-panel-2"
+              >
+                <span class="block text-sm font-medium">{item.label}</span>
+                <span class="block text-xs text-fg-3">{item.note}</span>
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+
+  <!-- Privacy -->
+  <section class="border-t border-line bg-panel">
+    <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+      <div class="max-w-2xl">
+        <h2 class="font-display text-3xl font-semibold tracking-tight">
+          No account. No telemetry.
+        </h2>
+        <p class="mt-4 leading-relaxed text-fg-2">
+          RDBS is a local tool. Your queries travel between you and your
+          database, and nowhere else.
+        </p>
+      </div>
+      <ul class="mt-8 grid gap-x-10 gap-y-4 text-sm text-fg-2 sm:grid-cols-2">
+        <li class="flex gap-3"><span class="mt-1 text-accent" aria-hidden="true">✓</span> Works fully offline; no sign-up, ever.</li>
+        <li class="flex gap-3"><span class="mt-1 text-accent" aria-hidden="true">✓</span> No usage tracking or crash reporting of any kind.</li>
+        <li class="flex gap-3"><span class="mt-1 text-accent" aria-hidden="true">✓</span> Connection secrets live in your OS keychain, not in config files.</li>
+        <li class="flex gap-3"><span class="mt-1 text-accent" aria-hidden="true">✓</span> The only outbound request is an update check against GitHub Releases, and you can turn it off in Settings.</li>
+      </ul>
+      <p class="mt-6 text-sm text-fg-3">
+        Details on the <a href={url("/privacy")} class="underline decoration-line underline-offset-4 hover:text-fg">privacy page</a>.
+      </p>
+    </div>
+  </section>
+
+  <!-- Final CTA -->
+  <section class="border-t border-line">
+    <div class="mx-auto max-w-6xl px-4 py-24 text-center sm:px-6">
+      <h2 class="font-display text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
+        Download RDBS and connect to your first database.
+      </h2>
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+        <a
+          href={url("/download")}
+          class="rounded-lg bg-accent px-5 py-3 font-semibold text-accent-ink transition-colors hover:bg-accent-soft"
+        >
+          Download RDBS
+        </a>
+        <a
+          href={GITHUB}
+          rel="noopener"
+          class="rounded-lg border border-line px-5 py-3 font-semibold transition-colors hover:border-line-2 hover:bg-panel"
+        >
+          View on GitHub
+        </a>
+      </div>
+      <p class="mt-6 font-mono text-xs text-fg-3">
+        Free forever under the MIT license.
+      </p>
+    </div>
+  </section>
+</Base>

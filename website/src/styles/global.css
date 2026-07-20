@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+/*
+  RDBS design tokens. One dark theme, locked for the whole site.
+  Accent is the product's brand green (see assets/brand/logo-mark.svg).
+  Radius rule: interactive elements 8px, panels/media 12px. Nothing else.
+*/
+@theme {
+  --font-display: "Space Grotesk Variable", "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --color-ink: #0a0a0a; /* page background */
+  --color-panel: #121212; /* elevated surface */
+  --color-panel-2: #181818; /* hover surface */
+  --color-line: #262626; /* border */
+  --color-line-2: #333333; /* border hover */
+  --color-fg: #ededed; /* primary text */
+  --color-fg-2: #a6a6a6; /* secondary text */
+  --color-fg-3: #8f8f8f; /* muted text; 5.5:1+ on ink and panel (WCAG AA) */
+  --color-accent: #4ade80; /* brand green */
+  --color-accent-soft: #86efac; /* accent hover / links */
+  --color-accent-ink: #05230f; /* text on accent surfaces */
+  --color-warn: #fbbf24;
+  --color-error: #f87171;
+  --color-code: #101010; /* code background */
+
+  --ease-swift: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/*
+  Grids on this site are single-column until a grid-cols-* utility says
+  otherwise. The minmax(0, 1fr) track also stops long unbreakable content
+  (install commands) from widening the page on small screens.
+*/
+@layer base {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+html {
+  background-color: var(--color-ink);
+  color: var(--color-fg);
+  color-scheme: dark;
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Skip link for keyboard users */
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -3rem;
+  z-index: 100;
+  padding: 0.5rem 1rem;
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+  border-radius: 8px;
+  font-weight: 600;
+  transition: top 0.15s var(--ease-swift);
+}
+.skip-link:focus {
+  top: 1rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
