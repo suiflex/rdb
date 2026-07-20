@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.19.0](https://github.com/suiflex/rdb/compare/v0.18.0...v0.19.0) (2026-07-20)
+
+
+### Features
+
+* **app:** accent bar on the focused split pane ([982374d](https://github.com/suiflex/rdb/commit/982374d0135313eccc4de82ac7e37bcbac72320a))
+* **app:** add split toggle rendering the second query pane ([325bebf](https://github.com/suiflex/rdb/commit/325bebf30b4020be8ab0e0a1a827646e416aeb0f))
+* **app:** complete split pane execution controls ([97a59d6](https://github.com/suiflex/rdb/commit/97a59d6eb9057e90e933e8f1c48227b79d016c16))
+* **app:** drag tabs between workspace groups ([63854c5](https://github.com/suiflex/rdb/commit/63854c5ef69162f40a61623477b8b906e9fea8c2))
+* **app:** drag-reorder connections within a group in picker ([b6a9c93](https://github.com/suiflex/rdb/commit/b6a9c938d626c339d67d3b9f3fb30f5656e5be5c))
+* **app:** localize table chrome by group ([c936fa4](https://github.com/suiflex/rdb/commit/c936fa451ae88f8af40b312a519e354f08c32d71))
+* **app:** per-pane find (Cmd+F targets the focused pane) ([2a0ef4c](https://github.com/suiflex/rdb/commit/2a0ef4c2180e994af2d4d629e5d6bd9babcca04a))
+* **app:** persist focused group and each group's active tab ([54bb1cd](https://github.com/suiflex/rdb/commit/54bb1cd0706b09e46ce15d83fbb18bb2d03e4d87))
+* **app:** persist split pane layout ([c9ecfe1](https://github.com/suiflex/rdb/commit/c9ecfe105205008866ddc0f244917ee11afdc3fe))
+* **app:** remember split and right-pane text per tab ([ca8f5c2](https://github.com/suiflex/rdb/commit/ca8f5c2ea63b69fd945558680b7112ebd0c19916))
+* **app:** run queries in the right split pane (buffered) ([6b7c557](https://github.com/suiflex/rdb/commit/6b7c5576aca3cdf2faec9735034289b7fefecab2))
+* **app:** sort connections by favorite then order in picker ([05a8b4e](https://github.com/suiflex/rdb/commit/05a8b4e62b4080a12fc7a3b3ece04ce50f74361c))
+* **app:** star and drag-reorder saved connections ([211ee44](https://github.com/suiflex/rdb/commit/211ee4482351761101c3ba1fe9fd6a02cfb97b4c))
+* **app:** star badge and toggle in connection picker ([b06009d](https://github.com/suiflex/rdb/commit/b06009d4a78386d38ec9528376f77cf85a462805))
+* **app:** wire per-pane editor input (keys, mouse, fold) ([5613cec](https://github.com/suiflex/rdb/commit/5613cec50ac198aa92f70e619a49d13ad8a35c41))
+* **app:** workspace tab groups (split editor with independent groups) ([b19983e](https://github.com/suiflex/rdb/commit/b19983e908dede53b134104959c35b5677ed0809))
+* **ui:** add pane 1 mirror properties and bind second pane ([89b7942](https://github.com/suiflex/rdb/commit/89b79429a11f8fb420a288d8f21165bdad1f601a))
+* **ui:** wrap query pane in split layout with empty second pane ([442718d](https://github.com/suiflex/rdb/commit/442718d44f008185efa7b8cf9b7f6440e26f1409))
+
+
+### Bug Fixes
+
+* **app:** attach parent window to export save dialog ([98268b0](https://github.com/suiflex/rdb/commit/98268b09bbf8fb37e9b3813256f9db76f8ebc178))
+* **app:** clone streaming group state ([e4614b6](https://github.com/suiflex/rdb/commit/e4614b6e4cda60911ab6eff62f36b5ce26744140))
+* **app:** enable autocomplete in split pane ([8d4e62b](https://github.com/suiflex/rdb/commit/8d4e62bb8422fd73fdd56adc52ef69c5a352b8a9))
+* **app:** finalize workspace tab groups ([9af02e8](https://github.com/suiflex/rdb/commit/9af02e8754037ad6278a2779f21f99b3169c4acd))
+* **app:** improve workspace tab controls ([87ba2a4](https://github.com/suiflex/rdb/commit/87ba2a4381930019d1103f1b2add69dc9d2dbe79))
+* **app:** keep picker star clickable and add drag affordance ([cad3cae](https://github.com/suiflex/rdb/commit/cad3cae79ada09068e134c69212e735909399489))
+* **app:** keep query tabs and results when switching connection ([b8c8d7e](https://github.com/suiflex/rdb/commit/b8c8d7eab3e01f1673e69aabb9aa32eb8efc4bd1))
+* **app:** make result grid vertical scroll reliable ([7a56c1a](https://github.com/suiflex/rdb/commit/7a56c1a3b238ebc74b4e251718205cef4ee58f73))
+* **app:** persist right-pane result per tab ([a0db1b8](https://github.com/suiflex/rdb/commit/a0db1b8a03f60f8e7f353597bb3e8c2625da1689))
+* **app:** reliable grid scroll, export dialog, and standby tabs ([cfb5289](https://github.com/suiflex/rdb/commit/cfb5289368474aa13925cef618175a6add9ddf13))
+* **app:** reset split so a new tab starts unsplit ([18153e7](https://github.com/suiflex/rdb/commit/18153e72e22e5a4447100a810fbae6aa6d784c73))
+* **app:** route Cmd+F/Cmd+Enter to focused pane, add Cmd+D split ([25f52d5](https://github.com/suiflex/rdb/commit/25f52d5d343f9eaa3168d72c907835fea5517218))
+* **app:** route workspace shortcuts by group ([4fb2707](https://github.com/suiflex/rdb/commit/4fb2707caa00459936b640ffbf504d9290942c5b))
+* **app:** run the focused pane on Cmd+Enter, not always the left ([b138b19](https://github.com/suiflex/rdb/commit/b138b19c9cd2dae1323dc5290d17e182cd24fb99))
+* **app:** satisfy clippy on restore_p1_tab and drop redundant binding ([e07a689](https://github.com/suiflex/rdb/commit/e07a689b9ac11bd4ba09c1e447f74d73e926f61a))
+* **app:** stabilize grouped tab state ([5a46add](https://github.com/suiflex/rdb/commit/5a46addf33df59c85fc28444db5f55d6d1a5b157))
+* **app:** wire split pane grid interactions ([50134f8](https://github.com/suiflex/rdb/commit/50134f8ea8a8fa2ad45852d0861fb00e90388ca2))
+* **ui:** remove legacy pane split controls ([f349a44](https://github.com/suiflex/rdb/commit/f349a44ccf77786df79087b7b065320efef24921))
+
 ## [0.18.0](https://github.com/suiflex/rdb/compare/v0.17.0...v0.18.0) (2026-07-18)
 
 
