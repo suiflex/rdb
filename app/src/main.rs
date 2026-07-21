@@ -5918,7 +5918,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // process, so nothing appears and nothing is written).
             let parent = w.window().window_handle();
             let weak = w.as_weak();
-            let _ = slint::spawn_local(async move {
+            if slint::spawn_local(async move {
                 let Some(file) = rfd::AsyncFileDialog::new()
                     .set_parent(&parent)
                     .set_file_name(format!("rdb-export.{ext}"))
@@ -5935,7 +5935,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 if let Some(w) = weak.upgrade() {
                     w.set_results_meta(SharedString::from(msg));
                 }
-            });
+            })
+            .is_err()
+            {
+                w.set_results_meta(SharedString::from("export failed: no UI event loop"));
+            }
         });
     }
 
@@ -8373,23 +8377,21 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let st = store.borrow();
-            let (ext, body) = if fmt == 1 {
-                ("csv", Ok(export::conns_to_csv(st.list())))
+            let (ext, contents) = if fmt == 1 {
+                ("csv", export::conns_to_csv(st.list()))
             } else {
-                ("json", serde_json::to_string_pretty(st.list()))
-            };
-            let contents = match body {
-                Ok(j) => j,
-                Err(e) => {
-                    w.set_sel_footer(SharedString::from(format!("export failed: {e}")));
-                    return;
-                }
+                ("json", export::conns_to_json(st.list()))
             };
             // Native save dialog via rfd's async API + Slint's local executor:
             // the sync dialog blocks the winit event loop and never surfaces.
+            // Parent it to our window so macOS presents the panel as a sheet
+            // (an unparented NSSavePanel silently no-ops for a non-foreground
+            // process, so nothing appears and nothing is written).
+            let parent = w.window().window_handle();
             let weak = w.as_weak();
-            let _ = slint::spawn_local(async move {
+            if slint::spawn_local(async move {
                 let Some(file) = rfd::AsyncFileDialog::new()
+                    .set_parent(&parent)
                     .set_file_name(format!("rdb-connections.{ext}"))
                     .add_filter(ext.to_uppercase(), &[ext])
                     .save_file()
@@ -8404,7 +8406,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 if let Some(w) = weak.upgrade() {
                     w.set_sel_footer(SharedString::from(msg));
                 }
-            });
+            })
+            .is_err()
+            {
+                w.set_sel_footer(SharedString::from("export failed: no UI event loop"));
+            }
         });
     }
     // quick test from the picker detail pane: saved config, result in the
