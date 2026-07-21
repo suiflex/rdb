@@ -149,6 +149,37 @@ jobs:
   # A failure in one does NOT cancel the other (GitHub only cancels a job's own
   # dependents). Single shared PAT: secrets.TAP_PUBLISH_TOKEN.
 
+  update-website-release:
+    if: github.event_name == 'push'
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: develop
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Refresh website release data
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: npm --prefix website run fetch-release
+      - name: Commit website release data
+        env:
+          GH_TOKEN: ${{ secrets.TAP_PUBLISH_TOKEN }}
+        run: |
+          if git diff --quiet -- website/src/data/release.json; then
+            echo "website release data already current"
+            exit 0
+          fi
+          git config user.name "MULHAM"
+          git config user.email "mulhamna@gmail.com"
+          git add website/src/data/release.json
+          git commit -m "docs: update website release data"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          git push origin HEAD:develop
+
   publish-homebrew:
     if: github.event_name == 'push'
     needs: [build]
