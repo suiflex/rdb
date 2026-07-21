@@ -5918,7 +5918,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // process, so nothing appears and nothing is written).
             let parent = w.window().window_handle();
             let weak = w.as_weak();
-            let _ = slint::spawn_local(async move {
+            if slint::spawn_local(async move {
                 let Some(file) = rfd::AsyncFileDialog::new()
                     .set_parent(&parent)
                     .set_file_name(format!("rdb-export.{ext}"))
@@ -5935,7 +5935,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 if let Some(w) = weak.upgrade() {
                     w.set_results_meta(SharedString::from(msg));
                 }
-            });
+            })
+            .is_err()
+            {
+                w.set_results_meta(SharedString::from("export failed: no UI event loop"));
+            }
         });
     }
 
@@ -8385,7 +8389,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // process, so nothing appears and nothing is written).
             let parent = w.window().window_handle();
             let weak = w.as_weak();
-            let _ = slint::spawn_local(async move {
+            if slint::spawn_local(async move {
                 let Some(file) = rfd::AsyncFileDialog::new()
                     .set_parent(&parent)
                     .set_file_name(format!("rdb-connections.{ext}"))
@@ -8402,7 +8406,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 if let Some(w) = weak.upgrade() {
                     w.set_sel_footer(SharedString::from(msg));
                 }
-            });
+            })
+            .is_err()
+            {
+                w.set_sel_footer(SharedString::from("export failed: no UI event loop"));
+            }
         });
     }
     // quick test from the picker detail pane: saved config, result in the
