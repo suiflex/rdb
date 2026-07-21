@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.20.0](https://github.com/suiflex/rdb/compare/v0.19.0...v0.20.0) (2026-07-21)
+
+
+### Features
+
+* **ui:** use grip icon for connection drag handle ([5837ec9](https://github.com/suiflex/rdb/commit/5837ec9a8064e931d8648eb4e45c999ae076b65f))
+
+
+### Bug Fixes
+
+* **app:** show connections save dialog and add URL to export ([b5eaf4e](https://github.com/suiflex/rdb/commit/b5eaf4e0bbcbceef10184b6228802a8707cb0877))
+* **app:** surface export save-dialog scheduling failure ([3d56ffa](https://github.com/suiflex/rdb/commit/3d56ffa315533b1bd423a2a2cb7ec9153ec4def0))
+* clear RUSTSEC advisories [#98](https://github.com/suiflex/rdb/issues/98)–[#106](https://github.com/suiflex/rdb/issues/106) ([#110](https://github.com/suiflex/rdb/issues/110)) ([a991b72](https://github.com/suiflex/rdb/commit/a991b72e727fa20f82e75e5df740aa564ec75bae))
+* export save dialog, connection URL, and tab/drag icons ([5a75f56](https://github.com/suiflex/rdb/commit/5a75f56bfa77371f9437c3f963572a79aaeb54e0))
+* **ui:** replace tab move glyph with columns icon ([32f301d](https://github.com/suiflex/rdb/commit/32f301df2ab5419f0b98ca11036e7dbf0fe48adc))
+* **ui:** use columns icon for right-pane tab move button ([4830bb5](https://github.com/suiflex/rdb/commit/4830bb5078fdb1712acbc5854908c6e00f9660ea))
+
 ## [0.19.0](https://github.com/suiflex/rdb/compare/v0.18.0...v0.19.0) (2026-07-20)
 
 
