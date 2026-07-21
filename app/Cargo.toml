@@ -40,7 +40,7 @@ open = "5"
 # through the XDG Desktop Portal (D-Bus) instead of the unmaintained gtk-rs
 # GTK3 bindings; tokio matches the app runtime. macOS/Windows use their
 # native panels.
-rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
+rfd = { version = "0.16", default-features = false, features = ["xdg-portal", "tokio"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Set the Dock icon even for `cargo run`; macOS ignores a window icon on an
