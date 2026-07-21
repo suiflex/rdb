@@ -56,6 +56,20 @@ ASSET_URLS="$(printf '%s' "$RELEASE_JSON" | grep -o '"browser_download_url": *"[
 
 pick_asset() {
   local url
+  # On macOS prefer the .dmg: it carries the signed RDB.app that installs to
+  # Applications (Launchpad). Other OSes take the tarball/zip (bare binary).
+  if [ "$OS_RAW" = "Darwin" ]; then
+    while IFS= read -r url; do
+      case "$url" in
+        *"$TARGET_TRIPLE"*.dmg|*apple-darwin*"$ARCH"*.dmg)
+          printf '%s\n' "$url"
+          return 0
+          ;;
+      esac
+    done <<EOF
+$ASSET_URLS
+EOF
+  fi
   while IFS= read -r url; do
     case "$url" in
       *"$TARGET_TRIPLE"*.tar.gz|*"$TARGET_TRIPLE"*.zip|*"$TARGET_HINT_1"*"$ARCH"*.tar.gz|*"$TARGET_HINT_1"*"$ARCH"*.zip|*"$TARGET_HINT_1"*"$TARGET_HINT_2"*.tar.gz|*"$TARGET_HINT_1"*"$TARGET_HINT_2"*.zip)
@@ -84,11 +98,26 @@ curl -fsSL "$ASSET_URL" -o "$ARCHIVE_PATH"
 case "$ASSET_NAME" in
   *.tar.gz) tar -xzf "$ARCHIVE_PATH" -C "$EXTRACT_DIR" ;;
   *.zip) unzip -q "$ARCHIVE_PATH" -d "$EXTRACT_DIR" ;;
+  *.dmg)
+    need_cmd hdiutil
+    MNT="$TMP_DIR/mnt"
+    mkdir -p "$MNT"
+    hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$ARCHIVE_PATH" >/dev/null
+    trap 'hdiutil detach "$MNT" >/dev/null 2>&1 || true; rm -rf "$TMP_DIR"' EXIT
+    cp -R "$MNT"/*.app "$EXTRACT_DIR"/
+    hdiutil detach "$MNT" >/dev/null
+    trap 'rm -rf "$TMP_DIR"' EXIT
+    ;;
   *) fail "unsupported asset format: $ASSET_NAME" ;;
 esac
 
-BIN_PATH="$(find "$EXTRACT_DIR" -type f -name "$BINARY" | head -n 1)"
 APP_PATH="$(find "$EXTRACT_DIR" -type d -name '*.app' | head -n 1)"
+# A .app bundle wins on macOS (Launchpad); otherwise install the bare binary.
+if [ -n "$APP_PATH" ]; then
+  BIN_PATH=""
+else
+  BIN_PATH="$(find "$EXTRACT_DIR" -type f -name "$BINARY" | head -n 1)"
+fi
 
 if [ -n "$BIN_PATH" ]; then
   DEFAULT_INSTALL_DIR="$HOME/.local/bin"
@@ -120,7 +149,22 @@ elif [ "$OS_RAW" = "Darwin" ] && [ -n "$APP_PATH" ]; then
   DEST_PATH="$APP_INSTALL_DIR/$(basename "$APP_PATH")"
   rm -rf "$DEST_PATH"
   cp -R "$APP_PATH" "$DEST_PATH"
+  # Clear quarantine so the ad-hoc-signed app opens without a Gatekeeper prompt.
+  xattr -dr com.apple.quarantine "$DEST_PATH" 2>/dev/null || true
   log "Installed app bundle to $DEST_PATH"
+
+  # Keep the `rdb` terminal command working via a symlink into ~/.local/bin.
+  CLI_DIR="$HOME/.local/bin"
+  mkdir -p "$CLI_DIR"
+  ln -sf "$DEST_PATH/Contents/MacOS/$BINARY" "$CLI_DIR/$BINARY"
+  log "Linked CLI to $CLI_DIR/$BINARY"
+  case ":$PATH:" in
+    *":$CLI_DIR:"*) ;;
+    *)
+      printf 'warning: %s is not on your PATH yet\n' "$CLI_DIR" >&2
+      printf 'add this to your shell profile: export PATH="%s:$PATH"\n' "$CLI_DIR" >&2
+      ;;
+  esac
 else
   fail "downloaded archive does not contain $BINARY or a macOS .app bundle"
 fi
