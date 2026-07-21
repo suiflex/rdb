@@ -103,7 +103,8 @@ npm i -g @suiflex/rdb
 ```
 
 The postinstall step downloads the prebuilt `rdb` binary for your platform from
-the matching GitHub Release, then `rdb` launches it.
+the matching GitHub Release, then `rdb` launches it. On macOS it also installs
+`RDB.app` into `~/Applications` so it shows up in Launchpad.
 
 ### macOS / Linux
 
@@ -117,9 +118,19 @@ Optional:
 curl -fsSL https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install.sh | RDB_VERSION=v0.1.0 INSTALL_DIR="$HOME/.local/bin" bash
 ```
 
-The script installs `rdb` into `/usr/local/bin` when writable, otherwise it falls back to `~/.local/bin`.
+On macOS the script installs `RDB.app` into Applications (Launchpad) and symlinks
+the `rdb` command into `~/.local/bin`. On Linux it installs the `rdb` binary into
+`/usr/local/bin` when writable, otherwise `~/.local/bin`.
 
 ### Homebrew (macOS / Linux)
+
+For the macOS app (Launchpad):
+
+```bash
+brew install --cask suiflex/tap/rdb
+```
+
+For the CLI binary only:
 
 ```bash
 brew install suiflex/tap/rdb
