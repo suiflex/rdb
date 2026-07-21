@@ -26,10 +26,47 @@ fn engine_label(e: Engine) -> &'static str {
     }
 }
 
+/// URI scheme for a connection-string URL. Distinct from `engine_label`:
+/// postgres/mongo use the canonical `postgresql`/`mongodb` schemes.
+fn engine_scheme(e: Engine) -> &'static str {
+    match e {
+        Engine::Postgres => "postgresql",
+        Engine::MySql => "mysql",
+        Engine::Redis => "redis",
+        Engine::Mongo => "mongodb",
+        Engine::Sqlite => "sqlite",
+        Engine::Cassandra => "cassandra",
+    }
+}
+
+/// Connection-string URL, e.g. `postgresql://user:***@host:5432/db`. The
+/// password is never stored in `SavedConnection` (it lives in the keychain),
+/// so a fixed `***` placeholder marks where it belongs. The user segment is
+/// omitted when empty and the `/database` when absent.
+pub fn conn_to_url(c: &SavedConnection) -> String {
+    let cred = if c.user.is_empty() {
+        String::new()
+    } else {
+        format!("{}:***@", c.user)
+    };
+    let db = c
+        .database
+        .as_deref()
+        .map(|d| format!("/{d}"))
+        .unwrap_or_default();
+    format!(
+        "{}://{cred}{}:{}{db}",
+        engine_scheme(c.engine),
+        c.host,
+        c.port
+    )
+}
+
 /// Saved connections as CSV. Non-secret fields only — passwords live in the
-/// keychain and are never part of `SavedConnection`, so the dump is safe.
+/// keychain and are never part of `SavedConnection`, so the dump is safe. The
+/// `url` column carries a `:***@` placeholder in place of the password.
 pub fn conns_to_csv(conns: &[SavedConnection]) -> String {
-    let mut out = String::from("name,engine,host,port,database,user\n");
+    let mut out = String::from("name,engine,host,port,database,user,url\n");
     for c in conns {
         let row = [
             csv_esc(&c.name),
@@ -38,11 +75,35 @@ pub fn conns_to_csv(conns: &[SavedConnection]) -> String {
             c.port.to_string(),
             csv_esc(c.database.as_deref().unwrap_or("")),
             csv_esc(&c.user),
+            csv_esc(&conn_to_url(c)),
         ];
         out.push_str(&row.join(","));
         out.push('\n');
     }
     out
+}
+
+/// Saved connections as a pretty JSON array. Mirrors `conns_to_csv`: non-secret
+/// fields plus a `url` with the `:***@` password placeholder. Built by hand
+/// (not via `Serialize` on `SavedConnection`) so the computed `url` is included
+/// and keychain secrets stay out.
+pub fn conns_to_json(conns: &[SavedConnection]) -> String {
+    use serde_json::{json, Value};
+    let arr: Vec<Value> = conns
+        .iter()
+        .map(|c| {
+            json!({
+                "name": c.name,
+                "engine": engine_label(c.engine),
+                "host": c.host,
+                "port": c.port,
+                "database": c.database,
+                "user": c.user,
+                "url": conn_to_url(c),
+            })
+        })
+        .collect();
+    serde_json::to_string_pretty(&arr).unwrap_or_else(|_| "[]".into())
 }
 
 /// RFC-4180-style CSV: fields quoted when they contain a comma, quote or
@@ -194,9 +255,37 @@ mod tests {
         let csv = conns_to_csv(&[c]);
         assert_eq!(
             csv,
-            "name,engine,host,port,database,user\n\"db, prod\",postgres,localhost,5432,app,postgres\n"
+            "name,engine,host,port,database,user,url\n\"db, prod\",postgres,localhost,5432,app,postgres,postgresql://postgres:***@localhost:5432/app\n"
         );
         assert!(!csv.to_lowercase().contains("password"));
+    }
+
+    #[test]
+    fn conn_url_scheme_and_placeholder_per_engine() {
+        let mut c = SavedConnection::new("c", Engine::Postgres, "10.2.238.22", 5432, "app");
+        c.database = Some("oss_rba".into());
+        assert_eq!(
+            conn_to_url(&c),
+            "postgresql://app:***@10.2.238.22:5432/oss_rba"
+        );
+
+        let m = SavedConnection::new("m", Engine::Mongo, "10.2.238.111", 27017, "root");
+        assert_eq!(conn_to_url(&m), "mongodb://root:***@10.2.238.111:27017");
+    }
+
+    #[test]
+    fn conn_url_omits_empty_user_and_missing_db() {
+        let c = SavedConnection::new("c", Engine::Redis, "localhost", 6379, "");
+        assert_eq!(conn_to_url(&c), "redis://localhost:6379");
+    }
+
+    #[test]
+    fn conns_json_has_url_and_no_secrets() {
+        let mut c = SavedConnection::new("prod", Engine::Postgres, "localhost", 5432, "app");
+        c.database = Some("db".into());
+        let json = conns_to_json(&[c]);
+        assert!(json.contains("\"url\": \"postgresql://app:***@localhost:5432/db\""));
+        assert!(!json.to_lowercase().contains("password"));
     }
 
     #[test]
