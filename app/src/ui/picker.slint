@@ -6,6 +6,7 @@ import {
     DbBadge, OutlineChip, PrimaryButton, SecondaryButton, TextButton,
     TagChip, FilterField
 } from "components.slint";
+import { AppIcon } from "icons.slint";
 import { ConnItem, KvRow } from "structs.slint";
 import { ScrollView } from "std-widgets.slint";
 
@@ -181,12 +182,10 @@ export component ConnPicker inherits Rectangle {
                                         Rectangle {
                                             width: 12px;
                                             opacity: row-ta.has-hover || grip-ta.has-hover || grip-ta.pressed ? 1.0 : 0.0;
-                                            Text {
-                                                text: "⋮⋮";
+                                            AppIcon {
+                                                name: "grip";
+                                                size: 12px;
                                                 color: selected ? white.with-alpha(0.7) : Tokens.text-faint;
-                                                font-size: 13px;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
                                             }
                                             grip-ta := TouchArea {
                                                 mouse-cursor: grab;
