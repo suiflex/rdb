@@ -1,0 +1,24 @@
+# Rendered by .github/workflows/release-build.yml into suiflex/homebrew-tap.
+# Placeholders (@VERSION@, @BASE@, @ARM_DMG_SHA@, @INTEL_DMG_SHA@) are filled in
+# via sed on each release. Edit the template, not the generated file.
+#
+# This cask installs the RDB.app GUI (from the release .dmg) into Applications.
+# The CLI-only binary is the separate `rdb` formula.
+cask "rdb" do
+  version "@VERSION@"
+
+  on_arm do
+    sha256 "@ARM_DMG_SHA@"
+    url "@BASE@/rdb-aarch64-apple-darwin.dmg"
+  end
+  on_intel do
+    sha256 "@INTEL_DMG_SHA@"
+    url "@BASE@/rdb-x86_64-apple-darwin.dmg"
+  end
+
+  name "RDB"
+  desc "Native cross-platform database manager (PostgreSQL, MySQL, Redis, MongoDB)"
+  homepage "https://github.com/suiflex/rdb"
+
+  app "RDB.app"
+end
