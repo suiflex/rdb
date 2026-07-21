@@ -53,15 +53,74 @@ function download(url, dest, redirects = 0) {
   });
 }
 
+// macOS: the .dmg carries the signed RDB.app. Its name mirrors the tarball's
+// target triple. Pure so it can be self-checked without touching the network.
+function macDmgAsset(arch) {
+  const target = resolveTarget("darwin", arch).target;
+  return `rdb-${target}.dmg`;
+}
+
+// macOS: fetch the .dmg, copy RDB.app into ~/Applications (Launchpad), and
+// vendor the inner binary so the `rdb` command still works. No sudo needed.
+async function installMacApp(version, vendor) {
+  const asset = macDmgAsset(process.arch);
+  const tag = `v${version}`;
+  const url = `https://github.com/${REPO}/releases/download/${tag}/${asset}`;
+  const dmg = path.join(vendor, asset);
+
+  process.stdout.write(`rdb: downloading ${asset} (${tag})…\n`);
+  await download(url, dmg);
+
+  const mnt = fs.mkdtempSync(path.join(require("os").tmpdir(), "rdb-dmg-"));
+  try {
+    execFileSync("hdiutil", ["attach", "-nobrowse", "-readonly", "-mountpoint", mnt, dmg], {
+      stdio: "inherit",
+    });
+    const appName = fs.readdirSync(mnt).find((n) => n.endsWith(".app"));
+    if (!appName) throw new Error("dmg did not contain a .app bundle");
+
+    const appsDir = path.join(require("os").homedir(), "Applications");
+    fs.mkdirSync(appsDir, { recursive: true });
+    const dest = path.join(appsDir, appName);
+    fs.rmSync(dest, { recursive: true, force: true });
+    execFileSync("cp", ["-R", path.join(mnt, appName), dest], { stdio: "inherit" });
+    // Clear quarantine so the ad-hoc-signed app opens without a Gatekeeper prompt.
+    try {
+      execFileSync("xattr", ["-dr", "com.apple.quarantine", dest], { stdio: "ignore" });
+    } catch {
+      /* xattr absent or nothing to clear */
+    }
+    process.stdout.write(`rdb: installed ${appName} to ${appsDir}\n`);
+
+    // Vendor the inner binary so bin/rdb.js keeps resolving the `rdb` command.
+    const binPath = path.join(vendor, "rdb");
+    fs.copyFileSync(path.join(dest, "Contents", "MacOS", "rdb"), binPath);
+    fs.chmodSync(binPath, 0o755);
+  } finally {
+    try {
+      execFileSync("hdiutil", ["detach", mnt], { stdio: "ignore" });
+    } catch {
+      /* already detached */
+    }
+    fs.rmSync(dmg, { force: true });
+  }
+}
+
 async function main() {
   const version = require("./package.json").version;
+
+  const vendor = path.join(__dirname, "vendor");
+  fs.mkdirSync(vendor, { recursive: true });
+
+  if (process.platform === "darwin") {
+    await installMacApp(version, vendor);
+    return;
+  }
+
   const { target, ext, bin } = resolveTarget(process.platform, process.arch);
   const asset = `rdb-${target}.${ext}`;
   const tag = `v${version}`;
   const url = `https://github.com/${REPO}/releases/download/${tag}/${asset}`;
-
-  const vendor = path.join(__dirname, "vendor");
-  fs.mkdirSync(vendor, { recursive: true });
   const archive = path.join(vendor, asset);
 
   process.stdout.write(`rdb: downloading ${asset} (${tag})…\n`);
@@ -86,6 +145,8 @@ if (process.argv.includes("--selftest")) {
   assert.strictEqual(resolveTarget("win32", "x64").bin, "rdb.exe");
   assert.strictEqual(resolveTarget("linux", "x64").ext, "tar.gz");
   assert.throws(() => resolveTarget("sunos", "sparc"));
+  assert.strictEqual(macDmgAsset("arm64"), "rdb-aarch64-apple-darwin.dmg");
+  assert.strictEqual(macDmgAsset("x64"), "rdb-x86_64-apple-darwin.dmg");
   console.log("selftest ok");
   process.exit(0);
 }
