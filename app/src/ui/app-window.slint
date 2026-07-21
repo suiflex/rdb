@@ -1080,11 +1080,10 @@ in-out property <string> rename-text;
                                         background: move-ta.has-hover ? Tokens.accent-tint : transparent;
                                         visible: i == root.active-tab || tab-ta.has-hover;
                                         move-ta := TouchArea { clicked => { root.move-tab-group(i, 1); } }
-                                        Text {
-                                            text: "⇥";
+                                        AppIcon {
+                                            name: "columns";
+                                            size: 11px;
                                             color: move-ta.has-hover ? Tokens.accent : Tokens.text-dim;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
                                         }
                                     }
                                     // close affordance (active or hovered tab)
