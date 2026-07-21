@@ -5,9 +5,9 @@ name: website
 on:
   push:
     branches: [develop]
-    paths: ["website/**"]
+    paths: ["website/**", "wrangler.jsonc"]
   pull_request:
-    paths: ["website/**"]
+    paths: ["website/**", "wrangler.jsonc"]
 
 jobs:
   build:
@@ -22,6 +22,16 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: website/package-lock.json
+      - name: Verify Worker name
+        working-directory: .
+        run: |
+          node -e '
+            const config = require("fs").readFileSync("wrangler.jsonc", "utf8");
+            const name = config.match(/"name"\s*:\s*"([^"]+)"/)?.[1];
+            if (name !== "rdb") {
+              throw new Error(`wrangler.jsonc name must be rdb, got ${name}`);
+            }
+          '
       - run: npm ci
       - run: npm run build
       - run: SKIP_NETWORK=1 npm run test
