@@ -3,7 +3,10 @@
 // committed JSON stays in place, so the site always has valid data.
 import { writeFileSync } from "node:fs";
 
-const API = "https://api.github.com/repos/suiflex/rdb/releases/latest";
+const TAG = process.env.RELEASE_TAG?.trim();
+const API = TAG
+  ? `https://api.github.com/repos/suiflex/rdb/releases/tags/${encodeURIComponent(TAG)}`
+  : "https://api.github.com/repos/suiflex/rdb/releases/latest";
 const OUT = new URL("../src/data/release.json", import.meta.url);
 
 try {
@@ -15,18 +18,25 @@ try {
   const release = {
     tag: data.tag_name,
     published: data.published_at.split("T")[0],
-    assets: data.assets.map((a) => ({
-      name: a.name,
-      size: a.size,
-      sha256: (a.digest ?? "").replace(/^sha256:/, ""),
-      url: a.browser_download_url,
-    })),
+    assets: data.assets.map((a) => {
+      const asset = {
+        name: a.name,
+        size: a.size,
+        sha256: (a.digest ?? "").replace(/^sha256:/, ""),
+        url: a.browser_download_url,
+      };
+      if (!asset.name || !asset.size || !asset.sha256 || !asset.url) {
+        throw new Error(`release asset missing data: ${asset.name || "unknown"}`);
+      }
+      return asset;
+    }),
   };
-  if (!release.tag || release.assets.length === 0) {
+  if (!release.tag || !release.published || release.assets.length === 0) {
     throw new Error("release payload missing tag or assets");
   }
   writeFileSync(OUT, JSON.stringify(release, null, 2) + "\n");
   console.log(`release.json updated to ${release.tag} (${release.assets.length} assets)`);
 } catch (err) {
   console.warn(`fetch-release: keeping committed release.json (${err.message})`);
+  if (TAG) process.exitCode = 1;
 }
