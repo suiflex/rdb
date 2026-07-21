@@ -1222,11 +1222,10 @@ in-out property <string> rename-text;
                                         background: p1-move-ta.has-hover ? Tokens.accent-tint : transparent;
                                         visible: i == root.p1-active-tab || p1-tab-ta.has-hover;
                                         p1-move-ta := TouchArea { clicked => { root.move-tab-group(i, 0); } }
-                                        Text {
-                                            text: "⇤";
+                                        AppIcon {
+                                            name: "columns";
+                                            size: 11px;
                                             color: p1-move-ta.has-hover ? Tokens.accent : Tokens.text-dim;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
                                         }
                                     }
                                     Rectangle {
