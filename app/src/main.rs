@@ -37,6 +37,93 @@ use dispatch::AnyDriver;
 /// Label used for connections with no explicit group.
 const UNGROUPED: &str = "Ungrouped";
 
+/// Open a native "save file" dialog and write `contents` to the chosen path.
+///
+/// macOS: rfd's NSSavePanel would not present from this non-bundled + winit
+/// setup no matter how we coaxed activation policy / parenting, so we shell out
+/// to `osascript`'s `choose file name` — a separate process that always shows
+/// the native panel, immune to our event-loop quirks. Other platforms keep rfd.
+/// ponytail: eprintln diagnostics, swap for `tracing` if the app grows structured logs.
+fn save_via_dialog(
+    w: &MainWindow,
+    file_name: String,
+    filter_label: String,
+    ext: String,
+    contents: String,
+    report: impl FnOnce(&MainWindow, String) + Send + 'static,
+) {
+    eprintln!("[export] request: {file_name} ({} bytes)", contents.len());
+    let weak = w.as_weak();
+    #[cfg(target_os = "macos")]
+    {
+        let _ = (&filter_label, &ext); // osascript panel filters by name only
+        std::thread::spawn(move || {
+            // `choose file name` is the save-style panel; default name prefills
+            // the extension. Quotes stripped so they can't break the AppleScript.
+            let default_name = file_name.replace(['"', '\\'], "");
+            let script = format!(
+                "POSIX path of (choose file name with prompt \"Export\" default name \"{default_name}\")"
+            );
+            eprintln!("[export] opening save dialog for {file_name}");
+            let out = std::process::Command::new("osascript")
+                .arg("-e")
+                .arg(&script)
+                .output();
+            let path = match out {
+                Ok(o) if o.status.success() => {
+                    String::from_utf8_lossy(&o.stdout).trim().to_string()
+                }
+                _ => {
+                    eprintln!("[export] dialog cancelled or failed");
+                    return;
+                }
+            };
+            if path.is_empty() {
+                return;
+            }
+            let msg = match std::fs::write(&path, contents) {
+                Ok(()) => format!("exported → {path}"),
+                Err(e) => format!("export failed: {e}"),
+            };
+            eprintln!("[export] {msg}");
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(w) = weak.upgrade() {
+                    report(&w, msg);
+                }
+            });
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let parent = w.window().window_handle();
+        if slint::spawn_local(async move {
+            eprintln!("[export] opening save dialog for {file_name}");
+            let picked = rfd::AsyncFileDialog::new()
+                .set_parent(&parent)
+                .set_file_name(&file_name)
+                .add_filter(&filter_label, &[ext.as_str()])
+                .save_file()
+                .await;
+            let Some(file) = picked else {
+                eprintln!("[export] dialog closed with no file (cancelled or failed to open)");
+                return;
+            };
+            let msg = match std::fs::write(file.path(), contents) {
+                Ok(()) => format!("exported → {}", file.path().display()),
+                Err(e) => format!("export failed: {e}"),
+            };
+            eprintln!("[export] {msg}");
+            if let Some(w) = weak.upgrade() {
+                report(&w, msg);
+            }
+        })
+        .is_err()
+        {
+            eprintln!("[export] no UI event loop; dialog not opened");
+        }
+    }
+}
+
 /// Build the grouped sidebar row model: a header row per group followed by its
 /// connection rows (unless the group is collapsed). `index` on each connection
 /// row is its position in the store list, so connect/edit callbacks stay correct
@@ -439,20 +526,40 @@ fn filter_operators(engine: rdb_connstore::Engine) -> Vec<SharedString> {
     ops.iter().copied().map(SharedString::from).collect()
 }
 
+/// Make the process a Regular macOS app. A bare `cargo run` binary (no .app
+/// bundle) starts as Prohibited; rfd downgrades that to Accessory, under which
+/// NSSavePanel silently never presents — so Export looked dead. Idempotent and a
+/// no-op on the bundled build (already Regular) and on non-macOS.
+#[cfg(target_os = "macos")]
+fn ensure_regular_activation_policy() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+
+    let Some(main_thread) = MainThreadMarker::new() else {
+        eprintln!("[export] activation policy: not on main thread, skipped");
+        return;
+    };
+    let app = NSApplication::sharedApplication(main_thread);
+    let before = app.activationPolicy();
+    let changed = app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
+    eprintln!("[export] activation policy before={before:?} set_regular_ok={changed}");
+}
+
 #[cfg(target_os = "macos")]
 fn install_macos_app_icon() {
     use objc2::{AllocAnyThread, MainThreadMarker};
     use objc2_app_kit::{NSApplication, NSImage};
     use objc2_foundation::NSData;
 
+    ensure_regular_activation_policy();
     let Some(main_thread) = MainThreadMarker::new() else {
         return;
     };
+    let app = NSApplication::sharedApplication(main_thread);
     let data = NSData::with_bytes(include_bytes!("../assets/icon@512.png"));
     let Some(icon) = NSImage::initWithData(NSImage::alloc(), &data) else {
         return;
     };
-    let app = NSApplication::sharedApplication(main_thread);
     // SAFETY: `icon` is a live NSImage and AppKit is called on the main thread.
     unsafe { app.setApplicationIconImage(Some(&icon)) };
 }
@@ -3387,12 +3494,27 @@ fn main() -> Result<(), slint::PlatformError> {
             let expanded_tables = expanded_tables.clone();
             let loaded_dbs = loaded_dbs.clone();
             let query_console = query_console.clone();
+            // Show the tree spinner until the refetch below finishes (any exit).
+            w.set_tree_loading(true);
+            let clear_loading = {
+                let weak = weak.clone();
+                move || {
+                    let weak = weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = weak.upgrade() {
+                            w.set_tree_loading(false);
+                        }
+                    });
+                }
+            };
             rt.spawn(async move {
                 let guard = current.lock_owned().await;
                 let Some((_, driver)) = guard.as_ref() else {
+                    clear_loading();
                     return;
                 };
                 let Ok(schema) = driver.schema_for(&schema_name).await else {
+                    clear_loading();
                     return;
                 };
                 let nodes = model::to_tree_model(&schema);
@@ -3429,6 +3551,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
                         let empty_cols: Vec<StructField> = Vec::new();
                         w.set_structure_columns(ModelRc::from(Rc::new(VecModel::from(empty_cols))));
+                        w.set_tree_loading(false);
                     }
                 });
             });
@@ -4364,10 +4487,25 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_status_latency(SharedString::default());
             w.set_schema_tree(ModelRc::from(Rc::new(VecModel::<TreeNode>::default())));
             w.set_structure_columns(ModelRc::from(Rc::new(VecModel::<StructField>::default())));
-            workspace_tabs.lock().unwrap().clear();
-            *active_tab_id.lock().unwrap() = None;
+            // Keep the SQL scratch tabs (they are connection-agnostic) so a later
+            // reconnect can restore them; drop only the connection-scoped table /
+            // function tabs whose data belongs to the connection being left.
+            {
+                let mut tabs = workspace_tabs.lock().unwrap();
+                tabs.retain(|t| t.kind == "sql");
+                for t in tabs.iter_mut() {
+                    t.loading = false;
+                }
+                let keep_active = active_tab_id
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .filter(|id| tabs.iter().any(|t| t.id == *id))
+                    .or_else(|| tabs.first().map(|t| t.id.clone()));
+                *active_tab_id.lock().unwrap() = keep_active.clone();
+                set_workspace_tabs(&w, &tabs, keep_active.as_deref());
+            }
             *current_connection_id.lock().unwrap() = None;
-            set_workspace_tabs(&w, &[], None);
             clear_grid(&w, 0);
             *cur_engine.borrow_mut() = None;
             expanded_tables.lock().unwrap().clear();
@@ -4860,12 +4998,18 @@ fn main() -> Result<(), slint::PlatformError> {
                     .filter(|id| kept.iter().any(|t| t.id == *id));
                 (kept, active, active_p1, 0usize)
             };
+            // Standby: a surviving SQL tab stays active across the switch, so its
+            // last result is still meaningful — leave it on screen instead of
+            // blanking. Only a fresh restore (first connect / DB switch) clears.
+            let standby = !restore && init_active.is_some();
             *workspace_tabs.lock().unwrap() = init_tabs;
             *active_tab_id.lock().unwrap() = init_active.clone();
             *active_group1_tab_id.lock().unwrap() = init_active_p1.clone();
-            results.lock().unwrap().clear();
-            *last_view.lock().unwrap() = None;
-            edit_buf.lock().unwrap().clear();
+            if !standby {
+                results.lock().unwrap().clear();
+                *last_view.lock().unwrap() = None;
+                edit_buf.lock().unwrap().clear();
+            }
             *browse.lock().unwrap() = BrowseState {
                 limit: default_browse_limit(sc.engine),
                 ..Default::default()
@@ -4877,7 +5021,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     let tabs = workspace_tabs.lock().unwrap();
                     set_workspace_tabs(&w, &tabs, init_active.as_deref());
                 }
-                clear_grid(&w, 0);
+                if !standby {
+                    clear_grid(&w, 0);
+                }
                 sync_query_console(&w, &query_console);
                 w.set_selected_conn(idx);
                 // Show progress + clear any prior failure immediately.
@@ -5892,6 +6038,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let Some(grid) = displayed_grid.lock().unwrap().clone() else {
+                eprintln!("[export] nothing to export: no result grid loaded");
                 w.set_results_meta(SharedString::from("nothing to export"));
                 return;
             };
@@ -5911,35 +6058,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 4 => ("md", "Markdown", export::to_markdown(&grid)),
                 _ => ("csv", "CSV", export::to_csv(&grid)),
             };
-            // Native save dialog via rfd's async API + Slint's local executor:
-            // the sync dialog blocks the winit event loop and never surfaces.
-            // Parent it to our window so macOS presents the panel as a sheet
-            // (an unparented NSSavePanel silently no-ops for a non-foreground
-            // process, so nothing appears and nothing is written).
-            let parent = w.window().window_handle();
-            let weak = w.as_weak();
-            if slint::spawn_local(async move {
-                let Some(file) = rfd::AsyncFileDialog::new()
-                    .set_parent(&parent)
-                    .set_file_name(format!("rdb-export.{ext}"))
-                    .add_filter(filter, &[ext])
-                    .save_file()
-                    .await
-                else {
-                    return; // user cancelled
-                };
-                let msg = match std::fs::write(file.path(), contents) {
-                    Ok(()) => format!("exported → {}", file.path().display()),
-                    Err(e) => format!("export failed: {e}"),
-                };
-                if let Some(w) = weak.upgrade() {
-                    w.set_results_meta(SharedString::from(msg));
-                }
-            })
-            .is_err()
-            {
-                w.set_results_meta(SharedString::from("export failed: no UI event loop"));
-            }
+            save_via_dialog(
+                &w,
+                format!("rdb-export.{ext}"),
+                filter.to_string(),
+                ext.to_string(),
+                contents,
+                |w, msg| w.set_results_meta(SharedString::from(msg)),
+            );
         });
     }
 
@@ -8245,6 +8371,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_user(SharedString::default());
             w.set_f_database(SharedString::default());
             w.set_f_password(SharedString::default());
+            w.set_f_has_password(false);
             w.set_f_sslmode(SharedString::from("Prefer"));
             w.set_f_params(SharedString::default());
             w.set_f_color(SharedString::from("#2c5fd8"));
@@ -8270,6 +8397,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             *editing_id.borrow_mut() = sc.id.clone();
+            // The stored secret is never shown; expose only whether one exists so
+            // the form can prompt "leave blank to keep" instead of looking empty.
+            let has_pw = st
+                .get_password(&sc.id)
+                .ok()
+                .flatten()
+                .is_some_and(|s| !s.is_empty());
             w.set_form_edit_mode(true);
             w.set_f_name(SharedString::from(sc.name));
             w.set_f_engine(SharedString::from(AnyDriver::label(sc.engine)));
@@ -8278,6 +8412,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_user(SharedString::from(sc.user));
             w.set_f_database(SharedString::from(sc.database.unwrap_or_default()));
             w.set_f_password(SharedString::default());
+            w.set_f_has_password(has_pw);
             w.set_f_sslmode(SharedString::from(match sc.sslmode {
                 rdb_core::conn::SslMode::Disable => "Disable",
                 rdb_core::conn::SslMode::Prefer => "Prefer",
@@ -8367,8 +8502,8 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         });
     }
-    // export saved connections. Passwords are not in the list — they live in
-    // the keychain — so the dump is safe to write. Arg: 0 = JSON, 1 = CSV.
+    // export saved connections. The URL embeds the real (percent-encoded)
+    // password so the file is a re-usable backup — it is sensitive. 0=JSON, 1=CSV.
     {
         let weak = window.as_weak();
         let store = store.clone();
@@ -8377,40 +8512,21 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let st = store.borrow();
+            // Real passwords are embedded so the export can be re-imported.
+            let pw_for = |c: &rdb_connstore::SavedConnection| st.get_password(&c.id).ok().flatten();
             let (ext, contents) = if fmt == 1 {
-                ("csv", export::conns_to_csv(st.list()))
+                ("csv", export::conns_to_csv(st.list(), pw_for))
             } else {
-                ("json", export::conns_to_json(st.list()))
+                ("json", export::conns_to_json(st.list(), pw_for))
             };
-            // Native save dialog via rfd's async API + Slint's local executor:
-            // the sync dialog blocks the winit event loop and never surfaces.
-            // Parent it to our window so macOS presents the panel as a sheet
-            // (an unparented NSSavePanel silently no-ops for a non-foreground
-            // process, so nothing appears and nothing is written).
-            let parent = w.window().window_handle();
-            let weak = w.as_weak();
-            if slint::spawn_local(async move {
-                let Some(file) = rfd::AsyncFileDialog::new()
-                    .set_parent(&parent)
-                    .set_file_name(format!("rdb-connections.{ext}"))
-                    .add_filter(ext.to_uppercase(), &[ext])
-                    .save_file()
-                    .await
-                else {
-                    return; // user cancelled
-                };
-                let msg = match std::fs::write(file.path(), contents) {
-                    Ok(()) => format!("export → {}", file.path().display()),
-                    Err(e) => format!("export failed: {e}"),
-                };
-                if let Some(w) = weak.upgrade() {
-                    w.set_sel_footer(SharedString::from(msg));
-                }
-            })
-            .is_err()
-            {
-                w.set_sel_footer(SharedString::from("export failed: no UI event loop"));
-            }
+            save_via_dialog(
+                &w,
+                format!("rdb-connections.{ext}"),
+                ext.to_uppercase(),
+                ext.to_string(),
+                contents,
+                |w, msg| w.set_sel_footer(SharedString::from(msg)),
+            );
         });
     }
     // quick test from the picker detail pane: saved config, result in the

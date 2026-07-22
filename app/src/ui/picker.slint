@@ -303,6 +303,9 @@ export component ConnPicker inherits Rectangle {
                                     width: exp-btn.preferred-width;
                                     height: exp-btn.preferred-height;
                                     export-menu := PopupWindow {
+                                        // See ExportButton: default close-on-click
+                                        // eats the press before the row click fires.
+                                        close-policy: close-on-click-outside;
                                         x: 0;
                                         y: -76px;
                                         width: 130px;
@@ -321,7 +324,7 @@ export component ConnPicker inherits Rectangle {
                                                     border-radius: 6px;
                                                     background: exp-row-ta.has-hover ? Tokens.accent-tint : transparent;
                                                     exp-row-ta := TouchArea {
-                                                        clicked => { export-menu.close(); root.export-conns(i); }
+                                                        clicked => { root.export-conns(i); export-menu.close(); }
                                                     }
                                                     HorizontalLayout {
                                                         padding-left: Tokens.sp2;

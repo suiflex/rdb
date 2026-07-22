@@ -1,8 +1,8 @@
 //! Secret storage abstraction. Two backends:
+//! - `EncryptedFileBackend`: AES-GCM file. **Default** — no prompts, survives
+//!   rebuilds, portable. See its module docs for the security tradeoff.
 //! - `KeyringBackend`: OS keychain (macOS Keychain, Linux Secret Service).
-//!   Preferred.
-//! - `EncryptedFileBackend`: AES-GCM file, used when Secret Service is absent
-//!   (headless Linux). See its module docs for the security tradeoff.
+//!   Opt-in via `RDB_USE_KEYCHAIN`.
 
 mod file;
 mod keyring;
@@ -22,27 +22,32 @@ pub trait SecretBackend {
 
 use std::path::Path;
 
-/// Pick a secret backend at runtime: prefer the OS keychain, fall back to the
-/// encrypted file when the keychain is unavailable (e.g. headless Linux with no
-/// Secret Service provider). `fallback_dir` is where the encrypted file lives
-/// when the fallback is taken.
+/// Pick a secret backend at runtime. The **encrypted file is the default**: it
+/// never prompts, survives rebuilds, and works everywhere. The OS keychain is
+/// opt-in via `RDB_USE_KEYCHAIN` — on macOS an unsigned/dev binary changes code
+/// signature each build, so the keychain ACL stops matching and every connect
+/// re-prompts (and secrets written by another binary read back empty). The file
+/// backend is weaker than the keychain (a local reader of the `0600` key file
+/// can decrypt) but avoids that whole class of hassle. `fallback_dir` is where
+/// the encrypted file lives.
 pub fn select_backend(fallback_dir: &Path) -> crate::error::Result<Box<dyn SecretBackend>> {
-    let keyring = KeyringBackend::new();
-    // Full set->get->delete roundtrip probe. A bare `get` is not enough: on some
-    // environments (e.g. an unsigned macOS binary) `set` reports success but the
-    // value never persists, so `get` keeps returning None and every saved
-    // password is silently lost. Only trust the keychain if a written sentinel
-    // reads back identical; otherwise fall back to the encrypted file.
-    const PROBE_ID: &str = "__rdb_probe__";
-    const PROBE_VAL: &str = "rdb-probe-value";
-    let keyring_ok = keyring.set(PROBE_ID, PROBE_VAL).is_ok()
-        && matches!(keyring.get(PROBE_ID), Ok(Some(v)) if v == PROBE_VAL);
-    let _ = keyring.delete(PROBE_ID);
-    if keyring_ok {
-        Ok(Box::new(keyring))
-    } else {
-        Ok(Box::new(EncryptedFileBackend::new(fallback_dir)?))
+    if std::env::var_os("RDB_USE_KEYCHAIN").is_some() {
+        let keyring = KeyringBackend::new();
+        // Full set->get->delete roundtrip probe. A bare `get` is not enough: on
+        // some environments (e.g. an unsigned macOS binary) `set` reports success
+        // but the value never persists, so `get` keeps returning None and every
+        // saved password is silently lost. Only trust the keychain if a written
+        // sentinel reads back identical; otherwise fall back to the encrypted file.
+        const PROBE_ID: &str = "__rdb_probe__";
+        const PROBE_VAL: &str = "rdb-probe-value";
+        let keyring_ok = keyring.set(PROBE_ID, PROBE_VAL).is_ok()
+            && matches!(keyring.get(PROBE_ID), Ok(Some(v)) if v == PROBE_VAL);
+        let _ = keyring.delete(PROBE_ID);
+        if keyring_ok {
+            return Ok(Box::new(keyring));
+        }
     }
+    Ok(Box::new(EncryptedFileBackend::new(fallback_dir)?))
 }
 
 #[cfg(test)]

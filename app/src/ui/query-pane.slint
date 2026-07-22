@@ -415,7 +415,7 @@ export component QueryPane inherits Rectangle {
             background: Tokens.canvas;
 
             // Data grid — SQL/KeyValue, and Mongo documents in grid view.
-            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0) && (root.result-kind == 0 || root.result-kind == 2 || (root.result-kind == 1 && root.doc-view == 0)): TabularGrid {
+            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0) && root.sql-view-mode != 2 && (root.result-kind == 0 || root.result-kind == 2 || (root.result-kind == 1 && root.doc-view == 0)): TabularGrid {
                 x: (body.detail-shown && root.detail-left) ? body.detail-w + 1px : 0;
                 width: body.detail-shown ? body.width - body.detail-w - 1px : body.width;
                 height: 100%;
@@ -544,7 +544,7 @@ export component QueryPane inherits Rectangle {
             }
 
             // empty result: distinct from an error, distinct from loading
-            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0)
+            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0) && root.sql-view-mode != 2
                 && root.result-kind == 0 && root.cells.length == 0
                 && !root.status-error && !root.query-running: VerticalLayout {
                 alignment: center;
@@ -577,7 +577,7 @@ export component QueryPane inherits Rectangle {
             }
 
             // Documents (Mongo) — JSON tree view (grid view uses TabularGrid above).
-            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0) && root.result-kind == 1 && root.doc-view == 1: ScrollView {
+            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0) && root.sql-view-mode != 2 && root.result-kind == 1 && root.doc-view == 1: ScrollView {
                 width: 100%;
                 height: 100%;
                 VerticalLayout {
@@ -699,7 +699,7 @@ export component QueryPane inherits Rectangle {
             }
 
             // Chart view: horizontal bars, first text column vs first numeric column
-            if !root.browse-mode && root.view-mode == 0 && root.sql-view-mode == 2: ScrollView {
+            if root.view-mode == 0 && root.sql-view-mode == 2: ScrollView {
                 width: 100%;
                 height: 100%;
                 VerticalLayout {
