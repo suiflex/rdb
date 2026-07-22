@@ -53,6 +53,10 @@ fn save_via_dialog(
     contents: String,
     report: impl FnOnce(&MainWindow, String) + 'static,
 ) {
+    // Guarantee the process is a Regular app right now: NSSavePanel silently
+    // no-ops under Prohibited/Accessory (the default for a non-bundled binary),
+    // and the startup timer that sets this may not have run. Cheap + idempotent.
+    ensure_regular_activation_policy();
     let weak = w.as_weak();
     if slint::spawn_local(async move {
         eprintln!("[export] opening save dialog for {file_name}");
@@ -482,21 +486,39 @@ fn filter_operators(engine: rdb_connstore::Engine) -> Vec<SharedString> {
     ops.iter().copied().map(SharedString::from).collect()
 }
 
+/// Make the process a Regular macOS app. A bare `cargo run` binary (no .app
+/// bundle) starts as Prohibited; rfd downgrades that to Accessory, under which
+/// NSSavePanel silently never presents — so Export looked dead. Idempotent and a
+/// no-op on the bundled build (already Regular) and on non-macOS.
+#[cfg(target_os = "macos")]
+fn ensure_regular_activation_policy() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+
+    let Some(main_thread) = MainThreadMarker::new() else {
+        eprintln!("[export] activation policy: not on main thread, skipped");
+        return;
+    };
+    let app = NSApplication::sharedApplication(main_thread);
+    let before = app.activationPolicy();
+    let changed = app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
+    eprintln!("[export] activation policy before={before:?} set_regular_ok={changed}");
+}
+
+#[cfg(not(target_os = "macos"))]
+fn ensure_regular_activation_policy() {}
+
 #[cfg(target_os = "macos")]
 fn install_macos_app_icon() {
     use objc2::{AllocAnyThread, MainThreadMarker};
-    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSImage};
+    use objc2_app_kit::{NSApplication, NSImage};
     use objc2_foundation::NSData;
 
+    ensure_regular_activation_policy();
     let Some(main_thread) = MainThreadMarker::new() else {
         return;
     };
     let app = NSApplication::sharedApplication(main_thread);
-    // A bare `cargo run` binary (no .app bundle) starts with activation policy
-    // Prohibited; rfd then downgrades it to Accessory, under which NSSavePanel
-    // silently never presents — so Export looked dead. Force Regular so the save
-    // dialog appears. No-op for the bundled build (already Regular).
-    app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
     let data = NSData::with_bytes(include_bytes!("../assets/icon@512.png"));
     let Some(icon) = NSImage::initWithData(NSImage::alloc(), &data) else {
         return;
