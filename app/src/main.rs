@@ -8505,8 +8505,8 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         });
     }
-    // export saved connections. Passwords are not in the list — they live in
-    // the keychain — so the dump is safe to write. Arg: 0 = JSON, 1 = CSV.
+    // export saved connections. The URL embeds the real (percent-encoded)
+    // password so the file is a re-usable backup — it is sensitive. 0=JSON, 1=CSV.
     {
         let weak = window.as_weak();
         let store = store.clone();
@@ -8515,10 +8515,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let st = store.borrow();
+            // Real passwords are embedded so the export can be re-imported.
+            let pw_for = |c: &rdb_connstore::SavedConnection| st.get_password(&c.id).ok().flatten();
             let (ext, contents) = if fmt == 1 {
-                ("csv", export::conns_to_csv(st.list()))
+                ("csv", export::conns_to_csv(st.list(), pw_for))
             } else {
-                ("json", export::conns_to_json(st.list()))
+                ("json", export::conns_to_json(st.list(), pw_for))
             };
             save_via_dialog(
                 &w,
