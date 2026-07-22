@@ -33,6 +33,7 @@ export component ConnForm inherits Rectangle {
     in-out property <string> f-user;
     in-out property <string> f-database;
     in-out property <string> f-password;
+    in-out property <bool> f-has-password;  // a secret is already stored for this conn
     in-out property <string> f-sslmode;    // "Disable"|"Prefer"|"Require"
     in-out property <string> f-params;     // Mongo options query string or full URI
     in-out property <string> f-color;      // selected hex
@@ -187,6 +188,7 @@ export component ConnForm inherits Rectangle {
                     horizontal-stretch: 1;
                     text <=> root.f-password;
                     input-type: InputType.password;
+                    placeholder: root.f-has-password ? "•••••• stored — leave blank to keep" : "";
                 }
             }
 

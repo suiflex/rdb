@@ -8267,6 +8267,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_user(SharedString::default());
             w.set_f_database(SharedString::default());
             w.set_f_password(SharedString::default());
+            w.set_f_has_password(false);
             w.set_f_sslmode(SharedString::from("Prefer"));
             w.set_f_params(SharedString::default());
             w.set_f_color(SharedString::from("#2c5fd8"));
@@ -8292,6 +8293,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             *editing_id.borrow_mut() = sc.id.clone();
+            // The stored secret is never shown; expose only whether one exists so
+            // the form can prompt "leave blank to keep" instead of looking empty.
+            let has_pw = st
+                .get_password(&sc.id)
+                .ok()
+                .flatten()
+                .is_some_and(|s| !s.is_empty());
             w.set_form_edit_mode(true);
             w.set_f_name(SharedString::from(sc.name));
             w.set_f_engine(SharedString::from(AnyDriver::label(sc.engine)));
@@ -8300,6 +8308,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_user(SharedString::from(sc.user));
             w.set_f_database(SharedString::from(sc.database.unwrap_or_default()));
             w.set_f_password(SharedString::default());
+            w.set_f_has_password(has_pw);
             w.set_f_sslmode(SharedString::from(match sc.sslmode {
                 rdb_core::conn::SslMode::Disable => "Disable",
                 rdb_core::conn::SslMode::Prefer => "Prefer",
