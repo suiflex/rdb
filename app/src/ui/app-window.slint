@@ -991,7 +991,9 @@ in-out property <string> rename-text;
                                 tab-ta := TouchArea {
                                     property <bool> dragging: false;
                                     moved => {
-                                        if (abs(self.mouse-x - self.pressed-x) > 8px) {
+                                        // 18px slop: a small jitter during a click
+                                        // no longer flips to drag and eats the click.
+                                        if (abs(self.mouse-x - self.pressed-x) > 18px) {
                                             self.dragging = true;
                                             root.tab-drag-source = 0;
                                         }
@@ -1158,7 +1160,9 @@ in-out property <string> rename-text;
                                 p1-tab-ta := TouchArea {
                                     property <bool> dragging: false;
                                     moved => {
-                                        if (abs(self.mouse-x - self.pressed-x) > 8px) {
+                                        // 18px slop: a small jitter during a click
+                                        // no longer flips to drag and eats the click.
+                                        if (abs(self.mouse-x - self.pressed-x) > 18px) {
                                             self.dragging = true;
                                             root.tab-drag-source = 1;
                                         }
