@@ -52,6 +52,7 @@ fn save_via_dialog(
     contents: String,
     report: impl FnOnce(&MainWindow, String) + Send + 'static,
 ) {
+    eprintln!("[export] request: {file_name} ({} bytes)", contents.len());
     let weak = w.as_weak();
     #[cfg(target_os = "macos")]
     {
@@ -6040,6 +6041,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let Some(grid) = displayed_grid.lock().unwrap().clone() else {
+                eprintln!("[export] nothing to export: no result grid loaded");
                 w.set_results_meta(SharedString::from("nothing to export"));
                 return;
             };
