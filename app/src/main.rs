@@ -37,6 +37,49 @@ use dispatch::AnyDriver;
 /// Label used for connections with no explicit group.
 const UNGROUPED: &str = "Ungrouped";
 
+/// Open a native "save file" dialog and write `contents` to the chosen path.
+///
+/// rfd's async API is driven on Slint's local executor so the winit event loop
+/// keeps running (the blocking dialog never surfaces otherwise). We deliberately
+/// do NOT parent the panel: a parented sheet can silently fail to present, while
+/// an app-modal panel reliably appears for a foreground process — and the app is
+/// always foreground here, since the user just clicked Export.
+/// ponytail: eprintln diagnostics, swap for `tracing` if the app grows structured logs.
+fn save_via_dialog(
+    w: &MainWindow,
+    file_name: String,
+    filter_label: String,
+    ext: String,
+    contents: String,
+    report: impl FnOnce(&MainWindow, String) + 'static,
+) {
+    let weak = w.as_weak();
+    if slint::spawn_local(async move {
+        eprintln!("[export] opening save dialog for {file_name}");
+        let picked = rfd::AsyncFileDialog::new()
+            .set_file_name(&file_name)
+            .add_filter(&filter_label, &[ext.as_str()])
+            .save_file()
+            .await;
+        let Some(file) = picked else {
+            eprintln!("[export] dialog closed with no file (cancelled or failed to open)");
+            return;
+        };
+        let msg = match std::fs::write(file.path(), contents) {
+            Ok(()) => format!("exported → {}", file.path().display()),
+            Err(e) => format!("export failed: {e}"),
+        };
+        eprintln!("[export] {msg}");
+        if let Some(w) = weak.upgrade() {
+            report(&w, msg);
+        }
+    })
+    .is_err()
+    {
+        eprintln!("[export] no UI event loop; dialog not opened");
+    }
+}
+
 /// Build the grouped sidebar row model: a header row per group followed by its
 /// connection rows (unless the group is collapsed). `index` on each connection
 /// row is its position in the store list, so connect/edit callbacks stay correct
@@ -5911,35 +5954,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 4 => ("md", "Markdown", export::to_markdown(&grid)),
                 _ => ("csv", "CSV", export::to_csv(&grid)),
             };
-            // Native save dialog via rfd's async API + Slint's local executor:
-            // the sync dialog blocks the winit event loop and never surfaces.
-            // Parent it to our window so macOS presents the panel as a sheet
-            // (an unparented NSSavePanel silently no-ops for a non-foreground
-            // process, so nothing appears and nothing is written).
-            let parent = w.window().window_handle();
-            let weak = w.as_weak();
-            if slint::spawn_local(async move {
-                let Some(file) = rfd::AsyncFileDialog::new()
-                    .set_parent(&parent)
-                    .set_file_name(format!("rdb-export.{ext}"))
-                    .add_filter(filter, &[ext])
-                    .save_file()
-                    .await
-                else {
-                    return; // user cancelled
-                };
-                let msg = match std::fs::write(file.path(), contents) {
-                    Ok(()) => format!("exported → {}", file.path().display()),
-                    Err(e) => format!("export failed: {e}"),
-                };
-                if let Some(w) = weak.upgrade() {
-                    w.set_results_meta(SharedString::from(msg));
-                }
-            })
-            .is_err()
-            {
-                w.set_results_meta(SharedString::from("export failed: no UI event loop"));
-            }
+            save_via_dialog(
+                &w,
+                format!("rdb-export.{ext}"),
+                filter.to_string(),
+                ext.to_string(),
+                contents,
+                |w, msg| w.set_results_meta(SharedString::from(msg)),
+            );
         });
     }
 
@@ -8382,35 +8404,14 @@ fn main() -> Result<(), slint::PlatformError> {
             } else {
                 ("json", export::conns_to_json(st.list()))
             };
-            // Native save dialog via rfd's async API + Slint's local executor:
-            // the sync dialog blocks the winit event loop and never surfaces.
-            // Parent it to our window so macOS presents the panel as a sheet
-            // (an unparented NSSavePanel silently no-ops for a non-foreground
-            // process, so nothing appears and nothing is written).
-            let parent = w.window().window_handle();
-            let weak = w.as_weak();
-            if slint::spawn_local(async move {
-                let Some(file) = rfd::AsyncFileDialog::new()
-                    .set_parent(&parent)
-                    .set_file_name(format!("rdb-connections.{ext}"))
-                    .add_filter(ext.to_uppercase(), &[ext])
-                    .save_file()
-                    .await
-                else {
-                    return; // user cancelled
-                };
-                let msg = match std::fs::write(file.path(), contents) {
-                    Ok(()) => format!("export → {}", file.path().display()),
-                    Err(e) => format!("export failed: {e}"),
-                };
-                if let Some(w) = weak.upgrade() {
-                    w.set_sel_footer(SharedString::from(msg));
-                }
-            })
-            .is_err()
-            {
-                w.set_sel_footer(SharedString::from("export failed: no UI event loop"));
-            }
+            save_via_dialog(
+                &w,
+                format!("rdb-connections.{ext}"),
+                ext.to_uppercase(),
+                ext.to_string(),
+                contents,
+                |w, msg| w.set_sel_footer(SharedString::from(msg)),
+            );
         });
     }
     // quick test from the picker detail pane: saved config, result in the
