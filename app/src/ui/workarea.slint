@@ -233,6 +233,8 @@ export component WorkArea inherits Rectangle {
 
     // SQL result footer segments: 0 Data · 1 Message · 2 Chart.
     in-out property <int> sql-view-mode: 0;
+    // Opening/switching a browsed table lands on the grid, not a leftover chart.
+    changed active-table => { root.sql-view-mode = 0; }
     in property <[ChartBar]> chart-bars;
 
     in property <[IndexRow]> index-rows;
@@ -344,6 +346,23 @@ export component WorkArea inherits Rectangle {
                             active: root.doc-view == 1;
                             clicked => { root.doc-view = 1; }
                         }
+                    }
+                }
+                // Copy / Export / Chart — parity with the query-result toolbar so
+                // browsing a table offers the same result actions.
+                VerticalLayout {
+                    alignment: center;
+                    TextButton { text: "Copy"; clicked => { root.copy-results(); } }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    ExportButton { export(i) => { root.export-results(i); } }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    TextButton {
+                        text: root.sql-view-mode == 2 ? "Data" : "Chart";
+                        clicked => { root.sql-view-mode = root.sql-view-mode == 2 ? 0 : 2; }
                     }
                 }
                 VerticalLayout {
