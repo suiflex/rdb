@@ -57,10 +57,15 @@ fn save_via_dialog(
     // no-ops under Prohibited/Accessory (the default for a non-bundled binary),
     // and the startup timer that sets this may not have run. Cheap + idempotent.
     ensure_regular_activation_policy();
+    // Parent to our window: rfd only takes its working async sheet-modal path
+    // when a parent is set; without one it falls back to a sync path that never
+    // presents here. (Regular policy above is what makes the sheet actually show.)
+    let parent = w.window().window_handle();
     let weak = w.as_weak();
     if slint::spawn_local(async move {
         eprintln!("[export] opening save dialog for {file_name}");
         let picked = rfd::AsyncFileDialog::new()
+            .set_parent(&parent)
             .set_file_name(&file_name)
             .add_filter(&filter_label, &[ext.as_str()])
             .save_file()
