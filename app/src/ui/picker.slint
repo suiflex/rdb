@@ -303,6 +303,9 @@ export component ConnPicker inherits Rectangle {
                                     width: exp-btn.preferred-width;
                                     height: exp-btn.preferred-height;
                                     export-menu := PopupWindow {
+                                        // See ExportButton: default close-on-click
+                                        // eats the press before the row click fires.
+                                        close-policy: close-on-click-outside;
                                         x: 0;
                                         y: -76px;
                                         width: 130px;

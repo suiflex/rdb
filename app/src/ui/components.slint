@@ -222,6 +222,10 @@ export component ExportButton inherits Rectangle {
         font-weight: 500;
     }
     menu := PopupWindow {
+        // Default close-on-click swallows the press and closes before the inner
+        // row TouchArea completes its click, so export(i) never fired. Only
+        // auto-close on clicks outside the menu.
+        close-policy: close-on-click-outside;
         x: 0;
         y: parent.height + 2px;
         width: 150px;
