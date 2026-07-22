@@ -246,7 +246,10 @@ export component ExportButton inherits Rectangle {
                     border-radius: 6px;
                     background: row-ta.has-hover ? Tokens.accent-tint : transparent;
                     row-ta := TouchArea {
-                        clicked => { menu.close(); root.export(i); }
+                        // Emit BEFORE close: closing the popup first cancels the
+                        // rest of this handler, so export(i) never ran (SelectBox
+                        // works because it emits before closing).
+                        clicked => { root.export(i); menu.close(); }
                     }
                     HorizontalLayout {
                         padding-left: Tokens.sp2;
