@@ -39,11 +39,10 @@ const UNGROUPED: &str = "Ungrouped";
 
 /// Open a native "save file" dialog and write `contents` to the chosen path.
 ///
-/// rfd's async API is driven on Slint's local executor so the winit event loop
-/// keeps running (the blocking dialog never surfaces otherwise). We deliberately
-/// do NOT parent the panel: a parented sheet can silently fail to present, while
-/// an app-modal panel reliably appears for a foreground process — and the app is
-/// always foreground here, since the user just clicked Export.
+/// macOS: rfd's NSSavePanel would not present from this non-bundled + winit
+/// setup no matter how we coaxed activation policy / parenting, so we shell out
+/// to `osascript`'s `choose file name` — a separate process that always shows
+/// the native panel, immune to our event-loop quirks. Other platforms keep rfd.
 /// ponytail: eprintln diagnostics, swap for `tracing` if the app grows structured logs.
 fn save_via_dialog(
     w: &MainWindow,
@@ -51,41 +50,76 @@ fn save_via_dialog(
     filter_label: String,
     ext: String,
     contents: String,
-    report: impl FnOnce(&MainWindow, String) + 'static,
+    report: impl FnOnce(&MainWindow, String) + Send + 'static,
 ) {
-    // Guarantee the process is a Regular app right now: NSSavePanel silently
-    // no-ops under Prohibited/Accessory (the default for a non-bundled binary),
-    // and the startup timer that sets this may not have run. Cheap + idempotent.
-    ensure_regular_activation_policy();
-    // Parent to our window: rfd only takes its working async sheet-modal path
-    // when a parent is set; without one it falls back to a sync path that never
-    // presents here. (Regular policy above is what makes the sheet actually show.)
-    let parent = w.window().window_handle();
     let weak = w.as_weak();
-    if slint::spawn_local(async move {
-        eprintln!("[export] opening save dialog for {file_name}");
-        let picked = rfd::AsyncFileDialog::new()
-            .set_parent(&parent)
-            .set_file_name(&file_name)
-            .add_filter(&filter_label, &[ext.as_str()])
-            .save_file()
-            .await;
-        let Some(file) = picked else {
-            eprintln!("[export] dialog closed with no file (cancelled or failed to open)");
-            return;
-        };
-        let msg = match std::fs::write(file.path(), contents) {
-            Ok(()) => format!("exported → {}", file.path().display()),
-            Err(e) => format!("export failed: {e}"),
-        };
-        eprintln!("[export] {msg}");
-        if let Some(w) = weak.upgrade() {
-            report(&w, msg);
-        }
-    })
-    .is_err()
+    #[cfg(target_os = "macos")]
     {
-        eprintln!("[export] no UI event loop; dialog not opened");
+        let _ = (&filter_label, &ext); // osascript panel filters by name only
+        std::thread::spawn(move || {
+            // `choose file name` is the save-style panel; default name prefills
+            // the extension. Quotes stripped so they can't break the AppleScript.
+            let default_name = file_name.replace(['"', '\\'], "");
+            let script = format!(
+                "POSIX path of (choose file name with prompt \"Export\" default name \"{default_name}\")"
+            );
+            eprintln!("[export] opening save dialog for {file_name}");
+            let out = std::process::Command::new("osascript")
+                .arg("-e")
+                .arg(&script)
+                .output();
+            let path = match out {
+                Ok(o) if o.status.success() => {
+                    String::from_utf8_lossy(&o.stdout).trim().to_string()
+                }
+                _ => {
+                    eprintln!("[export] dialog cancelled or failed");
+                    return;
+                }
+            };
+            if path.is_empty() {
+                return;
+            }
+            let msg = match std::fs::write(&path, contents) {
+                Ok(()) => format!("exported → {path}"),
+                Err(e) => format!("export failed: {e}"),
+            };
+            eprintln!("[export] {msg}");
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(w) = weak.upgrade() {
+                    report(&w, msg);
+                }
+            });
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let parent = w.window().window_handle();
+        if slint::spawn_local(async move {
+            eprintln!("[export] opening save dialog for {file_name}");
+            let picked = rfd::AsyncFileDialog::new()
+                .set_parent(&parent)
+                .set_file_name(&file_name)
+                .add_filter(&filter_label, &[ext.as_str()])
+                .save_file()
+                .await;
+            let Some(file) = picked else {
+                eprintln!("[export] dialog closed with no file (cancelled or failed to open)");
+                return;
+            };
+            let msg = match std::fs::write(file.path(), contents) {
+                Ok(()) => format!("exported → {}", file.path().display()),
+                Err(e) => format!("export failed: {e}"),
+            };
+            eprintln!("[export] {msg}");
+            if let Some(w) = weak.upgrade() {
+                report(&w, msg);
+            }
+        })
+        .is_err()
+        {
+            eprintln!("[export] no UI event loop; dialog not opened");
+        }
     }
 }
 
