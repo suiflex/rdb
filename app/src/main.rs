@@ -545,9 +545,6 @@ fn ensure_regular_activation_policy() {
     eprintln!("[export] activation policy before={before:?} set_regular_ok={changed}");
 }
 
-#[cfg(not(target_os = "macos"))]
-fn ensure_regular_activation_policy() {}
-
 #[cfg(target_os = "macos")]
 fn install_macos_app_icon() {
     use objc2::{AllocAnyThread, MainThreadMarker};
