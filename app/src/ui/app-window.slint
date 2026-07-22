@@ -11,7 +11,7 @@ import { WorkArea } from "workarea.slint";
 import { CommandPalette, ListModal, PaletteItem } from "palette.slint";
 import { ConnForm } from "conn-form.slint";
 import { AppIcon } from "icons.slint";
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView, Spinner } from "std-widgets.slint";
 import {
     GridColumn,
     GridCell,
@@ -134,6 +134,8 @@ export component MainWindow inherits Window {
     in property <string> bc-conn;
     in property <string> bc-db;
     in property <string> bc-schema;
+    // True while the schema/table tree is being (re)fetched after a db/schema switch.
+    in property <bool> tree-loading;
 
     // ----- sidebar models -----
     in property <[ConnItem]> connections;
@@ -735,6 +737,16 @@ in-out property <string> rename-text;
                             caret: true;
                             mono: true;
                             clicked => { root.select-schema(root.schema-name); }
+                        }
+                    }
+                    // Spinner while the tree reloads after a db/schema switch, so
+                    // the change isn't a silent jump.
+                    if root.tree-loading: VerticalLayout {
+                        alignment: center;
+                        Spinner {
+                            width: 16px;
+                            height: 16px;
+                            indeterminate: true;
                         }
                     }
                     VerticalLayout {

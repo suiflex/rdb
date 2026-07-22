@@ -3430,12 +3430,27 @@ fn main() -> Result<(), slint::PlatformError> {
             let expanded_tables = expanded_tables.clone();
             let loaded_dbs = loaded_dbs.clone();
             let query_console = query_console.clone();
+            // Show the tree spinner until the refetch below finishes (any exit).
+            w.set_tree_loading(true);
+            let clear_loading = {
+                let weak = weak.clone();
+                move || {
+                    let weak = weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = weak.upgrade() {
+                            w.set_tree_loading(false);
+                        }
+                    });
+                }
+            };
             rt.spawn(async move {
                 let guard = current.lock_owned().await;
                 let Some((_, driver)) = guard.as_ref() else {
+                    clear_loading();
                     return;
                 };
                 let Ok(schema) = driver.schema_for(&schema_name).await else {
+                    clear_loading();
                     return;
                 };
                 let nodes = model::to_tree_model(&schema);
@@ -3472,6 +3487,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
                         let empty_cols: Vec<StructField> = Vec::new();
                         w.set_structure_columns(ModelRc::from(Rc::new(VecModel::from(empty_cols))));
+                        w.set_tree_loading(false);
                     }
                 });
             });
