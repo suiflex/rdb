@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.21.0](https://github.com/suiflex/rdb/compare/v0.20.0...v0.21.0) (2026-07-22)
+
+
+### Features
+
+* **export:** embed real password in exported connection URLs ([5a10ed1](https://github.com/suiflex/rdb/commit/5a10ed165e75f20393d531bdc40ac3ef96ceb986))
+* **ui:** add copy/export/chart to the table browse toolbar ([7d33e1a](https://github.com/suiflex/rdb/commit/7d33e1aec39bab5e2ba091ff3a543cde21811ff0))
+* **ui:** show a spinner while the tree reloads on schema switch ([1af6362](https://github.com/suiflex/rdb/commit/1af636257c1760352a182a7f0b7ba74be4d671e5))
+
+
+### Bug Fixes
+
+* **export:** drop unused non-macos activation-policy stub ([00ef039](https://github.com/suiflex/rdb/commit/00ef039608dfb6e24ae45c55e166fa43dbf72372))
+* **export:** emit the chosen format before closing the menu ([3e96d50](https://github.com/suiflex/rdb/commit/3e96d504927218a64a0854d3c6cc8f133f1ec833))
+* **export:** force Regular activation policy at dialog open, not just startup ([53d11f6](https://github.com/suiflex/rdb/commit/53d11f67323c870ec88dcd48f036664280375725))
+* **export:** make save dialog appear reliably on macOS ([d6225ba](https://github.com/suiflex/rdb/commit/d6225ba99c3cd2d9445cb8759a7092e1f60eff8b))
+* **export:** parent the save panel so rfd uses its async sheet path ([511329f](https://github.com/suiflex/rdb/commit/511329fbdb6f584b673a7af6748762593c5cd4c9))
+* **export:** set macOS activation policy to Regular so save dialog shows ([cb962de](https://github.com/suiflex/rdb/commit/cb962de2be5aa59b051cf336d57913b532aa6326))
+* **export:** stop the format menu closing before its click registers ([13a12f4](https://github.com/suiflex/rdb/commit/13a12f4c11df78b14b6519df628b411ebd0004dc))
+* **export:** use osascript save panel on macOS ([550fdea](https://github.com/suiflex/rdb/commit/550fdeaf97c3a707230c2f396ebf1137559d7ee5))
+* macOS export dialog, connection secrets, tab persistence + UI polish ([0b41fa3](https://github.com/suiflex/rdb/commit/0b41fa34a93b45db2392afb27b6e56c4f6decd39))
+* **ui:** keep SQL query tabs and results across a connection switch ([cd75c1e](https://github.com/suiflex/rdb/commit/cd75c1ee2d5ae10a25a16d83520fdc2bde70722a))
+* **ui:** show that a saved connection already has a password ([095d8f0](https://github.com/suiflex/rdb/commit/095d8f0ca18dfde1db5382360c8fe8932c292e9c))
+* **ui:** stop query-tab clicks misfiring as drags ([0cc96d6](https://github.com/suiflex/rdb/commit/0cc96d63bece5b2cc64beab044f399d70940d70e))
+
 ## [0.20.0](https://github.com/suiflex/rdb/compare/v0.19.0...v0.20.0) (2026-07-21)
 
 
