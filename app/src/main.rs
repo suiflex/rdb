@@ -4428,10 +4428,25 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_status_latency(SharedString::default());
             w.set_schema_tree(ModelRc::from(Rc::new(VecModel::<TreeNode>::default())));
             w.set_structure_columns(ModelRc::from(Rc::new(VecModel::<StructField>::default())));
-            workspace_tabs.lock().unwrap().clear();
-            *active_tab_id.lock().unwrap() = None;
+            // Keep the SQL scratch tabs (they are connection-agnostic) so a later
+            // reconnect can restore them; drop only the connection-scoped table /
+            // function tabs whose data belongs to the connection being left.
+            {
+                let mut tabs = workspace_tabs.lock().unwrap();
+                tabs.retain(|t| t.kind == "sql");
+                for t in tabs.iter_mut() {
+                    t.loading = false;
+                }
+                let keep_active = active_tab_id
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .filter(|id| tabs.iter().any(|t| t.id == *id))
+                    .or_else(|| tabs.first().map(|t| t.id.clone()));
+                *active_tab_id.lock().unwrap() = keep_active.clone();
+                set_workspace_tabs(&w, &tabs, keep_active.as_deref());
+            }
             *current_connection_id.lock().unwrap() = None;
-            set_workspace_tabs(&w, &[], None);
             clear_grid(&w, 0);
             *cur_engine.borrow_mut() = None;
             expanded_tables.lock().unwrap().clear();
@@ -4924,12 +4939,18 @@ fn main() -> Result<(), slint::PlatformError> {
                     .filter(|id| kept.iter().any(|t| t.id == *id));
                 (kept, active, active_p1, 0usize)
             };
+            // Standby: a surviving SQL tab stays active across the switch, so its
+            // last result is still meaningful — leave it on screen instead of
+            // blanking. Only a fresh restore (first connect / DB switch) clears.
+            let standby = !restore && init_active.is_some();
             *workspace_tabs.lock().unwrap() = init_tabs;
             *active_tab_id.lock().unwrap() = init_active.clone();
             *active_group1_tab_id.lock().unwrap() = init_active_p1.clone();
-            results.lock().unwrap().clear();
-            *last_view.lock().unwrap() = None;
-            edit_buf.lock().unwrap().clear();
+            if !standby {
+                results.lock().unwrap().clear();
+                *last_view.lock().unwrap() = None;
+                edit_buf.lock().unwrap().clear();
+            }
             *browse.lock().unwrap() = BrowseState {
                 limit: default_browse_limit(sc.engine),
                 ..Default::default()
@@ -4941,7 +4962,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     let tabs = workspace_tabs.lock().unwrap();
                     set_workspace_tabs(&w, &tabs, init_active.as_deref());
                 }
-                clear_grid(&w, 0);
+                if !standby {
+                    clear_grid(&w, 0);
+                }
                 sync_query_console(&w, &query_console);
                 w.set_selected_conn(idx);
                 // Show progress + clear any prior failure immediately.
