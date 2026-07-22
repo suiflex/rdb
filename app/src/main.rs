@@ -485,17 +485,22 @@ fn filter_operators(engine: rdb_connstore::Engine) -> Vec<SharedString> {
 #[cfg(target_os = "macos")]
 fn install_macos_app_icon() {
     use objc2::{AllocAnyThread, MainThreadMarker};
-    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSImage};
     use objc2_foundation::NSData;
 
     let Some(main_thread) = MainThreadMarker::new() else {
         return;
     };
+    let app = NSApplication::sharedApplication(main_thread);
+    // A bare `cargo run` binary (no .app bundle) starts with activation policy
+    // Prohibited; rfd then downgrades it to Accessory, under which NSSavePanel
+    // silently never presents — so Export looked dead. Force Regular so the save
+    // dialog appears. No-op for the bundled build (already Regular).
+    app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
     let data = NSData::with_bytes(include_bytes!("../assets/icon@512.png"));
     let Some(icon) = NSImage::initWithData(NSImage::alloc(), &data) else {
         return;
     };
-    let app = NSApplication::sharedApplication(main_thread);
     // SAFETY: `icon` is a live NSImage and AppKit is called on the main thread.
     unsafe { app.setApplicationIconImage(Some(&icon)) };
 }
