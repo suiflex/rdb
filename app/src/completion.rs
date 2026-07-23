@@ -172,7 +172,9 @@ fn columns_of(nodes: &[VmTreeNode], owner: &str) -> Vec<Candidate> {
                 .map(|f| Candidate {
                     label: field_name(&f.label).to_string(),
                     kind: "field".into(),
-                    sub: owner.to_string(),
+                    // Bare table name only — the schema prefix just crowds the
+                    // row and pushes the field label into an ellipsis.
+                    sub: owner.rsplit('.').next().unwrap_or(owner).to_string(),
                 })
                 .collect();
         }

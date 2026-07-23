@@ -602,6 +602,10 @@ struct GroupRuntime {
     col_filters: Arc<std::sync::Mutex<Vec<String>>>,
     stream_cancel: Rc<RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>>,
     stream_timer: Rc<RefCell<Option<slint::Timer>>>,
+    // Abort handle for the in-flight buffered query task, so a slow query can be
+    // hard-cancelled. Overwritten on each run; aborting a finished task is a
+    // no-op, so no clearing on completion is needed.
+    query_abort: Rc<RefCell<Option<tokio::task::AbortHandle>>>,
 }
 
 impl GroupRuntime {
@@ -626,6 +630,7 @@ impl GroupRuntime {
             col_filters: Arc::new(std::sync::Mutex::new(Vec::new())),
             stream_cancel: Rc::new(RefCell::new(None)),
             stream_timer: Rc::new(RefCell::new(None)),
+            query_abort: Rc::new(RefCell::new(None)),
         }
     }
 }
@@ -2519,19 +2524,18 @@ fn main() -> Result<(), slint::PlatformError> {
                 .collect();
             let lines = ModelRc::from(Rc::new(VecModel::from(lines)));
             // Fold arrows: 1 = open head, 2 = closed head, 0 = plain line.
-            // `hidden` blanks out the body lines of a closed statement.
+            // `hidden` blanks out the body lines of a closed region; nested
+            // closed regions just union their ranges.
             let n = ed.lines.len();
             let mut hidden = vec![false; n];
             let mut fold_state = vec![0i32; n];
             let folded = folded_heads.borrow();
-            for (h, e) in editor::statement_line_spans(&ed.lines) {
-                if e > h {
-                    let closed = folded.contains(&h);
-                    fold_state[h] = if closed { 2 } else { 1 };
-                    if closed {
-                        for hl in hidden.iter_mut().take(e + 1).skip(h + 1) {
-                            *hl = true;
-                        }
+            for (h, e) in editor::fold_regions(&ed.lines) {
+                let closed = folded.contains(&h);
+                fold_state[h] = if closed { 2 } else { 1 };
+                if closed {
+                    for hl in hidden.iter_mut().take(e + 1).skip(h + 1) {
+                        *hl = true;
                     }
                 }
             }
@@ -2588,7 +2592,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // hidden line; pull the caret up to the visible head.
             if now_closed {
                 let mut ed = ed_state.borrow_mut();
-                if let Some((_, e)) = editor::statement_line_spans(&ed.lines)
+                if let Some((_, e)) = editor::fold_regions(&ed.lines)
                     .into_iter()
                     .find(|(h, _)| *h == head)
                 {
@@ -5417,7 +5421,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 // hid it. The console still updates in place when it is open.
                 cur_db = w.get_schema_name().to_string();
             }
-            rt.spawn(async move {
+            let jh = rt.spawn(async move {
                 let guard = current.lock().await;
                 let t0 = std::time::Instant::now();
                 // Multi-statement: SQL engines split on top-level `;` and run
@@ -5590,6 +5594,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 });
             });
+            // ponytail: task-abort is a client-side cancel — it frees the pane and
+            // the connection guard immediately; the server statement may keep
+            // running until the connection notices. Add Client::cancel_token() for
+            // a true server-side cancel if that ever matters.
+            *panes[pane].query_abort.borrow_mut() = Some(jh.abort_handle());
         })
     };
 
@@ -6122,6 +6131,32 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         });
     }
+
+    // ----- Cancel a running buffered query (hard abort of the tokio task) -----
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_cancel_query(move || {
+            if let Some(h) = panes[0].query_abort.borrow_mut().take() {
+                h.abort();
+            }
+            if let Some(w) = weak.upgrade() {
+                set_p_query_running(&w, 0, false);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_cancel_query(move || {
+            if let Some(h) = panes[1].query_abort.borrow_mut().take() {
+                h.abort();
+            }
+            if let Some(w) = weak.upgrade() {
+                set_p_query_running(&w, 1, false);
+            }
+        });
+    }
     {
         let weak = window.as_weak();
         let panes = panes.clone();
@@ -6210,8 +6245,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            if w.get_grid_read_only() || row < 0 || col < 0 {
-                set_p_result_status(&w, 1, SharedString::from("read-only result"));
+            // Open the cell overlay even when read-only — as a selectable viewer
+            // (the grid's read-only branch), so the value can be copied out.
+            if row < 0 || col < 0 {
                 return;
             }
             let count = w.get_p1_col_count();
@@ -7877,18 +7913,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            // Editable only in a tabular browse view with a known identity.
-            if w.get_grid_read_only() || w.get_show_structure() || w.get_result_kind() == 3 {
-                // Tell the user why the double-click did nothing.
-                if w.get_grid_read_only() && !w.get_show_structure() && w.get_result_kind() == 0 {
-                    let msg = if active_tab_kind(&w) == "table" {
-                        "read-only — table has no primary key"
-                    } else {
-                        "read-only result — open the table from the sidebar to edit"
-                    };
-                    w.set_status_error(false);
-                    w.set_result_status(SharedString::from(msg));
-                }
+            // Structure view and chart results have no cell to open. Everything
+            // else opens the cell overlay: an editor when the grid is writable,
+            // otherwise a read-only, selectable viewer so the value can be copied
+            // out (the read-only branch is driven by grid-read-only in the UI).
+            if w.get_show_structure() || w.get_result_kind() == 3 {
                 return;
             }
             let cols = w.get_grid_col_count();

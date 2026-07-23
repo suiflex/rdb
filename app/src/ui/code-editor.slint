@@ -201,7 +201,7 @@ export component CodeEditor inherits Rectangle {
         y: below-y + self.pop-h > root.height && root.cursor-line * root.line-h - self.pop-h - 6px > 0
             ? root.cursor-line * root.line-h - self.pop-h - 6px
             : below-y;
-        width: 260px;
+        width: 360px;
         height: pop-h;
         border-radius: Tokens.radius;
         border-width: 1px;
@@ -211,6 +211,14 @@ export component CodeEditor inherits Rectangle {
         drop-shadow-color: Tokens.text.with-alpha(0.25);
         clip: true;
         ScrollView {
+            // Keep the keyboard-selected row visible: scroll only when the
+            // selection would fall outside the viewport (rows are 22px, +4px
+            // list padding). Clamped so the top rows sit at 0 and wrap-around
+            // (last -> first) snaps back up.
+            viewport-y: -clamp(
+                root.completion-selected * 22px - self.visible-height + 22px + 8px,
+                0,
+                max(0, root.completion-items.length * 22px + 8px - self.visible-height));
             VerticalLayout {
                 padding: 4px;
                 for it[i] in root.completion-items: Rectangle {
@@ -234,6 +242,10 @@ export component CodeEditor inherits Rectangle {
                         }
                     }
                     Text {
+                        // The label is the identity the user picks — give it all
+                        // the slack so a long schema.table stays readable; the
+                        // secondary `sub` yields first.
+                        horizontal-stretch: 1;
                         text: it.label;
                         color: Tokens.text;
                         font-family: Tokens.mono;
@@ -241,13 +253,13 @@ export component CodeEditor inherits Rectangle {
                         vertical-alignment: center;
                         overflow: elide;
                     }
-                    Rectangle { horizontal-stretch: 1; }
                     Text {
                         text: it.sub;
                         color: Tokens.text-faint;
                         font-family: Tokens.mono;
                         font-size: Tokens.font-xs;
                         vertical-alignment: center;
+                        overflow: elide;
                     }
                 }
                 cta := TouchArea { clicked => { root.completion-choose(i); } }

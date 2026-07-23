@@ -9,7 +9,7 @@ import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow, DocRow } f
 import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "palette.slint";
-import { SecondaryButton, PrimaryButton, TextButton, ExportButton } from "components.slint";
+import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton } from "components.slint";
 import { ScrollView } from "std-widgets.slint";
 
 export component QueryPane inherits Rectangle {
@@ -42,6 +42,7 @@ export component QueryPane inherits Rectangle {
     callback format-sql();
     callback explain-query();
     callback cancel-stream();
+    callback cancel-query();
     callback set-limit(string);
 
     // ----- find bar -----
@@ -220,10 +221,20 @@ export component QueryPane inherits Rectangle {
                     }
                     if root.streaming: VerticalLayout {
                         alignment: center;
-                        SecondaryButton {
-                            text: "✕ Cancel";
+                        DangerButton {
+                            text: "⏹ Cancel";
                             height: 28px;
                             clicked => { root.cancel-stream(); }
+                        }
+                    }
+                    // Buffered (non-streaming) run: a hard cancel that aborts the
+                    // in-flight query task so a slow query never hangs the pane.
+                    if root.query-running && !root.streaming: VerticalLayout {
+                        alignment: center;
+                        DangerButton {
+                            text: "⏹ Cancel";
+                            height: 28px;
+                            clicked => { root.cancel-query(); }
                         }
                     }
                     Rectangle { horizontal-stretch: 1; }
@@ -421,6 +432,7 @@ export component QueryPane inherits Rectangle {
                 height: 100%;
                 columns: root.columns;
                 cells: root.cells;
+                read-only: root.read-only;
                 col-count: root.col-count;
                 col-widths: root.col-widths;
                 sorted-col: root.grid-sort-col;
@@ -568,11 +580,20 @@ export component QueryPane inherits Rectangle {
             // in-flight query indicator
             if root.query-running: VerticalLayout {
                 alignment: center;
+                spacing: Tokens.sp3;
                 Text {
                     text: "Running…";
                     color: Tokens.text-dim;
                     font-size: Tokens.font-md;
                     horizontal-alignment: center;
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    DangerButton {
+                        text: "⏹ Cancel";
+                        height: 28px;
+                        clicked => { root.cancel-query(); }
+                    }
                 }
             }
 

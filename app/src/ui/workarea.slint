@@ -110,6 +110,7 @@ export component WorkArea inherits Rectangle {
     in property <bool> read-only: true;
     in property <bool> streaming;
     callback cancel-stream();
+    callback cancel-query();
     in-out property <string> limit-text;
     // Draggable height of the SQL editor pane (session-local).
     in-out property <length> editor-h: 340px;
@@ -181,6 +182,7 @@ export component WorkArea inherits Rectangle {
     callback p1-format-sql();
     callback p1-explain-query();
     callback p1-cancel-stream();
+    callback p1-cancel-query();
     callback p1-set-limit(string);
     callback p1-prev-page();
     callback p1-next-page();
@@ -532,6 +534,7 @@ export component WorkArea inherits Rectangle {
             format-sql() => { root.format-sql(); }
             explain-query() => { root.explain-query(); }
             cancel-stream() => { root.cancel-stream(); }
+            cancel-query() => { root.cancel-query(); }
             set-limit(t) => { root.set-limit(t); }
             find-open: root.find-open;
             find-text: root.find-text;
@@ -646,6 +649,7 @@ export component WorkArea inherits Rectangle {
                 format-sql() => { root.p1-format-sql(); }
                 explain-query() => { root.p1-explain-query(); }
                 cancel-stream() => { root.p1-cancel-stream(); }
+                cancel-query() => { root.p1-cancel-query(); }
                 set-limit(t) => { root.p1-set-limit(t); }
                 find-open: root.p1-find-open;
                 find-text: root.p1-find-text;

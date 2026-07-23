@@ -186,6 +186,31 @@ export component SecondaryButton inherits Rectangle {
     }
 }
 
+// Destructive / warning action (Cancel a running query, abort a stream).
+// Red outline + text so it reads as "stop this", distinct from a plain button.
+export component DangerButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    callback clicked;
+    height: Tokens.button-h;
+    width: label.preferred-width + 2 * Tokens.sp4;
+    border-radius: Tokens.radius;
+    border-width: 1px;
+    border-color: Tokens.error;
+    background: ta.has-hover ? Tokens.error-tint : transparent;
+    animate background { duration: Tokens.fade; }
+    label := Text {
+        text: root.text;
+        color: Tokens.error;
+        font-size: Tokens.font-sm;
+        font-weight: 600;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
 // Plain text button (footer actions: Import, Backup, Copy, Export CSV…).
 export component TextButton inherits Rectangle {
     in property <string> text;
