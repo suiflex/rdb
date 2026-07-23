@@ -6246,8 +6246,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            if w.get_grid_read_only() || row < 0 || col < 0 {
-                set_p_result_status(&w, 1, SharedString::from("read-only result"));
+            // Open the cell overlay even when read-only — as a selectable viewer
+            // (the grid's read-only branch), so the value can be copied out.
+            if row < 0 || col < 0 {
                 return;
             }
             let count = w.get_p1_col_count();
@@ -7913,18 +7914,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            // Editable only in a tabular browse view with a known identity.
-            if w.get_grid_read_only() || w.get_show_structure() || w.get_result_kind() == 3 {
-                // Tell the user why the double-click did nothing.
-                if w.get_grid_read_only() && !w.get_show_structure() && w.get_result_kind() == 0 {
-                    let msg = if active_tab_kind(&w) == "table" {
-                        "read-only — table has no primary key"
-                    } else {
-                        "read-only result — open the table from the sidebar to edit"
-                    };
-                    w.set_status_error(false);
-                    w.set_result_status(SharedString::from(msg));
-                }
+            // Structure view and chart results have no cell to open. Everything
+            // else opens the cell overlay: an editor when the grid is writable,
+            // otherwise a read-only, selectable viewer so the value can be copied
+            // out (the read-only branch is driven by grid-read-only in the UI).
+            if w.get_show_structure() || w.get_result_kind() == 3 {
                 return;
             }
             let cols = w.get_grid_col_count();

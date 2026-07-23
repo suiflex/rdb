@@ -8,6 +8,9 @@ import { ComboBox, DatePickerPopup, ListView, ScrollView } from "std-widgets.sli
 export component TabularGrid inherits Rectangle {
     in property <[GridColumn]> columns;
     in property <[GridCell]> cells;
+    // When true the cell overlay opens as a selectable, non-editable viewer so
+    // a query-result value can be selected and copied instead of edited.
+    in property <bool> read-only;
     in property <int> col-count;
     in property <[length]> col-widths;     // per-column pixel widths (drag-resizable)
     in property <int> sorted-col: -1;       // display col currently sorted, -1 none
@@ -316,7 +319,7 @@ export component TabularGrid inherits Rectangle {
                         background: Tokens.card;
                         border-width: 2px;
                         border-color: Tokens.edit-outline;
-                        if root.is-boolean(root.columns[c].type-name): ComboBox {
+                        if !root.read-only && root.is-boolean(root.columns[c].type-name): ComboBox {
                             x: 1px;
                             y: 1px;
                             width: parent.width - 2px;
@@ -328,7 +331,7 @@ export component TabularGrid inherits Rectangle {
                                 root.cell-edited(r, c, value);
                             }
                         }
-                        if root.is-date(root.columns[c].type-name): HorizontalLayout {
+                        if !root.read-only && root.is-date(root.columns[c].type-name): HorizontalLayout {
                             padding-left: Tokens.sp2;
                             padding-right: 2px;
                             spacing: Tokens.sp1;
@@ -365,12 +368,14 @@ export component TabularGrid inherits Rectangle {
                                 }
                             }
                         }
-                        if !root.is-boolean(root.columns[c].type-name) && !root.is-date(root.columns[c].type-name): edit-input := TextInput {
+                        if root.read-only || (!root.is-boolean(root.columns[c].type-name) && !root.is-date(root.columns[c].type-name)): edit-input := TextInput {
                             x: Tokens.sp2;
                             y: Tokens.sp1;
                             width: parent.width - 2 * Tokens.sp2;
                             height: parent.height - 2 * Tokens.sp1;
                             vertical-alignment: top;
+                            // Read-only view: selectable + copyable, edits blocked.
+                            read-only: root.read-only;
                             text: cell.is-null ? "" : cell.text;
                             edited => { root.editing-value = self.text; }
                             color: Tokens.text;
@@ -378,12 +383,15 @@ export component TabularGrid inherits Rectangle {
                             font-size: Tokens.font-sm;
                             single-line: false;
                             wrap: word-wrap;
-                            accepted => { root.cell-edited(r, c, self.text); }
+                            accepted => { if (!root.read-only) { root.cell-edited(r, c, self.text); } }
                             key-pressed(e) => {
                                 if (e.text == Key.Escape) {
                                     root.edit-cancelled();
                                     return accept;
                                 }
+                                // Read-only view: let selection/copy shortcuts
+                                // through, don't commit or advance.
+                                if (root.read-only) { return reject; }
                                 if (e.text == Key.Return) {
                                     root.cell-edited(r, c, self.text);
                                     return accept;
