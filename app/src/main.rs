@@ -840,6 +840,16 @@ fn sync_query_console(w: &MainWindow, log: &Arc<std::sync::Mutex<Vec<String>>>) 
 
 /// 1-based display bounds of the current page window plus prev/next
 /// availability. `shown` is how many rows the page actually returned.
+/// Quote a database/schema/table identifier for `engine`, doubling the quote
+/// char so a name with an embedded quote can't break out. MySQL uses backticks,
+/// everything else standard double-quotes.
+fn quote_ident(name: &str, engine: rdb_connstore::Engine) -> String {
+    match engine {
+        rdb_connstore::Engine::MySql => format!("`{}`", name.replace('`', "``")),
+        _ => format!("\"{}\"", name.replace('"', "\"\"")),
+    }
+}
+
 /// Connect + ping, bounded to 8s so "Testing connection…" always resolves.
 /// Returns the elapsed milliseconds on success.
 // ponytail: timeout-bounded, no hard abort; add CancellationToken if a true
@@ -3556,6 +3566,62 @@ fn main() -> Result<(), slint::PlatformError> {
                         let empty_cols: Vec<StructField> = Vec::new();
                         w.set_structure_columns(ModelRc::from(Rc::new(VecModel::from(empty_cols))));
                         w.set_tree_loading(false);
+                    }
+                });
+            });
+        });
+    }
+    // ----- create database / schema from the breadcrumb "New…" prompt -----
+    {
+        let weak = window.as_weak();
+        let rt = rt.clone();
+        let current = current.clone();
+        let cur_engine = cur_engine.clone();
+        window.on_create_commit(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let kind = w.get_create_kind().to_string();
+            let name = w.get_create_text().trim().to_string();
+            if name.is_empty() {
+                w.set_create_error(SharedString::from("Name can't be empty"));
+                return;
+            }
+            let Some(engine) = *cur_engine.borrow() else {
+                w.set_create_error(SharedString::from("Not connected"));
+                return;
+            };
+            let ident = quote_ident(&name, engine);
+            let sql = match kind.as_str() {
+                "database" => format!("CREATE DATABASE {ident}"),
+                "schema" => format!("CREATE SCHEMA {ident}"),
+                _ => return,
+            };
+            w.set_create_error(SharedString::default());
+            let selected = w.get_selected_conn();
+            let weak2 = weak.clone();
+            let current = current.clone();
+            rt.spawn(async move {
+                let guard = current.lock_owned().await;
+                let res = match guard.as_ref() {
+                    Some((_, driver)) => driver
+                        .query(&rdb_core::query::Query::Sql(sql))
+                        .await
+                        .map(|_| ()),
+                    None => Err(rdb_core::error::RdbError::Query("not connected".into())),
+                };
+                drop(guard);
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak2.upgrade() {
+                        match res {
+                            // Reconnect to refresh the db/schema lists + tree from
+                            // the server — the just-created object then shows up.
+                            Ok(()) => {
+                                w.set_create_modal_open(false);
+                                w.invoke_connect_clicked(selected);
+                            }
+                            Err(e) => w.set_create_error(SharedString::from(format!("{e}"))),
+                        }
                     }
                 });
             });

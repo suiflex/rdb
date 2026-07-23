@@ -164,6 +164,15 @@ in-out property <bool> rename-modal-open: false;
 in-out property <int> rename-target: -1;
 in-out property <int> rename-group: 0;
 in-out property <string> rename-text;
+// Create a database or schema from the breadcrumb "New…" buttons. `create-kind`
+// is "database" | "schema"; `create-commit` runs CREATE on the trimmed name and
+// leaves the modal open with `create-error` set on failure.
+in-out property <bool> create-modal-open: false;
+in-out property <string> create-kind;
+in-out property <string> create-title;
+in-out property <string> create-text;
+in-out property <string> create-error;
+callback create-commit();
     callback toggle-group(string);
     callback toggle-favorite(int);          // star/unstar a saved connection
     callback reorder-conn(int, int);        // (dragged store index, row-step delta)
@@ -1710,7 +1719,12 @@ in-out property <string> rename-text;
             root.db-modal-open = false;
         }
         new-item => {
-            root.open-add-form();
+            root.db-modal-open = false;
+            root.create-kind = "database";
+            root.create-title = "New database";
+            root.create-text = "";
+            root.create-error = "";
+            root.create-modal-open = true;
         }
     }
 
@@ -1727,7 +1741,14 @@ in-out property <string> rename-text;
         dismiss => {
             root.schema-modal-open = false;
         }
-        new-item => { }
+        new-item => {
+            root.schema-modal-open = false;
+            root.create-kind = "schema";
+            root.create-title = "New schema";
+            root.create-text = "";
+            root.create-error = "";
+            root.create-modal-open = true;
+        }
     }
 
     // ----- Rename query tab -----
@@ -1800,6 +1821,79 @@ in-out property <string> rename-text;
                             root.rename-commit();
                             root.rename-modal-open = false;
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- Create database / schema (name prompt) -----
+    create-modal := Rectangle {
+        visible: root.create-modal-open;
+        background: Tokens.veil;
+        TouchArea { clicked => { root.create-modal-open = false; } }
+        changed visible => {
+            if (self.visible) { cti.focus(); }
+        }
+        Rectangle {
+            width: 360px;
+            x: (parent.width - self.width) / 2;
+            y: 120px;
+            height: cbox.preferred-height;
+            border-radius: Tokens.modal-radius;
+            background: Tokens.card;
+            border-width: 1px;
+            border-color: Tokens.border;
+            drop-shadow-blur: 42px;
+            drop-shadow-offset-y: 12px;
+            drop-shadow-color: #1C191426;
+            TouchArea {}
+            cbox := VerticalLayout {
+                padding: Tokens.sp4;
+                spacing: Tokens.sp3;
+                Text {
+                    text: root.create-title;
+                    color: Tokens.text;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+                Rectangle {
+                    height: 34px;
+                    border-radius: Tokens.radius;
+                    background: Tokens.canvas;
+                    border-width: 1px;
+                    border-color: Tokens.border;
+                    cti := TextInput {
+                        x: Tokens.sp2;
+                        width: parent.width - 2 * Tokens.sp2;
+                        vertical-alignment: center;
+                        text <=> root.create-text;
+                        color: Tokens.text;
+                        font-family: Tokens.mono;
+                        font-size: Tokens.font-md;
+                        single-line: true;
+                        accepted => { root.create-commit(); }
+                    }
+                }
+                if root.create-error != "": Text {
+                    text: root.create-error;
+                    color: Tokens.error;
+                    font-size: Tokens.font-sm;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    alignment: end;
+                    SecondaryButton {
+                        text: "Cancel";
+                        height: 30px;
+                        clicked => { root.create-modal-open = false; }
+                    }
+                    PrimaryButton {
+                        text: "Create";
+                        height: 30px;
+                        clicked => { root.create-commit(); }
                     }
                 }
             }
