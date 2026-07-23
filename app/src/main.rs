@@ -3866,14 +3866,14 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // ----- background health poll: flip the breadcrumb dot red when a live
     // connection stops answering, green again when it recovers -----
-    // ponytail: one fixed 30s loop for the lifetime of the app; make the
+    // ponytail: one fixed 10s loop for the lifetime of the app; make the
     // interval configurable only if asked.
     {
         let weak = window.as_weak();
         let current = current.clone();
         rt.spawn(async move {
             loop {
-                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                 // None = no driver (picker); Some(ok) = pinged a live connection.
                 let alive = {
                     let guard = current.lock().await;
@@ -9256,6 +9256,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 let version = tag.trim_start_matches('v').to_string();
                 let hint = update::InstallMethod::detect().upgrade_hint().to_string();
+                // Native nudge for when the window isn't in focus at launch; the
+                // in-app banner still shows for when it is.
+                update::notify_update(&version, &hint);
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak.upgrade() {
                         w.set_update_version(version.into());

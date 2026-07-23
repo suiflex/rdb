@@ -46,6 +46,9 @@ export component WorkArea inherits Rectangle {
     in property <bool> status-error;
     in property <bool> query-running;
     in property <string> status-latency;
+    // Live connection health: "connecting" | "connected" | "error". Overrides the
+    // query-status dot/text so a dropped connection can't keep reading "connected".
+    in property <string> conn-status;
     in-out property <int> selected-row: 0;
     in-out property <int> selected-col: -1;
     in property <int> editing-row: -1;
@@ -902,11 +905,17 @@ export component WorkArea inherits Rectangle {
                         height: 7px;
                         border-radius: 4px;
                         y: (parent.height - self.height) / 2;
-                        background: root.status-error ? Tokens.error : Tokens.ok;
+                        background: root.conn-status == "error" ? Tokens.error
+                            : root.conn-status == "connecting" ? Tokens.warn
+                            : root.status-error ? Tokens.error : Tokens.ok;
                     }
                     Text {
-                        text: root.status-latency;
-                        color: root.status-error ? Tokens.error : Tokens.ok;
+                        text: root.conn-status == "error" ? "disconnected"
+                            : root.conn-status == "connecting" ? "connecting…"
+                            : root.status-latency;
+                        color: root.conn-status == "error" ? Tokens.error
+                            : root.conn-status == "connecting" ? Tokens.warn
+                            : root.status-error ? Tokens.error : Tokens.ok;
                         font-size: Tokens.font-sm;
                         font-family: Tokens.mono;
                         vertical-alignment: center;
