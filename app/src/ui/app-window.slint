@@ -202,6 +202,9 @@ callback create-commit();
     in property <bool> connected: false;
     in property <string> picker-error;
     in property <bool> connecting;
+    // Live health of the active connection, reflected in the breadcrumb dot:
+    // "connecting" (amber) | "connected" (green) | "error" (red, ping dropped).
+    in property <string> conn-status: "connecting";
     callback disconnect();
     callback conn-filter(string);
 
@@ -701,6 +704,9 @@ callback create-commit();
                         BreadcrumbChip {
                             text: root.bc-conn;
                             show-dot: true;
+                            dot-color: root.conn-status == "error" ? Tokens.error
+                                : root.conn-status == "connecting" ? Tokens.warn
+                                : Tokens.ok;
                             mono: true;
                             clicked => { root.open-conn-modal(); }
                         }

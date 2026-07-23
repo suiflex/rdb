@@ -3627,6 +3627,41 @@ fn main() -> Result<(), slint::PlatformError> {
             });
         });
     }
+    // ----- background health poll: flip the breadcrumb dot red when a live
+    // connection stops answering, green again when it recovers -----
+    // ponytail: one fixed 30s loop for the lifetime of the app; make the
+    // interval configurable only if asked.
+    {
+        let weak = window.as_weak();
+        let current = current.clone();
+        rt.spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                // None = no driver (picker); Some(ok) = pinged a live connection.
+                let alive = {
+                    let guard = current.lock().await;
+                    match guard.as_ref() {
+                        Some((_, driver)) => Some(driver.ping().await.is_ok()),
+                        None => None,
+                    }
+                };
+                let Some(ok) = alive else { continue };
+                let weak = weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak.upgrade() {
+                        // Only touch a live workspace; never override "connecting".
+                        if w.get_connected() {
+                            w.set_conn_status(SharedString::from(if ok {
+                                "connected"
+                            } else {
+                                "error"
+                            }));
+                        }
+                    }
+                });
+            }
+        });
+    }
     {
         let weak = window.as_weak();
         let store = store.clone();
@@ -5098,6 +5133,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_selected_conn(idx);
                 // Show progress + clear any prior failure immediately.
                 w.set_connecting(true);
+                w.set_conn_status(SharedString::from("connecting"));
                 w.set_picker_error(SharedString::default());
                 w.global::<Theme>()
                     .set_accent(theme::accent_or_default(sc.color.as_deref().unwrap_or("")));
@@ -5335,6 +5371,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                     sfields,
                                 ))));
                                 w.set_status_latency(SharedString::from("connected"));
+                                w.set_conn_status(SharedString::from("connected"));
                                 w.set_picker_error(SharedString::default());
                                 w.set_connecting(false);
                                 // Swap the picker for the workspace.
