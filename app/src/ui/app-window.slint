@@ -20,6 +20,7 @@ import {
     KvRow,
     TabItem,
     StructField,
+    TableCol,
     Span,
     ChartBar,
     IndexRow,
@@ -164,6 +165,31 @@ in-out property <bool> rename-modal-open: false;
 in-out property <int> rename-target: -1;
 in-out property <int> rename-group: 0;
 in-out property <string> rename-text;
+// Create a database or schema from the breadcrumb "New…" buttons. `create-kind`
+// is "database" | "schema"; `create-commit` runs CREATE on the trimmed name and
+// leaves the modal open with `create-error` set on failure.
+in-out property <bool> create-modal-open: false;
+in-out property <string> create-kind;
+in-out property <string> create-title;
+in-out property <string> create-text;
+in-out property <string> create-error;
+callback create-commit();
+// New-table designer (sidebar "+"). Column rows live in a Rust VecModel so
+// add/remove go through callbacks; the field inputs two-way bind into the rows.
+in property <[TableCol]> table-cols;
+in-out property <bool> table-modal-open: false;
+in-out property <string> table-name;
+in-out property <string> table-error;
+callback new-table();               // open the designer for the current schema
+callback table-add-col();
+callback table-remove-col(int);
+// Slint can't two-way bind into model rows, so edits round-trip through Rust,
+// which owns the VecModel and writes the changed row back.
+callback table-set-col-name(int, string);
+callback table-set-col-type(int, string);
+callback table-toggle-null(int);
+callback table-toggle-pk(int);
+callback create-table-commit();
     callback toggle-group(string);
     callback toggle-favorite(int);          // star/unstar a saved connection
     callback reorder-conn(int, int);        // (dragged store index, row-step delta)
@@ -193,6 +219,9 @@ in-out property <string> rename-text;
     in property <bool> connected: false;
     in property <string> picker-error;
     in property <bool> connecting;
+    // Live health of the active connection, reflected in the breadcrumb dot:
+    // "connecting" (amber) | "connected" (green) | "error" (red, ping dropped).
+    in property <string> conn-status: "connecting";
     callback disconnect();
     callback conn-filter(string);
 
@@ -466,6 +495,8 @@ in-out property <string> rename-text;
     in property <string> update-hint;      // install-method upgrade instruction
     callback update-open();                // open the release page
     callback update-dismiss();             // hide until next launch
+    callback check-updates-now();          // manual check from settings
+    in property <string> update-check-status; // settings feedback line
 
     // ----- app settings modal -----
     in-out property <bool> settings-open: false;
@@ -692,6 +723,9 @@ in-out property <string> rename-text;
                         BreadcrumbChip {
                             text: root.bc-conn;
                             show-dot: true;
+                            dot-color: root.conn-status == "error" ? Tokens.error
+                                : root.conn-status == "connecting" ? Tokens.warn
+                                : Tokens.ok;
                             mono: true;
                             clicked => { root.open-conn-modal(); }
                         }
@@ -959,7 +993,7 @@ in-out property <string> rename-text;
                     toggle-node(t) => { root.toggle-schema-node(t); }
                     select-schema(s) => { root.select-schema(s); }
                     filter-tree(t) => { root.filter-tree(t); }
-                    add-item() => { root.new-tab(); }
+                    add-item() => { root.new-table(); }
                 }
 
                 // work column: tab bar + work area (takes all remaining width)
@@ -1397,6 +1431,7 @@ in-out property <string> rename-text;
                         result-status: root.result-status;
                         status-error: root.status-error;
                         status-latency: root.status-latency;
+                        conn-status: root.conn-status;
                         sort-text: root.sort-text;
                         grid-sort-col: root.grid-sort-col;
                         grid-sort-asc: root.grid-sort-asc;
@@ -1673,7 +1708,7 @@ in-out property <string> rename-text;
                     toggle-node(t) => { root.toggle-schema-node(t); }
                     select-schema(s) => { root.select-schema(s); }
                     filter-tree(t) => { root.filter-tree(t); }
-                    add-item() => { root.new-tab(); }
+                    add-item() => { root.new-table(); }
                 }
             }
         }
@@ -1710,7 +1745,12 @@ in-out property <string> rename-text;
             root.db-modal-open = false;
         }
         new-item => {
-            root.open-add-form();
+            root.db-modal-open = false;
+            root.create-kind = "database";
+            root.create-title = "New database";
+            root.create-text = "";
+            root.create-error = "";
+            root.create-modal-open = true;
         }
     }
 
@@ -1727,7 +1767,14 @@ in-out property <string> rename-text;
         dismiss => {
             root.schema-modal-open = false;
         }
-        new-item => { }
+        new-item => {
+            root.schema-modal-open = false;
+            root.create-kind = "schema";
+            root.create-title = "New schema";
+            root.create-text = "";
+            root.create-error = "";
+            root.create-modal-open = true;
+        }
     }
 
     // ----- Rename query tab -----
@@ -1800,6 +1847,271 @@ in-out property <string> rename-text;
                             root.rename-commit();
                             root.rename-modal-open = false;
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- Create database / schema (name prompt) -----
+    create-modal := Rectangle {
+        visible: root.create-modal-open;
+        background: Tokens.veil;
+        TouchArea { clicked => { root.create-modal-open = false; } }
+        changed visible => {
+            if (self.visible) { cti.focus(); }
+        }
+        Rectangle {
+            width: 360px;
+            x: (parent.width - self.width) / 2;
+            y: 120px;
+            height: cbox.preferred-height;
+            border-radius: Tokens.modal-radius;
+            background: Tokens.card;
+            border-width: 1px;
+            border-color: Tokens.border;
+            drop-shadow-blur: 42px;
+            drop-shadow-offset-y: 12px;
+            drop-shadow-color: #1C191426;
+            TouchArea {}
+            cbox := VerticalLayout {
+                padding: Tokens.sp4;
+                spacing: Tokens.sp3;
+                Text {
+                    text: root.create-title;
+                    color: Tokens.text;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+                Rectangle {
+                    height: 34px;
+                    border-radius: Tokens.radius;
+                    background: Tokens.canvas;
+                    border-width: 1px;
+                    border-color: Tokens.border;
+                    cti := TextInput {
+                        x: Tokens.sp2;
+                        width: parent.width - 2 * Tokens.sp2;
+                        vertical-alignment: center;
+                        text <=> root.create-text;
+                        color: Tokens.text;
+                        font-family: Tokens.mono;
+                        font-size: Tokens.font-md;
+                        single-line: true;
+                        accepted => { root.create-commit(); }
+                    }
+                }
+                if root.create-error != "": Text {
+                    text: root.create-error;
+                    color: Tokens.error;
+                    font-size: Tokens.font-sm;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    alignment: end;
+                    SecondaryButton {
+                        text: "Cancel";
+                        height: 30px;
+                        clicked => { root.create-modal-open = false; }
+                    }
+                    PrimaryButton {
+                        text: "Create";
+                        height: 30px;
+                        clicked => { root.create-commit(); }
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- New table designer (sidebar "+") -----
+    // ponytail: columns + types + null/PK cover the common case; FKs, indexes and
+    // check constraints stay a SQL-tab job until asked.
+    table-modal := Rectangle {
+        visible: root.table-modal-open;
+        background: Tokens.veil;
+        TouchArea { clicked => { root.table-modal-open = false; } }
+        changed visible => {
+            if (self.visible) { tname.focus(); }
+        }
+        Rectangle {
+            width: 620px;
+            x: (parent.width - self.width) / 2;
+            y: 80px;
+            height: min(tbox.preferred-height, parent.height - 160px);
+            border-radius: Tokens.modal-radius;
+            background: Tokens.card;
+            border-width: 1px;
+            border-color: Tokens.border;
+            drop-shadow-blur: 42px;
+            drop-shadow-offset-y: 12px;
+            drop-shadow-color: #1C191426;
+            TouchArea {}
+            tbox := VerticalLayout {
+                padding: Tokens.sp4;
+                spacing: Tokens.sp3;
+                Text {
+                    text: "New table in " + root.schema-name;
+                    color: Tokens.text;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+                // table name
+                Rectangle {
+                    height: 34px;
+                    border-radius: Tokens.radius;
+                    background: Tokens.canvas;
+                    border-width: 1px;
+                    border-color: Tokens.border;
+                    tname := TextInput {
+                        x: Tokens.sp2;
+                        width: parent.width - 2 * Tokens.sp2;
+                        vertical-alignment: center;
+                        text <=> root.table-name;
+                        color: Tokens.text;
+                        font-family: Tokens.mono;
+                        font-size: Tokens.font-md;
+                        single-line: true;
+                    }
+                }
+                // column header
+                HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    Text { text: "Column"; color: Tokens.text-dim; font-size: Tokens.font-sm; horizontal-stretch: 1; }
+                    Text { text: "Type"; color: Tokens.text-dim; font-size: Tokens.font-sm; horizontal-stretch: 1; }
+                    Text { text: "Null"; color: Tokens.text-dim; font-size: Tokens.font-sm; width: 40px; horizontal-alignment: center; }
+                    Text { text: "PK"; color: Tokens.text-dim; font-size: Tokens.font-sm; width: 40px; horizontal-alignment: center; }
+                    Rectangle { width: 28px; }
+                }
+                // column rows (scrolls when many)
+                Rectangle {
+                    vertical-stretch: 1;
+                    min-height: 44px;
+                    ScrollView {
+                        VerticalLayout {
+                            spacing: Tokens.sp2;
+                            for col[i] in root.table-cols: HorizontalLayout {
+                                spacing: Tokens.sp2;
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 30px;
+                                    border-radius: Tokens.radius;
+                                    background: Tokens.canvas;
+                                    border-width: 1px;
+                                    border-color: Tokens.border;
+                                    TextInput {
+                                        x: Tokens.sp2;
+                                        width: parent.width - 2 * Tokens.sp2;
+                                        vertical-alignment: center;
+                                        text: col.name;
+                                        edited => { root.table-set-col-name(i, self.text); }
+                                        color: Tokens.text;
+                                        font-family: Tokens.mono;
+                                        font-size: Tokens.font-sm;
+                                        single-line: true;
+                                    }
+                                }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 30px;
+                                    border-radius: Tokens.radius;
+                                    background: Tokens.canvas;
+                                    border-width: 1px;
+                                    border-color: Tokens.border;
+                                    TextInput {
+                                        x: Tokens.sp2;
+                                        width: parent.width - 2 * Tokens.sp2;
+                                        vertical-alignment: center;
+                                        text: col.type-name;
+                                        edited => { root.table-set-col-type(i, self.text); }
+                                        color: Tokens.text;
+                                        font-family: Tokens.mono;
+                                        font-size: Tokens.font-sm;
+                                        single-line: true;
+                                    }
+                                }
+                                // nullable toggle
+                                Rectangle {
+                                    width: 40px;
+                                    height: 30px;
+                                    null-ta := TouchArea { clicked => { root.table-toggle-null(i); } }
+                                    Rectangle {
+                                        width: 18px;
+                                        height: 18px;
+                                        border-radius: 4px;
+                                        border-width: 1px;
+                                        border-color: Tokens.border-strong;
+                                        background: col.nullable ? Tokens.accent : transparent;
+                                        Text {
+                                            text: col.nullable ? "✓" : "";
+                                            color: #FFFFFF;
+                                            font-size: 12px;
+                                        }
+                                    }
+                                }
+                                // primary-key toggle
+                                Rectangle {
+                                    width: 40px;
+                                    height: 30px;
+                                    pk-ta := TouchArea { clicked => { root.table-toggle-pk(i); } }
+                                    Rectangle {
+                                        width: 18px;
+                                        height: 18px;
+                                        border-radius: 4px;
+                                        border-width: 1px;
+                                        border-color: Tokens.border-strong;
+                                        background: col.pk ? Tokens.accent : transparent;
+                                        Text {
+                                            text: col.pk ? "✓" : "";
+                                            color: #FFFFFF;
+                                            font-size: 12px;
+                                        }
+                                    }
+                                }
+                                // remove row
+                                Rectangle {
+                                    width: 28px;
+                                    height: 30px;
+                                    rm-ta := TouchArea { clicked => { root.table-remove-col(i); } }
+                                    Text {
+                                        text: "✕";
+                                        color: rm-ta.has-hover ? Tokens.error : Tokens.text-faint;
+                                        font-size: 13px;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    SecondaryButton {
+                        text: "+ Add column";
+                        height: 28px;
+                        clicked => { root.table-add-col(); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                if root.table-error != "": Text {
+                    text: root.table-error;
+                    color: Tokens.error;
+                    font-size: Tokens.font-sm;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    alignment: end;
+                    SecondaryButton {
+                        text: "Cancel";
+                        height: 30px;
+                        clicked => { root.table-modal-open = false; }
+                    }
+                    PrimaryButton {
+                        text: "Create";
+                        height: 30px;
+                        clicked => { root.create-table-commit(); }
                     }
                 }
             }
@@ -2065,6 +2377,24 @@ in-out property <string> rename-text;
                                     y: (parent.height - self.height) / 2;
                                 }
                             }
+                        }
+                    }
+                }
+
+                // --- manual update check ---
+                HorizontalLayout {
+                    spacing: Tokens.sp3;
+                    SecondaryButton {
+                        text: "Check now";
+                        clicked => { root.check-updates-now(); }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: root.update-check-status;
+                            color: Tokens.text-dim;
+                            font-size: 12px;
                         }
                     }
                 }

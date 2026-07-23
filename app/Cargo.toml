@@ -36,6 +36,8 @@ copypasta = "0.10"
 ureq = "3"
 semver = "1"
 open = "5"
+# native desktop notification nudging the user when an update is out
+notify-rust = "4"
 # native Save-As dialog for CSV export. xdg-portal drives the Linux backend
 # through the XDG Desktop Portal (D-Bus) instead of the unmaintained gtk-rs
 # GTK3 bindings; tokio matches the app runtime. macOS/Windows use their

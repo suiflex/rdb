@@ -840,6 +840,92 @@ fn sync_query_console(w: &MainWindow, log: &Arc<std::sync::Mutex<Vec<String>>>) 
 
 /// 1-based display bounds of the current page window plus prev/next
 /// availability. `shown` is how many rows the page actually returned.
+/// Quote a database/schema/table identifier for `engine`, doubling the quote
+/// char so a name with an embedded quote can't break out. MySQL uses backticks,
+/// everything else standard double-quotes.
+fn quote_ident(name: &str, engine: rdb_connstore::Engine) -> String {
+    match engine {
+        rdb_connstore::Engine::MySql => format!("`{}`", name.replace('`', "``")),
+        _ => format!("\"{}\"", name.replace('"', "\"\"")),
+    }
+}
+
+/// One column as entered in the new-table designer.
+struct ColSpec {
+    name: String,
+    ty: String,
+    nullable: bool,
+    pk: bool,
+}
+
+/// Build a `CREATE TABLE` statement from the designer rows, quoting every
+/// identifier for `engine`. `schema` qualifies the table when the engine uses
+/// namespaces (Postgres). Returns a user-facing message on invalid input.
+fn build_create_table(
+    schema: Option<&str>,
+    table: &str,
+    cols: &[ColSpec],
+    engine: rdb_connstore::Engine,
+) -> std::result::Result<String, String> {
+    let table = table.trim();
+    if table.is_empty() {
+        return Err("Table name can't be empty".into());
+    }
+    if cols.is_empty() {
+        return Err("Add at least one column".into());
+    }
+    let mut defs = Vec::new();
+    let mut pks = Vec::new();
+    for c in cols {
+        let n = c.name.trim();
+        let ty = c.ty.trim();
+        if n.is_empty() {
+            return Err("Column name can't be empty".into());
+        }
+        if ty.is_empty() {
+            return Err(format!("Type for \"{n}\" can't be empty"));
+        }
+        let mut d = format!("{} {ty}", quote_ident(n, engine));
+        if !c.nullable {
+            d.push_str(" NOT NULL");
+        }
+        defs.push(d);
+        if c.pk {
+            pks.push(quote_ident(n, engine));
+        }
+    }
+    if !pks.is_empty() {
+        defs.push(format!("PRIMARY KEY ({})", pks.join(", ")));
+    }
+    let target = match schema {
+        Some(s) => format!("{}.{}", quote_ident(s, engine), quote_ident(table, engine)),
+        None => quote_ident(table, engine),
+    };
+    Ok(format!(
+        "CREATE TABLE {target} (\n  {}\n)",
+        defs.join(",\n  ")
+    ))
+}
+
+/// Default type for the seeded primary-key column of a new table, per engine.
+fn default_pk_type(engine: rdb_connstore::Engine) -> &'static str {
+    match engine {
+        rdb_connstore::Engine::Postgres => "serial",
+        rdb_connstore::Engine::MySql => "INT",
+        rdb_connstore::Engine::Sqlite => "INTEGER",
+        _ => "int",
+    }
+}
+
+/// Default type for an added column, per engine.
+fn default_col_type(engine: rdb_connstore::Engine) -> &'static str {
+    match engine {
+        rdb_connstore::Engine::MySql => "VARCHAR(255)",
+        rdb_connstore::Engine::Sqlite => "TEXT",
+        _ => "text",
+    }
+}
+
 /// Connect + ping, bounded to 8s so "Testing connection…" always resolves.
 /// Returns the elapsed milliseconds on success.
 // ponytail: timeout-bounded, no hard abort; add CancellationToken if a true
@@ -3561,6 +3647,258 @@ fn main() -> Result<(), slint::PlatformError> {
             });
         });
     }
+    // ----- create database / schema from the breadcrumb "New…" prompt -----
+    {
+        let weak = window.as_weak();
+        let rt = rt.clone();
+        let current = current.clone();
+        let cur_engine = cur_engine.clone();
+        window.on_create_commit(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let kind = w.get_create_kind().to_string();
+            let name = w.get_create_text().trim().to_string();
+            if name.is_empty() {
+                w.set_create_error(SharedString::from("Name can't be empty"));
+                return;
+            }
+            let Some(engine) = *cur_engine.borrow() else {
+                w.set_create_error(SharedString::from("Not connected"));
+                return;
+            };
+            let ident = quote_ident(&name, engine);
+            let sql = match kind.as_str() {
+                "database" => format!("CREATE DATABASE {ident}"),
+                "schema" => format!("CREATE SCHEMA {ident}"),
+                _ => return,
+            };
+            w.set_create_error(SharedString::default());
+            let selected = w.get_selected_conn();
+            let weak2 = weak.clone();
+            let current = current.clone();
+            rt.spawn(async move {
+                let guard = current.lock_owned().await;
+                let res = match guard.as_ref() {
+                    Some((_, driver)) => driver
+                        .query(&rdb_core::query::Query::Sql(sql))
+                        .await
+                        .map(|_| ()),
+                    None => Err(rdb_core::error::RdbError::Query("not connected".into())),
+                };
+                drop(guard);
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak2.upgrade() {
+                        match res {
+                            // Reconnect to refresh the db/schema lists + tree from
+                            // the server — the just-created object then shows up.
+                            Ok(()) => {
+                                w.set_create_modal_open(false);
+                                w.invoke_connect_clicked(selected);
+                            }
+                            Err(e) => w.set_create_error(SharedString::from(format!("{e}"))),
+                        }
+                    }
+                });
+            });
+        });
+    }
+    // ----- new-table designer: Rust owns the column rows so add/remove go
+    // through callbacks; the dialog inputs two-way bind into the row fields -----
+    let table_cols: Rc<VecModel<TableCol>> = Rc::new(VecModel::default());
+    window.set_table_cols(ModelRc::from(table_cols.clone()));
+    {
+        let weak = window.as_weak();
+        let cur_engine = cur_engine.clone();
+        let table_cols = table_cols.clone();
+        window.on_new_table(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some(engine) = *cur_engine.borrow() else {
+                return;
+            };
+            // Seed with a sensible primary key so the common case is one click.
+            table_cols.set_vec(vec![TableCol {
+                name: "id".into(),
+                type_name: default_pk_type(engine).into(),
+                nullable: false,
+                pk: true,
+            }]);
+            w.set_table_name(SharedString::default());
+            w.set_table_error(SharedString::default());
+            w.set_table_modal_open(true);
+        });
+    }
+    {
+        let cur_engine = cur_engine.clone();
+        let table_cols = table_cols.clone();
+        window.on_table_add_col(move || {
+            let ty = cur_engine.borrow().map(default_col_type).unwrap_or("text");
+            table_cols.push(TableCol {
+                name: SharedString::default(),
+                type_name: ty.into(),
+                nullable: true,
+                pk: false,
+            });
+        });
+    }
+    {
+        let table_cols = table_cols.clone();
+        window.on_table_remove_col(move |i| {
+            let i = i.max(0) as usize;
+            if i < table_cols.row_count() {
+                table_cols.remove(i);
+            }
+        });
+    }
+    {
+        let table_cols = table_cols.clone();
+        window.on_table_set_col_name(move |i, t| {
+            let i = i.max(0) as usize;
+            if let Some(mut c) = table_cols.row_data(i) {
+                c.name = t;
+                table_cols.set_row_data(i, c);
+            }
+        });
+    }
+    {
+        let table_cols = table_cols.clone();
+        window.on_table_set_col_type(move |i, t| {
+            let i = i.max(0) as usize;
+            if let Some(mut c) = table_cols.row_data(i) {
+                c.type_name = t;
+                table_cols.set_row_data(i, c);
+            }
+        });
+    }
+    {
+        let table_cols = table_cols.clone();
+        window.on_table_toggle_null(move |i| {
+            let i = i.max(0) as usize;
+            if let Some(mut c) = table_cols.row_data(i) {
+                c.nullable = !c.nullable;
+                table_cols.set_row_data(i, c);
+            }
+        });
+    }
+    {
+        let table_cols = table_cols.clone();
+        window.on_table_toggle_pk(move |i| {
+            let i = i.max(0) as usize;
+            if let Some(mut c) = table_cols.row_data(i) {
+                c.pk = !c.pk;
+                // A primary key can't be null; clear the flag to keep the DDL valid.
+                if c.pk {
+                    c.nullable = false;
+                }
+                table_cols.set_row_data(i, c);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let rt = rt.clone();
+        let current = current.clone();
+        let cur_engine = cur_engine.clone();
+        let table_cols = table_cols.clone();
+        window.on_create_table_commit(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some(engine) = *cur_engine.borrow() else {
+                return;
+            };
+            let cols: Vec<ColSpec> = table_cols
+                .iter()
+                .map(|c| ColSpec {
+                    name: c.name.to_string(),
+                    ty: c.type_name.to_string(),
+                    nullable: c.nullable,
+                    pk: c.pk,
+                })
+                .collect();
+            // Postgres browses namespaces, so qualify with the current schema;
+            // other engines scope to the connection's database already.
+            let schema = matches!(engine, rdb_connstore::Engine::Postgres)
+                .then(|| w.get_schema_name().to_string());
+            let sql = match build_create_table(
+                schema.as_deref(),
+                w.get_table_name().as_ref(),
+                &cols,
+                engine,
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    w.set_table_error(SharedString::from(e));
+                    return;
+                }
+            };
+            w.set_table_error(SharedString::default());
+            let selected = w.get_selected_conn();
+            let weak2 = weak.clone();
+            let current = current.clone();
+            rt.spawn(async move {
+                let guard = current.lock_owned().await;
+                let res = match guard.as_ref() {
+                    Some((_, driver)) => driver
+                        .query(&rdb_core::query::Query::Sql(sql))
+                        .await
+                        .map(|_| ()),
+                    None => Err(rdb_core::error::RdbError::Query("not connected".into())),
+                };
+                drop(guard);
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak2.upgrade() {
+                        match res {
+                            Ok(()) => {
+                                w.set_table_modal_open(false);
+                                // Reconnect to reload the tree so the new table shows.
+                                w.invoke_connect_clicked(selected);
+                            }
+                            Err(e) => w.set_table_error(SharedString::from(format!("{e}"))),
+                        }
+                    }
+                });
+            });
+        });
+    }
+
+    // ----- background health poll: flip the breadcrumb dot red when a live
+    // connection stops answering, green again when it recovers -----
+    // ponytail: one fixed 10s loop for the lifetime of the app; make the
+    // interval configurable only if asked.
+    {
+        let weak = window.as_weak();
+        let current = current.clone();
+        rt.spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                // None = no driver (picker); Some(ok) = pinged a live connection.
+                let alive = {
+                    let guard = current.lock().await;
+                    match guard.as_ref() {
+                        Some((_, driver)) => Some(driver.ping().await.is_ok()),
+                        None => None,
+                    }
+                };
+                let Some(ok) = alive else { continue };
+                let weak = weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak.upgrade() {
+                        // Only touch a live workspace; never override "connecting".
+                        if w.get_connected() {
+                            w.set_conn_status(SharedString::from(if ok {
+                                "connected"
+                            } else {
+                                "error"
+                            }));
+                        }
+                    }
+                });
+            }
+        });
+    }
     {
         let weak = window.as_weak();
         let store = store.clone();
@@ -5032,6 +5370,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_selected_conn(idx);
                 // Show progress + clear any prior failure immediately.
                 w.set_connecting(true);
+                w.set_conn_status(SharedString::from("connecting"));
                 w.set_picker_error(SharedString::default());
                 w.global::<Theme>()
                     .set_accent(theme::accent_or_default(sc.color.as_deref().unwrap_or("")));
@@ -5269,6 +5608,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                     sfields,
                                 ))));
                                 w.set_status_latency(SharedString::from("connected"));
+                                w.set_conn_status(SharedString::from("connected"));
                                 w.set_picker_error(SharedString::default());
                                 w.set_connecting(false);
                                 // Swap the picker for the workspace.
@@ -8848,6 +9188,46 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ----- manual "Check now" from settings: bypasses the daily throttle and
+    // reports the outcome inline so the toggle no longer feels like a no-op -----
+    {
+        let weak = window.as_weak();
+        window.on_check_updates_now(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            w.set_update_check_status(SharedString::from("Checking…"));
+            let weak = weak.clone();
+            std::thread::spawn(move || {
+                let current = env!("CARGO_PKG_VERSION");
+                let tag = update::fetch_latest_tag();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak.upgrade() {
+                        match tag {
+                            Some(t) if update::is_newer(&t, current) => {
+                                let version = t.trim_start_matches('v').to_string();
+                                let hint =
+                                    update::InstallMethod::detect().upgrade_hint().to_string();
+                                w.set_update_check_status(SharedString::from(format!(
+                                    "Update available — v{version}"
+                                )));
+                                w.set_update_version(version.into());
+                                w.set_update_hint(hint.into());
+                                w.set_update_available(true);
+                            }
+                            Some(_) => w.set_update_check_status(SharedString::from(format!(
+                                "Up to date (v{current})"
+                            ))),
+                            None => w.set_update_check_status(SharedString::from(
+                                "Check failed — try again",
+                            )),
+                        }
+                    }
+                });
+            });
+        });
+    }
+
     // ----- update check: once/day, gated by the setting, off the UI thread -----
     // Skip in mock mode so the reference screenshots stay deterministic.
     if !mock::mock_mode() {
@@ -8876,6 +9256,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 let version = tag.trim_start_matches('v').to_string();
                 let hint = update::InstallMethod::detect().upgrade_hint().to_string();
+                // Native nudge for when the window isn't in focus at launch; the
+                // in-app banner still shows for when it is.
+                update::notify_update(&version, &hint);
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak.upgrade() {
                         w.set_update_version(version.into());
@@ -8909,6 +9292,54 @@ fn main() -> Result<(), slint::PlatformError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn create_table_sql_quotes_and_pk() {
+        let cols = vec![
+            ColSpec {
+                name: "id".into(),
+                ty: "serial".into(),
+                nullable: false,
+                pk: true,
+            },
+            ColSpec {
+                name: "na\"me".into(),
+                ty: "text".into(),
+                nullable: true,
+                pk: false,
+            },
+        ];
+        let sql = build_create_table(
+            Some("public"),
+            "users",
+            &cols,
+            rdb_connstore::Engine::Postgres,
+        )
+        .unwrap();
+        assert_eq!(
+            sql,
+            "CREATE TABLE \"public\".\"users\" (\n  \"id\" serial NOT NULL,\n  \"na\"\"me\" text,\n  PRIMARY KEY (\"id\")\n)"
+        );
+
+        // MySQL: backtick quoting, no schema qualifier.
+        let my = build_create_table(None, "t", &cols[..1], rdb_connstore::Engine::MySql).unwrap();
+        assert_eq!(
+            my,
+            "CREATE TABLE `t` (\n  `id` serial NOT NULL,\n  PRIMARY KEY (`id`)\n)"
+        );
+    }
+
+    #[test]
+    fn create_table_rejects_bad_input() {
+        assert!(build_create_table(None, "  ", &[], rdb_connstore::Engine::Postgres).is_err());
+        let no_type = vec![ColSpec {
+            name: "x".into(),
+            ty: "".into(),
+            nullable: true,
+            pk: false,
+        }];
+        assert!(build_create_table(None, "t", &no_type, rdb_connstore::Engine::Postgres).is_err());
+    }
 
     #[test]
     fn persisted_tabs_round_trip() {
