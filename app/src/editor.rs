@@ -788,45 +788,48 @@ pub fn find_matches(lines: &[String], needle: &str) -> Vec<(usize, usize, usize)
     out
 }
 
-/// Inclusive `(first_line, last_line)` of each SQL statement, for the editor's
-/// gutter fold arrows. Uses the same string/comment rules as
-/// [`split_statements`] (a `;` inside a `'literal'` or after `--` doesn't end a
-/// statement), carrying string state across lines. Blank leading lines are
-/// skipped so a block starts at its first content line. A block is foldable
-/// only when `last_line > first_line`.
-pub fn statement_line_spans(lines: &[String]) -> Vec<(usize, usize)> {
-    let mut out: Vec<(usize, usize)> = Vec::new();
-    let mut in_str = false;
-    let mut start: Option<usize> = None;
-    for (li, line) in lines.iter().enumerate() {
-        if start.is_none() && !line.trim().is_empty() {
-            start = Some(li);
-        }
-        let chars: Vec<char> = line.chars().collect();
-        let mut i = 0;
-        let mut ends = false;
-        while i < chars.len() {
-            let c = chars[i];
-            if c == '\'' {
-                in_str = !in_str;
-            } else if !in_str && c == '-' && chars.get(i + 1) == Some(&'-') {
-                break; // rest of the line is a comment
-            } else if c == ';' && !in_str {
-                ends = true;
+/// Foldable `(head_line, last_line)` regions for the editor gutter, VSCode-style:
+/// any line whose following lines are more indented heads a fold that runs until
+/// the indent returns to its level or shallower. This nests naturally (a `select`
+/// heads its column list, a `from` its joins, an indented subquery its body), so
+/// a single statement gets several collapsible blocks instead of one arrow.
+/// Blank lines belong to the surrounding block and don't end a region.
+pub fn fold_regions(lines: &[String]) -> Vec<(usize, usize)> {
+    // Leading-whitespace width per line; `None` marks a blank line, which is
+    // transparent to indent (it neither heads nor closes a region).
+    let ind: Vec<Option<usize>> = lines
+        .iter()
+        .map(|l| {
+            if l.trim().is_empty() {
+                None
+            } else {
+                Some(l.chars().take_while(|c| c.is_whitespace()).count())
             }
-            i += 1;
-        }
-        if ends {
-            if let Some(s) = start.take() {
-                out.push((s, li));
+        })
+        .collect();
+    let n = lines.len();
+    let mut regions = Vec::new();
+    for i in 0..n {
+        let Some(di) = ind[i] else { continue };
+        // Walk forward while deeper-indented (skipping blanks); the last deeper
+        // line is the region end.
+        let mut end = i;
+        let mut k = i + 1;
+        while k < n {
+            match ind[k] {
+                None => k += 1,
+                Some(dk) if dk > di => {
+                    end = k;
+                    k += 1;
+                }
+                Some(_) => break,
             }
+        }
+        if end > i {
+            regions.push((i, end));
         }
     }
-    // Trailing statement without a terminating ';'.
-    if let (Some(s), false) = (start, lines.is_empty()) {
-        out.push((s, lines.len() - 1));
-    }
-    out
+    regions
 }
 
 /// True when a statement segment carries no executable SQL — only whitespace
@@ -848,22 +851,30 @@ mod tests {
             .collect()
     }
 
-    fn spans(text: &str) -> Vec<(usize, usize)> {
+    fn regions(text: &str) -> Vec<(usize, usize)> {
         let lines: Vec<String> = text.lines().map(str::to_string).collect();
-        statement_line_spans(&lines)
+        fold_regions(&lines)
     }
 
     #[test]
-    fn fold_spans_group_multiline_statements() {
-        // Two statements: lines 0-2 (ends with ;) and lines 3-4 (no ;).
+    fn fold_regions_by_indent() {
+        // Each clause heads its indented body: select→cols, from→joins, where.
         assert_eq!(
-            spans("select *\nfrom t\nwhere x=1;\nupdate t\nset a=1"),
-            vec![(0, 2), (3, 4)]
+            regions("select\n  a,\n  b\nfrom\n  t\nwhere\n  x = 1;"),
+            vec![(0, 2), (3, 4), (5, 6)]
         );
-        // Semicolon inside a literal does not split.
-        assert_eq!(spans("select 'a;b'\nfrom t;"), vec![(0, 1)]);
-        // A semicolon after `--` is a comment, not a terminator.
-        assert_eq!(spans("select 1 -- a;b\nfrom t;"), vec![(0, 1)]);
+        // Nested indent nests regions; the outer head covers the whole block.
+        assert_eq!(
+            regions("select\n  a,\n  case\n    when x then 1\n  end\nfrom t"),
+            vec![(0, 4), (2, 3)]
+        );
+        // Flat text with no deeper lines folds nothing.
+        assert_eq!(
+            regions("select a\nfrom t\nwhere x=1;"),
+            Vec::<(usize, usize)>::new()
+        );
+        // Blank lines stay inside the block instead of ending it.
+        assert_eq!(regions("select\n  a,\n\n  b\nfrom t"), vec![(0, 3)]);
     }
 
     #[test]

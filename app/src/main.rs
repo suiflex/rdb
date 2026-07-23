@@ -2524,19 +2524,18 @@ fn main() -> Result<(), slint::PlatformError> {
                 .collect();
             let lines = ModelRc::from(Rc::new(VecModel::from(lines)));
             // Fold arrows: 1 = open head, 2 = closed head, 0 = plain line.
-            // `hidden` blanks out the body lines of a closed statement.
+            // `hidden` blanks out the body lines of a closed region; nested
+            // closed regions just union their ranges.
             let n = ed.lines.len();
             let mut hidden = vec![false; n];
             let mut fold_state = vec![0i32; n];
             let folded = folded_heads.borrow();
-            for (h, e) in editor::statement_line_spans(&ed.lines) {
-                if e > h {
-                    let closed = folded.contains(&h);
-                    fold_state[h] = if closed { 2 } else { 1 };
-                    if closed {
-                        for hl in hidden.iter_mut().take(e + 1).skip(h + 1) {
-                            *hl = true;
-                        }
+            for (h, e) in editor::fold_regions(&ed.lines) {
+                let closed = folded.contains(&h);
+                fold_state[h] = if closed { 2 } else { 1 };
+                if closed {
+                    for hl in hidden.iter_mut().take(e + 1).skip(h + 1) {
+                        *hl = true;
                     }
                 }
             }
@@ -2593,7 +2592,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // hidden line; pull the caret up to the visible head.
             if now_closed {
                 let mut ed = ed_state.borrow_mut();
-                if let Some((_, e)) = editor::statement_line_spans(&ed.lines)
+                if let Some((_, e)) = editor::fold_regions(&ed.lines)
                     .into_iter()
                     .find(|(h, _)| *h == head)
                 {
