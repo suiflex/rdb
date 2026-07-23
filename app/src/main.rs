@@ -8951,6 +8951,46 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ----- manual "Check now" from settings: bypasses the daily throttle and
+    // reports the outcome inline so the toggle no longer feels like a no-op -----
+    {
+        let weak = window.as_weak();
+        window.on_check_updates_now(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            w.set_update_check_status(SharedString::from("Checking…"));
+            let weak = weak.clone();
+            std::thread::spawn(move || {
+                let current = env!("CARGO_PKG_VERSION");
+                let tag = update::fetch_latest_tag();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak.upgrade() {
+                        match tag {
+                            Some(t) if update::is_newer(&t, current) => {
+                                let version = t.trim_start_matches('v').to_string();
+                                let hint =
+                                    update::InstallMethod::detect().upgrade_hint().to_string();
+                                w.set_update_check_status(SharedString::from(format!(
+                                    "Update available — v{version}"
+                                )));
+                                w.set_update_version(version.into());
+                                w.set_update_hint(hint.into());
+                                w.set_update_available(true);
+                            }
+                            Some(_) => w.set_update_check_status(SharedString::from(format!(
+                                "Up to date (v{current})"
+                            ))),
+                            None => w.set_update_check_status(SharedString::from(
+                                "Check failed — try again",
+                            )),
+                        }
+                    }
+                });
+            });
+        });
+    }
+
     // ----- update check: once/day, gated by the setting, off the UI thread -----
     // Skip in mock mode so the reference screenshots stay deterministic.
     if !mock::mock_mode() {
