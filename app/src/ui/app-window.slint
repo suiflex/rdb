@@ -20,6 +20,7 @@ import {
     KvRow,
     TabItem,
     StructField,
+    TableCol,
     Span,
     ChartBar,
     IndexRow,
@@ -173,6 +174,22 @@ in-out property <string> create-title;
 in-out property <string> create-text;
 in-out property <string> create-error;
 callback create-commit();
+// New-table designer (sidebar "+"). Column rows live in a Rust VecModel so
+// add/remove go through callbacks; the field inputs two-way bind into the rows.
+in property <[TableCol]> table-cols;
+in-out property <bool> table-modal-open: false;
+in-out property <string> table-name;
+in-out property <string> table-error;
+callback new-table();               // open the designer for the current schema
+callback table-add-col();
+callback table-remove-col(int);
+// Slint can't two-way bind into model rows, so edits round-trip through Rust,
+// which owns the VecModel and writes the changed row back.
+callback table-set-col-name(int, string);
+callback table-set-col-type(int, string);
+callback table-toggle-null(int);
+callback table-toggle-pk(int);
+callback create-table-commit();
     callback toggle-group(string);
     callback toggle-favorite(int);          // star/unstar a saved connection
     callback reorder-conn(int, int);        // (dragged store index, row-step delta)
@@ -976,7 +993,7 @@ callback create-commit();
                     toggle-node(t) => { root.toggle-schema-node(t); }
                     select-schema(s) => { root.select-schema(s); }
                     filter-tree(t) => { root.filter-tree(t); }
-                    add-item() => { root.new-tab(); }
+                    add-item() => { root.new-table(); }
                 }
 
                 // work column: tab bar + work area (takes all remaining width)
@@ -1690,7 +1707,7 @@ callback create-commit();
                     toggle-node(t) => { root.toggle-schema-node(t); }
                     select-schema(s) => { root.select-schema(s); }
                     filter-tree(t) => { root.filter-tree(t); }
-                    add-item() => { root.new-tab(); }
+                    add-item() => { root.new-table(); }
                 }
             }
         }
@@ -1902,6 +1919,198 @@ callback create-commit();
                         text: "Create";
                         height: 30px;
                         clicked => { root.create-commit(); }
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- New table designer (sidebar "+") -----
+    // ponytail: columns + types + null/PK cover the common case; FKs, indexes and
+    // check constraints stay a SQL-tab job until asked.
+    table-modal := Rectangle {
+        visible: root.table-modal-open;
+        background: Tokens.veil;
+        TouchArea { clicked => { root.table-modal-open = false; } }
+        changed visible => {
+            if (self.visible) { tname.focus(); }
+        }
+        Rectangle {
+            width: 620px;
+            x: (parent.width - self.width) / 2;
+            y: 80px;
+            height: min(tbox.preferred-height, parent.height - 160px);
+            border-radius: Tokens.modal-radius;
+            background: Tokens.card;
+            border-width: 1px;
+            border-color: Tokens.border;
+            drop-shadow-blur: 42px;
+            drop-shadow-offset-y: 12px;
+            drop-shadow-color: #1C191426;
+            TouchArea {}
+            tbox := VerticalLayout {
+                padding: Tokens.sp4;
+                spacing: Tokens.sp3;
+                Text {
+                    text: "New table in " + root.schema-name;
+                    color: Tokens.text;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+                // table name
+                Rectangle {
+                    height: 34px;
+                    border-radius: Tokens.radius;
+                    background: Tokens.canvas;
+                    border-width: 1px;
+                    border-color: Tokens.border;
+                    tname := TextInput {
+                        x: Tokens.sp2;
+                        width: parent.width - 2 * Tokens.sp2;
+                        vertical-alignment: center;
+                        text <=> root.table-name;
+                        color: Tokens.text;
+                        font-family: Tokens.mono;
+                        font-size: Tokens.font-md;
+                        single-line: true;
+                    }
+                }
+                // column header
+                HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    Text { text: "Column"; color: Tokens.text-dim; font-size: Tokens.font-sm; horizontal-stretch: 1; }
+                    Text { text: "Type"; color: Tokens.text-dim; font-size: Tokens.font-sm; horizontal-stretch: 1; }
+                    Text { text: "Null"; color: Tokens.text-dim; font-size: Tokens.font-sm; width: 40px; horizontal-alignment: center; }
+                    Text { text: "PK"; color: Tokens.text-dim; font-size: Tokens.font-sm; width: 40px; horizontal-alignment: center; }
+                    Rectangle { width: 28px; }
+                }
+                // column rows (scrolls when many)
+                Rectangle {
+                    vertical-stretch: 1;
+                    min-height: 44px;
+                    ScrollView {
+                        VerticalLayout {
+                            spacing: Tokens.sp2;
+                            for col[i] in root.table-cols: HorizontalLayout {
+                                spacing: Tokens.sp2;
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 30px;
+                                    border-radius: Tokens.radius;
+                                    background: Tokens.canvas;
+                                    border-width: 1px;
+                                    border-color: Tokens.border;
+                                    TextInput {
+                                        x: Tokens.sp2;
+                                        width: parent.width - 2 * Tokens.sp2;
+                                        vertical-alignment: center;
+                                        text: col.name;
+                                        edited => { root.table-set-col-name(i, self.text); }
+                                        color: Tokens.text;
+                                        font-family: Tokens.mono;
+                                        font-size: Tokens.font-sm;
+                                        single-line: true;
+                                    }
+                                }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 30px;
+                                    border-radius: Tokens.radius;
+                                    background: Tokens.canvas;
+                                    border-width: 1px;
+                                    border-color: Tokens.border;
+                                    TextInput {
+                                        x: Tokens.sp2;
+                                        width: parent.width - 2 * Tokens.sp2;
+                                        vertical-alignment: center;
+                                        text: col.type-name;
+                                        edited => { root.table-set-col-type(i, self.text); }
+                                        color: Tokens.text;
+                                        font-family: Tokens.mono;
+                                        font-size: Tokens.font-sm;
+                                        single-line: true;
+                                    }
+                                }
+                                // nullable toggle
+                                Rectangle {
+                                    width: 40px;
+                                    height: 30px;
+                                    null-ta := TouchArea { clicked => { root.table-toggle-null(i); } }
+                                    Rectangle {
+                                        width: 18px;
+                                        height: 18px;
+                                        border-radius: 4px;
+                                        border-width: 1px;
+                                        border-color: Tokens.border-strong;
+                                        background: col.nullable ? Tokens.accent : transparent;
+                                        Text {
+                                            text: col.nullable ? "✓" : "";
+                                            color: #FFFFFF;
+                                            font-size: 12px;
+                                        }
+                                    }
+                                }
+                                // primary-key toggle
+                                Rectangle {
+                                    width: 40px;
+                                    height: 30px;
+                                    pk-ta := TouchArea { clicked => { root.table-toggle-pk(i); } }
+                                    Rectangle {
+                                        width: 18px;
+                                        height: 18px;
+                                        border-radius: 4px;
+                                        border-width: 1px;
+                                        border-color: Tokens.border-strong;
+                                        background: col.pk ? Tokens.accent : transparent;
+                                        Text {
+                                            text: col.pk ? "✓" : "";
+                                            color: #FFFFFF;
+                                            font-size: 12px;
+                                        }
+                                    }
+                                }
+                                // remove row
+                                Rectangle {
+                                    width: 28px;
+                                    height: 30px;
+                                    rm-ta := TouchArea { clicked => { root.table-remove-col(i); } }
+                                    Text {
+                                        text: "✕";
+                                        color: rm-ta.has-hover ? Tokens.error : Tokens.text-faint;
+                                        font-size: 13px;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    SecondaryButton {
+                        text: "+ Add column";
+                        height: 28px;
+                        clicked => { root.table-add-col(); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                if root.table-error != "": Text {
+                    text: root.table-error;
+                    color: Tokens.error;
+                    font-size: Tokens.font-sm;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    alignment: end;
+                    SecondaryButton {
+                        text: "Cancel";
+                        height: 30px;
+                        clicked => { root.table-modal-open = false; }
+                    }
+                    PrimaryButton {
+                        text: "Create";
+                        height: 30px;
+                        clicked => { root.create-table-commit(); }
                     }
                 }
             }
