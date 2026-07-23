@@ -325,6 +325,7 @@ in-out property <string> rename-text;
     // A "No limit" stream is loading rows progressively (shows the Cancel button).
     in property <bool> streaming;
     callback cancel-stream();
+    callback cancel-query();
     in-out property <string> limit-text: "300";
     callback prev-page();
     callback next-page();
@@ -412,6 +413,7 @@ in-out property <string> rename-text;
     callback p1-format-sql();
     callback p1-explain-query();
     callback p1-cancel-stream();
+    callback p1-cancel-query();
     callback p1-set-limit(string);
     callback p1-prev-page();
     callback p1-next-page();
@@ -1345,6 +1347,7 @@ in-out property <string> rename-text;
                         p1-format-sql() => { root.p1-format-sql(); }
                         p1-explain-query() => { root.p1-explain-query(); }
                         p1-cancel-stream() => { root.p1-cancel-stream(); }
+                        p1-cancel-query() => { root.p1-cancel-query(); }
                         p1-set-limit(t) => { root.p1-set-limit(t); }
                         p1-prev-page() => { root.p1-prev-page(); }
                         p1-next-page() => { root.p1-next-page(); }
@@ -1466,6 +1469,7 @@ in-out property <string> rename-text;
                         query-running: root.query-running;
                         streaming: root.streaming;
                         cancel-stream() => { root.cancel-stream(); }
+                        cancel-query() => { root.cancel-query(); }
                         limit-text <=> root.limit-text;
                         run => {
                             root.run-query();

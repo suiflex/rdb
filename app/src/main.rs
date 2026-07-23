@@ -602,6 +602,10 @@ struct GroupRuntime {
     col_filters: Arc<std::sync::Mutex<Vec<String>>>,
     stream_cancel: Rc<RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>>,
     stream_timer: Rc<RefCell<Option<slint::Timer>>>,
+    // Abort handle for the in-flight buffered query task, so a slow query can be
+    // hard-cancelled. Overwritten on each run; aborting a finished task is a
+    // no-op, so no clearing on completion is needed.
+    query_abort: Rc<RefCell<Option<tokio::task::AbortHandle>>>,
 }
 
 impl GroupRuntime {
@@ -626,6 +630,7 @@ impl GroupRuntime {
             col_filters: Arc::new(std::sync::Mutex::new(Vec::new())),
             stream_cancel: Rc::new(RefCell::new(None)),
             stream_timer: Rc::new(RefCell::new(None)),
+            query_abort: Rc::new(RefCell::new(None)),
         }
     }
 }
@@ -5417,7 +5422,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 // hid it. The console still updates in place when it is open.
                 cur_db = w.get_schema_name().to_string();
             }
-            rt.spawn(async move {
+            let jh = rt.spawn(async move {
                 let guard = current.lock().await;
                 let t0 = std::time::Instant::now();
                 // Multi-statement: SQL engines split on top-level `;` and run
@@ -5590,6 +5595,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 });
             });
+            // ponytail: task-abort is a client-side cancel — it frees the pane and
+            // the connection guard immediately; the server statement may keep
+            // running until the connection notices. Add Client::cancel_token() for
+            // a true server-side cancel if that ever matters.
+            *panes[pane].query_abort.borrow_mut() = Some(jh.abort_handle());
         })
     };
 
@@ -6119,6 +6129,32 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             if let Some(w) = weak.upgrade() {
                 set_p_streaming(&w, 0, false);
+            }
+        });
+    }
+
+    // ----- Cancel a running buffered query (hard abort of the tokio task) -----
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_cancel_query(move || {
+            if let Some(h) = panes[0].query_abort.borrow_mut().take() {
+                h.abort();
+            }
+            if let Some(w) = weak.upgrade() {
+                set_p_query_running(&w, 0, false);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_cancel_query(move || {
+            if let Some(h) = panes[1].query_abort.borrow_mut().take() {
+                h.abort();
+            }
+            if let Some(w) = weak.upgrade() {
+                set_p_query_running(&w, 1, false);
             }
         });
     }
