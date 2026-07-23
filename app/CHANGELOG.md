@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.22.0](https://github.com/suiflex/rdb/compare/v0.21.0...v0.22.0) (2026-07-23)
+
+
+### Features
+
+* create db/schema/table, live connection status, update nudges ([0e2b826](https://github.com/suiflex/rdb/commit/0e2b826ed315afeb1d023720c1b73ffbc60caa0e))
+* desktop notification when an update is available ([1bbe1a4](https://github.com/suiflex/rdb/commit/1bbe1a4c8930fc1c9a3631c5af56a86bc5f02a6f))
+* live connection status dot with periodic ping ([f8f2550](https://github.com/suiflex/rdb/commit/f8f255062448001970763cf0f912a8f48357bd00))
+* manual "check for updates" in settings ([b326308](https://github.com/suiflex/rdb/commit/b326308f7dda3021e3fa0b6638a81dc30bee6d62))
+* table designer dialog from sidebar + ([3b1cd1c](https://github.com/suiflex/rdb/commit/3b1cd1c91f04e34a2ce3b1ca9ca170db371f6f88))
+
+
+### Bug Fixes
+
+* create database/schema from modal New… instead of connection form ([3a2ce95](https://github.com/suiflex/rdb/commit/3a2ce9546a1edef4c3ca64f09784989b6e508b7a))
+* reflect live connection health in the status footer ([d4489f8](https://github.com/suiflex/rdb/commit/d4489f81decedc7197f90ca4bee2a7016efbb873))
+* SQL editor UX batch — cancel, autocomplete, folding, cell copy ([#127](https://github.com/suiflex/rdb/issues/127)) ([8d4d51e](https://github.com/suiflex/rdb/commit/8d4d51eccbec519fcfce050edf8cd0fbbb6a5201))
+
 ## [0.21.0](https://github.com/suiflex/rdb/compare/v0.20.0...v0.21.0) (2026-07-22)
 
 
