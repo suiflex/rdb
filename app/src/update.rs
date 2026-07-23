@@ -59,6 +59,15 @@ pub fn release_page() -> &'static str {
     RELEASES_PAGE
 }
 
+/// Fire a native desktop notification inviting the user to update. Best-effort:
+/// any platform/permission failure is swallowed so it never disrupts startup.
+pub fn notify_update(version: &str, hint: &str) {
+    let _ = notify_rust::Notification::new()
+        .summary(&format!("RDB {version} is available"))
+        .body(&format!("A new version is out — {hint}."))
+        .show();
+}
+
 /// True if `latest_tag` (e.g. "v1.2.0") is a strictly newer semver than the
 /// running `current` version. Unparseable input is treated as "not newer" so a
 /// malformed tag never nags the user.
