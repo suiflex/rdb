@@ -124,6 +124,30 @@ fn save_via_dialog(
     }
 }
 
+/// Next cursor line when moving vertically past folded (hidden) lines. A closed
+/// fold at head `h` hides its body `h+1..=e`; stepping into that body jumps to
+/// the first visible line beyond it (down) or back to the fold head (up), so the
+/// caret never lands on a line the editor isn't drawing.
+fn fold_skip_line(lines: &[String], folded: &HashSet<usize>, line: usize, down: bool) -> usize {
+    let regions = editor::fold_regions(lines);
+    let hidden = |l: usize| {
+        regions
+            .iter()
+            .any(|&(h, e)| folded.contains(&h) && l > h && l <= e)
+    };
+    let mut l = line;
+    if down {
+        while hidden(l) && l + 1 < lines.len() {
+            l += 1;
+        }
+    }
+    // Up, or a down move that hit a fold running to EOF: retreat to a visible line.
+    while hidden(l) && l > 0 {
+        l -= 1;
+    }
+    l
+}
+
 /// Build the grouped sidebar row model: a header row per group followed by its
 /// connection rows (unless the group is collapsed). `index` on each connection
 /// row is its position in the store list, so connect/edit callbacks stay correct
@@ -2851,14 +2875,30 @@ fn main() -> Result<(), slint::PlatformError> {
                                 if meta {
                                     ed.move_doc_start()
                                 } else {
-                                    ed.move_cursor(-1, 0)
+                                    ed.move_cursor(-1, 0);
+                                    let vis = fold_skip_line(
+                                        &ed.lines,
+                                        &panes[pane].folded_heads.borrow(),
+                                        ed.line,
+                                        false,
+                                    );
+                                    ed.line = vis;
+                                    ed.col = ed.col.min(ed.lines[vis].chars().count());
                                 }
                             }
                             "\u{f701}" => {
                                 if meta {
                                     ed.move_doc_end()
                                 } else {
-                                    ed.move_cursor(1, 0)
+                                    ed.move_cursor(1, 0);
+                                    let vis = fold_skip_line(
+                                        &ed.lines,
+                                        &panes[pane].folded_heads.borrow(),
+                                        ed.line,
+                                        true,
+                                    );
+                                    ed.line = vis;
+                                    ed.col = ed.col.min(ed.lines[vis].chars().count());
                                 }
                             }
                             "\u{f729}" => ed.home(),
