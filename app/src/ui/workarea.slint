@@ -239,7 +239,7 @@ export component WorkArea inherits Rectangle {
     // SQL result footer segments: 0 Data · 1 Message · 2 Chart.
     in-out property <int> sql-view-mode: 0;
     // Opening/switching a browsed table lands on the grid, not a leftover chart.
-    changed active-table => { root.sql-view-mode = 0; }
+    changed active-table => { root.sql-view-mode = 0; root.columns-open = false; }
     in property <[ChartBar]> chart-bars;
 
     in property <[IndexRow]> index-rows;
@@ -982,7 +982,9 @@ export component WorkArea inherits Rectangle {
     }
 
     // ----- column-visibility popup (anchored above the footer) -----
-    if root.columns-open: Rectangle {
+    // Gated on browse-mode too: switching to a non-browse engine hides the
+    // footer toggle, so the popup must vanish with it or it gets orphaned.
+    if root.columns-open && root.browse-mode: Rectangle {
         x: parent.width - self.width - Tokens.sp3;
         y: parent.height - self.height - Tokens.status-bar-h - Tokens.sp2;
         width: 240px;
