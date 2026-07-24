@@ -165,25 +165,37 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: npm --prefix website run fetch-release
-      - name: Commit website release data
+      - name: Open and merge website release data PR
         env:
-          # TAP_PUBLISH_TOKEN is scoped to the tap repo only, so it was denied
-          # here (403). GITHUB_TOKEN can't push either: develop is protected and
-          # only the mulhamna account is in the PR-bypass list (no apps). Reuse
-          # RELEASE_PLEASE_TOKEN — the same PAT release-please already uses to
-          # write to develop — which bypasses protection and has repo write.
+          # develop is a protected ruleset that forbids direct pushes for every
+          # actor (PR required, no bypass), so route the change through a PR and
+          # merge it. Website files need 0 approvals and no required checks, so
+          # the merge lands immediately. RELEASE_PLEASE_TOKEN has repo + PR write.
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
         run: |
           if git diff --quiet -- website/src/data/release.json; then
             echo "website release data already current"
             exit 0
           fi
+          branch="chore/website-release-${{ github.ref_name }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
           git add website/src/data/release.json
-          git commit -m "docs: update website release data"
+          git commit -m "docs: update website release data for ${{ github.ref_name }}"
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
-          git push origin HEAD:develop
+          git push -u origin "$branch"
+          gh pr create --base develop --head "$branch" \
+            --title "docs: update website release data for ${{ github.ref_name }}" \
+            --body "Automated release-data refresh for ${{ github.ref_name }}."
+          # Merge once GitHub has computed mergeability (no auto-merge on this repo).
+          for i in 1 2 3 4 5 6; do
+            if gh pr merge "$branch" --squash --delete-branch; then
+              exit 0
+            fi
+            echo "merge not ready yet, retrying…"; sleep 5
+          done
+          echo "::error::failed to merge website release data PR"; exit 1
 
   publish-homebrew:
     if: github.event_name == 'push'
