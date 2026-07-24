@@ -67,8 +67,7 @@ export component TabularGrid inherits Rectangle {
     // Horizontal counterpart: drive the outer Flickable directly so a sideways
     // wheel pans columns without the Flickable's single-axis wheel redirect.
     function scroll-cols(dx: length) {
-        hscroll.viewport-x = clamp(hscroll.viewport-x + dx,
-            min(0px, hscroll.visible-width - hscroll.viewport-width), 0px);
+        hscroll.viewport-x = clamp(hscroll.viewport-x + dx, hscroll.max-off, 0px);
     }
 
     // A horizontal ScrollView owns the whole grid so the header and rows pan
@@ -76,12 +75,19 @@ export component TabularGrid inherits Rectangle {
     // scroll vertically. The ListView virtualizes — only the on-screen rows are
     // instantiated — so a hundred-thousand / million-row result renders as
     // cheaply as a single screenful (no more freeze on `SELECT *`).
-    hscroll := ScrollView {
-        width: 100%;
-        height: 100%;
-        VerticalLayout {
-            width: max(self.preferred-width, hscroll.visible-width);
-            height: hscroll.visible-height;
+    // A manual horizontal pan (clipped Rectangle + offset) rather than a
+    // horizontal ScrollView: a single-axis Flickable hijacks the vertical wheel
+    // into sideways panning before any child handler runs. Without it the inner
+    // ListView is the only Flickable and scrolls rows on a vertical wheel.
+    hscroll := Rectangle {
+        clip: true;
+        property <length> viewport-width: content.preferred-width;
+        property <length> viewport-x: 0px;      // 0..max-off, both <= 0
+        property <length> max-off: min(0px, self.width - self.viewport-width);
+        content := VerticalLayout {
+            x: hscroll.viewport-x;
+            width: max(self.preferred-width, hscroll.width);
+            height: hscroll.height;
 
         // ----- header (27px): "name" 600 + type dim, mono -----
         HorizontalLayout {
@@ -460,6 +466,39 @@ export component TabularGrid inherits Rectangle {
                     list.viewport-y = clamp(
                         parent.drag-start - (self.mouse-y - self.pressed-y)
                             * (parent.scroll-range / (parent.height - thumb.height)),
+                        -parent.scroll-range, 0px);
+                }
+            }
+        }
+    }
+
+    // Horizontal scrollbar pinned to the bottom of the viewport (replaces the
+    // one the removed ScrollView used to draw).
+    if hscroll.viewport-width > hscroll.width + 1px: Rectangle {
+        x: 0;
+        y: parent.height - self.height - 2px;
+        width: hscroll.width - 2px;
+        height: 8px;
+        property <length> scroll-range: hscroll.viewport-width - hscroll.width;
+        property <length> drag-start;
+        hthumb := Rectangle {
+            height: parent.height;
+            width: max(28px, parent.width * hscroll.width / hscroll.viewport-width);
+            x: parent.scroll-range > 0
+                ? (parent.width - self.width) * (-hscroll.viewport-x / parent.scroll-range)
+                : 0px;
+            border-radius: 4px;
+            background: hsb-ta.pressed || hsb-ta.has-hover ? Tokens.text-faint : Tokens.border-strong;
+        }
+        hsb-ta := TouchArea {
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down) { parent.drag-start = hscroll.viewport-x; }
+            }
+            moved => {
+                if (parent.scroll-range > 0 && parent.width > hthumb.width) {
+                    hscroll.viewport-x = clamp(
+                        parent.drag-start - (self.mouse-x - self.pressed-x)
+                            * (parent.scroll-range / (parent.width - hthumb.width)),
                         -parent.scroll-range, 0px);
                 }
             }
