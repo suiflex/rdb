@@ -3,7 +3,7 @@
 // Cells are flat row-major: row r, col c at r*col-count + c.
 import { Tokens } from "tokens.slint";
 import { GridColumn, GridCell } from "structs.slint";
-import { ComboBox, DatePickerPopup, ListView, ScrollView } from "std-widgets.slint";
+import { ComboBox, DatePickerPopup, ScrollView } from "std-widgets.slint";
 
 export component TabularGrid inherits Rectangle {
     in property <[GridColumn]> columns;
@@ -35,9 +35,12 @@ export component TabularGrid inherits Rectangle {
     in property <int> scroll-grid-tick;
     property <int> date-row: -1;
     property <int> date-col: -1;
-    // Shared horizontal pan offset (<= 0) so the header and the row list move
-    // together. Driven by the horizontal scrollbar; the ListView owns vertical.
-    property <length> h-off: 0px;
+    // Manual row virtualization: only the on-screen window of rows is built, so a
+    // single two-axis Flickable can scroll both ways smoothly without paying to
+    // instantiate every row of a large result. `r` rebinds as the window slides.
+    property <int> row-count: root.col-count > 0 ? root.cells.length / root.col-count : 0;
+    property <int> first-row: clamp(floor(-flick.viewport-y / Tokens.grid-row-h), 0, max(0, root.row-count - 1));
+    property <int> win-count: min(root.row-count - root.first-row, ceil(la.height / Tokens.grid-row-h) + 2);
 
     pure function is-boolean(t: string) -> bool {
         return t == "bool" || t == "boolean" || t == "BOOL" || t == "BOOLEAN"
@@ -52,21 +55,19 @@ export component TabularGrid inherits Rectangle {
     }
 
     changed scroll-grid-tick => {
-        list.viewport-y = min(0px, list.visible-height - list.viewport-height);
+        flick.viewport-y = min(0px, flick.height - flick.viewport-height);
     }
 
-    // The virtualizing ListView owns the vertical axis (smooth on huge results,
-    // and a mouse wheel scrolls rows). Columns are panned by the shared h-off,
-    // driven by the horizontal scrollbar, so the header and rows move together.
-    // (Nested Flickables can't share the wheel — only the outermost gets it — so
-    // the horizontal axis is a scrollbar rather than the wheel.)
+    // One two-axis Flickable scrolls both ways (trackpad smooth on both), and
+    // rows are manually windowed — only the on-screen slice exists — so it stays
+    // light on large results. The header sits above and pans with viewport-x.
     VerticalLayout {
         // fixed header + filter, clipped and panned horizontally with the rows
         Rectangle {
             clip: true;
             height: Tokens.grid-header-h + 1px + (root.filter-open ? 26px + 1px : 0px);
             hdr := VerticalLayout {
-                x: root.h-off;
+                x: flick.viewport-x;
                 width: max(self.preferred-width, parent.width);
 
         // ----- header (27px): "name" 600 + type dim, mono -----
@@ -185,30 +186,25 @@ export component TabularGrid inherits Rectangle {
         if root.filter-open: Rectangle { height: 1px; background: Tokens.border; }
             }
         }
-        // ----- rows: virtualizing ListView, panned horizontally by h-off -----
+        // ----- rows: one two-axis Flickable, scrolls both ways; only the
+        // on-screen window of rows is instantiated so large results stay smooth -----
         la := Rectangle {
             vertical-stretch: 1;
             clip: true;
-            // Wide container panned by h-off; the ListView fills it so its rows
-            // are the full column width (a ListView ignores a width set wider
-            // than its own parent, so it must live inside a wide parent).
-            panner := Rectangle {
-                x: root.h-off;
-                width: max(hdr.preferred-width, la.width);
-                height: la.height;
-                list := ListView {
-                    width: parent.width;
-                    height: parent.height;
+            flick := Flickable {
+                width: 100%;
+                height: 100%;
+                viewport-width: max(hdr.preferred-width, la.width);
+                viewport-height: root.row-count * Tokens.grid-row-h;
 
-        // ----- rows (24px) -----
-        for r in (root.col-count > 0 ? root.cells.length / root.col-count : 0): Rectangle {
+        // ----- rows (24px): windowed — `r` is the real row index -----
+        for i in root.win-count: Rectangle {
+            property <int> r: root.first-row + i;
+            y: r * Tokens.grid-row-h;
+            width: flick.viewport-width;
+            height: Tokens.grid-row-h;
             property <bool> row-deleted: root.cells[r * root.col-count].state == 2;
             property <bool> row-inserted: root.cells[r * root.col-count].state == 3;
-            property <bool> expanded-editor: r == root.editing-row && root.editing-col >= 0
-                && root.editing-col < root.columns.length
-                && !root.is-boolean(root.columns[root.editing-col].type-name)
-                && !root.is-date(root.columns[root.editing-col].type-name);
-            height: self.expanded-editor ? 52px : Tokens.grid-row-h;
             background: row-deleted ? Tokens.error-tint
                 : row-inserted ? Tokens.ok-tint
                 : r == root.selected-row ? Tokens.accent-tint.with-alpha(0.55)
@@ -305,12 +301,14 @@ export component TabularGrid inherits Rectangle {
                             || root.is-date(root.columns[c].type-name);
                         property <length> editor-w: self.compact-editor ? parent.width
                             : max(parent.width, min(520px, root.width - 2 * Tokens.sp2));
-                        property <length> visible-x: parent.x + root.h-off;
+                        property <length> visible-x: parent.x + flick.viewport-x;
                         z: 100;
                         x: self.compact-editor ? 0px
                             : max(-self.visible-x, min(0px, root.width - self.visible-x - self.editor-w));
                         width: self.editor-w;
-                        height: parent.height;
+                        // Rows are fixed height now, so a multi-line editor floats
+                        // taller over the rows below (z:100) instead of growing one.
+                        height: self.compact-editor ? parent.height : 96px;
                         background: Tokens.card;
                         border-width: 2px;
                         // Read-only view is a value inspector, not a pending
@@ -410,57 +408,56 @@ export component TabularGrid inherits Rectangle {
             }
         }
             }
-            }
-            // ----- vertical scrollbar (ListView's native bar is off-screen right) -----
-            if list.viewport-height > list.height + 1px: Rectangle {
+            // ----- vertical scrollbar (a Flickable draws none) -----
+            if flick.viewport-height > flick.height + 1px: Rectangle {
                 x: parent.width - self.width - 2px;
                 y: 0;
                 width: 8px;
                 height: parent.height;
-                property <length> scroll-range: list.viewport-height - list.height;
+                property <length> scroll-range: flick.viewport-height - flick.height;
                 property <length> drag-start;
                 vthumb := Rectangle {
                     width: parent.width;
-                    height: max(28px, parent.height * list.height / list.viewport-height);
+                    height: max(28px, parent.height * flick.height / flick.viewport-height);
                     y: parent.scroll-range > 0
-                        ? (parent.height - self.height) * (-list.viewport-y / parent.scroll-range)
+                        ? (parent.height - self.height) * (-flick.viewport-y / parent.scroll-range)
                         : 0px;
                     border-radius: 4px;
                     background: vsb.pressed || vsb.has-hover ? Tokens.text-faint : Tokens.border-strong;
                 }
                 vsb := TouchArea {
-                    pointer-event(e) => { if (e.kind == PointerEventKind.down) { parent.drag-start = list.viewport-y; } }
+                    pointer-event(e) => { if (e.kind == PointerEventKind.down) { parent.drag-start = flick.viewport-y; } }
                     moved => {
                         if (parent.scroll-range > 0 && parent.height > vthumb.height) {
-                            list.viewport-y = clamp(parent.drag-start
+                            flick.viewport-y = clamp(parent.drag-start
                                 - (self.mouse-y - self.pressed-y) * (parent.scroll-range / (parent.height - vthumb.height)),
                                 -parent.scroll-range, 0px);
                         }
                     }
                 }
             }
-            // ----- horizontal scrollbar (drives the shared pan offset) -----
-            if panner.width > la.width + 1px: Rectangle {
+            // ----- horizontal scrollbar (drives the Flickable's viewport-x) -----
+            if flick.viewport-width > la.width + 1px: Rectangle {
                 x: 0;
                 y: parent.height - self.height - 2px;
                 width: parent.width - 2px;
                 height: 8px;
-                property <length> scroll-range: panner.width - la.width;
+                property <length> scroll-range: flick.viewport-width - la.width;
                 property <length> drag-start;
                 hthumb := Rectangle {
                     height: parent.height;
-                    width: max(28px, parent.width * la.width / panner.width);
+                    width: max(28px, parent.width * la.width / flick.viewport-width);
                     x: parent.scroll-range > 0
-                        ? (parent.width - self.width) * (-root.h-off / parent.scroll-range)
+                        ? (parent.width - self.width) * (-flick.viewport-x / parent.scroll-range)
                         : 0px;
                     border-radius: 4px;
                     background: hsb.pressed || hsb.has-hover ? Tokens.text-faint : Tokens.border-strong;
                 }
                 hsb := TouchArea {
-                    pointer-event(e) => { if (e.kind == PointerEventKind.down) { parent.drag-start = root.h-off; } }
+                    pointer-event(e) => { if (e.kind == PointerEventKind.down) { parent.drag-start = flick.viewport-x; } }
                     moved => {
                         if (parent.scroll-range > 0 && parent.width > hthumb.width) {
-                            root.h-off = clamp(parent.drag-start
+                            flick.viewport-x = clamp(parent.drag-start
                                 - (self.mouse-x - self.pressed-x) * (parent.scroll-range / (parent.width - hthumb.width)),
                                 -parent.scroll-range, 0px);
                         }
