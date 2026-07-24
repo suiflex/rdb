@@ -355,6 +355,7 @@ callback create-table-commit();
     in property <bool> streaming;
     callback cancel-stream();
     callback cancel-query();
+    callback reconnect();
     in-out property <string> limit-text: "300";
     callback prev-page();
     callback next-page();
@@ -1506,6 +1507,7 @@ callback create-table-commit();
                         streaming: root.streaming;
                         cancel-stream() => { root.cancel-stream(); }
                         cancel-query() => { root.cancel-query(); }
+                        reconnect() => { root.reconnect(); }
                         limit-text <=> root.limit-text;
                         run => {
                             root.run-query();

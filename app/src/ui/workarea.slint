@@ -114,6 +114,8 @@ export component WorkArea inherits Rectangle {
     in property <bool> streaming;
     callback cancel-stream();
     callback cancel-query();
+    // Re-establish the current connection after a dropped health check.
+    callback reconnect();
     in-out property <string> limit-text;
     // Draggable height of the SQL editor pane (session-local).
     in-out property <length> editor-h: 340px;
@@ -900,6 +902,15 @@ export component WorkArea inherits Rectangle {
                 HorizontalLayout {
                     spacing: Tokens.sp2;
                     alignment: end;
+                    // Offer a one-click retry when the live connection dropped.
+                    if root.conn-status == "error": VerticalLayout {
+                        alignment: center;
+                        SecondaryButton {
+                            text: "Reconnect";
+                            height: 20px;
+                            clicked => { root.reconnect(); }
+                        }
+                    }
                     Rectangle {
                         width: 7px;
                         height: 7px;

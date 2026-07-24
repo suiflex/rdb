@@ -4861,6 +4861,22 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ----- reconnect: retry the current connection after a health drop -----
+    {
+        let weak = window.as_weak();
+        window.on_reconnect(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            // The health poll leaves selected_conn pointing at the live
+            // connection, so replay the connect path against it.
+            let idx = w.get_selected_conn();
+            if idx >= 0 {
+                w.invoke_connect_clicked(idx);
+            }
+        });
+    }
+
     // Deferred handle to `run_browse` (defined later): per-column filters in
     // browse mode re-query the DB, but this handler is wired before run_browse
     // exists. Filled in once run_browse is built, below.
