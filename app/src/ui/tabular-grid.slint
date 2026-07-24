@@ -318,7 +318,10 @@ export component TabularGrid inherits Rectangle {
                         height: parent.height;
                         background: Tokens.card;
                         border-width: 2px;
-                        border-color: Tokens.edit-outline;
+                        // Read-only view is a value inspector, not a pending
+                        // edit — neutral border so it doesn't mimic the orange
+                        // edit-outline cue.
+                        border-color: root.read-only ? Tokens.border-strong : Tokens.edit-outline;
                         if !root.read-only && root.is-boolean(root.columns[c].type-name): ComboBox {
                             x: 1px;
                             y: 1px;
