@@ -52,40 +52,17 @@ export component TabularGrid inherits Rectangle {
         list.viewport-y = min(0px, list.visible-height - list.viewport-height);
     }
 
-    // Drive the ListView from the wheel directly. The list is nested inside the
-    // horizontal ScrollView below, and the outer Flickable intermittently
-    // swallows the vertical wheel delta — so rows only scroll "sometimes".
-    // Forwarding the delta here (clamped to the same bounds as scroll-grid-tick)
-    // makes vertical scrolling deterministic regardless of which Flickable the
-    // event lands on.
-    function scroll-rows(dy: length) {
-        list.viewport-y = max(
-            min(0px, list.visible-height - list.viewport-height),
-            min(0px, list.viewport-y + dy));
-    }
-
-    // Horizontal counterpart: drive the outer Flickable directly so a sideways
-    // wheel pans columns without the Flickable's single-axis wheel redirect.
-    function scroll-cols(dx: length) {
-        hscroll.viewport-x = clamp(hscroll.viewport-x + dx, hscroll.max-off, 0px);
-    }
-
-    // A horizontal ScrollView owns the whole grid so the header and rows pan
-    // together; the header sits above the ListView so it stays put while rows
-    // scroll vertically. The ListView virtualizes — only the on-screen rows are
-    // instantiated — so a hundred-thousand / million-row result renders as
-    // cheaply as a single screenful (no more freeze on `SELECT *`).
-    // A manual horizontal pan (clipped Rectangle + offset) rather than a
-    // horizontal ScrollView: a single-axis Flickable hijacks the vertical wheel
-    // into sideways panning before any child handler runs. Without it the inner
-    // ListView is the only Flickable and scrolls rows on a vertical wheel.
-    hscroll := Rectangle {
-        clip: true;
-        property <length> viewport-width: content.preferred-width;
-        property <length> viewport-x: 0px;      // 0..max-off, both <= 0
-        property <length> max-off: min(0px, self.width - self.viewport-width);
+    // Two-axis scroll via nested Flickables, per Slint's wheel model: a Flickable
+    // scrolls the axis it can and forwards the other to its parent. A vertical
+    // wheel hits the inner ListView (innermost under the cursor) and scrolls rows;
+    // a horizontal wheel the ListView can't use is forwarded up to this outer
+    // Flickable, which pans the columns. The ListView virtualizes, so a
+    // million-row result renders as cheaply as one screenful. Custom scrollbars
+    // below drive viewport-x / viewport-y since a bare Flickable draws none.
+    hscroll := Flickable {
+        viewport-width: content.preferred-width;
+        viewport-height: self.height;    // lock vertical here; rows scroll in the ListView
         content := VerticalLayout {
-            x: hscroll.viewport-x;
             width: max(self.preferred-width, hscroll.width);
             height: hscroll.height;
 
@@ -221,18 +198,8 @@ export component TabularGrid inherits Rectangle {
                 : r == root.selected-row ? Tokens.accent-tint.with-alpha(0.55)
                 : row-ta.has-hover ? Tokens.chrome.with-alpha(0.6)
                 : transparent;
-            row-ta := TouchArea {
-                scroll-event(e) => {
-                    if (abs(e.delta-y) >= abs(e.delta-x)) {
-                        root.scroll-rows(e.delta-y);
-                    } else {
-                        root.scroll-cols(e.delta-x);
-                    }
-                    // Always accept: leaving it to the outer Flickable is what
-                    // redirects a vertical wheel into horizontal panning.
-                    return accept;
-                }
-            }
+            // Empty: the Flickables own the wheel now; this only tracks hover.
+            row-ta := TouchArea { }
             HorizontalLayout {
                 // row-number gutter
                 Rectangle {
@@ -265,14 +232,6 @@ export component TabularGrid inherits Rectangle {
                         // Stash the value so the read-only inspector card can show
                         // it directly (editable grids reopen the inline overlay).
                         double-clicked => { root.editing-value = cell.text; root.edit-cell(r, c); }
-                        scroll-event(e) => {
-                            if (abs(e.delta-y) >= abs(e.delta-x)) {
-                                root.scroll-rows(e.delta-y);
-                            } else {
-                                root.scroll-cols(e.delta-x);
-                            }
-                            return accept;
-                        }
                     }
                     if !is-bar: Text {
                         vertical-alignment: center;
