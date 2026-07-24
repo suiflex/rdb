@@ -421,6 +421,40 @@ export component TabularGrid inherits Rectangle {
         }
     }
 
+    // Vertical scrollbar pinned to the visible viewport. The ListView's own bar
+    // sits at the far-right of the (wide) content and scrolls off-screen with
+    // it, so drive its viewport-y from a bar anchored to the grid's right edge.
+    if list.viewport-height > list.height + 1px: Rectangle {
+        x: parent.width - self.width - 2px;
+        y: list.y;
+        width: 8px;
+        height: list.height;
+        property <length> scroll-range: list.viewport-height - list.height;
+        property <length> drag-start;
+        thumb := Rectangle {
+            width: parent.width;
+            height: max(28px, parent.height * parent.height / list.viewport-height);
+            y: parent.scroll-range > 0
+                ? (parent.height - self.height) * (-list.viewport-y / parent.scroll-range)
+                : 0px;
+            border-radius: 4px;
+            background: sb-ta.pressed || sb-ta.has-hover ? Tokens.text-faint : Tokens.border-strong;
+        }
+        sb-ta := TouchArea {
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down) { parent.drag-start = list.viewport-y; }
+            }
+            moved => {
+                if (parent.scroll-range > 0 && parent.height > thumb.height) {
+                    list.viewport-y = clamp(
+                        parent.drag-start - (self.mouse-y - self.pressed-y)
+                            * (parent.scroll-range / (parent.height - thumb.height)),
+                        -parent.scroll-range, 0px);
+                }
+            }
+        }
+    }
+
     date-picker := DatePickerPopup {
         title: "Select date";
         accepted(d) => {
