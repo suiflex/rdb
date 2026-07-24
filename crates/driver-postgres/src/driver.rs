@@ -389,7 +389,23 @@ async fn schema_impl(client: &Client, schema: &str) -> Result<Schema> {
     // Ordered so columns of the same table are contiguous for grouping.
     let rows = client
         .query(
-            "SELECT c.table_name, c.column_name, c.data_type, c.is_nullable \
+            "SELECT c.table_name, c.column_name, c.data_type, c.is_nullable, \
+             EXISTS (SELECT 1 FROM information_schema.table_constraints tc \
+                     JOIN information_schema.key_column_usage kcu \
+                       ON tc.constraint_name = kcu.constraint_name \
+                      AND tc.table_schema = kcu.table_schema \
+                     WHERE tc.constraint_type = 'PRIMARY KEY' \
+                       AND tc.table_schema = c.table_schema \
+                       AND tc.table_name = c.table_name \
+                       AND kcu.column_name = c.column_name) AS is_pk, \
+             EXISTS (SELECT 1 FROM information_schema.table_constraints tc \
+                     JOIN information_schema.key_column_usage kcu \
+                       ON tc.constraint_name = kcu.constraint_name \
+                      AND tc.table_schema = kcu.table_schema \
+                     WHERE tc.constraint_type = 'FOREIGN KEY' \
+                       AND tc.table_schema = c.table_schema \
+                       AND tc.table_name = c.table_name \
+                       AND kcu.column_name = c.column_name) AS is_fk \
              FROM information_schema.columns c \
              JOIN information_schema.tables t \
                ON t.table_schema = c.table_schema AND t.table_name = c.table_name \
@@ -410,6 +426,8 @@ async fn schema_impl(client: &Client, schema: &str) -> Result<Schema> {
             name: column,
             type_name: data_type,
             nullable: is_nullable.eq_ignore_ascii_case("YES"),
+            pk: row.get(4),
+            fk: row.get(5),
         };
         match containers.last_mut() {
             Some(last) if last.name == table => last.fields.push(field),

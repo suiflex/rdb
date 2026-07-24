@@ -256,6 +256,7 @@ impl CassandraDriver {
                 name,
                 type_name,
                 nullable: true,
+                ..Default::default()
             });
         }
         Ok(fields)

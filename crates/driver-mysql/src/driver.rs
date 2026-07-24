@@ -75,13 +75,23 @@ impl Driver for MysqlDriver {
         let rows: Vec<SchemaRow> = conn
             .query_map(
                 columns_query(),
-                |(db, table, col, dtype, is_nullable): (String, String, String, String, String)| {
+                |(db, table, col, dtype, is_nullable, is_pk, is_fk): (
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                )| {
                     (
                         db,
                         table,
                         col,
                         dtype,
                         is_nullable.eq_ignore_ascii_case("YES"),
+                        is_pk.eq_ignore_ascii_case("YES"),
+                        is_fk.eq_ignore_ascii_case("YES"),
                     )
                 },
             )

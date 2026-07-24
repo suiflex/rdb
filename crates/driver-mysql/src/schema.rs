@@ -1,15 +1,21 @@
 use rdb_core::schema::{Container, ContainerKind, Database, Field, Schema};
 
-/// One row of the schema query: (database, table, column, type_name, nullable).
-pub type SchemaRow = (String, String, String, String, bool);
+/// One row of the schema query:
+/// (database, table, column, type_name, nullable, pk, fk).
+pub type SchemaRow = (String, String, String, String, bool, bool, bool);
 
 /// SQL pulling every user column. System schemas are excluded so the tree is
 /// the user's data, not server internals.
 pub fn columns_query() -> String {
-    "SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE \
-     FROM INFORMATION_SCHEMA.COLUMNS \
-     WHERE TABLE_SCHEMA NOT IN ('mysql','information_schema','performance_schema','sys') \
-     ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION"
+    "SELECT c.TABLE_SCHEMA, c.TABLE_NAME, c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE, \
+     IF(c.COLUMN_KEY = 'PRI', 'YES', 'NO') AS IS_PK, \
+     IF(EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE k \
+                WHERE k.TABLE_SCHEMA = c.TABLE_SCHEMA AND k.TABLE_NAME = c.TABLE_NAME \
+                  AND k.COLUMN_NAME = c.COLUMN_NAME AND k.REFERENCED_TABLE_NAME IS NOT NULL), \
+        'YES', 'NO') AS IS_FK \
+     FROM INFORMATION_SCHEMA.COLUMNS c \
+     WHERE c.TABLE_SCHEMA NOT IN ('mysql','information_schema','performance_schema','sys') \
+     ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION"
         .to_string()
 }
 
@@ -18,7 +24,7 @@ pub fn columns_query() -> String {
 pub fn fold_rows(rows: Vec<SchemaRow>) -> Schema {
     let mut databases: Vec<Database> = Vec::new();
 
-    for (db_name, table, col, type_name, nullable) in rows {
+    for (db_name, table, col, type_name, nullable, pk, fk) in rows {
         let db = match databases.iter_mut().find(|d| d.name == db_name) {
             Some(d) => d,
             None => {
@@ -47,6 +53,8 @@ pub fn fold_rows(rows: Vec<SchemaRow>) -> Schema {
             name: col,
             type_name,
             nullable,
+            pk,
+            fk,
         });
     }
 
@@ -74,6 +82,8 @@ mod tests {
                 "id".to_string(),
                 "int".to_string(),
                 false,
+                true,
+                false,
             ),
             (
                 "app".to_string(),
@@ -81,12 +91,16 @@ mod tests {
                 "name".to_string(),
                 "varchar".to_string(),
                 true,
+                false,
+                false,
             ),
             (
                 "app".to_string(),
                 "orders".to_string(),
                 "id".to_string(),
                 "int".to_string(),
+                false,
+                true,
                 false,
             ),
         ];

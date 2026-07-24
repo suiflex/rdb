@@ -237,16 +237,20 @@ fn schema_impl(c: &Connection, db_name: &str) -> Result<Schema> {
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
                     r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(5)?, // pk: 0 = not part of the primary key
                 ))
             })
             .map_err(|e| RdbError::Schema(e.to_string()))?;
         let mut fields = Vec::new();
         for row in rows {
-            let (name, type_name, notnull) = row.map_err(|e| RdbError::Schema(e.to_string()))?;
+            let (name, type_name, notnull, pk) =
+                row.map_err(|e| RdbError::Schema(e.to_string()))?;
             fields.push(Field {
                 name,
                 type_name,
                 nullable: notnull == 0,
+                pk: pk != 0,
+                ..Default::default()
             });
         }
         containers.push(Container {
