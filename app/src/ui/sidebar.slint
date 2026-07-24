@@ -36,6 +36,20 @@ export component Sidebar inherits Rectangle {
     in property <int> focus-tick;
     changed focus-tick => { fld.focus-input(); }
 
+    // Pending container click, deferred so a double-click can pre-empt it: the
+    // single-click action rebuilds the tree and destroys the row's TouchArea,
+    // which would otherwise swallow the second click of every double-click.
+    property <string> pending-db;
+    property <string> pending-label;
+    click-timer := Timer {
+        interval: 220ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            root.toggle-fields(root.pending-db, root.pending-label);
+        }
+    }
+
     background: Tokens.sidebar;
 
     VerticalLayout {
@@ -132,10 +146,13 @@ export component Sidebar inherits Rectangle {
                             if (is-category || is-database) {
                                 root.toggle-node(node.label);
                             } else if (is-container) {
-                                // Single click expands an SQL table's columns;
-                                // leaf containers (Mongo/Redis) have none, so the
-                                // handler opens them instead. Double-click opens.
-                                root.toggle-fields(node.db, node.label);
+                                // Defer the expand/open: a double-click cancels it
+                                // and opens instead. Acting now would rebuild the
+                                // tree and eat the second click.
+                                root.pending-db = node.db;
+                                root.pending-label = node.label;
+                                click-timer.running = false;
+                                click-timer.running = true;
                             } else if (is-function) {
                                 root.open-function(node.label);
                             } else if (is-query) {
@@ -144,6 +161,7 @@ export component Sidebar inherits Rectangle {
                         }
                         double-clicked => {
                             if (is-container) {
+                                click-timer.running = false;
                                 root.open-table(node.db, node.label);
                                 root.pin-table(node.db, node.label);
                             }
