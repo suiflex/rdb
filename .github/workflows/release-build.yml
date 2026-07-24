@@ -167,7 +167,11 @@ jobs:
         run: npm --prefix website run fetch-release
       - name: Commit website release data
         env:
-          GH_TOKEN: ${{ secrets.TAP_PUBLISH_TOKEN }}
+          # Push back to this repo with the workflow's own token: the personal
+          # PAT (TAP_PUBLISH_TOKEN) has no write access to suiflex/rdb, only to
+          # the tap repo, so it was denied here. GITHUB_TOKEN + contents:write
+          # pushes as github-actions[bot].
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if git diff --quiet -- website/src/data/release.json; then
             echo "website release data already current"
