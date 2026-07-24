@@ -189,9 +189,16 @@ export component TabularGrid inherits Rectangle {
         la := Rectangle {
             vertical-stretch: 1;
             clip: true;
-            list := ListView {
+            // Wide container panned by h-off; the ListView fills it so its rows
+            // are the full column width (a ListView ignores a width set wider
+            // than its own parent, so it must live inside a wide parent).
+            panner := Rectangle {
                 x: root.h-off;
                 width: max(hdr.preferred-width, la.width);
+                height: la.height;
+                list := ListView {
+                    width: parent.width;
+                    height: parent.height;
 
         // ----- rows (24px) -----
         for r in (root.col-count > 0 ? root.cells.length / root.col-count : 0): Rectangle {
@@ -403,6 +410,7 @@ export component TabularGrid inherits Rectangle {
             }
         }
             }
+            }
             // ----- vertical scrollbar (ListView's native bar is off-screen right) -----
             if list.viewport-height > list.height + 1px: Rectangle {
                 x: parent.width - self.width - 2px;
@@ -432,16 +440,16 @@ export component TabularGrid inherits Rectangle {
                 }
             }
             // ----- horizontal scrollbar (drives the shared pan offset) -----
-            if list.width > la.width + 1px: Rectangle {
+            if panner.width > la.width + 1px: Rectangle {
                 x: 0;
                 y: parent.height - self.height - 2px;
                 width: parent.width - 2px;
                 height: 8px;
-                property <length> scroll-range: list.width - la.width;
+                property <length> scroll-range: panner.width - la.width;
                 property <length> drag-start;
                 hthumb := Rectangle {
                     height: parent.height;
-                    width: max(28px, parent.width * la.width / list.width);
+                    width: max(28px, parent.width * la.width / panner.width);
                     x: parent.scroll-range > 0
                         ? (parent.width - self.width) * (-root.h-off / parent.scroll-range)
                         : 0px;
