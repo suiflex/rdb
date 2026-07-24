@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.23.0](https://github.com/suiflex/rdb/compare/v0.22.0...v0.23.0) (2026-07-24)
+
+
+### Features
+
+* populate primary/foreign key flags in the drivers ([5a0ab87](https://github.com/suiflex/rdb/commit/5a0ab87bcbfabd909c709aac898b2dea9c81181a))
+* **ui:** add a footer Reconnect button after a dropped connection ([9184ae9](https://github.com/suiflex/rdb/commit/9184ae982c0b13f7afa4c5fb9fb15abf820bc8c7))
+* **ui:** mark PK/FK columns in the sidebar field tree ([6808d91](https://github.com/suiflex/rdb/commit/6808d91ab5d99bf95a546775ec0e4021b1f2e7af))
+* **ui:** open a centered inspector card for read-only cells ([5db8cd1](https://github.com/suiflex/rdb/commit/5db8cd1f41358a03bd7db3fdd0abd654457c62d3))
+* **ui:** show a loading overlay while the sidebar tree reloads ([4a9cb6a](https://github.com/suiflex/rdb/commit/4a9cb6a25464f5157ca8605e326a291ed973a1d3))
+
+
+### Bug Fixes
+
+* **editor:** skip folded lines when moving the cursor vertically ([801659e](https://github.com/suiflex/rdb/commit/801659eccc2e4fda73f32261000535f38218e264))
+* **ui:** add a visible vertical scrollbar to the results grid ([b552fb2](https://github.com/suiflex/rdb/commit/b552fb296a95e2011f441f25cbb5c39c8b074dff))
+* **ui:** dismiss column popup when the browsed table changes ([a854349](https://github.com/suiflex/rdb/commit/a854349983aac522e987f41d33ebefb27c68375b))
+* **ui:** expand an SQL table on single click, open on double click ([f321d6e](https://github.com/suiflex/rdb/commit/f321d6efa30f2c80096159413f95d5da8829d79a))
+* **ui:** pan grid columns manually so the vertical wheel scrolls rows ([da04d6c](https://github.com/suiflex/rdb/commit/da04d6c03b4e45b4c5393d8e0327366f8c2e9e0f))
+* **ui:** pan the grid horizontally via a wide container ([7936802](https://github.com/suiflex/rdb/commit/79368020b87d1e40af1d530e06dc0cca72975fe6))
+* **ui:** scroll rows on a vertical wheel instead of panning columns ([0edb03a](https://github.com/suiflex/rdb/commit/0edb03ab3984632b220263be8d421daf530f06a3))
+* **ui:** scroll the grid both ways via one two-axis ScrollView ([4f86442](https://github.com/suiflex/rdb/commit/4f86442141e8080bb39e826fda28c0c15d86a2f0))
+* **ui:** scroll the grid both ways with nested Flickables ([211616b](https://github.com/suiflex/rdb/commit/211616be6846ce4bc2e4393f487f19d4dc041564))
+* **ui:** show expand caret and align Mongo/Redis db rows ([1985605](https://github.com/suiflex/rdb/commit/1985605c3cd74ac91de302363e9bbbd39e1a89bc))
+* **ui:** stop a table double-click collapsing into single clicks ([b5fa8cb](https://github.com/suiflex/rdb/commit/b5fa8cbb2620f6d4fad48d62cf27f402a9ad95ef))
+* **ui:** use a neutral border for the read-only cell inspector ([c00bb49](https://github.com/suiflex/rdb/commit/c00bb494d6d67a215ada0c85f929742f9c96e4fc))
+
+
+### Performance Improvements
+
+* **ui:** custom-virtualize the grid for smooth two-axis scrolling ([ca517f6](https://github.com/suiflex/rdb/commit/ca517f6408f9c7a89387ceeb3a82880d81a569f9))
+* **ui:** virtualize grid rows again for smooth scrolling ([fb0a124](https://github.com/suiflex/rdb/commit/fb0a12412313a4258c03e60142f225c3e1984986))
+
 ## [0.22.0](https://github.com/suiflex/rdb/compare/v0.21.0...v0.22.0) (2026-07-23)
 
 
