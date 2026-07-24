@@ -3,7 +3,7 @@
 // Cells are flat row-major: row r, col c at r*col-count + c.
 import { Tokens } from "tokens.slint";
 import { GridColumn, GridCell } from "structs.slint";
-import { ComboBox, DatePickerPopup, ScrollView } from "std-widgets.slint";
+import { ComboBox, DatePickerPopup, ListView, ScrollView } from "std-widgets.slint";
 
 export component TabularGrid inherits Rectangle {
     in property <[GridColumn]> columns;
@@ -35,6 +35,9 @@ export component TabularGrid inherits Rectangle {
     in property <int> scroll-grid-tick;
     property <int> date-row: -1;
     property <int> date-col: -1;
+    // Shared horizontal pan offset (<= 0) so the header and the row list move
+    // together. Driven by the horizontal scrollbar; the ListView owns vertical.
+    property <length> h-off: 0px;
 
     pure function is-boolean(t: string) -> bool {
         return t == "bool" || t == "boolean" || t == "BOOL" || t == "BOOLEAN"
@@ -49,23 +52,21 @@ export component TabularGrid inherits Rectangle {
     }
 
     changed scroll-grid-tick => {
-        body.viewport-y = min(0px, body.visible-height - body.viewport-height);
+        list.viewport-y = min(0px, list.visible-height - list.viewport-height);
     }
 
-    // One both-axis ScrollView scrolls the whole grid: a mouse wheel scrolls rows
-    // (vertical) and pans columns (horizontal) with no Flickable axis redirect,
-    // and it draws native scrollbars. The header sits above the scroll so it
-    // stays put vertically and follows the horizontal scroll via body.viewport-x.
-    // (Nested Flickables can't do both axes — only the outermost gets the wheel —
-    // so the virtualizing ListView is dropped; the result set is already fully
-    // materialised in `cells` and bounded by the query LIMIT.)
+    // The virtualizing ListView owns the vertical axis (smooth on huge results,
+    // and a mouse wheel scrolls rows). Columns are panned by the shared h-off,
+    // driven by the horizontal scrollbar, so the header and rows move together.
+    // (Nested Flickables can't share the wheel — only the outermost gets it — so
+    // the horizontal axis is a scrollbar rather than the wheel.)
     VerticalLayout {
-        // fixed header + filter, clipped and panned horizontally with the body
+        // fixed header + filter, clipped and panned horizontally with the rows
         Rectangle {
             clip: true;
             height: Tokens.grid-header-h + 1px + (root.filter-open ? 26px + 1px : 0px);
             hdr := VerticalLayout {
-                x: body.viewport-x;
+                x: root.h-off;
                 width: max(self.preferred-width, parent.width);
 
         // ----- header (27px): "name" 600 + type dim, mono -----
@@ -184,12 +185,13 @@ export component TabularGrid inherits Rectangle {
         if root.filter-open: Rectangle { height: 1px; background: Tokens.border; }
             }
         }
-        // ----- rows: one both-axis ScrollView (native scrollbars) -----
-        body := ScrollView {
+        // ----- rows: virtualizing ListView, panned horizontally by h-off -----
+        la := Rectangle {
             vertical-stretch: 1;
-            viewport-width: hdr.preferred-width;
-            VerticalLayout {
-                width: body.viewport-width;
+            clip: true;
+            list := ListView {
+                x: root.h-off;
+                width: max(hdr.preferred-width, la.width);
 
         // ----- rows (24px) -----
         for r in (root.col-count > 0 ? root.cells.length / root.col-count : 0): Rectangle {
@@ -296,7 +298,7 @@ export component TabularGrid inherits Rectangle {
                             || root.is-date(root.columns[c].type-name);
                         property <length> editor-w: self.compact-editor ? parent.width
                             : max(parent.width, min(520px, root.width - 2 * Tokens.sp2));
-                        property <length> visible-x: parent.x + body.viewport-x;
+                        property <length> visible-x: parent.x + root.h-off;
                         z: 100;
                         x: self.compact-editor ? 0px
                             : max(-self.visible-x, min(0px, root.width - self.visible-x - self.editor-w));
@@ -400,6 +402,62 @@ export component TabularGrid inherits Rectangle {
                 Rectangle { horizontal-stretch: 1; }
             }
         }
+            }
+            // ----- vertical scrollbar (ListView's native bar is off-screen right) -----
+            if list.viewport-height > list.height + 1px: Rectangle {
+                x: parent.width - self.width - 2px;
+                y: 0;
+                width: 8px;
+                height: parent.height;
+                property <length> scroll-range: list.viewport-height - list.height;
+                property <length> drag-start;
+                vthumb := Rectangle {
+                    width: parent.width;
+                    height: max(28px, parent.height * list.height / list.viewport-height);
+                    y: parent.scroll-range > 0
+                        ? (parent.height - self.height) * (-list.viewport-y / parent.scroll-range)
+                        : 0px;
+                    border-radius: 4px;
+                    background: vsb.pressed || vsb.has-hover ? Tokens.text-faint : Tokens.border-strong;
+                }
+                vsb := TouchArea {
+                    pointer-event(e) => { if (e.kind == PointerEventKind.down) { parent.drag-start = list.viewport-y; } }
+                    moved => {
+                        if (parent.scroll-range > 0 && parent.height > vthumb.height) {
+                            list.viewport-y = clamp(parent.drag-start
+                                - (self.mouse-y - self.pressed-y) * (parent.scroll-range / (parent.height - vthumb.height)),
+                                -parent.scroll-range, 0px);
+                        }
+                    }
+                }
+            }
+            // ----- horizontal scrollbar (drives the shared pan offset) -----
+            if list.width > la.width + 1px: Rectangle {
+                x: 0;
+                y: parent.height - self.height - 2px;
+                width: parent.width - 2px;
+                height: 8px;
+                property <length> scroll-range: list.width - la.width;
+                property <length> drag-start;
+                hthumb := Rectangle {
+                    height: parent.height;
+                    width: max(28px, parent.width * la.width / list.width);
+                    x: parent.scroll-range > 0
+                        ? (parent.width - self.width) * (-root.h-off / parent.scroll-range)
+                        : 0px;
+                    border-radius: 4px;
+                    background: hsb.pressed || hsb.has-hover ? Tokens.text-faint : Tokens.border-strong;
+                }
+                hsb := TouchArea {
+                    pointer-event(e) => { if (e.kind == PointerEventKind.down) { parent.drag-start = root.h-off; } }
+                    moved => {
+                        if (parent.scroll-range > 0 && parent.width > hthumb.width) {
+                            root.h-off = clamp(parent.drag-start
+                                - (self.mouse-x - self.pressed-x) * (parent.scroll-range / (parent.width - hthumb.width)),
+                                -parent.scroll-range, 0px);
+                        }
+                    }
+                }
             }
         }
     }
