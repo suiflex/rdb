@@ -173,8 +173,8 @@ jobs:
             echo "website release data already current"
             exit 0
           fi
-          git config user.name "MULHAM"
-          git config user.email "mulhamna@gmail.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add website/src/data/release.json
           git commit -m "docs: update website release data"
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
