@@ -132,7 +132,10 @@ export component Sidebar inherits Rectangle {
                             if (is-category || is-database) {
                                 root.toggle-node(node.label);
                             } else if (is-container) {
-                                root.open-table(node.db, node.label);
+                                // Single click expands an SQL table's columns;
+                                // leaf containers (Mongo/Redis) have none, so the
+                                // handler opens them instead. Double-click opens.
+                                root.toggle-fields(node.db, node.label);
                             } else if (is-function) {
                                 root.open-function(node.label);
                             } else if (is-query) {
