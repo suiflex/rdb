@@ -553,6 +553,8 @@ impl Driver for MockDriver {
                         name: c.name.clone(),
                         type_name: c.type_name.clone(),
                         nullable: matches!(c.name.as_str(), "updated_at" | "deleted_at" | "notes"),
+                        pk: c.name == "id",
+                        fk: c.name.ends_with("_id"),
                     })
                     .collect(),
             })

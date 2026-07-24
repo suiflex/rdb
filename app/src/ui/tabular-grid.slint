@@ -3,7 +3,7 @@
 // Cells are flat row-major: row r, col c at r*col-count + c.
 import { Tokens } from "tokens.slint";
 import { GridColumn, GridCell } from "structs.slint";
-import { ComboBox, DatePickerPopup, ListView, ScrollView } from "std-widgets.slint";
+import { ComboBox, DatePickerPopup, ScrollView } from "std-widgets.slint";
 
 export component TabularGrid inherits Rectangle {
     in property <[GridColumn]> columns;
@@ -35,6 +35,12 @@ export component TabularGrid inherits Rectangle {
     in property <int> scroll-grid-tick;
     property <int> date-row: -1;
     property <int> date-col: -1;
+    // Manual row virtualization: only the on-screen window of rows is built, so a
+    // single two-axis Flickable can scroll both ways smoothly without paying to
+    // instantiate every row of a large result. `r` rebinds as the window slides.
+    property <int> row-count: root.col-count > 0 ? root.cells.length / root.col-count : 0;
+    property <int> first-row: clamp(floor(-flick.viewport-y / Tokens.grid-row-h), 0, max(0, root.row-count - 1));
+    property <int> win-count: min(root.row-count - root.first-row, ceil(la.height / Tokens.grid-row-h) + 2);
 
     pure function is-boolean(t: string) -> bool {
         return t == "bool" || t == "boolean" || t == "BOOL" || t == "BOOLEAN"
@@ -49,32 +55,20 @@ export component TabularGrid inherits Rectangle {
     }
 
     changed scroll-grid-tick => {
-        list.viewport-y = min(0px, list.visible-height - list.viewport-height);
+        flick.viewport-y = min(0px, flick.height - flick.viewport-height);
     }
 
-    // Drive the ListView from the wheel directly. The list is nested inside the
-    // horizontal ScrollView below, and the outer Flickable intermittently
-    // swallows the vertical wheel delta — so rows only scroll "sometimes".
-    // Forwarding the delta here (clamped to the same bounds as scroll-grid-tick)
-    // makes vertical scrolling deterministic regardless of which Flickable the
-    // event lands on.
-    function scroll-rows(dy: length) {
-        list.viewport-y = max(
-            min(0px, list.visible-height - list.viewport-height),
-            min(0px, list.viewport-y + dy));
-    }
-
-    // A horizontal ScrollView owns the whole grid so the header and rows pan
-    // together; the header sits above the ListView so it stays put while rows
-    // scroll vertically. The ListView virtualizes — only the on-screen rows are
-    // instantiated — so a hundred-thousand / million-row result renders as
-    // cheaply as a single screenful (no more freeze on `SELECT *`).
-    hscroll := ScrollView {
-        width: 100%;
-        height: 100%;
-        VerticalLayout {
-            width: max(self.preferred-width, hscroll.visible-width);
-            height: hscroll.visible-height;
+    // One two-axis Flickable scrolls both ways (trackpad smooth on both), and
+    // rows are manually windowed — only the on-screen slice exists — so it stays
+    // light on large results. The header sits above and pans with viewport-x.
+    VerticalLayout {
+        // fixed header + filter, clipped and panned horizontally with the rows
+        Rectangle {
+            clip: true;
+            height: Tokens.grid-header-h + 1px + (root.filter-open ? 26px + 1px : 0px);
+            hdr := VerticalLayout {
+                x: flick.viewport-x;
+                width: max(self.preferred-width, parent.width);
 
         // ----- header (27px): "name" 600 + type dim, mono -----
         HorizontalLayout {
@@ -190,33 +184,34 @@ export component TabularGrid inherits Rectangle {
             Rectangle { horizontal-stretch: 1; background: Tokens.chrome; }
         }
         if root.filter-open: Rectangle { height: 1px; background: Tokens.border; }
-        // ----- rows: ListView virtualizes; only the visible rows are built -----
-        list := ListView {
+            }
+        }
+        // ----- rows: one two-axis Flickable, scrolls both ways; only the
+        // on-screen window of rows is instantiated so large results stay smooth -----
+        la := Rectangle {
             vertical-stretch: 1;
+            clip: true;
+            flick := Flickable {
+                width: 100%;
+                height: 100%;
+                viewport-width: max(hdr.preferred-width, la.width);
+                viewport-height: root.row-count * Tokens.grid-row-h;
 
-        // ----- rows (24px) -----
-        for r in (root.col-count > 0 ? root.cells.length / root.col-count : 0): Rectangle {
+        // ----- rows (24px): windowed — `r` is the real row index -----
+        for i in root.win-count: Rectangle {
+            property <int> r: root.first-row + i;
+            y: r * Tokens.grid-row-h;
+            width: flick.viewport-width;
+            height: Tokens.grid-row-h;
             property <bool> row-deleted: root.cells[r * root.col-count].state == 2;
             property <bool> row-inserted: root.cells[r * root.col-count].state == 3;
-            property <bool> expanded-editor: r == root.editing-row && root.editing-col >= 0
-                && root.editing-col < root.columns.length
-                && !root.is-boolean(root.columns[root.editing-col].type-name)
-                && !root.is-date(root.columns[root.editing-col].type-name);
-            height: self.expanded-editor ? 52px : Tokens.grid-row-h;
             background: row-deleted ? Tokens.error-tint
                 : row-inserted ? Tokens.ok-tint
                 : r == root.selected-row ? Tokens.accent-tint.with-alpha(0.55)
                 : row-ta.has-hover ? Tokens.chrome.with-alpha(0.6)
                 : transparent;
-            row-ta := TouchArea {
-                scroll-event(e) => {
-                    if (abs(e.delta-y) >= abs(e.delta-x)) {
-                        root.scroll-rows(e.delta-y);
-                        return accept;
-                    }
-                    return reject;
-                }
-            }
+            // Empty: the Flickables own the wheel now; this only tracks hover.
+            row-ta := TouchArea { }
             HorizontalLayout {
                 // row-number gutter
                 Rectangle {
@@ -246,14 +241,9 @@ export component TabularGrid inherits Rectangle {
                     background: transparent;
                     cell-ta := TouchArea {
                         clicked => { root.select-cell(r, c); }
-                        double-clicked => { root.edit-cell(r, c); }
-                        scroll-event(e) => {
-                            if (abs(e.delta-y) >= abs(e.delta-x)) {
-                                root.scroll-rows(e.delta-y);
-                                return accept;
-                            }
-                            return reject;
-                        }
+                        // Stash the value so the read-only inspector card can show
+                        // it directly (editable grids reopen the inline overlay).
+                        double-clicked => { root.editing-value = cell.text; root.edit-cell(r, c); }
                     }
                     if !is-bar: Text {
                         vertical-alignment: center;
@@ -304,21 +294,27 @@ export component TabularGrid inherits Rectangle {
                         border-color: Tokens.accent;
                         background: transparent;
                     }
-                    // inline editor overlay
-                    if r == root.editing-row && c == root.editing-col: Rectangle {
+                    // inline editor overlay (editable grids only; a read-only
+                    // result opens the centered inspector card instead)
+                    if r == root.editing-row && c == root.editing-col && !root.read-only: Rectangle {
                         property <bool> compact-editor: root.is-boolean(root.columns[c].type-name)
                             || root.is-date(root.columns[c].type-name);
                         property <length> editor-w: self.compact-editor ? parent.width
                             : max(parent.width, min(520px, root.width - 2 * Tokens.sp2));
-                        property <length> visible-x: parent.x + hscroll.viewport-x;
+                        property <length> visible-x: parent.x + flick.viewport-x;
                         z: 100;
                         x: self.compact-editor ? 0px
                             : max(-self.visible-x, min(0px, root.width - self.visible-x - self.editor-w));
                         width: self.editor-w;
-                        height: parent.height;
+                        // Rows are fixed height now, so a multi-line editor floats
+                        // taller over the rows below (z:100) instead of growing one.
+                        height: self.compact-editor ? parent.height : 96px;
                         background: Tokens.card;
                         border-width: 2px;
-                        border-color: Tokens.edit-outline;
+                        // Read-only view is a value inspector, not a pending
+                        // edit — neutral border so it doesn't mimic the orange
+                        // edit-outline cue.
+                        border-color: root.read-only ? Tokens.border-strong : Tokens.edit-outline;
                         if !root.read-only && root.is-boolean(root.columns[c].type-name): ComboBox {
                             x: 1px;
                             y: 1px;
@@ -412,6 +408,62 @@ export component TabularGrid inherits Rectangle {
             }
         }
             }
+            // ----- vertical scrollbar (a Flickable draws none) -----
+            if flick.viewport-height > flick.height + 1px: Rectangle {
+                x: parent.width - self.width - 2px;
+                y: 0;
+                width: 8px;
+                height: parent.height;
+                property <length> scroll-range: flick.viewport-height - flick.height;
+                property <length> drag-start;
+                vthumb := Rectangle {
+                    width: parent.width;
+                    height: max(28px, parent.height * flick.height / flick.viewport-height);
+                    y: parent.scroll-range > 0
+                        ? (parent.height - self.height) * (-flick.viewport-y / parent.scroll-range)
+                        : 0px;
+                    border-radius: 4px;
+                    background: vsb.pressed || vsb.has-hover ? Tokens.text-faint : Tokens.border-strong;
+                }
+                vsb := TouchArea {
+                    pointer-event(e) => { if (e.kind == PointerEventKind.down) { parent.drag-start = flick.viewport-y; } }
+                    moved => {
+                        if (parent.scroll-range > 0 && parent.height > vthumb.height) {
+                            flick.viewport-y = clamp(parent.drag-start
+                                - (self.mouse-y - self.pressed-y) * (parent.scroll-range / (parent.height - vthumb.height)),
+                                -parent.scroll-range, 0px);
+                        }
+                    }
+                }
+            }
+            // ----- horizontal scrollbar (drives the Flickable's viewport-x) -----
+            if flick.viewport-width > la.width + 1px: Rectangle {
+                x: 0;
+                y: parent.height - self.height - 2px;
+                width: parent.width - 2px;
+                height: 8px;
+                property <length> scroll-range: flick.viewport-width - la.width;
+                property <length> drag-start;
+                hthumb := Rectangle {
+                    height: parent.height;
+                    width: max(28px, parent.width * la.width / flick.viewport-width);
+                    x: parent.scroll-range > 0
+                        ? (parent.width - self.width) * (-flick.viewport-x / parent.scroll-range)
+                        : 0px;
+                    border-radius: 4px;
+                    background: hsb.pressed || hsb.has-hover ? Tokens.text-faint : Tokens.border-strong;
+                }
+                hsb := TouchArea {
+                    pointer-event(e) => { if (e.kind == PointerEventKind.down) { parent.drag-start = flick.viewport-x; } }
+                    moved => {
+                        if (parent.scroll-range > 0 && parent.width > hthumb.width) {
+                            flick.viewport-x = clamp(parent.drag-start
+                                - (self.mouse-x - self.pressed-x) * (parent.scroll-range / (parent.width - hthumb.width)),
+                                -parent.scroll-range, 0px);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -422,6 +474,74 @@ export component TabularGrid inherits Rectangle {
                 root.cell-edited(root.date-row, root.date-col,
                     "\{d.year}-" + (d.month < 10 ? "0" : "") + "\{d.month}-"
                     + (d.day < 10 ? "0" : "") + "\{d.day}");
+            }
+        }
+    }
+
+    // Read-only cell inspector: a centered card with the full value, opened by
+    // double-click on a result cell. Selectable + auto-selected so ⌘C copies.
+    if root.read-only && root.editing-row >= 0 && root.editing-col >= 0: Rectangle {
+        background: #00000088;
+        // backdrop click closes
+        TouchArea { clicked => { root.edit-cancelled(); } }
+        Rectangle {
+            width: min(560px, root.width - 4 * Tokens.sp3);
+            height: min(360px, root.height - 4 * Tokens.sp3);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Tokens.card;
+            border-radius: Tokens.radius-lg;
+            border-width: 1px;
+            border-color: Tokens.border-strong;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #00000066;
+            // swallow clicks inside the card so they don't close it
+            TouchArea {}
+            VerticalLayout {
+                padding: Tokens.sp3;
+                spacing: Tokens.sp2;
+                HorizontalLayout {
+                    Text {
+                        text: "Cell value";
+                        horizontal-stretch: 1;
+                        color: Tokens.text;
+                        font-weight: Tokens.weight-emphasis;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: "⌘C to copy · Esc to close";
+                        color: Tokens.text-faint;
+                        font-size: Tokens.font-xs;
+                        vertical-alignment: center;
+                    }
+                }
+                Rectangle {
+                    vertical-stretch: 1;
+                    background: Tokens.chrome;
+                    border-radius: Tokens.radius;
+                    border-width: 1px;
+                    border-color: Tokens.border;
+                    ScrollView {
+                        detail-input := TextInput {
+                            x: Tokens.sp2;
+                            y: Tokens.sp1;
+                            width: parent.visible-width - 2 * Tokens.sp2;
+                            height: max(parent.visible-height - 2 * Tokens.sp1, self.preferred-height);
+                            read-only: true;
+                            text: root.editing-value;
+                            color: Tokens.text;
+                            font-family: Tokens.mono;
+                            font-size: Tokens.font-sm;
+                            wrap: word-wrap;
+                            single-line: false;
+                            init => { self.focus(); self.select-all(); }
+                            key-pressed(e) => {
+                                if (e.text == Key.Escape) { root.edit-cancelled(); return accept; }
+                                return reject;
+                            }
+                        }
+                    }
+                }
             }
         }
     }

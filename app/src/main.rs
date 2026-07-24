@@ -124,6 +124,30 @@ fn save_via_dialog(
     }
 }
 
+/// Next cursor line when moving vertically past folded (hidden) lines. A closed
+/// fold at head `h` hides its body `h+1..=e`; stepping into that body jumps to
+/// the first visible line beyond it (down) or back to the fold head (up), so the
+/// caret never lands on a line the editor isn't drawing.
+fn fold_skip_line(lines: &[String], folded: &HashSet<usize>, line: usize, down: bool) -> usize {
+    let regions = editor::fold_regions(lines);
+    let hidden = |l: usize| {
+        regions
+            .iter()
+            .any(|&(h, e)| folded.contains(&h) && l > h && l <= e)
+    };
+    let mut l = line;
+    if down {
+        while hidden(l) && l + 1 < lines.len() {
+            l += 1;
+        }
+    }
+    // Up, or a down move that hit a fold running to EOF: retreat to a visible line.
+    while hidden(l) && l > 0 {
+        l -= 1;
+    }
+    l
+}
+
 /// Build the grouped sidebar row model: a header row per group followed by its
 /// connection rows (unless the group is collapsed). `index` on each connection
 /// row is its position in the store list, so connect/edit callbacks stay correct
@@ -420,7 +444,7 @@ fn nested_display_rows(
                 } else {
                     "(empty)".into()
                 },
-                depth: 1,
+                depth: 2,
                 kind: "hint".into(),
                 expanded: false,
                 db: db.clone().into(),
@@ -431,7 +455,7 @@ fn nested_display_rows(
         for n in leaves {
             rows.push(TreeNode {
                 label: n.label.clone().into(),
-                depth: 1,
+                depth: 2,
                 kind: leaf_kind.into(),
                 expanded: false,
                 db: db.clone().into(),
@@ -2851,14 +2875,30 @@ fn main() -> Result<(), slint::PlatformError> {
                                 if meta {
                                     ed.move_doc_start()
                                 } else {
-                                    ed.move_cursor(-1, 0)
+                                    ed.move_cursor(-1, 0);
+                                    let vis = fold_skip_line(
+                                        &ed.lines,
+                                        &panes[pane].folded_heads.borrow(),
+                                        ed.line,
+                                        false,
+                                    );
+                                    ed.line = vis;
+                                    ed.col = ed.col.min(ed.lines[vis].chars().count());
                                 }
                             }
                             "\u{f701}" => {
                                 if meta {
                                     ed.move_doc_end()
                                 } else {
-                                    ed.move_cursor(1, 0)
+                                    ed.move_cursor(1, 0);
+                                    let vis = fold_skip_line(
+                                        &ed.lines,
+                                        &panes[pane].folded_heads.borrow(),
+                                        ed.line,
+                                        true,
+                                    );
+                                    ed.line = vis;
+                                    ed.col = ed.col.min(ed.lines[vis].chars().count());
                                 }
                             }
                             "\u{f729}" => ed.home(),
@@ -4861,6 +4901,22 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ----- reconnect: retry the current connection after a health drop -----
+    {
+        let weak = window.as_weak();
+        window.on_reconnect(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            // The health poll leaves selected_conn pointing at the live
+            // connection, so replay the connect path against it.
+            let idx = w.get_selected_conn();
+            if idx >= 0 {
+                w.invoke_connect_clicked(idx);
+            }
+        });
+    }
+
     // Deferred handle to `run_browse` (defined later): per-column filters in
     // browse mode re-query the DB, but this handler is wired before run_browse
     // exists. Filled in once run_browse is built, below.
@@ -5370,6 +5426,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_selected_conn(idx);
                 // Show progress + clear any prior failure immediately.
                 w.set_connecting(true);
+                // Dim the sidebar tree while the new schema loads so a
+                // connection/db switch isn't a silent, frozen-looking reload.
+                w.set_tree_loading(true);
                 w.set_conn_status(SharedString::from("connecting"));
                 w.set_picker_error(SharedString::default());
                 w.global::<Theme>()
@@ -5611,6 +5670,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 w.set_conn_status(SharedString::from("connected"));
                                 w.set_picker_error(SharedString::default());
                                 w.set_connecting(false);
+                                w.set_tree_loading(false);
                                 // Swap the picker for the workspace.
                                 w.set_connected(true);
                             }
@@ -5645,6 +5705,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 // Stay on the picker; surface the failure there.
                                 w.set_connected(false);
                                 w.set_connecting(false);
+                                w.set_tree_loading(false);
                                 w.set_picker_error(SharedString::from(format!(
                                     "connection failed: {e}"
                                 )));

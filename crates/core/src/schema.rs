@@ -36,11 +36,17 @@ pub enum ContainerKind {
     Keyspace,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Field {
     pub name: String,
     pub type_name: String,
     pub nullable: bool,
+    /// Column is part of the primary key. Engines/drivers without the concept
+    /// leave it false.
+    pub pk: bool,
+    /// Column is a foreign key referencing another table. Best-effort: only
+    /// the relational drivers populate it, others leave it false.
+    pub fk: bool,
 }
 
 #[cfg(test)]
@@ -61,6 +67,8 @@ mod tests {
                             name: "id".into(),
                             type_name: "int4".into(),
                             nullable: false,
+                            pk: true,
+                            ..Default::default()
                         }],
                     },
                     Container {

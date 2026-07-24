@@ -355,6 +355,7 @@ callback create-table-commit();
     in property <bool> streaming;
     callback cancel-stream();
     callback cancel-query();
+    callback reconnect();
     in-out property <string> limit-text: "300";
     callback prev-page();
     callback next-page();
@@ -975,6 +976,7 @@ callback create-table-commit();
                     active-count: root.total-rows;
                     query-tree: root.query-tree;
                     sidebar-mode: root.sidebar-mode;
+                    tree-loading: root.tree-loading;
                     sidebar-visible: root.sidebar-visible;
                     sidebar-rail: root.sidebar-rail;
                     sidebar-w: root.sidebar-w;
@@ -1505,6 +1507,7 @@ callback create-table-commit();
                         streaming: root.streaming;
                         cancel-stream() => { root.cancel-stream(); }
                         cancel-query() => { root.cancel-query(); }
+                        reconnect() => { root.reconnect(); }
                         limit-text <=> root.limit-text;
                         run => {
                             root.run-query();
@@ -1690,6 +1693,7 @@ callback create-table-commit();
                     active-count: root.total-rows;
                     query-tree: root.query-tree;
                     sidebar-mode: root.sidebar-mode;
+                    tree-loading: root.tree-loading;
                     sidebar-visible: root.sidebar-visible;
                     sidebar-rail: root.sidebar-rail;
                     sidebar-w: root.sidebar-w;

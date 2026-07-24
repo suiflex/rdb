@@ -425,8 +425,18 @@ pub fn to_tree_model(schema: &Schema) -> Vec<VmTreeNode> {
                 kind: kind.into(),
             });
             for f in &c.fields {
+                // Trailing key marker so a column reads "id: int4  PK". PK wins
+                // when a column is both (PK is the stronger signal); engines
+                // without key info show neither.
+                let marker = if f.pk {
+                    "  PK"
+                } else if f.fk {
+                    "  FK"
+                } else {
+                    ""
+                };
                 out.push(VmTreeNode {
-                    label: format!("{}: {}", f.name, f.type_name),
+                    label: format!("{}: {}{}", f.name, f.type_name, marker),
                     kind: "field".into(),
                 });
             }
@@ -680,6 +690,8 @@ mod tests {
                         name: "id".into(),
                         type_name: "int4".into(),
                         nullable: false,
+                        pk: true,
+                        ..Default::default()
                     }],
                 }],
             }],
