@@ -64,6 +64,13 @@ export component TabularGrid inherits Rectangle {
             min(0px, list.viewport-y + dy));
     }
 
+    // Horizontal counterpart: drive the outer Flickable directly so a sideways
+    // wheel pans columns without the Flickable's single-axis wheel redirect.
+    function scroll-cols(dx: length) {
+        hscroll.viewport-x = clamp(hscroll.viewport-x + dx,
+            min(0px, hscroll.visible-width - hscroll.viewport-width), 0px);
+    }
+
     // A horizontal ScrollView owns the whole grid so the header and rows pan
     // together; the header sits above the ListView so it stays put while rows
     // scroll vertically. The ListView virtualizes — only the on-screen rows are
@@ -212,9 +219,12 @@ export component TabularGrid inherits Rectangle {
                 scroll-event(e) => {
                     if (abs(e.delta-y) >= abs(e.delta-x)) {
                         root.scroll-rows(e.delta-y);
-                        return accept;
+                    } else {
+                        root.scroll-cols(e.delta-x);
                     }
-                    return reject;
+                    // Always accept: leaving it to the outer Flickable is what
+                    // redirects a vertical wheel into horizontal panning.
+                    return accept;
                 }
             }
             HorizontalLayout {
@@ -252,9 +262,10 @@ export component TabularGrid inherits Rectangle {
                         scroll-event(e) => {
                             if (abs(e.delta-y) >= abs(e.delta-x)) {
                                 root.scroll-rows(e.delta-y);
-                                return accept;
+                            } else {
+                                root.scroll-cols(e.delta-x);
                             }
-                            return reject;
+                            return accept;
                         }
                     }
                     if !is-bar: Text {
