@@ -246,7 +246,9 @@ export component TabularGrid inherits Rectangle {
                     background: transparent;
                     cell-ta := TouchArea {
                         clicked => { root.select-cell(r, c); }
-                        double-clicked => { root.edit-cell(r, c); }
+                        // Stash the value so the read-only inspector card can show
+                        // it directly (editable grids reopen the inline overlay).
+                        double-clicked => { root.editing-value = cell.text; root.edit-cell(r, c); }
                         scroll-event(e) => {
                             if (abs(e.delta-y) >= abs(e.delta-x)) {
                                 root.scroll-rows(e.delta-y);
@@ -304,8 +306,9 @@ export component TabularGrid inherits Rectangle {
                         border-color: Tokens.accent;
                         background: transparent;
                     }
-                    // inline editor overlay
-                    if r == root.editing-row && c == root.editing-col: Rectangle {
+                    // inline editor overlay (editable grids only; a read-only
+                    // result opens the centered inspector card instead)
+                    if r == root.editing-row && c == root.editing-col && !root.read-only: Rectangle {
                         property <bool> compact-editor: root.is-boolean(root.columns[c].type-name)
                             || root.is-date(root.columns[c].type-name);
                         property <length> editor-w: self.compact-editor ? parent.width
@@ -425,6 +428,74 @@ export component TabularGrid inherits Rectangle {
                 root.cell-edited(root.date-row, root.date-col,
                     "\{d.year}-" + (d.month < 10 ? "0" : "") + "\{d.month}-"
                     + (d.day < 10 ? "0" : "") + "\{d.day}");
+            }
+        }
+    }
+
+    // Read-only cell inspector: a centered card with the full value, opened by
+    // double-click on a result cell. Selectable + auto-selected so ⌘C copies.
+    if root.read-only && root.editing-row >= 0 && root.editing-col >= 0: Rectangle {
+        background: #00000088;
+        // backdrop click closes
+        TouchArea { clicked => { root.edit-cancelled(); } }
+        Rectangle {
+            width: min(560px, root.width - 4 * Tokens.sp3);
+            height: min(360px, root.height - 4 * Tokens.sp3);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Tokens.card;
+            border-radius: Tokens.radius-lg;
+            border-width: 1px;
+            border-color: Tokens.border-strong;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #00000066;
+            // swallow clicks inside the card so they don't close it
+            TouchArea {}
+            VerticalLayout {
+                padding: Tokens.sp3;
+                spacing: Tokens.sp2;
+                HorizontalLayout {
+                    Text {
+                        text: "Cell value";
+                        horizontal-stretch: 1;
+                        color: Tokens.text;
+                        font-weight: Tokens.weight-emphasis;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: "⌘C to copy · Esc to close";
+                        color: Tokens.text-faint;
+                        font-size: Tokens.font-xs;
+                        vertical-alignment: center;
+                    }
+                }
+                Rectangle {
+                    vertical-stretch: 1;
+                    background: Tokens.chrome;
+                    border-radius: Tokens.radius;
+                    border-width: 1px;
+                    border-color: Tokens.border;
+                    ScrollView {
+                        detail-input := TextInput {
+                            x: Tokens.sp2;
+                            y: Tokens.sp1;
+                            width: parent.visible-width - 2 * Tokens.sp2;
+                            height: max(parent.visible-height - 2 * Tokens.sp1, self.preferred-height);
+                            read-only: true;
+                            text: root.editing-value;
+                            color: Tokens.text;
+                            font-family: Tokens.mono;
+                            font-size: Tokens.font-sm;
+                            wrap: word-wrap;
+                            single-line: false;
+                            init => { self.focus(); self.select-all(); }
+                            key-pressed(e) => {
+                                if (e.text == Key.Escape) { root.edit-cancelled(); return accept; }
+                                return reject;
+                            }
+                        }
+                    }
+                }
             }
         }
     }
