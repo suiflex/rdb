@@ -5370,6 +5370,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_selected_conn(idx);
                 // Show progress + clear any prior failure immediately.
                 w.set_connecting(true);
+                // Dim the sidebar tree while the new schema loads so a
+                // connection/db switch isn't a silent, frozen-looking reload.
+                w.set_tree_loading(true);
                 w.set_conn_status(SharedString::from("connecting"));
                 w.set_picker_error(SharedString::default());
                 w.global::<Theme>()
@@ -5611,6 +5614,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 w.set_conn_status(SharedString::from("connected"));
                                 w.set_picker_error(SharedString::default());
                                 w.set_connecting(false);
+                                w.set_tree_loading(false);
                                 // Swap the picker for the workspace.
                                 w.set_connected(true);
                             }
@@ -5645,6 +5649,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 // Stay on the picker; surface the failure there.
                                 w.set_connected(false);
                                 w.set_connecting(false);
+                                w.set_tree_loading(false);
                                 w.set_picker_error(SharedString::from(format!(
                                     "connection failed: {e}"
                                 )));

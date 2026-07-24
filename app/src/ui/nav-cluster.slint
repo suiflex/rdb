@@ -24,6 +24,7 @@ export component NavCluster inherits HorizontalLayout {
     in property <[string]> schema-list;
     in property <string> schema-name;
     in property <int> sidebar-mode: 0;
+    in property <bool> tree-loading;
     in property <bool> sidebar-visible: true;
     in property <bool> sidebar-rail: false;
     in property <length> sidebar-w;
@@ -76,6 +77,7 @@ export component NavCluster inherits HorizontalLayout {
         active-count: root.active-count;
         query-tree: root.query-tree;
         mode: root.sidebar-mode;
+        tree-loading: root.tree-loading;
         schema-list: root.schema-list;
         schema-name: root.schema-name;
         disconnect() => { root.disconnect(); }

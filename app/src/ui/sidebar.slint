@@ -5,7 +5,7 @@ import { Tokens } from "tokens.slint";
 import { TreeNode } from "structs.slint";
 import { FilterField, KeyCap } from "components.slint";
 import { AppIcon } from "icons.slint";
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView, Spinner } from "std-widgets.slint";
 
 export component Sidebar inherits Rectangle {
     in property <[TreeNode]> tree;
@@ -17,6 +17,8 @@ export component Sidebar inherits Rectangle {
     // 0 = Items, 1 = Queries, 2 = History. Read-only: tab clicks signal via
     // mode-changed and the owner (MainWindow) sets the value back down.
     in property <int> mode: 0;
+    // Dims the tree + shows a spinner while the schema/db/connection reloads.
+    in property <bool> tree-loading;
     // Query tab rows reuse TreeNode: kind "qcat" headers / "query" / "recent".
     in property <[TreeNode]> query-tree;
     callback disconnect();
@@ -87,10 +89,13 @@ export component Sidebar inherits Rectangle {
         }
 
         // ----- tree (Items) / query list (Queries, History) -----
-        ScrollView {
+        Rectangle {
             vertical-stretch: 1;
+            tree-scroll := ScrollView {
+            width: parent.width;
+            height: parent.height;
             VerticalLayout {
-                width: parent.visible-width;
+                width: tree-scroll.visible-width;
                 padding-left: Tokens.sp2;
                 padding-right: Tokens.sp2;
                 spacing: 0;
@@ -249,6 +254,19 @@ export component Sidebar inherits Rectangle {
                             font-size: Tokens.font-xs;
                             vertical-alignment: center;
                         }
+                    }
+                }
+            }
+            }
+            if root.tree-loading: Rectangle {
+                width: parent.width;
+                height: parent.height;
+                background: Tokens.sidebar.with-alpha(0.62);
+                VerticalLayout {
+                    alignment: center;
+                    HorizontalLayout {
+                        alignment: center;
+                        Spinner { width: 20px; height: 20px; indeterminate: true; }
                     }
                 }
             }
