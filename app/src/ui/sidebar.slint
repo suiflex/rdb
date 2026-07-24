@@ -148,7 +148,10 @@ export component Sidebar inherits Rectangle {
                     }
 
                     HorizontalLayout {
-                        padding-left: is-category ? Tokens.sp2 : Tokens.sp2 + (node.depth - 1) * Tokens.sp3;
+                        // clamp at 0 so a depth-0 non-category row (Mongo/Redis
+                        // db header, which has no wrapping category) doesn't get
+                        // a negative offset and sit flush-left of everything.
+                        padding-left: is-category ? Tokens.sp2 : Tokens.sp2 + max(0, node.depth - 1) * Tokens.sp3;
                         padding-right: Tokens.sp2;
                         spacing: Tokens.sp2;
 
@@ -196,9 +199,10 @@ export component Sidebar inherits Rectangle {
                                 }
                             }
                         }
-                        // expandable SQL tables get a caret hinting single-click
-                        // reveals their columns (Mongo/Redis leaves don't).
-                        if node.kind == "table": Rectangle {
+                        // expandable rows get a caret hinting single-click
+                        // toggles them: SQL tables reveal their columns, Mongo/
+                        // Redis db headers reveal their collections/keys.
+                        if node.kind == "table" || is-database: Rectangle {
                             width: 13px;
                             VerticalLayout {
                                 alignment: center;

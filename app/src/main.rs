@@ -420,7 +420,7 @@ fn nested_display_rows(
                 } else {
                     "(empty)".into()
                 },
-                depth: 1,
+                depth: 2,
                 kind: "hint".into(),
                 expanded: false,
                 db: db.clone().into(),
@@ -431,7 +431,7 @@ fn nested_display_rows(
         for n in leaves {
             rows.push(TreeNode {
                 label: n.label.clone().into(),
-                depth: 1,
+                depth: 2,
                 kind: leaf_kind.into(),
                 expanded: false,
                 db: db.clone().into(),
