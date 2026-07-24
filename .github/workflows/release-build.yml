@@ -167,7 +167,12 @@ jobs:
         run: npm --prefix website run fetch-release
       - name: Commit website release data
         env:
-          GH_TOKEN: ${{ secrets.TAP_PUBLISH_TOKEN }}
+          # TAP_PUBLISH_TOKEN is scoped to the tap repo only, so it was denied
+          # here (403). GITHUB_TOKEN can't push either: develop is protected and
+          # only the mulhamna account is in the PR-bypass list (no apps). Reuse
+          # RELEASE_PLEASE_TOKEN — the same PAT release-please already uses to
+          # write to develop — which bypasses protection and has repo write.
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
         run: |
           if git diff --quiet -- website/src/data/release.json; then
             echo "website release data already current"
