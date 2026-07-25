@@ -41,6 +41,19 @@ release on `develop`): conventional commits drive an auto-maintained release
 PR that bumps the version and `app/CHANGELOG.md`; merging it tags `vX.Y.Z`
 and cuts a GitHub Release. The `app` package (`rdb`) is the tracked version.
 
+Release note sections are configured in `release-please-config.json` and are
+triggered by conventional commit **type**:
+
+- `feat(app): ...` -> **App Features**
+- `feature(driver-<engine>): ...` or `feature(driver): ...` ->
+  **Driver Features** (`release-please` treats `feature` like `feat` for minor
+  version bumps)
+- `fix(<scope>): ...` -> **Bug Fixes**
+- `perf(<scope>): ...` -> **Performance Improvements**
+
+Keep the scope specific (`app`, `driver-postgres`, `driver-mysql`, `core`,
+`connstore`) so generated changelog lines stay readable.
+
 ## Architecture
 
 - `app/` — Slint UI binary (main entry point)
