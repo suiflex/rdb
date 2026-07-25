@@ -1,6 +1,9 @@
 <!--
 Title: conventional-commits style, ≤ 70 chars, no trailing period.
+Use feat(app): ... for App Features release notes.
+Use feature(driver-<engine>): ... for Driver Features release notes.
 e.g. feat(app): cancel an in-flight connection
+e.g. feature(driver-postgres): introspect materialized views
 Keep the PR focused — one logical change is easier to review and revert.
 -->
 
