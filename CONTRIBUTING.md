@@ -62,13 +62,44 @@ concrete driver is `AnyDriver`.
 We follow [Conventional Commits](https://www.conventionalcommits.org/); the
 `release-please` workflow parses them to drive the changelog and version bumps.
 
-- Types: `feat`, `fix`, `chore`, `refactor`, `docs`, `test`, `build`, `ci`.
+- Types: `feat`, `feature`, `fix`, `perf`, `chore`, `refactor`, `docs`,
+  `test`, `build`, `ci`.
+- Use `feat(app): ...` for user-facing application/UI features. These appear
+  under **App Features** in the generated changelog.
+- Use `feature(driver-<engine>): ...` or `feature(driver): ...` for database
+  driver capabilities. These appear under **Driver Features** in the generated
+  changelog. `release-please` treats `feature` the same as `feat` for version
+  bumping.
+- Use `fix(<scope>): ...` for bug fixes and `perf(<scope>): ...` for
+  performance improvements. These keep the standard release-please sections.
 - Subject line ≤ 72 chars, imperative mood, no trailing period.
 - Wrap the body at 72 chars and explain **why** the change exists — the diff
   already shows the what.
 - One logical change per commit. Each commit should leave the tree in a
   buildable, testable state so `git revert` stays safe.
 - Do **not** hand-edit the `release-please`-managed sections of any changelog.
+
+Example release notes from commit headers:
+
+```markdown
+### App Features
+
+* **app:** add saved-query folders
+
+### Driver Features
+
+* **driver-postgres:** introspect materialized views
+* **driver-redis:** support key TTL editing
+
+### Bug Fixes
+
+* **app:** keep tabs after reconnect
+* **driver-mysql:** parse unsigned bigint columns
+
+### Performance Improvements
+
+* **app:** virtualize large result grids
+```
 
 ## Branching & pull requests
 
