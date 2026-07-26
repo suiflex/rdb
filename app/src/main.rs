@@ -4918,6 +4918,13 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ----- open an external link (Product Hunt / GitHub) in the browser -----
+    {
+        window.on_open_url(move |u| {
+            let _ = open::that(u.as_str());
+        });
+    }
+
     // Deferred handle to `run_browse` (defined later): per-column filters in
     // browse mode re-query the DB, but this handler is wired before run_browse
     // exists. Filled in once run_browse is built, below.

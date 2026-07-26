@@ -40,6 +40,8 @@ export component ConnPicker inherits Rectangle {
     // Drag-reorder: (store index of dragged row, signed number of rows moved).
     callback reorder-conn(int, int);
     callback filter(string);
+    // Open an external link (Product Hunt / GitHub) in the system browser.
+    callback open-url(string);
 
     background: Tokens.canvas;
 
@@ -372,6 +374,61 @@ export component ConnPicker inherits Rectangle {
                     color: root.error == "" ? Tokens.text-faint : Tokens.error;
                     font-size: Tokens.font-md;
                     horizontal-alignment: center;
+                }
+                // Social badges: Product Hunt launch + GitHub star, open browser.
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: Tokens.sp3;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 250px;
+                            height: 54px;
+                            opacity: ph-ta.has-hover ? 0.85 : 1.0;
+                            Image {
+                                source: @image-url("../../assets/producthunt-badge.svg");
+                                width: 100%;
+                                height: 100%;
+                                image-fit: contain;
+                            }
+                            ph-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.open-url("https://www.producthunt.com/products/rdb"); }
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            height: 54px;
+                            border-radius: 10px;
+                            border-width: 1px;
+                            border-color: Tokens.border;
+                            background: gh-ta.has-hover ? Tokens.card : transparent;
+                            HorizontalLayout {
+                                padding-left: Tokens.sp3;
+                                padding-right: Tokens.sp3;
+                                spacing: Tokens.sp2;
+                                alignment: center;
+                                Text {
+                                    text: "★";
+                                    color: Tokens.warn;
+                                    font-size: 15px;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: "Star on GitHub";
+                                    color: Tokens.text;
+                                    font-size: Tokens.font-md;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            gh-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.open-url("https://github.com/suiflex/rdb"); }
+                            }
+                        }
+                    }
                 }
             }
 
