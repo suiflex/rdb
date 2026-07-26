@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.24.0](https://github.com/suiflex/rdb/compare/v0.23.0...v0.24.0) (2026-07-26)
+
+
+### App Features
+
+* **app:** add New Connection action and drawn social badges to picker ([0b612f9](https://github.com/suiflex/rdb/commit/0b612f9e8bb1f140d0bb614c497889e26c3963b5))
+* **app:** add Product Hunt and GitHub badges to the connection picker ([04e97cd](https://github.com/suiflex/rdb/commit/04e97cde44ead3bea6478ea39ab3bb3101a2bedd))
+* **app:** add row separators and copy inspector to Mongo tree ([9a06aa4](https://github.com/suiflex/rdb/commit/9a06aa44a80da2d73c0673e5fab1aa3a316dde5e))
+* **app:** connection UX, Mongo tree, SQLite fixes, and social badges ([350b7cd](https://github.com/suiflex/rdb/commit/350b7cd4268d165720cb4bca5ea311cb66e0b5ca))
+* **app:** show connection status and reconnect in the header ([700927e](https://github.com/suiflex/rdb/commit/700927efb9dc6800ef4eb9016c5119795d5e728d))
+
+
+### Bug Fixes
+
+* **app:** abort in-flight connect when switching connections ([4eccfa1](https://github.com/suiflex/rdb/commit/4eccfa1cc9d4177ac43e94da65c9ab0ea1b5769c))
+* **app:** center the P mark in the Product Hunt badge ([2b72f55](https://github.com/suiflex/rdb/commit/2b72f5555a83d3330400374a02fdb63c9b51300d))
+* **app:** drop the P sub-box that would not center in the PH badge ([722646d](https://github.com/suiflex/rdb/commit/722646d658d8046570967bc431f513dc8f1b7856))
+* **app:** skip host/port validation for SQLite connections ([af3965a](https://github.com/suiflex/rdb/commit/af3965afe684b97e907ed4297a2ec277d3c314ae))
+* **app:** stop long Mongo tree values from overflowing rows ([4a0075d](https://github.com/suiflex/rdb/commit/4a0075d8636b1f254a714f7303a42910ab0c7ee8))
+* **app:** use ASCII plus in the New Connection button ([a9e13e5](https://github.com/suiflex/rdb/commit/a9e13e51a59990ead1af98466d24fccc77988f2c))
+
 ## [0.23.0](https://github.com/suiflex/rdb/compare/v0.22.0...v0.23.0) (2026-07-24)
 
 
