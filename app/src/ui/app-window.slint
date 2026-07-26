@@ -731,6 +731,30 @@ callback create-table-commit();
                             clicked => { root.open-conn-modal(); }
                         }
                     }
+                    // live status label so the header shows connected /
+                    // connecting… / disconnected at a glance
+                    VerticalLayout {
+                        alignment: center;
+                        Text {
+                            text: root.conn-status == "error" ? "disconnected"
+                                : root.conn-status == "connecting" ? "connecting…"
+                                : "connected";
+                            color: root.conn-status == "error" ? Tokens.error
+                                : root.conn-status == "connecting" ? Tokens.warn
+                                : Tokens.ok;
+                            font-size: Tokens.font-sm;
+                            vertical-alignment: center;
+                        }
+                    }
+                    // one-click reconnect when the live connection dropped
+                    if root.conn-status == "error": VerticalLayout {
+                        alignment: center;
+                        GlyphButton {
+                            glyph: "↻";
+                            tooltip: "Reconnect";
+                            clicked => { root.reconnect(); }
+                        }
+                    }
                     // disconnect: drop the driver and return to the picker
                     // (which lists every connection = switch to another DB)
                     VerticalLayout {
