@@ -733,17 +733,13 @@ callback create-table-commit();
                             clicked => { root.open-conn-modal(); }
                         }
                     }
-                    // live status label so the header shows connected /
-                    // connecting… / disconnected at a glance
-                    VerticalLayout {
+                    // Status word only when it needs attention; the healthy case
+                    // is already conveyed by the green dot on the chip above.
+                    if root.conn-status != "connected": VerticalLayout {
                         alignment: center;
                         Text {
-                            text: root.conn-status == "error" ? "disconnected"
-                                : root.conn-status == "connecting" ? "connecting…"
-                                : "connected";
-                            color: root.conn-status == "error" ? Tokens.error
-                                : root.conn-status == "connecting" ? Tokens.warn
-                                : Tokens.ok;
+                            text: root.conn-status == "error" ? "disconnected" : "connecting…";
+                            color: root.conn-status == "error" ? Tokens.error : Tokens.warn;
                             font-size: Tokens.font-sm;
                             vertical-alignment: center;
                         }
@@ -751,9 +747,9 @@ callback create-table-commit();
                     // one-click reconnect when the live connection dropped
                     if root.conn-status == "error": VerticalLayout {
                         alignment: center;
-                        GlyphButton {
-                            glyph: "↻";
-                            tooltip: "Reconnect";
+                        SecondaryButton {
+                            text: "↻ Reconnect";
+                            height: 24px;
                             clicked => { root.reconnect(); }
                         }
                     }
