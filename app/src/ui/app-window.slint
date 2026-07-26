@@ -356,6 +356,8 @@ callback create-table-commit();
     callback cancel-stream();
     callback cancel-query();
     callback reconnect();
+    // Open an external link (Product Hunt / GitHub) in the system browser.
+    callback open-url(string);
     in-out property <string> limit-text: "300";
     callback prev-page();
     callback next-page();
@@ -731,6 +733,26 @@ callback create-table-commit();
                             clicked => { root.open-conn-modal(); }
                         }
                     }
+                    // Status word only when it needs attention; the healthy case
+                    // is already conveyed by the green dot on the chip above.
+                    if root.conn-status != "connected": VerticalLayout {
+                        alignment: center;
+                        Text {
+                            text: root.conn-status == "error" ? "disconnected" : "connecting…";
+                            color: root.conn-status == "error" ? Tokens.error : Tokens.warn;
+                            font-size: Tokens.font-sm;
+                            vertical-alignment: center;
+                        }
+                    }
+                    // one-click reconnect when the live connection dropped
+                    if root.conn-status == "error": VerticalLayout {
+                        alignment: center;
+                        SecondaryButton {
+                            text: "↻ Reconnect";
+                            height: 24px;
+                            clicked => { root.reconnect(); }
+                        }
+                    }
                     // disconnect: drop the driver and return to the picker
                     // (which lists every connection = switch to another DB)
                     VerticalLayout {
@@ -949,6 +971,7 @@ callback create-table-commit();
             reorder-conn(i, d) => { root.reorder-conn(i, d); }
             filter(t) => { root.conn-filter(t); }
             export-conns(fmt) => { root.export-conns(fmt); }
+            open-url(u) => { root.open-url(u); }
         }
 
         // ===== workspace (shown once connected) =====

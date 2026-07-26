@@ -40,6 +40,8 @@ export component ConnPicker inherits Rectangle {
     // Drag-reorder: (store index of dragged row, signed number of rows moved).
     callback reorder-conn(int, int);
     callback filter(string);
+    // Open an external link (Product Hunt / GitHub) in the system browser.
+    callback open-url(string);
 
     background: Tokens.canvas;
 
@@ -372,6 +374,82 @@ export component ConnPicker inherits Rectangle {
                     color: root.error == "" ? Tokens.text-faint : Tokens.error;
                     font-size: Tokens.font-md;
                     horizontal-alignment: center;
+                }
+                // Primary action: create a new connection.
+                HorizontalLayout {
+                    alignment: center;
+                    PrimaryButton {
+                        text: "+ New Connection";
+                        height: 34px;
+                        clicked => { root.add-clicked(); }
+                    }
+                }
+                // Social badges: Product Hunt launch + GitHub star, open browser.
+                // Drawn as pills (not the remote SVG, which the UI can't render).
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: Tokens.sp2;
+                    Rectangle {
+                        height: 32px;
+                        horizontal-stretch: 0;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: Tokens.border;
+                        background: ph-ta.has-hover ? Tokens.card : transparent;
+                        HorizontalLayout {
+                            padding-left: Tokens.sp3;
+                            padding-right: Tokens.sp3;
+                            spacing: Tokens.sp2;
+                            alignment: center;
+                            Text {
+                                text: "P";
+                                color: #DA552F;
+                                font-size: 15px;
+                                font-weight: 800;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: "Product Hunt";
+                                color: Tokens.text;
+                                font-size: Tokens.font-md;
+                                vertical-alignment: center;
+                            }
+                        }
+                        ph-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.open-url("https://www.producthunt.com/products/rdb"); }
+                        }
+                    }
+                    Rectangle {
+                        height: 32px;
+                        horizontal-stretch: 0;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: Tokens.border;
+                        background: gh-ta.has-hover ? Tokens.card : transparent;
+                        HorizontalLayout {
+                            padding-left: Tokens.sp3;
+                            padding-right: Tokens.sp3;
+                            spacing: Tokens.sp2;
+                            alignment: center;
+                            Text {
+                                text: "★";
+                                color: Tokens.warn;
+                                font-size: 15px;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: "Star on GitHub";
+                                color: Tokens.text;
+                                font-size: Tokens.font-md;
+                                vertical-alignment: center;
+                            }
+                        }
+                        gh-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.open-url("https://github.com/suiflex/rdb"); }
+                        }
+                    }
                 }
             }
 

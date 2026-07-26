@@ -2135,6 +2135,7 @@ fn push_doc_tree(
             depth: n.depth as i32,
             key: SharedString::from(n.key.clone()),
             preview: SharedString::from(n.preview.clone()),
+            full: SharedString::from(n.full.clone()),
             expandable: n.expandable,
             expanded,
             path: SharedString::from(n.path.clone()),
@@ -4917,6 +4918,13 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ----- open an external link (Product Hunt / GitHub) in the browser -----
+    {
+        window.on_open_url(move |u| {
+            let _ = open::that(u.as_str());
+        });
+    }
+
     // Deferred handle to `run_browse` (defined later): per-column filters in
     // browse mode re-query the DB, but this handler is wired before run_browse
     // exists. Filled in once run_browse is built, below.
@@ -5714,6 +5722,13 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 }
             });
+            // Abort any still-running connect from a previous selection before
+            // tracking the new one: switching connections mid-connect otherwise
+            // leaks the old task, which keeps holding the driver lock and hangs
+            // the UI with no way to cancel.
+            if let Some(old) = connect_handle.borrow_mut().take() {
+                old.abort();
+            }
             *connect_handle.borrow_mut() = Some(handle);
         });
     }
@@ -9007,21 +9022,32 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let host = w.get_f_host().to_string();
-            if host.trim().is_empty() {
-                w.set_test_ok(false);
-                w.set_test_result(SharedString::from("host is required"));
-                return;
-            }
-            let port: u16 = match w.get_f_port().to_string().parse() {
-                Ok(p) if p != 0 => p,
-                _ => {
+            let engine = label_to_engine(w.get_f_engine().as_ref());
+            // SQLite is a local file: no host/port, the file path lives in database.
+            let (host, port) = if engine == rdb_connstore::Engine::Sqlite {
+                if w.get_f_database().to_string().trim().is_empty() {
                     w.set_test_ok(false);
-                    w.set_test_result(SharedString::from("port must be a number 1-65535"));
+                    w.set_test_result(SharedString::from("file path is required"));
                     return;
                 }
+                (String::new(), 0u16)
+            } else {
+                let host = w.get_f_host().to_string();
+                if host.trim().is_empty() {
+                    w.set_test_ok(false);
+                    w.set_test_result(SharedString::from("host is required"));
+                    return;
+                }
+                let port: u16 = match w.get_f_port().to_string().parse() {
+                    Ok(p) if p != 0 => p,
+                    _ => {
+                        w.set_test_ok(false);
+                        w.set_test_result(SharedString::from("port must be a number 1-65535"));
+                        return;
+                    }
+                };
+                (host, port)
             };
-            let engine = label_to_engine(w.get_f_engine().as_ref());
             let sslmode = match w.get_f_sslmode().to_string().as_str() {
                 "Disable" => rdb_core::conn::SslMode::Disable,
                 "Require" => rdb_core::conn::SslMode::Require,
@@ -9115,19 +9141,33 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let name = w.get_f_name().to_string();
-            let host = w.get_f_host().to_string();
-            if name.trim().is_empty() || host.trim().is_empty() {
-                w.set_form_error(SharedString::from("name and host are required"));
+            let engine = label_to_engine(w.get_f_engine().as_ref());
+            if name.trim().is_empty() {
+                w.set_form_error(SharedString::from("name is required"));
                 return;
             }
-            let port: u16 = match w.get_f_port().to_string().parse() {
-                Ok(p) if p != 0 => p,
-                _ => {
-                    w.set_form_error(SharedString::from("port must be a number 1-65535"));
+            // SQLite is a local file: no host/port, the file path lives in database.
+            let (host, port) = if engine == rdb_connstore::Engine::Sqlite {
+                if w.get_f_database().to_string().trim().is_empty() {
+                    w.set_form_error(SharedString::from("file path is required"));
                     return;
                 }
+                (String::new(), 0u16)
+            } else {
+                let host = w.get_f_host().to_string();
+                if host.trim().is_empty() {
+                    w.set_form_error(SharedString::from("name and host are required"));
+                    return;
+                }
+                let port: u16 = match w.get_f_port().to_string().parse() {
+                    Ok(p) if p != 0 => p,
+                    _ => {
+                        w.set_form_error(SharedString::from("port must be a number 1-65535"));
+                        return;
+                    }
+                };
+                (host, port)
             };
-            let engine = label_to_engine(w.get_f_engine().as_ref());
             let sslmode = match w.get_f_sslmode().to_string().as_str() {
                 "Disable" => rdb_core::conn::SslMode::Disable,
                 "Require" => rdb_core::conn::SslMode::Require,

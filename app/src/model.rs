@@ -41,6 +41,8 @@ pub struct DocNode {
     pub depth: usize,
     pub key: String,
     pub preview: String,
+    /// Untruncated value for the copy inspector; `preview` is capped for layout.
+    pub full: String,
     pub expandable: bool,
     pub path: String,
 }
@@ -64,6 +66,14 @@ fn scalar_preview(v: &serde_json::Value) -> String {
     }
 }
 
+/// The untruncated scalar value, for the copy inspector.
+fn scalar_full(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
 fn push_doc_node(
     out: &mut Vec<DocNode>,
     depth: usize,
@@ -73,10 +83,12 @@ fn push_doc_node(
 ) {
     match v {
         serde_json::Value::Object(m) => {
+            let preview = format!("{{ {} fields }}", m.len());
             out.push(DocNode {
                 depth,
                 key: key.into(),
-                preview: format!("{{ {} fields }}", m.len()),
+                full: preview.clone(),
+                preview,
                 expandable: !m.is_empty(),
                 path: path.into(),
             });
@@ -85,10 +97,12 @@ fn push_doc_node(
             }
         }
         serde_json::Value::Array(a) => {
+            let preview = format!("[ {} ]", a.len());
             out.push(DocNode {
                 depth,
                 key: key.into(),
-                preview: format!("[ {} ]", a.len()),
+                full: preview.clone(),
+                preview,
                 expandable: !a.is_empty(),
                 path: path.into(),
             });
@@ -106,6 +120,7 @@ fn push_doc_node(
             depth,
             key: key.into(),
             preview: scalar_preview(scalar),
+            full: scalar_full(scalar),
             expandable: false,
             path: path.into(),
         }),
