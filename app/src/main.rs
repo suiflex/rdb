@@ -5714,6 +5714,13 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 }
             });
+            // Abort any still-running connect from a previous selection before
+            // tracking the new one: switching connections mid-connect otherwise
+            // leaks the old task, which keeps holding the driver lock and hangs
+            // the UI with no way to cancel.
+            if let Some(old) = connect_handle.borrow_mut().take() {
+                old.abort();
+            }
             *connect_handle.borrow_mut() = Some(handle);
         });
     }
