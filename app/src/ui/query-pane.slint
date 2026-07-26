@@ -101,6 +101,9 @@ export component QueryPane inherits Rectangle {
     in property <int> editing-row: -1;
     in property <int> editing-col: -1;
     in-out property <string> editing-value;
+    // Copy inspector for the Mongo tree (mirrors the grid's cell inspector).
+    in-out property <string> doc-inspect-value;
+    in-out property <bool> doc-inspect-open;
     in property <int> scroll-grid-tick;
     callback sort-col(int);
     callback reorder-col(int, length);
@@ -605,45 +608,61 @@ export component QueryPane inherits Rectangle {
                     padding: Tokens.sp3;
                     spacing: 0;
                     alignment: start;
-                    for row in root.doc-tree: Rectangle {
-                        height: 22px;
-                        // Whole branch row is clickable to fold/unfold; leaves inert.
-                        background: row-ta.has-hover && row.expandable ? Tokens.card : transparent;
-                        row-ta := TouchArea {
-                            enabled: row.expandable;
-                            clicked => { root.toggle-doc-node(row.path); }
+                    for row in root.doc-tree: VerticalLayout {
+                        Rectangle {
+                            height: 22px;
+                            // Whole branch row is clickable to fold/unfold; leaves inert.
+                            background: row-ta.has-hover && row.expandable ? Tokens.card : transparent;
+                            row-ta := TouchArea {
+                                enabled: row.expandable;
+                                clicked => { root.toggle-doc-node(row.path); }
+                            }
+                            HorizontalLayout {
+                                padding-left: row.depth * 16px;
+                                spacing: Tokens.sp1;
+                                alignment: start;
+                                // fold caret (branches only)
+                                Text {
+                                    width: 14px;
+                                    text: row.expandable ? (row.expanded ? "▾" : "▸") : "";
+                                    color: Tokens.text-dim;
+                                    font-size: Tokens.font-xs;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    width: 200px;
+                                    text: row.key + ":";
+                                    color: Tokens.accent;
+                                    font-family: Tokens.mono;
+                                    font-size: Tokens.font-sm;
+                                    overflow: elide;
+                                    vertical-alignment: center;
+                                }
+                                // Value: double-click opens the copy inspector.
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    background: val-ta.has-hover ? Tokens.card : transparent;
+                                    val-ta := TouchArea {
+                                        mouse-cursor: pointer;
+                                        double-clicked => {
+                                            root.doc-inspect-value = row.full;
+                                            root.doc-inspect-open = true;
+                                        }
+                                    }
+                                    Text {
+                                        text: row.preview;
+                                        color: row.expandable ? Tokens.text-dim : Tokens.text;
+                                        font-family: Tokens.mono;
+                                        font-size: Tokens.font-sm;
+                                        horizontal-alignment: left;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
                         }
-                        HorizontalLayout {
-                            padding-left: row.depth * 16px;
-                            spacing: Tokens.sp1;
-                            alignment: start;
-                            // fold caret (branches only)
-                            Text {
-                                width: 14px;
-                                text: row.expandable ? (row.expanded ? "▾" : "▸") : "";
-                                color: Tokens.text-dim;
-                                font-size: Tokens.font-xs;
-                                vertical-alignment: center;
-                            }
-                            Text {
-                                width: 200px;
-                                text: row.key + ":";
-                                color: Tokens.accent;
-                                font-family: Tokens.mono;
-                                font-size: Tokens.font-sm;
-                                overflow: elide;
-                                vertical-alignment: center;
-                            }
-                            Text {
-                                text: row.preview;
-                                color: row.expandable ? Tokens.text-dim : Tokens.text;
-                                font-family: Tokens.mono;
-                                font-size: Tokens.font-sm;
-                                horizontal-alignment: left;
-                                overflow: elide;
-                                vertical-alignment: center;
-                            }
-                        }
+                        // hairline separator between records
+                        Rectangle { height: 1px; background: Tokens.border; }
                     }
                 }
             }
@@ -777,5 +796,73 @@ export component QueryPane inherits Rectangle {
         height: 2px;
         width: 100%;
         background: Tokens.accent;
+    }
+
+    // Mongo tree copy inspector: centered card with the full value, opened by
+    // double-click on a tree value. Selectable + auto-selected so ⌘C copies.
+    if root.doc-inspect-open: Rectangle {
+        background: #00000088;
+        // backdrop click closes
+        TouchArea { clicked => { root.doc-inspect-open = false; } }
+        Rectangle {
+            width: min(560px, root.width - 4 * Tokens.sp3);
+            height: min(360px, root.height - 4 * Tokens.sp3);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Tokens.card;
+            border-radius: Tokens.radius-lg;
+            border-width: 1px;
+            border-color: Tokens.border-strong;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #00000066;
+            // swallow clicks inside the card so they don't close it
+            TouchArea {}
+            VerticalLayout {
+                padding: Tokens.sp3;
+                spacing: Tokens.sp2;
+                HorizontalLayout {
+                    Text {
+                        text: "Field value";
+                        horizontal-stretch: 1;
+                        color: Tokens.text;
+                        font-weight: Tokens.weight-emphasis;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: "⌘C to copy · Esc to close";
+                        color: Tokens.text-faint;
+                        font-size: Tokens.font-xs;
+                        vertical-alignment: center;
+                    }
+                }
+                Rectangle {
+                    vertical-stretch: 1;
+                    background: Tokens.chrome;
+                    border-radius: Tokens.radius;
+                    border-width: 1px;
+                    border-color: Tokens.border;
+                    ScrollView {
+                        doc-inspect-input := TextInput {
+                            x: Tokens.sp2;
+                            y: Tokens.sp1;
+                            width: parent.visible-width - 2 * Tokens.sp2;
+                            height: max(parent.visible-height - 2 * Tokens.sp1, self.preferred-height);
+                            read-only: true;
+                            text: root.doc-inspect-value;
+                            color: Tokens.text;
+                            font-family: Tokens.mono;
+                            font-size: Tokens.font-sm;
+                            wrap: word-wrap;
+                            single-line: false;
+                            init => { self.focus(); self.select-all(); }
+                            key-pressed(e) => {
+                                if (e.text == Key.Escape) { root.doc-inspect-open = false; return accept; }
+                                return reject;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

@@ -2135,6 +2135,7 @@ fn push_doc_tree(
             depth: n.depth as i32,
             key: SharedString::from(n.key.clone()),
             preview: SharedString::from(n.preview.clone()),
+            full: SharedString::from(n.full.clone()),
             expandable: n.expandable,
             expanded,
             path: SharedString::from(n.path.clone()),
