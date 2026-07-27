@@ -3080,14 +3080,32 @@ fn main() -> Result<(), slint::PlatformError> {
         let sync_editor = sync_editor.clone();
         let weak = window.as_weak();
         let press: Rc<dyn Fn(usize, i32, i32)> = Rc::new(move |pane, line, col| {
-            if let Some(w) = weak.upgrade() {
-                // Clicking a pane focuses it: drives the accent + which pane
-                // global shortcuts fall back to.
-                w.set_active_pane(pane as i32);
-                set_p_completion_visible(&w, pane, false);
-            }
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            // Clicking a pane focuses it: drives the accent + which pane
+            // global shortcuts fall back to.
+            w.set_active_pane(pane as i32);
+            set_p_completion_visible(&w, pane, false);
+            // A plain click only moves the caret. sync_editor rebuilds the whole
+            // lines model, which destroys every row's TouchArea — and that swallows
+            // the second tap of a double-click, so word-select never fired. When
+            // there is no selection to clear, the line spans are unchanged, so just
+            // nudge the caret and leave the rows (and their TouchAreas) intact.
+            let had_sel = panes[pane].ed_state.borrow().selection().is_some();
             panes[pane].ed_state.borrow_mut().move_to(line, col, false);
-            sync_editor(pane);
+            if had_sel {
+                sync_editor(pane);
+            } else {
+                let ed = panes[pane].ed_state.borrow();
+                if pane == 0 {
+                    w.set_cursor_line(ed.line as i32);
+                    w.set_cursor_col(ed.col as i32);
+                } else {
+                    w.set_p1_cursor_line(ed.line as i32);
+                    w.set_p1_cursor_col(ed.col as i32);
+                }
+            }
         });
         window.on_editor_press({
             let press = press.clone();
