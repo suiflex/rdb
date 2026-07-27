@@ -324,6 +324,10 @@ export component QueryPane inherits Rectangle {
                 }
                 if !root.editor-collapsed: CodeEditor {
                     vertical-stretch: 1;
+                    // Lift above the results header/tabs below it so the autocomplete
+                    // popup, which overflows the editor's bottom edge, is not covered
+                    // by those later siblings in this column.
+                    z: 1;
                     lines: root.editor-lines;
                     fold-state: root.editor-fold-state;
                     line-hidden: root.editor-line-hidden;

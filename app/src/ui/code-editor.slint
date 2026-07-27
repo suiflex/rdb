@@ -210,7 +210,10 @@ export component CodeEditor inherits Rectangle {
         // viewport and it never shows. Below the caret by default; flip above when
         // that would clip past the editor's bottom edge.
         property <length> pop-h: min(root.completion-items.length * 22px + 8px, 200px);
-        property <length> caret-y: Tokens.sp2 + root.cursor-line * root.line-h + edit-scroll.viewport-y;
+        // Clamp the caret anchor into the editor's own height so the popup stays
+        // on-screen even when the scroll offset can't be read precisely (a short,
+        // scrolled editor otherwise threw the anchor a thousand px down).
+        property <length> caret-y: clamp(Tokens.sp2 + root.cursor-line * root.line-h + edit-scroll.viewport-y, 0px, root.height);
         property <length> below-y: caret-y + root.line-h + 6px;
         property <length> above-y: caret-y - self.pop-h - 6px;
         x: min(root.gutter-w + Tokens.sp3 + root.cursor-col * root.charw + edit-scroll.viewport-x, root.width - self.width - Tokens.sp2);
