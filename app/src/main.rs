@@ -1178,21 +1178,29 @@ fn default_col_width(name: &str, type_name: &str) -> f32 {
     if type_name == "bar" {
         return 520.0;
     }
-    match name {
-        "sector" => 420.0,
-        "total" => 120.0,
-        "name" | "email" => 265.0,
-        "code" => 100.0,
-        "short_name" => 115.0,
-        "country" => 100.0,
-        "exch" => 95.0,
-        "ccy" => 64.0,
-        _ => match type_name {
-            "uuid" | "fk" => 185.0,
-            "timestamptz" | "timestamp" => 190.0,
-            "int4" | "int8" | "numeric" => 80.0,
-            _ => 140.0,
-        },
+    // Size the column to fit its header — bold name + dim type label in the mono
+    // font — so real schema names (often long, `_`-joined) read without dragging.
+    // Coefficients approximate the mono advance at font-sm/xs; the arrow + cell
+    // padding is the constant. Clamped so nothing collapses or runs off-screen.
+    let name_px = name.chars().count() as f32 * 7.3;
+    let type_px = type_name.chars().count() as f32 * 5.6;
+    (name_px + type_px + 44.0).clamp(90.0, 360.0)
+}
+
+#[cfg(test)]
+mod col_width_tests {
+    use super::default_col_width;
+
+    #[test]
+    fn fits_name_within_clamp() {
+        // A longer header is wider, and both stay inside the clamp.
+        let short = default_col_width("id", "int4");
+        let long = default_col_width("alasan_penolakan", "varchar");
+        assert!(long > short);
+        assert!((90.0..=360.0).contains(&short));
+        assert!((90.0..=360.0).contains(&long));
+        // The bar sentinel keeps its fixed width.
+        assert_eq!(default_col_width("share", "bar"), 520.0);
     }
 }
 
