@@ -1031,10 +1031,23 @@ fn save_recent(list: &[String]) {
     }
 }
 
+/// Strip SQL line comments (`--` to end of line) and blank lines, so a
+/// commented-out scratch statement leaves only its runnable SQL. Word-scan, not
+/// a parser: a `--` inside a string literal is a rare edge we accept trimming.
+fn strip_sql_comments(text: &str) -> String {
+    text.lines()
+        .map(|l| l.split("--").next().unwrap_or("").trim_end())
+        .filter(|l| !l.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Record an executed query at the head of the history (dedupe, cap
-/// `RECENT_CAP`) and persist it, except in mock mode.
+/// `RECENT_CAP`) and persist it, except in mock mode. Comment-only text is
+/// dropped and comments are stripped so history keeps only runnable SQL.
 fn record_recent(list: &RefCell<Vec<String>>, text: &str) {
-    let t = text.trim();
+    let t = strip_sql_comments(text);
+    let t = t.trim();
     if t.is_empty() {
         return;
     }
@@ -1044,6 +1057,25 @@ fn record_recent(list: &RefCell<Vec<String>>, text: &str) {
     v.truncate(RECENT_CAP);
     if !mock::mock_mode() {
         save_recent(&v);
+    }
+}
+
+#[cfg(test)]
+mod record_recent_tests {
+    use super::*;
+
+    #[test]
+    fn comment_only_is_not_recorded() {
+        let list = RefCell::new(Vec::new());
+        record_recent(&list, "-- \\ Check Perizinan\n-- mp.username ilike '%x%'");
+        assert!(list.borrow().is_empty());
+    }
+
+    #[test]
+    fn leading_comment_is_stripped_but_sql_kept() {
+        let list = RefCell::new(Vec::new());
+        record_recent(&list, "-- pick emiten\nselect * from emiten; -- trailing");
+        assert_eq!(list.borrow().as_slice(), ["select * from emiten;"]);
     }
 }
 
