@@ -5866,11 +5866,21 @@ fn main() -> Result<(), slint::PlatformError> {
                             vec![sql.clone()]
                         };
                         let n = stmts.len().max(1);
-                        // Row-limit control (default 300): cap manual SELECTs so a
-                        // huge `SELECT * FROM table` can't stream millions of rows
-                        // in and freeze the grid. Browse text already carries its
-                        // own LIMIT, so cap_select leaves it untouched.
-                        let row_limit = browse.lock().unwrap().limit;
+                        // SQL engines are never auto-capped — the user's SELECT runs
+                        // as written (bare reads take the streaming path instead).
+                        // NoSQL keeps the row-limit control's value. Browse text
+                        // carries its own LIMIT either way, so cap_select no-ops it.
+                        let row_limit = if matches!(
+                            engine,
+                            rdb_connstore::Engine::Postgres
+                                | rdb_connstore::Engine::MySql
+                                | rdb_connstore::Engine::Sqlite
+                                | rdb_connstore::Engine::Cassandra
+                        ) {
+                            0
+                        } else {
+                            browse.lock().unwrap().limit
+                        };
                         let mut out = Err(rdb_core::error::RdbError::Query("empty query".into()));
                         for (i, s) in stmts.iter().enumerate() {
                             let s = cap_select(*engine, s, row_limit);
@@ -6356,7 +6366,6 @@ fn main() -> Result<(), slint::PlatformError> {
         let run_sql = run_sql.clone();
         let run_stream = run_stream.clone();
         let cur_engine = cur_engine.clone();
-        let browse = browse.clone();
         let ed_state = ed_state.clone();
         let recent_queries = recent_queries.clone();
         let rebuild_query_tree = rebuild_query_tree.clone();
@@ -6381,10 +6390,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 if active_tab_kind(&w) != "table" {
                     w.set_grid_read_only(true);
                 }
-                // "No limit" (browse.limit == 0) on a bare SELECT streams the
-                // rows in progressively; everything else runs buffered (capped).
+                // SQL engines never carry an injected LIMIT: a bare SELECT streams
+                // the rows in progressively (cancelable, no artificial cap), and a
+                // statement with its own LIMIT / a write runs buffered as written.
                 let stream = active_tab_kind(&w) != "table"
-                    && browse.lock().unwrap().limit == 0
                     && cur_engine
                         .borrow()
                         .map(|e| is_bare_select(e, &text))
@@ -6424,11 +6433,10 @@ fn main() -> Result<(), slint::PlatformError> {
             let stream = weak
                 .upgrade()
                 .map(|w| {
-                    panes[1].browse.lock().unwrap().limit == 0
-                        && cur_engine
-                            .borrow()
-                            .map(|e| is_bare_select(e, &text))
-                            .unwrap_or(false)
+                    cur_engine
+                        .borrow()
+                        .map(|e| is_bare_select(e, &text))
+                        .unwrap_or(false)
                         && active_tab_kind(&w) != "table"
                 })
                 .unwrap_or(false);
