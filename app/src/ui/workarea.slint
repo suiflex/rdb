@@ -235,6 +235,7 @@ export component WorkArea inherits Rectangle {
     callback format-sql();
     callback explain-query();
     callback copy-results();
+    callback copy-text(string);
     // Export displayed results. Arg = format: 0 CSV, 1 JSON, 2 TSV, 3 SQL, 4 Markdown.
     callback export-results(int);
 
@@ -572,6 +573,7 @@ export component WorkArea inherits Rectangle {
             select-result-tab(i) => { root.select-result-tab(i); }
             close-result-tab(i) => { root.close-result-tab(i); }
             copy-results() => { root.copy-results(); }
+            copy-text(t) => { root.copy-text(t); }
             export-results(i) => { root.export-results(i); }
             columns: root.columns;
             cells: root.cells;
@@ -687,6 +689,7 @@ export component WorkArea inherits Rectangle {
                 select-result-tab(i) => { root.p1-select-result-tab(i); }
                 close-result-tab(i) => { root.p1-close-result-tab(i); }
                 copy-results() => { root.p1-copy-results(); }
+                copy-text(t) => { root.copy-text(t); }
                 export-results(i) => { root.p1-export-results(i); }
                 columns: root.p1-columns;
                 cells: root.p1-cells;

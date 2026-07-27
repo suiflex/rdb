@@ -6525,7 +6525,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 let end_col = ed.lines.last().map(|l| l.chars().count()).unwrap_or(0) as i32;
                 ed.move_to(end_line, end_col, false);
                 // Blank line between what's there and the appended statement.
-                let prefix = if ed.text().trim().is_empty() { "" } else { "\n\n" };
+                let prefix = if ed.text().trim().is_empty() {
+                    ""
+                } else {
+                    "\n\n"
+                };
                 ed.insert(&format!("{prefix}{text}"));
             }
             sync_editor(0);
@@ -6580,6 +6584,9 @@ fn main() -> Result<(), slint::PlatformError> {
         window.on_p1_run(run_p1.clone());
         window.on_p1_run_selection(run_p1);
     }
+
+    // ----- Details panel: copy one field value to the clipboard -----
+    window.on_copy_text(move |s| clip_set(&s));
 
     // ----- Copy results (TSV → clipboard) / Export CSV (~/Downloads) -----
     {
