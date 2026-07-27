@@ -37,6 +37,8 @@ export component NavCluster inherits HorizontalLayout {
     callback disconnect();
     callback open-function(string);
     callback open-query(string, int);
+    callback insert-query(int);
+    callback rerun-query(int);
     callback mode-changed(int);
     callback open-table(string, string);
     callback pin-table(string, string);
@@ -83,6 +85,8 @@ export component NavCluster inherits HorizontalLayout {
         disconnect() => { root.disconnect(); }
         open-function(f) => { root.open-function(f); }
         open-query(q, i) => { root.open-query(q, i); }
+        insert-query(i) => { root.insert-query(i); }
+        rerun-query(i) => { root.rerun-query(i); }
         mode-changed(m) => { root.mode-changed(m); }
         open-table(db, t) => { root.open-table(db, t); }
         pin-table(db, t) => { root.pin-table(db, t); }

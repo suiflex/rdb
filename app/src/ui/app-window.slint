@@ -202,6 +202,9 @@ callback create-table-commit();
     callback filter-tree(string);
     callback open-function(string);
     callback open-query(string, int);
+    // History item actions: append its SQL to the editor, or re-run it directly.
+    callback insert-query(int);
+    callback rerun-query(int);
     callback sidebar-mode-changed(int);
 
     // ----- connections screen detail panel -----
@@ -260,6 +263,7 @@ callback create-table-commit();
     callback format-sql();
     callback explain-query();
     callback copy-results();
+    callback copy-text(string);
     callback export-results(int);
     in property <[ChartBar]> chart-bars;
     in property <[string]> all-columns;
@@ -1011,6 +1015,8 @@ callback create-table-commit();
                     disconnect() => { root.disconnect(); }
                     open-function(f) => { root.open-function(f); }
                     open-query(q, i) => { root.open-query(q, i); }
+                    insert-query(i) => { root.insert-query(i); }
+                    rerun-query(i) => { root.rerun-query(i); }
                     mode-changed(m) => { root.sidebar-mode = m; root.sidebar-mode-changed(m); }
                     open-table(db, t) => { root.open-table(db, t); }
                     pin-table(db, t) => { root.pin-table(db, t); }
@@ -1547,6 +1553,9 @@ callback create-table-commit();
                         copy-results() => {
                             root.copy-results();
                         }
+                        copy-text(t) => {
+                            root.copy-text(t);
+                        }
                         export-results(fmt) => {
                             root.export-results(fmt);
                         }
@@ -1728,6 +1737,8 @@ callback create-table-commit();
                     disconnect() => { root.disconnect(); }
                     open-function(f) => { root.open-function(f); }
                     open-query(q, i) => { root.open-query(q, i); }
+                    insert-query(i) => { root.insert-query(i); }
+                    rerun-query(i) => { root.rerun-query(i); }
                     mode-changed(m) => { root.sidebar-mode = m; root.sidebar-mode-changed(m); }
                     open-table(db, t) => { root.open-table(db, t); }
                     pin-table(db, t) => { root.pin-table(db, t); }

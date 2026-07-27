@@ -83,6 +83,7 @@ export component QueryPane inherits Rectangle {
     callback select-result-tab(int);
     callback close-result-tab(int);
     callback copy-results();
+    callback copy-text(string);           // Details: copy a single field value
     callback export-results(int);
 
     // ----- result grid -----
@@ -434,7 +435,9 @@ export component QueryPane inherits Rectangle {
             property <bool> detail-shown: root.detail-visible && root.view-mode == 0
                 && root.result-kind == 0 && root.col-count > 0 && root.selected-row >= 0
                 && (root.selected-row + 1) * root.col-count <= root.cells.length;
-            property <length> detail-w: min(320px, max(240px, self.width * 0.32));
+            // Leaner + more responsive: a smaller slice of the body so the grid
+            // keeps most of the width, clamped so fields stay readable.
+            property <length> detail-w: min(300px, max(200px, self.width * 0.24));
             vertical-stretch: 1;
             background: Tokens.canvas;
 
@@ -493,12 +496,45 @@ export component QueryPane inherits Rectangle {
                                 vertical-alignment: center;
                             }
                             Rectangle { horizontal-stretch: 1; }
-                            Text {
-                                text: "Row " + (root.selected-row + 1);
-                                color: Tokens.text-faint;
-                                font-family: Tokens.mono;
-                                font-size: Tokens.font-xs;
-                                vertical-alignment: center;
+                            // step through rows without going back to the grid
+                            stepper := HorizontalLayout {
+                                property <int> row-count: root.col-count > 0 ? root.cells.length / root.col-count : 0;
+                                spacing: Tokens.sp1;
+                                Rectangle {
+                                    width: 20px;
+                                    Text {
+                                        text: "‹";
+                                        color: root.selected-row > 0 ? Tokens.text : Tokens.text-ghost;
+                                        font-size: Tokens.font-md;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    TouchArea {
+                                        enabled: root.selected-row > 0;
+                                        clicked => { root.select-cell(root.selected-row - 1, max(0, root.selected-col)); }
+                                    }
+                                }
+                                Text {
+                                    text: "Row " + (root.selected-row + 1);
+                                    color: Tokens.text-faint;
+                                    font-family: Tokens.mono;
+                                    font-size: Tokens.font-xs;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle {
+                                    width: 20px;
+                                    Text {
+                                        text: "›";
+                                        color: root.selected-row + 1 < stepper.row-count ? Tokens.text : Tokens.text-ghost;
+                                        font-size: Tokens.font-md;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    TouchArea {
+                                        enabled: root.selected-row + 1 < stepper.row-count;
+                                        clicked => { root.select-cell(root.selected-row + 1, max(0, root.selected-col)); }
+                                    }
+                                }
                             }
                         }
                     }
@@ -527,6 +563,20 @@ export component QueryPane inherits Rectangle {
                                             color: Tokens.text-faint;
                                             font-family: Tokens.mono;
                                             font-size: Tokens.font-xs;
+                                        }
+                                        // copy this field's value to the clipboard
+                                        Rectangle {
+                                            width: 18px;
+                                            Text {
+                                                text: "⧉";
+                                                color: copy-ta.has-hover ? Tokens.accent : Tokens.text-faint;
+                                                font-size: Tokens.font-xs;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            copy-ta := TouchArea {
+                                                clicked => { root.copy-text(detail-cell.is-null ? "" : detail-cell.text); }
+                                            }
                                         }
                                     }
                                     Rectangle {

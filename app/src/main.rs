@@ -1031,10 +1031,23 @@ fn save_recent(list: &[String]) {
     }
 }
 
+/// Strip SQL line comments (`--` to end of line) and blank lines, so a
+/// commented-out scratch statement leaves only its runnable SQL. Word-scan, not
+/// a parser: a `--` inside a string literal is a rare edge we accept trimming.
+fn strip_sql_comments(text: &str) -> String {
+    text.lines()
+        .map(|l| l.split("--").next().unwrap_or("").trim_end())
+        .filter(|l| !l.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Record an executed query at the head of the history (dedupe, cap
-/// `RECENT_CAP`) and persist it, except in mock mode.
+/// `RECENT_CAP`) and persist it, except in mock mode. Comment-only text is
+/// dropped and comments are stripped so history keeps only runnable SQL.
 fn record_recent(list: &RefCell<Vec<String>>, text: &str) {
-    let t = text.trim();
+    let t = strip_sql_comments(text);
+    let t = t.trim();
     if t.is_empty() {
         return;
     }
@@ -1044,6 +1057,25 @@ fn record_recent(list: &RefCell<Vec<String>>, text: &str) {
     v.truncate(RECENT_CAP);
     if !mock::mock_mode() {
         save_recent(&v);
+    }
+}
+
+#[cfg(test)]
+mod record_recent_tests {
+    use super::*;
+
+    #[test]
+    fn comment_only_is_not_recorded() {
+        let list = RefCell::new(Vec::new());
+        record_recent(&list, "-- \\ Check Perizinan\n-- mp.username ilike '%x%'");
+        assert!(list.borrow().is_empty());
+    }
+
+    #[test]
+    fn leading_comment_is_stripped_but_sql_kept() {
+        let list = RefCell::new(Vec::new());
+        record_recent(&list, "-- pick emiten\nselect * from emiten; -- trailing");
+        assert_eq!(list.borrow().as_slice(), ["select * from emiten;"]);
     }
 }
 
@@ -3351,29 +3383,31 @@ fn main() -> Result<(), slint::PlatformError> {
                     });
                 }
             }
-            let recent = recent.borrow();
-            rows.push(TreeNode {
-                label: if history_only { "History" } else { "Recent" }.into(),
-                depth: 0,
-                kind: "qcat".into(),
-                expanded: true,
-                db: SharedString::default(),
-                count: recent.len() as i32,
-            });
-            for (i, q) in recent.iter().enumerate() {
-                let label: String = if q.chars().count() > 24 {
-                    format!("{}…", q.chars().take(23).collect::<String>())
-                } else {
-                    q.clone()
-                };
+            // Queries (mode 1) is the curated Saved list only; History (mode 2)
+            // is the live run history — they no longer duplicate a "Recent" list.
+            if history_only {
+                let recent = recent.borrow();
                 rows.push(TreeNode {
-                    label: label.into(),
-                    depth: 1,
-                    kind: "recent".into(),
-                    expanded: false,
+                    label: "History".into(),
+                    depth: 0,
+                    kind: "qcat".into(),
+                    expanded: true,
                     db: SharedString::default(),
-                    count: i as i32,
+                    count: recent.len() as i32,
                 });
+                for (i, q) in recent.iter().enumerate() {
+                    // Collapse whitespace to one line so a multi-line query does
+                    // not paint over the rows below; the row elides to its width.
+                    let label: String = q.split_whitespace().collect::<Vec<_>>().join(" ");
+                    rows.push(TreeNode {
+                        label: label.chars().take(200).collect::<String>().into(),
+                        depth: 1,
+                        kind: "recent".into(),
+                        expanded: false,
+                        db: SharedString::default(),
+                        count: i as i32,
+                    });
+                }
             }
             w.set_query_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
         }
@@ -6435,6 +6469,82 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ----- History: re-run an entry directly (fresh result, editor untouched) -----
+    {
+        let weak = window.as_weak();
+        let run_sql = run_sql.clone();
+        let run_stream = run_stream.clone();
+        let cur_engine = cur_engine.clone();
+        let recent_queries = recent_queries.clone();
+        window.on_rerun_query(move |idx| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some(text) = recent_queries.borrow().get(idx.max(0) as usize).cloned() else {
+                return;
+            };
+            if text.trim().is_empty() {
+                return;
+            }
+            // Same stream/buffered rule as a manual run; the result replaces the
+            // grid but the editor buffer is left alone.
+            if active_tab_kind(&w) != "table" {
+                w.set_grid_read_only(true);
+            }
+            let stream = active_tab_kind(&w) != "table"
+                && cur_engine
+                    .borrow()
+                    .map(|e| is_bare_select(e, &text))
+                    .unwrap_or(false);
+            if stream {
+                run_stream(0, text);
+            } else {
+                run_sql(0, text);
+            }
+        });
+    }
+
+    // ----- History: append an entry to the editor (never replaces its text) -----
+    {
+        let weak = window.as_weak();
+        let ed_state = ed_state.clone();
+        let sync_editor = sync_editor.clone();
+        let recent_queries = recent_queries.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        window.on_insert_query(move |idx| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some(text) = recent_queries.borrow().get(idx.max(0) as usize).cloned() else {
+                return;
+            };
+            {
+                let mut ed = ed_state.borrow_mut();
+                let end_line = ed.lines.len().saturating_sub(1) as i32;
+                let end_col = ed.lines.last().map(|l| l.chars().count()).unwrap_or(0) as i32;
+                ed.move_to(end_line, end_col, false);
+                // Blank line between what's there and the appended statement.
+                let prefix = if ed.text().trim().is_empty() {
+                    ""
+                } else {
+                    "\n\n"
+                };
+                ed.insert(&format!("{prefix}{text}"));
+            }
+            sync_editor(0);
+            // Persist the grown buffer to the active tab.
+            if let Some(id) = active_tab_id.lock().unwrap().clone() {
+                let new_text = ed_state.borrow().text();
+                let mut tabs = workspace_tabs.lock().unwrap();
+                if let Some(tab) = tabs.iter_mut().find(|t| t.id == id) {
+                    tab.query_text = new_text;
+                }
+            }
+            let _ = w;
+        });
+    }
+
     // ----- run query in the right split pane -----
     {
         let run_sql = run_sql.clone();
@@ -6474,6 +6584,9 @@ fn main() -> Result<(), slint::PlatformError> {
         window.on_p1_run(run_p1.clone());
         window.on_p1_run_selection(run_p1);
     }
+
+    // ----- Details panel: copy one field value to the clipboard -----
+    window.on_copy_text(move |s| clip_set(&s));
 
     // ----- Copy results (TSV → clipboard) / Export CSV (~/Downloads) -----
     {

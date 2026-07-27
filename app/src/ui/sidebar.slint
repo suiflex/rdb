@@ -27,6 +27,8 @@ export component Sidebar inherits Rectangle {
     callback toggle-fields(string, string); // (database, table) — expand columns inline
     callback open-function(string);
     callback open-query(string, int);      // (label, index in its section)
+    callback insert-query(int);            // History row: append its SQL to editor
+    callback rerun-query(int);             // History ▶: run it, editor untouched
     callback toggle-node(string);
     callback select-schema(string);
     callback filter-tree(string);
@@ -156,7 +158,13 @@ export component Sidebar inherits Rectangle {
                             } else if (is-function) {
                                 root.open-function(node.label);
                             } else if (is-query) {
-                                root.open-query(node.label, node.count);
+                                // Saved opens into the editor; History appends so it
+                                // never clobbers what the user is writing.
+                                if (node.kind == "recent") {
+                                    root.insert-query(node.count);
+                                } else {
+                                    root.open-query(node.label, node.count);
+                                }
                             }
                         }
                         double-clicked => {
@@ -270,6 +278,22 @@ export component Sidebar inherits Rectangle {
                             font-italic: is-hint;
                             vertical-alignment: center;
                             overflow: elide;
+                        }
+
+                        // History ▶: re-run this entry directly (editor untouched).
+                        // Nested TouchArea wins over the row, so the row still appends.
+                        if node.kind == "recent": Rectangle {
+                            width: 20px;
+                            Text {
+                                text: "▶";
+                                color: rerun-ta.has-hover ? Tokens.accent : Tokens.text-faint;
+                                font-size: Tokens.font-xs;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            rerun-ta := TouchArea {
+                                clicked => { root.rerun-query(node.count); }
+                            }
                         }
 
                         // active table row-count badge (e.g. emiten · 986)
