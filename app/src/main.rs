@@ -6469,6 +6469,78 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ----- History: re-run an entry directly (fresh result, editor untouched) -----
+    {
+        let weak = window.as_weak();
+        let run_sql = run_sql.clone();
+        let run_stream = run_stream.clone();
+        let cur_engine = cur_engine.clone();
+        let recent_queries = recent_queries.clone();
+        window.on_rerun_query(move |idx| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some(text) = recent_queries.borrow().get(idx.max(0) as usize).cloned() else {
+                return;
+            };
+            if text.trim().is_empty() {
+                return;
+            }
+            // Same stream/buffered rule as a manual run; the result replaces the
+            // grid but the editor buffer is left alone.
+            if active_tab_kind(&w) != "table" {
+                w.set_grid_read_only(true);
+            }
+            let stream = active_tab_kind(&w) != "table"
+                && cur_engine
+                    .borrow()
+                    .map(|e| is_bare_select(e, &text))
+                    .unwrap_or(false);
+            if stream {
+                run_stream(0, text);
+            } else {
+                run_sql(0, text);
+            }
+        });
+    }
+
+    // ----- History: append an entry to the editor (never replaces its text) -----
+    {
+        let weak = window.as_weak();
+        let ed_state = ed_state.clone();
+        let sync_editor = sync_editor.clone();
+        let recent_queries = recent_queries.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        window.on_insert_query(move |idx| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some(text) = recent_queries.borrow().get(idx.max(0) as usize).cloned() else {
+                return;
+            };
+            {
+                let mut ed = ed_state.borrow_mut();
+                let end_line = ed.lines.len().saturating_sub(1) as i32;
+                let end_col = ed.lines.last().map(|l| l.chars().count()).unwrap_or(0) as i32;
+                ed.move_to(end_line, end_col, false);
+                // Blank line between what's there and the appended statement.
+                let prefix = if ed.text().trim().is_empty() { "" } else { "\n\n" };
+                ed.insert(&format!("{prefix}{text}"));
+            }
+            sync_editor(0);
+            // Persist the grown buffer to the active tab.
+            if let Some(id) = active_tab_id.lock().unwrap().clone() {
+                let new_text = ed_state.borrow().text();
+                let mut tabs = workspace_tabs.lock().unwrap();
+                if let Some(tab) = tabs.iter_mut().find(|t| t.id == id) {
+                    tab.query_text = new_text;
+                }
+            }
+            let _ = w;
+        });
+    }
+
     // ----- run query in the right split pane -----
     {
         let run_sql = run_sql.clone();
