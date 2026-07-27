@@ -581,22 +581,37 @@ export component QueryPane inherits Rectangle {
                 }
             }
 
-            // in-flight query indicator
-            if root.query-running: VerticalLayout {
-                alignment: center;
-                spacing: Tokens.sp3;
-                Text {
-                    text: "Running…";
-                    color: Tokens.text-dim;
-                    font-size: Tokens.font-md;
-                    horizontal-alignment: center;
-                }
-                HorizontalLayout {
-                    alignment: center;
-                    DangerButton {
-                        text: "⏹ Cancel";
-                        height: 28px;
-                        clicked => { root.cancel-query(); }
+            // in-flight query indicator: a solid centered card so it reads
+            // clearly over the (stale) rows behind it instead of floating.
+            if root.query-running: Rectangle {
+                Rectangle {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: 168px;
+                    height: 104px;
+                    background: Tokens.card;
+                    border-radius: Tokens.radius-lg;
+                    border-width: 1px;
+                    border-color: Tokens.border-strong;
+                    drop-shadow-blur: 24px;
+                    drop-shadow-color: #00000066;
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: Tokens.sp3;
+                        Text {
+                            text: "Running…";
+                            color: Tokens.text-dim;
+                            font-size: Tokens.font-md;
+                            horizontal-alignment: center;
+                        }
+                        HorizontalLayout {
+                            alignment: center;
+                            DangerButton {
+                                text: "⏹ Cancel";
+                                height: 28px;
+                                clicked => { root.cancel-query(); }
+                            }
+                        }
                     }
                 }
             }
