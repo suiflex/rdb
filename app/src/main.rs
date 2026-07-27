@@ -2685,7 +2685,13 @@ fn main() -> Result<(), slint::PlatformError> {
         let panes = panes.clone();
         let sync_editor = sync_editor.clone();
         Rc::new(move |pane: usize, text: &str| {
-            *panes[pane].ed_state.borrow_mut() = editor::EditorState::from_text(text);
+            let mut ed = editor::EditorState::from_text(text);
+            // Start at the top so a restored tab shows its query from the first
+            // line with the caret in view — matching a fresh tab. Leaving the
+            // caret on the last line (where `from_text` puts it) kept it, and the
+            // autocomplete popup, scrolled out of sight for saved multi-line queries.
+            ed.move_to(0, 0, false);
+            *panes[pane].ed_state.borrow_mut() = ed;
             sync_editor(pane);
         })
     };

@@ -55,7 +55,7 @@ export component CodeEditor inherits Rectangle {
             return reject;
         }
 
-        ScrollView {
+        edit-scroll := ScrollView {
             width: 100%;
             height: 100%;
             VerticalLayout {
@@ -203,15 +203,18 @@ export component CodeEditor inherits Rectangle {
 
     // ----- autocomplete popup (overlays the editor, under the caret) -----
     if root.completion-visible && root.completion-items.length > 0: Rectangle {
-        // y below the caret line by default; if that would run past the editor's
-        // bottom edge (deep in a long query / short results pane), flip it above
-        // the caret line so the list stays fully visible instead of clipped.
+        // Anchor to the caret's *visual* position: the caret lives inside the
+        // scrolled line list, so the popup (a sibling of the scroll view) has to
+        // fold in the padding and the scroll offset — otherwise a restored tab,
+        // whose cursor lands on the last line, paints the popup far below the
+        // viewport and it never shows. Below the caret by default; flip above when
+        // that would clip past the editor's bottom edge.
         property <length> pop-h: min(root.completion-items.length * 22px + 8px, 200px);
-        property <length> below-y: (root.cursor-line + 1) * root.line-h + 6px;
-        x: min(root.gutter-w + Tokens.sp3 + root.cursor-col * root.charw, root.width - self.width - Tokens.sp2);
-        y: below-y + self.pop-h > root.height && root.cursor-line * root.line-h - self.pop-h - 6px > 0
-            ? root.cursor-line * root.line-h - self.pop-h - 6px
-            : below-y;
+        property <length> caret-y: Tokens.sp2 + root.cursor-line * root.line-h + edit-scroll.viewport-y;
+        property <length> below-y: caret-y + root.line-h + 6px;
+        property <length> above-y: caret-y - self.pop-h - 6px;
+        x: min(root.gutter-w + Tokens.sp3 + root.cursor-col * root.charw + edit-scroll.viewport-x, root.width - self.width - Tokens.sp2);
+        y: below-y + self.pop-h > root.height && above-y > 0 ? above-y : below-y;
         width: 360px;
         height: pop-h;
         border-radius: Tokens.radius;
