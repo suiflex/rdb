@@ -803,30 +803,35 @@ export component WorkArea inherits Rectangle {
                 if root.browse-mode: HorizontalLayout {
                     spacing: Tokens.sp2;
                     alignment: center;
-                    Text {
-                        text: "Limit";
-                        color: Tokens.text-faint;
-                        font-size: Tokens.font-sm;
-                        vertical-alignment: center;
-                    }
-                    Rectangle {
-                        width: 58px;
-                        height: 24px;
-                        border-radius: Tokens.radius;
-                        border-width: 1px;
-                        border-color: Tokens.border-strong;
-                        background: Tokens.card;
-                        TextInput {
-                            x: 0;
-                            width: parent.width;
-                            text <=> root.limit-text;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                            single-line: true;
-                            color: Tokens.text;
-                            font-family: Tokens.mono;
+                    // Limit box only for NoSQL: SQL browse pages via ‹ › and the
+                    // engine has its own LIMIT, so the control is dropped there.
+                    if !root.sql-capable: HorizontalLayout {
+                        spacing: Tokens.sp2;
+                        Text {
+                            text: "Limit";
+                            color: Tokens.text-faint;
                             font-size: Tokens.font-sm;
-                            accepted => { root.set-limit(self.text); }
+                            vertical-alignment: center;
+                        }
+                        Rectangle {
+                            width: 58px;
+                            height: 24px;
+                            border-radius: Tokens.radius;
+                            border-width: 1px;
+                            border-color: Tokens.border-strong;
+                            background: Tokens.card;
+                            TextInput {
+                                x: 0;
+                                width: parent.width;
+                                text <=> root.limit-text;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                single-line: true;
+                                color: Tokens.text;
+                                font-family: Tokens.mono;
+                                font-size: Tokens.font-sm;
+                                accepted => { root.set-limit(self.text); }
+                            }
                         }
                     }
                     Rectangle {

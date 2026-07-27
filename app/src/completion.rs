@@ -91,6 +91,13 @@ fn resolve_alias(stmt: &str, owner: &str) -> String {
     owner.to_string()
 }
 
+/// True when `word` (already lowercased) matches `label` as a prefix or at the
+/// start of any `_`-delimited segment, so typing `teknis` finds `flag_teknis`.
+fn subword_match(label: &str, word: &str) -> bool {
+    let l = label.to_lowercase();
+    l.starts_with(word) || l.split('_').any(|seg| seg.starts_with(word))
+}
+
 /// The trailing run of identifier chars at the end of `s` (ASCII identifier).
 pub fn trailing_word(s: &str) -> &str {
     let b = s.as_bytes();
@@ -253,7 +260,10 @@ pub fn suggest(
     };
     let wl = word.to_lowercase();
     if !wl.is_empty() {
-        cands.retain(|c| c.label.to_lowercase().starts_with(&wl));
+        cands.retain(|c| subword_match(&c.label, &wl));
+        // Prefix matches rank above mid-word (`_`-segment) matches so the most
+        // literal completion stays on top; stable within each group.
+        cands.sort_by_key(|c| !c.label.to_lowercase().starts_with(&wl));
     }
     // dedup by label (a column name may appear across tables), keep first.
     let mut seen = std::collections::HashSet::new();
@@ -310,6 +320,35 @@ mod tests {
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["config_id", "name"]
         );
+    }
+
+    /// Typing a mid-word `_` segment finds the identifier, and a true prefix
+    /// still ranks above the subword hit.
+    #[test]
+    fn subword_matches_underscore_segment() {
+        let n = vec![
+            VmTreeNode {
+                label: "public".into(),
+                kind: "database".into(),
+            },
+            VmTreeNode {
+                label: "licenses".into(),
+                kind: "table".into(),
+            },
+            VmTreeNode {
+                label: "flag_teknis".into(),
+                kind: "field".into(),
+            },
+            VmTreeNode {
+                label: "teknis_id".into(),
+                kind: "field".into(),
+            },
+        ];
+        let (_, c) = suggest("select teknis", &n, "public");
+        let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+        assert!(labels.contains(&"flag_teknis"));
+        // `teknis_id` is a real prefix → ranks ahead of the mid-word match.
+        assert_eq!(labels.first(), Some(&"teknis_id"));
     }
 
     #[test]

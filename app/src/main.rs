@@ -1178,21 +1178,30 @@ fn default_col_width(name: &str, type_name: &str) -> f32 {
     if type_name == "bar" {
         return 520.0;
     }
-    match name {
-        "sector" => 420.0,
-        "total" => 120.0,
-        "name" | "email" => 265.0,
-        "code" => 100.0,
-        "short_name" => 115.0,
-        "country" => 100.0,
-        "exch" => 95.0,
-        "ccy" => 64.0,
-        _ => match type_name {
-            "uuid" | "fk" => 185.0,
-            "timestamptz" | "timestamp" => 190.0,
-            "int4" | "int8" | "numeric" => 80.0,
-            _ => 140.0,
-        },
+    // Size the column to fit its header — bold name + dim type label in the mono
+    // font — so real schema names (often long, `_`-joined) read without dragging.
+    // Coefficients are deliberately a touch above the mono advance at font-sm/xs so
+    // a name never lands right on the elision edge; the arrow + cell padding is the
+    // constant. Clamped so nothing collapses or runs off-screen.
+    let name_px = name.chars().count() as f32 * 8.4;
+    let type_px = type_name.chars().count() as f32 * 6.8;
+    (name_px + type_px + 56.0).clamp(100.0, 460.0)
+}
+
+#[cfg(test)]
+mod col_width_tests {
+    use super::default_col_width;
+
+    #[test]
+    fn fits_name_within_clamp() {
+        // A longer header is wider, and both stay inside the clamp.
+        let short = default_col_width("id", "int4");
+        let long = default_col_width("alasan_penolakan", "varchar");
+        assert!(long > short);
+        assert!((100.0..=460.0).contains(&short));
+        assert!((100.0..=460.0).contains(&long));
+        // The bar sentinel keeps its fixed width.
+        assert_eq!(default_col_width("share", "bar"), 520.0);
     }
 }
 
@@ -2676,7 +2685,13 @@ fn main() -> Result<(), slint::PlatformError> {
         let panes = panes.clone();
         let sync_editor = sync_editor.clone();
         Rc::new(move |pane: usize, text: &str| {
-            *panes[pane].ed_state.borrow_mut() = editor::EditorState::from_text(text);
+            let mut ed = editor::EditorState::from_text(text);
+            // Start at the top so a restored tab shows its query from the first
+            // line with the caret in view — matching a fresh tab. Leaving the
+            // caret on the last line (where `from_text` puts it) kept it, and the
+            // autocomplete popup, scrolled out of sight for saved multi-line queries.
+            ed.move_to(0, 0, false);
+            *panes[pane].ed_state.borrow_mut() = ed;
             sync_editor(pane);
         })
     };
@@ -3071,14 +3086,32 @@ fn main() -> Result<(), slint::PlatformError> {
         let sync_editor = sync_editor.clone();
         let weak = window.as_weak();
         let press: Rc<dyn Fn(usize, i32, i32)> = Rc::new(move |pane, line, col| {
-            if let Some(w) = weak.upgrade() {
-                // Clicking a pane focuses it: drives the accent + which pane
-                // global shortcuts fall back to.
-                w.set_active_pane(pane as i32);
-                set_p_completion_visible(&w, pane, false);
-            }
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            // Clicking a pane focuses it: drives the accent + which pane
+            // global shortcuts fall back to.
+            w.set_active_pane(pane as i32);
+            set_p_completion_visible(&w, pane, false);
+            // A plain click only moves the caret. sync_editor rebuilds the whole
+            // lines model, which destroys every row's TouchArea — and that swallows
+            // the second tap of a double-click, so word-select never fired. When
+            // there is no selection to clear, the line spans are unchanged, so just
+            // nudge the caret and leave the rows (and their TouchAreas) intact.
+            let had_sel = panes[pane].ed_state.borrow().selection().is_some();
             panes[pane].ed_state.borrow_mut().move_to(line, col, false);
-            sync_editor(pane);
+            if had_sel {
+                sync_editor(pane);
+            } else {
+                let ed = panes[pane].ed_state.borrow();
+                if pane == 0 {
+                    w.set_cursor_line(ed.line as i32);
+                    w.set_cursor_col(ed.col as i32);
+                } else {
+                    w.set_p1_cursor_line(ed.line as i32);
+                    w.set_p1_cursor_col(ed.col as i32);
+                }
+            }
         });
         window.on_editor_press({
             let press = press.clone();
@@ -5858,11 +5891,21 @@ fn main() -> Result<(), slint::PlatformError> {
                             vec![sql.clone()]
                         };
                         let n = stmts.len().max(1);
-                        // Row-limit control (default 300): cap manual SELECTs so a
-                        // huge `SELECT * FROM table` can't stream millions of rows
-                        // in and freeze the grid. Browse text already carries its
-                        // own LIMIT, so cap_select leaves it untouched.
-                        let row_limit = browse.lock().unwrap().limit;
+                        // SQL engines are never auto-capped — the user's SELECT runs
+                        // as written (bare reads take the streaming path instead).
+                        // NoSQL keeps the row-limit control's value. Browse text
+                        // carries its own LIMIT either way, so cap_select no-ops it.
+                        let row_limit = if matches!(
+                            engine,
+                            rdb_connstore::Engine::Postgres
+                                | rdb_connstore::Engine::MySql
+                                | rdb_connstore::Engine::Sqlite
+                                | rdb_connstore::Engine::Cassandra
+                        ) {
+                            0
+                        } else {
+                            browse.lock().unwrap().limit
+                        };
                         let mut out = Err(rdb_core::error::RdbError::Query("empty query".into()));
                         for (i, s) in stmts.iter().enumerate() {
                             let s = cap_select(*engine, s, row_limit);
@@ -6348,7 +6391,6 @@ fn main() -> Result<(), slint::PlatformError> {
         let run_sql = run_sql.clone();
         let run_stream = run_stream.clone();
         let cur_engine = cur_engine.clone();
-        let browse = browse.clone();
         let ed_state = ed_state.clone();
         let recent_queries = recent_queries.clone();
         let rebuild_query_tree = rebuild_query_tree.clone();
@@ -6373,10 +6415,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 if active_tab_kind(&w) != "table" {
                     w.set_grid_read_only(true);
                 }
-                // "No limit" (browse.limit == 0) on a bare SELECT streams the
-                // rows in progressively; everything else runs buffered (capped).
+                // SQL engines never carry an injected LIMIT: a bare SELECT streams
+                // the rows in progressively (cancelable, no artificial cap), and a
+                // statement with its own LIMIT / a write runs buffered as written.
                 let stream = active_tab_kind(&w) != "table"
-                    && browse.lock().unwrap().limit == 0
                     && cur_engine
                         .borrow()
                         .map(|e| is_bare_select(e, &text))
@@ -6416,11 +6458,10 @@ fn main() -> Result<(), slint::PlatformError> {
             let stream = weak
                 .upgrade()
                 .map(|w| {
-                    panes[1].browse.lock().unwrap().limit == 0
-                        && cur_engine
-                            .borrow()
-                            .map(|e| is_bare_select(e, &text))
-                            .unwrap_or(false)
+                    cur_engine
+                        .borrow()
+                        .map(|e| is_bare_select(e, &text))
+                        .unwrap_or(false)
                         && active_tab_kind(&w) != "table"
                 })
                 .unwrap_or(false);
