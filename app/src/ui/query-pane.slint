@@ -186,11 +186,12 @@ export component QueryPane inherits Rectangle {
                             clicked => { root.explain-query(); }
                         }
                     }
-                    // Row limit for manual queries: a number caps the result;
-                    // "No limit" streams the whole table in progressively.
+                    // Row limit only for NoSQL engines: SQL engines write their
+                    // own LIMIT, so the control just misleads there. NoSQL has no
+                    // LIMIT syntax, so the field is the only way to cap the result.
                     VerticalLayout {
                         alignment: center;
-                        visible: root.sql-capable;
+                        visible: !root.sql-capable;
                         HorizontalLayout {
                             spacing: Tokens.sp1;
                             VerticalLayout {
