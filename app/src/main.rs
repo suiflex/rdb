@@ -3383,29 +3383,31 @@ fn main() -> Result<(), slint::PlatformError> {
                     });
                 }
             }
-            let recent = recent.borrow();
-            rows.push(TreeNode {
-                label: if history_only { "History" } else { "Recent" }.into(),
-                depth: 0,
-                kind: "qcat".into(),
-                expanded: true,
-                db: SharedString::default(),
-                count: recent.len() as i32,
-            });
-            for (i, q) in recent.iter().enumerate() {
-                let label: String = if q.chars().count() > 24 {
-                    format!("{}…", q.chars().take(23).collect::<String>())
-                } else {
-                    q.clone()
-                };
+            // Queries (mode 1) is the curated Saved list only; History (mode 2)
+            // is the live run history — they no longer duplicate a "Recent" list.
+            if history_only {
+                let recent = recent.borrow();
                 rows.push(TreeNode {
-                    label: label.into(),
-                    depth: 1,
-                    kind: "recent".into(),
-                    expanded: false,
+                    label: "History".into(),
+                    depth: 0,
+                    kind: "qcat".into(),
+                    expanded: true,
                     db: SharedString::default(),
-                    count: i as i32,
+                    count: recent.len() as i32,
                 });
+                for (i, q) in recent.iter().enumerate() {
+                    // Collapse whitespace to one line so a multi-line query does
+                    // not paint over the rows below; the row elides to its width.
+                    let label: String = q.split_whitespace().collect::<Vec<_>>().join(" ");
+                    rows.push(TreeNode {
+                        label: label.chars().take(200).collect::<String>().into(),
+                        depth: 1,
+                        kind: "recent".into(),
+                        expanded: false,
+                        db: SharedString::default(),
+                        count: i as i32,
+                    });
+                }
             }
             w.set_query_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
         }
