@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.25.0](https://github.com/suiflex/rdb/compare/v0.24.0...v0.25.0) (2026-07-27)
+
+
+### App Features
+
+* **app:** sidebar Queries/History split and Details panel actions ([#141](https://github.com/suiflex/rdb/issues/141)) ([ad764b5](https://github.com/suiflex/rdb/commit/ad764b5c888f28f880d7df478c4436d2e31ccb03))
+
+
+### Bug Fixes
+
+* **app:** query-pane limit, autocomplete, and result-grid UX ([#139](https://github.com/suiflex/rdb/issues/139)) ([154b123](https://github.com/suiflex/rdb/commit/154b123c5acdf1070d71daa6c03a19a7adc1116f))
+
 ## [0.24.0](https://github.com/suiflex/rdb/compare/v0.23.0...v0.24.0) (2026-07-26)
 
 
