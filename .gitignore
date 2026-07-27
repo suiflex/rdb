@@ -15,6 +15,7 @@ desktop.ini
 .claude
 .agents
 docs/superpowers
+.forgeguard
 
 # Env & secrets
 .env
