@@ -716,7 +716,8 @@ mod tests {
         assert_eq!(nodes[0].kind, "database");
         assert_eq!(nodes[1].label, "users");
         assert_eq!(nodes[1].kind, "table");
-        assert_eq!(nodes[2].label, "id: int4");
+        // PK fields carry a trailing "PK" tag in the tree label.
+        assert_eq!(nodes[2].label, "id: int4  PK");
         assert_eq!(nodes[2].kind, "field");
     }
 }
