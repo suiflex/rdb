@@ -150,6 +150,11 @@ export component QueryPane inherits Rectangle {
             vertical-stretch: 0.0;
             preferred-height: root.editor-h;
             background: Tokens.canvas;
+            // Paint above the result body below: when the editor is short the
+            // autocomplete popup overflows past its bottom edge, and without this
+            // the result grid (a later sibling) would cover it. z lifts the whole
+            // editor cell — and so the overflowing popup — over the grid.
+            z: 1;
             VerticalLayout {
                 width: 100%;
                 height: 100%;
