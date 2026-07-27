@@ -542,6 +542,14 @@ export component TabularGrid inherits Rectangle {
                         }
                     }
                 }
+                // Say *why* this is view-only: a manual query result has no row
+                // identity, so open the table itself to edit or insert.
+                Text {
+                    text: "View-only — query results have no row identity. Open the table to edit or add rows.";
+                    color: Tokens.text-faint;
+                    font-size: Tokens.font-xs;
+                    wrap: word-wrap;
+                }
             }
         }
     }
