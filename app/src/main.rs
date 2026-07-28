@@ -6813,13 +6813,11 @@ fn main() -> Result<(), slint::PlatformError> {
                         clip_set(query);
                     }
                 }
-                3 => {
-                    if remove_recent(&recent_queries, idx) {
-                        if !mock::mock_mode() {
-                            save_recent(&recent_queries.borrow());
-                        }
-                        rebuild_query_tree("");
+                3 if remove_recent(&recent_queries, idx) => {
+                    if !mock::mock_mode() {
+                        save_recent(&recent_queries.borrow());
                     }
+                    rebuild_query_tree("");
                 }
                 _ => {}
             }
