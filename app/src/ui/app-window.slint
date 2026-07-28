@@ -2574,18 +2574,42 @@ callback create-table-commit();
                     { k: "Esc", a: "Close dialog" },
                 ]: HorizontalLayout {
                     spacing: Tokens.sp3;
-                    Text {
-                        width: 72px;
-                        text: row.k;
-                        color: Tokens.text;
-                        font-family: Tokens.mono;
-                        font-size: Tokens.font-sm;
+                    height: 26px;
+                    // fixed key column so every description starts on the same line
+                    Rectangle {
+                        width: 92px;
+                        HorizontalLayout {
+                            alignment: start;
+                            VerticalLayout {
+                                alignment: center;
+                                // kbd chip
+                                Rectangle {
+                                    height: 20px;
+                                    border-radius: Tokens.radius;
+                                    border-width: 1px;
+                                    border-color: Tokens.border-strong;
+                                    background: Tokens.chrome;
+                                    HorizontalLayout {
+                                        padding-left: Tokens.sp2;
+                                        padding-right: Tokens.sp2;
+                                        Text {
+                                            text: row.k;
+                                            color: Tokens.text;
+                                            font-family: Tokens.mono;
+                                            font-size: Tokens.font-sm;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     Text {
                         horizontal-stretch: 1;
                         text: row.a;
                         color: Tokens.text-dim;
                         font-size: Tokens.font-sm;
+                        vertical-alignment: center;
                     }
                 }
 
