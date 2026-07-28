@@ -9993,6 +9993,14 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         });
     }
+    {
+        let weak = window.as_weak();
+        window.on_update_copy_hint(move || {
+            if let Some(w) = weak.upgrade() {
+                clip_set(&w.get_update_hint());
+            }
+        });
+    }
 
     // ----- manual "Check now" from settings: bypasses the daily throttle and
     // reports the outcome inline so the toggle no longer feels like a no-op -----
