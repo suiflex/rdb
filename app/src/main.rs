@@ -2666,6 +2666,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let spans: Vec<Span> = spans
                         .into_iter()
                         .map(|sp| Span {
+                            cols: sp.text.chars().count() as i32,
                             text: sp.text.into(),
                             kind: sp.kind,
                             sel: sp.sel,
@@ -3482,6 +3483,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let spans: Vec<Span> = editor::lex_line(l)
                         .into_iter()
                         .map(|sp| Span {
+                            cols: sp.text.chars().count() as i32,
                             text: sp.text.into(),
                             kind: sp.kind,
                             sel: false,

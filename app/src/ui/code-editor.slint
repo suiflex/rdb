@@ -148,8 +148,14 @@ export component CodeEditor inherits Rectangle {
                             spacing: 0;
                             alignment: start;
                             for span in line: Rectangle {
+                                // Pin each span to the caret's charw grid so the
+                                // rendered text and the caret/hit-test stay in lock
+                                // step — no drift, even glyph spacing on long lines.
+                                width: root.charw * span.cols;
+                                clip: true;
                                 background: span.sel ? Tokens.accent.with-alpha(0.18) : transparent;
                                 Text {
+                                    x: 0;
                                     vertical-alignment: center;
                                     text: span.text;
                                     font-family: Tokens.mono;
