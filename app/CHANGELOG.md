@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.26.0](https://github.com/suiflex/rdb/compare/v0.25.2...v0.26.0) (2026-07-28)
+## RDB: [0.26.0](https://github.com/suiflex/rdb/compare/v0.25.2...v0.26.0) (2026-07-28)
 
 
 ### App Features
