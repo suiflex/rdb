@@ -3,7 +3,7 @@ export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
-    SearchCommandPill, BreadcrumbChip, GlyphButton, IconButton, PrimaryButton, SecondaryButton, TextButton, Tooltip
+    SearchCommandPill, BreadcrumbChip, GlyphButton, IconButton, PrimaryButton, SecondaryButton, SelectBox, TextButton, Tooltip
 } from "components.slint";
 import { NavCluster } from "nav-cluster.slint";
 import { ConnPicker } from "picker.slint";
@@ -208,6 +208,7 @@ callback create-table-commit();
     // History item actions: append its SQL to the editor, or re-run it directly.
     callback insert-query(int);
     callback rerun-query(int);
+    callback history-action(int, int);
     callback sidebar-mode-changed(int);
 
     // ----- connections screen detail panel -----
@@ -291,6 +292,7 @@ callback create-table-commit();
     callback toggle-fold(int);
     in property <string> editor-placeholder;
     in property <int> cursor-line;
+    in property <int> cursor-visual-row;
     in property <int> cursor-col;
     // SQL autocomplete popup
     in property <[PaletteItem]> completion-items;
@@ -400,6 +402,7 @@ callback create-table-commit();
     in property <[bool]> p1-editor-line-hidden;
     in property <string> p1-editor-placeholder;
     in property <int> p1-cursor-line;
+    in property <int> p1-cursor-visual-row;
     in property <int> p1-cursor-col;
     in-out property <bool> p1-editor-collapsed;
     in-out property <length> p1-editor-h: 340px;
@@ -512,6 +515,8 @@ callback create-table-commit();
     in-out property <bool> settings-open: false;
     in property <bool> update-check-enabled: true;
     callback set-update-check(bool);
+    in property <int> history-max-entries: 50;
+    callback set-history-max-entries(int);
     in-out property <bool> shortcuts-open: false;
     in-out property <bool> about-open: false;
     in property <string> app-version;
@@ -1020,6 +1025,7 @@ callback create-table-commit();
                     open-query(q, i) => { root.open-query(q, i); }
                     insert-query(i) => { root.insert-query(i); }
                     rerun-query(i) => { root.rerun-query(i); }
+                    history-action(i, a) => { root.history-action(i, a); }
                     mode-changed(m) => { root.sidebar-mode = m; root.sidebar-mode-changed(m); }
                     open-table(db, t) => { root.open-table(db, t); }
                     pin-table(db, t) => { root.pin-table(db, t); }
@@ -1363,6 +1369,7 @@ callback create-table-commit();
                         p1-editor-line-hidden: root.p1-editor-line-hidden;
                         p1-editor-placeholder: root.p1-editor-placeholder;
                         p1-cursor-line: root.p1-cursor-line;
+                        p1-cursor-visual-row: root.p1-cursor-visual-row;
                         p1-cursor-col: root.p1-cursor-col;
                         p1-editor-collapsed <=> root.p1-editor-collapsed;
                         p1-editor-h <=> root.p1-editor-h;
@@ -1481,6 +1488,7 @@ callback create-table-commit();
                         toggle-fold(l) => { root.toggle-fold(l); }
                         editor-placeholder: root.editor-placeholder;
                         cursor-line: root.cursor-line;
+                        cursor-visual-row: root.cursor-visual-row;
                         cursor-col: root.cursor-col;
                         completion-items: root.completion-items;
                         completion-visible: root.completion-visible;
@@ -1744,6 +1752,7 @@ callback create-table-commit();
                     open-query(q, i) => { root.open-query(q, i); }
                     insert-query(i) => { root.insert-query(i); }
                     rerun-query(i) => { root.rerun-query(i); }
+                    history-action(i, a) => { root.history-action(i, a); }
                     mode-changed(m) => { root.sidebar-mode = m; root.sidebar-mode-changed(m); }
                     open-table(db, t) => { root.open-table(db, t); }
                     pin-table(db, t) => { root.pin-table(db, t); }
@@ -2442,6 +2451,31 @@ callback create-table-commit();
                     }
                 }
 
+                // --- query history ---
+                HorizontalLayout {
+                    spacing: Tokens.sp3;
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: "History entries";
+                            color: Tokens.text;
+                            font-size: 13px;
+                        }
+                    }
+                    SelectBox {
+                        width: 82px;
+                        model: ["25", "50", "100", "200"];
+                        current-value: root.history-max-entries == 25 ? "25"
+                            : root.history-max-entries == 100 ? "100"
+                            : root.history-max-entries == 200 ? "200" : "50";
+                        selected(value) => {
+                            root.set-history-max-entries(value == "25" ? 25
+                                : value == "100" ? 100 : value == "200" ? 200 : 50);
+                        }
+                    }
+                }
+
                 // --- keyboard shortcuts ---
                 HorizontalLayout {
                     SecondaryButton {
@@ -2524,6 +2558,8 @@ callback create-table-commit();
                     { k: "⌘O", a: "Open connection" },
                     { k: "⌘⇧O", a: "Open database" },
                     { k: "⌘P", a: "Filter sidebar" },
+                    { k: "J / K", a: "Grid: next / previous row" },
+                    { k: "⌫ / Del", a: "Grid: mark row for deletion" },
                     { k: "Esc", a: "Close dialog" },
                 ]: HorizontalLayout {
                     spacing: Tokens.sp3;
@@ -2624,16 +2660,19 @@ callback create-table-commit();
     if Tooltip.shown && Tooltip.text != "": Rectangle {
         x: min(max(Tooltip.x - self.width / 2, 4px), root.width - self.width - 4px);
         y: Tooltip.y;
-        width: tip.preferred-width + 2 * Tokens.sp2;
+        width: min(tip.preferred-width + 2 * Tokens.sp2, Tooltip.max-width);
         height: tip.preferred-height + Tokens.sp1;
         border-radius: Tokens.radius;
         background: Tokens.chrome;
         border-width: 1px;
         border-color: Tokens.border;
         tip := Text {
+            x: Tokens.sp2;
+            width: parent.width - 2 * Tokens.sp2;
             text: Tooltip.text;
             color: Tokens.text;
             font-size: Tokens.font-xs;
+            wrap: word-wrap;
         }
     }
 }

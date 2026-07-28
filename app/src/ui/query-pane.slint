@@ -11,6 +11,7 @@ import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "palette.slint";
 import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton } from "components.slint";
 import { ScrollView } from "std-widgets.slint";
+import { AppIcon } from "icons.slint";
 
 export component QueryPane inherits Rectangle {
     // ----- tab-global context (forwarded from WorkArea) -----
@@ -61,6 +62,7 @@ export component QueryPane inherits Rectangle {
     in property <[bool]> editor-line-hidden;
     in property <string> editor-placeholder;
     in property <int> cursor-line;
+    in property <int> cursor-visual-row;
     in property <int> cursor-col;
     callback toggle-fold(int);
     callback editor-key(string, bool, bool, bool) -> bool;
@@ -338,6 +340,7 @@ export component QueryPane inherits Rectangle {
                     toggle-fold(l) => { root.toggle-fold(l); }
                     placeholder: root.editor-placeholder;
                     cursor-line: root.cursor-line;
+                    cursor-visual-row: root.cursor-visual-row;
                     cursor-col: root.cursor-col;
                     completion-items: root.completion-items;
                     completion-visible: root.completion-visible;
@@ -573,12 +576,12 @@ export component QueryPane inherits Rectangle {
                                         // copy this field's value to the clipboard
                                         Rectangle {
                                             width: 18px;
-                                            Text {
-                                                text: "⧉";
+                                            AppIcon {
+                                                x: 2px;
+                                                y: 2px;
+                                                name: "copy";
+                                                size: 14px;
                                                 color: copy-ta.has-hover ? Tokens.accent : Tokens.text-faint;
-                                                font-size: Tokens.font-xs;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
                                             }
                                             copy-ta := TouchArea {
                                                 clicked => { root.copy-text(detail-cell.is-null ? "" : detail-cell.text); }

@@ -3,7 +3,7 @@
 // Reference: design/2-workspace.png (left column).
 import { Tokens } from "tokens.slint";
 import { TreeNode } from "structs.slint";
-import { FilterField, KeyCap } from "components.slint";
+import { FilterField, KeyCap, Tooltip } from "components.slint";
 import { AppIcon } from "icons.slint";
 import { ScrollView, Spinner } from "std-widgets.slint";
 
@@ -29,6 +29,8 @@ export component Sidebar inherits Rectangle {
     callback open-query(string, int);      // (label, index in its section)
     callback insert-query(int);            // History row: append its SQL to editor
     callback rerun-query(int);             // History ▶: run it, editor untouched
+    // History menu action: 0 insert, 1 run, 2 copy, 3 delete.
+    callback history-action(int, int);
     callback toggle-node(string);
     callback select-schema(string);
     callback filter-tree(string);
@@ -43,6 +45,8 @@ export component Sidebar inherits Rectangle {
     // which would otherwise swallow the second click of every double-click.
     property <string> pending-db;
     property <string> pending-label;
+    property <int> history-menu-index: -1;
+    property <length> history-menu-y: 0px;
     click-timer := Timer {
         interval: 220ms;
         running: false;
@@ -144,6 +148,25 @@ export component Sidebar inherits Rectangle {
 
                     row-ta := TouchArea {
                         enabled: !is-hint && !is-field;
+                        changed has-hover => {
+                            if (self.has-hover && node.kind == "recent") {
+                                Tooltip.text = node.db;
+                                Tooltip.x = root.absolute-position.x + root.width / 2;
+                                Tooltip.y = self.absolute-position.y + parent.height + 4px;
+                                Tooltip.max-width = 520px;
+                                Tooltip.shown = node.db != "";
+                            } else if Tooltip.text == node.db {
+                                Tooltip.shown = false;
+                            }
+                        }
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right
+                                && node.kind == "recent") {
+                                root.history-menu-index = node.count;
+                                root.history-menu-y = self.absolute-position.y - root.absolute-position.y;
+                                history-menu.show();
+                            }
+                        }
                         clicked => {
                             if (is-category || is-database) {
                                 root.toggle-node(node.label);
@@ -284,12 +307,12 @@ export component Sidebar inherits Rectangle {
                         // Nested TouchArea wins over the row, so the row still appends.
                         if node.kind == "recent": Rectangle {
                             width: 20px;
-                            Text {
-                                text: "▶";
+                            AppIcon {
+                                x: 4px;
+                                y: 5px;
+                                name: "play";
+                                size: 12px;
                                 color: rerun-ta.has-hover ? Tokens.accent : Tokens.text-faint;
-                                font-size: Tokens.font-xs;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
                             }
                             rerun-ta := TouchArea {
                                 clicked => { root.rerun-query(node.count); }
@@ -366,6 +389,41 @@ export component Sidebar inherits Rectangle {
                         font-size: 16px;
                     }
                     plus-ta := TouchArea { clicked => { root.add-item(); } }
+                }
+            }
+        }
+    }
+
+    history-menu := PopupWindow {
+        x: root.width - 156px;
+        y: min(root.history-menu-y, root.height - 128px);
+        width: 152px;
+        Rectangle {
+            background: Tokens.card;
+            border-radius: Tokens.radius;
+            border-width: 1px;
+            border-color: Tokens.border-strong;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: Tokens.text.with-alpha(0.25);
+            VerticalLayout {
+                padding: 4px;
+                for label[action] in ["Insert to editor", "Run", "Copy query", "Delete"]: Rectangle {
+                    height: 28px;
+                    border-radius: Tokens.radius;
+                    background: menu-ta.has-hover ? (action == 3 ? Tokens.error-tint : Tokens.accent-tint) : transparent;
+                    Text {
+                        x: Tokens.sp2;
+                        text: label;
+                        color: action == 3 ? Tokens.error : Tokens.text;
+                        font-size: Tokens.font-sm;
+                        vertical-alignment: center;
+                    }
+                    menu-ta := TouchArea {
+                        clicked => {
+                            root.history-action(root.history-menu-index, action);
+                            history-menu.close();
+                        }
+                    }
                 }
             }
         }
