@@ -6767,7 +6767,6 @@ fn main() -> Result<(), slint::PlatformError> {
         let run_stream = run_stream.clone();
         let cur_engine = cur_engine.clone();
         let recent_queries = recent_queries.clone();
-        let history_cap = history_cap.clone();
         window.on_rerun_query(move |idx| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -6876,6 +6875,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let cur_engine = cur_engine.clone();
         let weak = window.as_weak();
         let recent_queries = recent_queries.clone();
+        let history_cap = history_cap.clone();
         let run_p1 = move || {
             let text = {
                 let ed = panes[1].ed_state.borrow();
