@@ -2834,6 +2834,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 }
             }
+            let cursor_visual_row = hidden
+                .iter()
+                .take(ed.line)
+                .filter(|hidden| !**hidden)
+                .count() as i32;
             let hidden = ModelRc::from(Rc::new(VecModel::from(hidden)));
             let fold_state = ModelRc::from(Rc::new(VecModel::from(fold_state)));
             if pane == 0 {
@@ -2841,6 +2846,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_editor_line_hidden(hidden);
                 w.set_editor_fold_state(fold_state);
                 w.set_cursor_line(ed.line as i32);
+                w.set_cursor_visual_row(cursor_visual_row);
                 w.set_cursor_col(ed.col as i32);
                 // query-text mirrors the focused editor for tab persistence; the
                 // right pane's text lives in panes[1].ed_state (persisted via
@@ -2851,6 +2857,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_p1_editor_line_hidden(hidden);
                 w.set_p1_editor_fold_state(fold_state);
                 w.set_p1_cursor_line(ed.line as i32);
+                w.set_p1_cursor_visual_row(cursor_visual_row);
                 w.set_p1_cursor_col(ed.col as i32);
             }
         }
