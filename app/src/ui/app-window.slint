@@ -208,6 +208,7 @@ callback create-table-commit();
     // History item actions: append its SQL to the editor, or re-run it directly.
     callback insert-query(int);
     callback rerun-query(int);
+    callback history-action(int, int);
     callback sidebar-mode-changed(int);
 
     // ----- connections screen detail panel -----
@@ -1022,6 +1023,7 @@ callback create-table-commit();
                     open-query(q, i) => { root.open-query(q, i); }
                     insert-query(i) => { root.insert-query(i); }
                     rerun-query(i) => { root.rerun-query(i); }
+                    history-action(i, a) => { root.history-action(i, a); }
                     mode-changed(m) => { root.sidebar-mode = m; root.sidebar-mode-changed(m); }
                     open-table(db, t) => { root.open-table(db, t); }
                     pin-table(db, t) => { root.pin-table(db, t); }
@@ -1748,6 +1750,7 @@ callback create-table-commit();
                     open-query(q, i) => { root.open-query(q, i); }
                     insert-query(i) => { root.insert-query(i); }
                     rerun-query(i) => { root.rerun-query(i); }
+                    history-action(i, a) => { root.history-action(i, a); }
                     mode-changed(m) => { root.sidebar-mode = m; root.sidebar-mode-changed(m); }
                     open-table(db, t) => { root.open-table(db, t); }
                     pin-table(db, t) => { root.pin-table(db, t); }
