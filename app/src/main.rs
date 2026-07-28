@@ -5561,7 +5561,17 @@ fn main() -> Result<(), slint::PlatformError> {
         let db_override = db_override.clone();
         let tabs_restored = tabs_restored.clone();
         let restore_tab = restore_tab.clone();
+        let save_active_tab = save_active_tab.clone();
+        let save_p1_tab = save_p1_tab.clone();
         window.on_connect_clicked(move |idx| {
+            // Flush the live editor text + results of the active tab(s) into the
+            // workspace model before it is rebuilt for the new connection. Without
+            // this a connection switch reads stale/empty tab text (the query looked
+            // duplicated or lost) and dropped the results of the inactive tabs.
+            if let Some(w) = weak.upgrade() {
+                save_active_tab(&w);
+                save_p1_tab(&w);
+            }
             let i = idx as usize;
             // One-shot: set by the database switcher, empty for a fresh picker
             // connect (which then uses the connection's saved database).
