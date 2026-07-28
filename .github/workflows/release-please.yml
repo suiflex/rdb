@@ -16,6 +16,11 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+
       - uses: googleapis/release-please-action@v5
         id: release
         with:
@@ -33,3 +38,24 @@ jobs:
         run: |
           gh release edit "${{ steps.release.outputs.tag_name }}" \
             --title "RDB: ${{ steps.release.outputs.tag_name }}"
+
+      # Match the CHANGELOG to the release title. release-please regenerates
+      # only the newest block on each run, so prefixing the top-most heading on
+      # the release-PR branch is idempotent and leaves older headings untouched.
+      - name: Prefix CHANGELOG heading with product name
+        if: ${{ steps.release.outputs.pr }}
+        run: |
+          branch=$(printf '%s' '${{ steps.release.outputs.pr }}' | jq -r '.headBranchName')
+          git fetch origin "$branch"
+          git checkout "$branch"
+          awk '!done && /^## \[/ { sub(/^## \[/, "## RDB: ["); done=1 } { print }' \
+            app/CHANGELOG.md > app/CHANGELOG.md.tmp
+          mv app/CHANGELOG.md.tmp app/CHANGELOG.md
+          if git diff --quiet -- app/CHANGELOG.md; then
+            echo "CHANGELOG heading already prefixed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "docs: prefix changelog heading with RDB"
+          git push origin "$branch"
