@@ -209,6 +209,10 @@ callback create-table-commit();
     callback insert-query(int);
     callback rerun-query(int);
     callback history-action(int, int);
+    // Saved query actions: run directly, or menu (0 run, 1 new tab, 2 insert,
+    // 3 copy, 4 delete).
+    callback run-saved-query(int);
+    callback query-action(int, int);
     callback sidebar-mode-changed(int);
 
     // ----- connections screen detail panel -----
@@ -1026,6 +1030,8 @@ callback create-table-commit();
                     insert-query(i) => { root.insert-query(i); }
                     rerun-query(i) => { root.rerun-query(i); }
                     history-action(i, a) => { root.history-action(i, a); }
+                    run-saved-query(i) => { root.run-saved-query(i); }
+                    query-action(i, a) => { root.query-action(i, a); }
                     mode-changed(m) => { root.sidebar-mode = m; root.sidebar-mode-changed(m); }
                     open-table(db, t) => { root.open-table(db, t); }
                     pin-table(db, t) => { root.pin-table(db, t); }
@@ -1753,6 +1759,8 @@ callback create-table-commit();
                     insert-query(i) => { root.insert-query(i); }
                     rerun-query(i) => { root.rerun-query(i); }
                     history-action(i, a) => { root.history-action(i, a); }
+                    run-saved-query(i) => { root.run-saved-query(i); }
+                    query-action(i, a) => { root.query-action(i, a); }
                     mode-changed(m) => { root.sidebar-mode = m; root.sidebar-mode-changed(m); }
                     open-table(db, t) => { root.open-table(db, t); }
                     pin-table(db, t) => { root.pin-table(db, t); }

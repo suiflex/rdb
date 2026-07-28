@@ -31,6 +31,9 @@ export component Sidebar inherits Rectangle {
     callback rerun-query(int);             // History ▶: run it, editor untouched
     // History menu action: 0 insert, 1 run, 2 copy, 3 delete.
     callback history-action(int, int);
+    callback run-saved-query(int);         // Saved ▶: run it, editor untouched
+    // Saved menu action: 0 run, 1 open in new tab, 2 insert, 3 copy, 4 delete.
+    callback query-action(int, int);
     callback toggle-node(string);
     callback select-schema(string);
     callback filter-tree(string);
@@ -47,6 +50,8 @@ export component Sidebar inherits Rectangle {
     property <string> pending-label;
     property <int> history-menu-index: -1;
     property <length> history-menu-y: 0px;
+    property <int> query-menu-index: -1;
+    property <length> query-menu-y: 0px;
     click-timer := Timer {
         interval: 220ms;
         running: false;
@@ -165,6 +170,11 @@ export component Sidebar inherits Rectangle {
                                 root.history-menu-index = node.count;
                                 root.history-menu-y = self.absolute-position.y - root.absolute-position.y;
                                 history-menu.show();
+                            } else if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right
+                                && node.kind == "query") {
+                                root.query-menu-index = node.count;
+                                root.query-menu-y = self.absolute-position.y - root.absolute-position.y;
+                                query-menu.show();
                             }
                         }
                         clicked => {
@@ -303,9 +313,10 @@ export component Sidebar inherits Rectangle {
                             overflow: elide;
                         }
 
-                        // History ▶: re-run this entry directly (editor untouched).
-                        // Nested TouchArea wins over the row, so the row still appends.
-                        if node.kind == "recent": Rectangle {
+                        // ▶: re-run this entry directly (editor untouched).
+                        // Nested TouchArea wins over the row, so the row still
+                        // performs its own click action (append / open).
+                        if node.kind == "recent" || node.kind == "query": Rectangle {
                             width: 20px;
                             AppIcon {
                                 x: 4px;
@@ -315,7 +326,13 @@ export component Sidebar inherits Rectangle {
                                 color: rerun-ta.has-hover ? Tokens.accent : Tokens.text-faint;
                             }
                             rerun-ta := TouchArea {
-                                clicked => { root.rerun-query(node.count); }
+                                clicked => {
+                                    if (node.kind == "recent") {
+                                        root.rerun-query(node.count);
+                                    } else {
+                                        root.run-saved-query(node.count);
+                                    }
+                                }
                             }
                         }
 
@@ -422,6 +439,41 @@ export component Sidebar inherits Rectangle {
                         clicked => {
                             root.history-action(root.history-menu-index, action);
                             history-menu.close();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    query-menu := PopupWindow {
+        x: root.width - 176px;
+        y: min(root.query-menu-y, root.height - 156px);
+        width: 172px;
+        Rectangle {
+            background: Tokens.card;
+            border-radius: Tokens.radius;
+            border-width: 1px;
+            border-color: Tokens.border-strong;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: Tokens.text.with-alpha(0.25);
+            VerticalLayout {
+                padding: 4px;
+                for label[action] in ["Run", "Open in new tab", "Insert to editor", "Copy query"]: Rectangle {
+                    height: 28px;
+                    border-radius: Tokens.radius;
+                    background: qmenu-ta.has-hover ? Tokens.accent-tint : transparent;
+                    Text {
+                        x: Tokens.sp2;
+                        text: label;
+                        color: Tokens.text;
+                        font-size: Tokens.font-sm;
+                        vertical-alignment: center;
+                    }
+                    qmenu-ta := TouchArea {
+                        clicked => {
+                            root.query-action(root.query-menu-index, action);
+                            query-menu.close();
                         }
                     }
                 }
