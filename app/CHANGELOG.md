@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.26.0](https://github.com/suiflex/rdb/compare/v0.25.2...v0.26.0) (2026-07-28)
+
+
+### App Features
+
+* **app:** add run/open/insert/copy actions to saved query rows ([91c768c](https://github.com/suiflex/rdb/commit/91c768c97efc25601cd6061784447052f3a173c6))
+* **app:** add save-to-queries action to history rows ([b186894](https://github.com/suiflex/rdb/commit/b1868941f9360eadede0e375deedb81c095ab399))
+* **app:** persist saved queries and support delete ([76d8c34](https://github.com/suiflex/rdb/commit/76d8c34b65404ccb7d9ee4d07968cf27601c04f9))
+* **app:** polish keyboard shortcuts dialog ([cecbc77](https://github.com/suiflex/rdb/commit/cecbc7729d697fc560011e314145162679d12e83))
+* **app:** redesign settings into tabbed sections ([d546c6f](https://github.com/suiflex/rdb/commit/d546c6fb786604a1aff81042402f28af822d8a80))
+* **app:** show actionable update prompt in settings ([9287c4a](https://github.com/suiflex/rdb/commit/9287c4aa31a727a59fd98199b78f91399b1e6a80))
+
+
+### Bug Fixes
+
+* **app:** even out keyboard shortcut key chips ([b29fa66](https://github.com/suiflex/rdb/commit/b29fa66b463049f8429d11492b2810fb0611550f))
+* **app:** list all six supported engines in About ([a915b5f](https://github.com/suiflex/rdb/commit/a915b5fde0c641fc0eaa721abe1f711c8d7697ec))
+
 ## [0.25.2](https://github.com/suiflex/rdb/compare/v0.25.1...v0.25.2) (2026-07-28)
 
 
