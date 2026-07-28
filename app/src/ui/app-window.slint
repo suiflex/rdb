@@ -3,7 +3,7 @@ export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
-    SearchCommandPill, BreadcrumbChip, GlyphButton, IconButton, PrimaryButton, SecondaryButton, TextButton, Tooltip
+    SearchCommandPill, BreadcrumbChip, GlyphButton, IconButton, PrimaryButton, SecondaryButton, SelectBox, TextButton, Tooltip
 } from "components.slint";
 import { NavCluster } from "nav-cluster.slint";
 import { ConnPicker } from "picker.slint";
@@ -515,6 +515,8 @@ callback create-table-commit();
     in-out property <bool> settings-open: false;
     in property <bool> update-check-enabled: true;
     callback set-update-check(bool);
+    in property <int> history-max-entries: 50;
+    callback set-history-max-entries(int);
     in-out property <bool> shortcuts-open: false;
     in-out property <bool> about-open: false;
     in property <string> app-version;
@@ -2449,6 +2451,31 @@ callback create-table-commit();
                     }
                 }
 
+                // --- query history ---
+                HorizontalLayout {
+                    spacing: Tokens.sp3;
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: "History entries";
+                            color: Tokens.text;
+                            font-size: 13px;
+                        }
+                    }
+                    SelectBox {
+                        width: 82px;
+                        model: ["25", "50", "100", "200"];
+                        current-value: root.history-max-entries == 25 ? "25"
+                            : root.history-max-entries == 100 ? "100"
+                            : root.history-max-entries == 200 ? "200" : "50";
+                        selected(value) => {
+                            root.set-history-max-entries(value == "25" ? 25
+                                : value == "100" ? 100 : value == "200" ? 200 : 50);
+                        }
+                    }
+                }
+
                 // --- keyboard shortcuts ---
                 HorizontalLayout {
                     SecondaryButton {
@@ -2531,6 +2558,8 @@ callback create-table-commit();
                     { k: "⌘O", a: "Open connection" },
                     { k: "⌘⇧O", a: "Open database" },
                     { k: "⌘P", a: "Filter sidebar" },
+                    { k: "J / K", a: "Grid: next / previous row" },
+                    { k: "⌫ / Del", a: "Grid: mark row for deletion" },
                     { k: "Esc", a: "Close dialog" },
                 ]: HorizontalLayout {
                     spacing: Tokens.sp3;

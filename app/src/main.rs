@@ -25,7 +25,7 @@ mod sql_format;
 mod theme;
 mod update;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -1069,9 +1069,9 @@ fn strip_sql_comments(text: &str) -> String {
 }
 
 /// Record an executed query at the head of the history (dedupe, cap
-/// `RECENT_CAP`) and persist it, except in mock mode. Comment-only text is
+/// `cap`) and persist it, except in mock mode. Comment-only text is
 /// dropped and comments are stripped so history keeps only runnable SQL.
-fn record_recent(list: &RefCell<Vec<String>>, text: &str) {
+fn record_recent(list: &RefCell<Vec<String>>, text: &str, cap: usize) {
     let t = strip_sql_comments(text);
     let t = t.trim();
     if t.is_empty() {
@@ -1080,7 +1080,7 @@ fn record_recent(list: &RefCell<Vec<String>>, text: &str) {
     let mut v = list.borrow_mut();
     v.retain(|s| s != t);
     v.insert(0, t.to_string());
-    v.truncate(RECENT_CAP);
+    v.truncate(cap.max(1));
     if !mock::mock_mode() {
         save_recent(&v);
     }
@@ -1088,7 +1088,7 @@ fn record_recent(list: &RefCell<Vec<String>>, text: &str) {
 
 fn recent_preview(text: &str) -> String {
     let preview = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut out: String = preview.chars().take(180).collect();
+    let mut out: String = preview.chars().take(600).collect();
     if preview.chars().count() > out.chars().count() {
         out.push_str("...");
     }
@@ -1132,14 +1132,14 @@ mod record_recent_tests {
     #[test]
     fn comment_only_is_not_recorded() {
         let list = RefCell::new(Vec::new());
-        record_recent(&list, "-- \\ Check Perizinan\n-- mp.username ilike '%x%'");
+        record_recent(&list, "-- \\ Check Perizinan\n-- mp.username ilike '%x%'", RECENT_CAP);
         assert!(list.borrow().is_empty());
     }
 
     #[test]
     fn leading_comment_is_stripped_but_sql_kept() {
         let list = RefCell::new(Vec::new());
-        record_recent(&list, "-- pick emiten\nselect * from emiten; -- trailing");
+        record_recent(&list, "-- pick emiten\nselect * from emiten; -- trailing", RECENT_CAP);
         assert_eq!(list.borrow().as_slice(), ["select * from emiten;"]);
     }
 
@@ -2693,6 +2693,10 @@ fn main() -> Result<(), slint::PlatformError> {
         .set_dark(settings.borrow().get().theme.is_dark());
     window.set_update_check_enabled(settings.borrow().get().update_check);
     window.set_sidebar_right(settings.borrow().get().ui_state.sidebar_right);
+    let history_cap = Rc::new(Cell::new(
+        settings.borrow().get().editor.history_max_entries.max(1) as usize,
+    ));
+    window.set_history_max_entries(history_cap.get() as i32);
     window.set_app_version(env!("CARGO_PKG_VERSION").into());
 
     // Fixed window size for the screenshot loop: RDB_WIN=WxH (logical px).
@@ -3555,7 +3559,9 @@ fn main() -> Result<(), slint::PlatformError> {
             "UPDATE emiten SET updated_at = now() WHERE code = '93344';".into(),
         ]
     } else {
-        load_recent()
+        let mut recent = load_recent();
+        recent.truncate(history_cap.get());
+        recent
     }));
     let rebuild_query_tree = {
         let weak = window.as_weak();
@@ -6650,6 +6656,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let cur_engine = cur_engine.clone();
         let ed_state = ed_state.clone();
         let recent_queries = recent_queries.clone();
+        let history_cap = history_cap.clone();
         let rebuild_query_tree = rebuild_query_tree.clone();
         window.on_run_query(move || {
             if let Some(w) = weak.upgrade() {
@@ -6666,7 +6673,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 if text.is_empty() {
                     return;
                 }
-                record_recent(&recent_queries, &text);
+                record_recent(&recent_queries, &text, history_cap.get());
                 // A manual query result has no row identity — never editable.
                 // (The browse path re-enables editing after its PK fetch.)
                 if active_tab_kind(&w) != "table" {
@@ -6699,6 +6706,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let run_stream = run_stream.clone();
         let cur_engine = cur_engine.clone();
         let recent_queries = recent_queries.clone();
+        let history_cap = history_cap.clone();
         window.on_rerun_query(move |idx| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -6818,7 +6826,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if text.is_empty() {
                 return;
             }
-            record_recent(&recent_queries, &text);
+            record_recent(&recent_queries, &text, history_cap.get());
             let stream = weak
                 .upgrade()
                 .map(|w| {
@@ -6911,6 +6919,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let browse = browse.clone();
         let ed_state = ed_state.clone();
         let recent_queries = recent_queries.clone();
+        let history_cap = history_cap.clone();
         window.on_run_selection(move || {
             let stmt = {
                 let ed = ed_state.borrow();
@@ -6932,7 +6941,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             .map(|e| is_bare_select(e, &stmt))
                             .unwrap_or(false);
                 }
-                record_recent(&recent_queries, &stmt);
+                record_recent(&recent_queries, &stmt, history_cap.get());
                 if stream {
                     run_stream(0, stmt);
                 } else {
@@ -8191,6 +8200,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let panes = panes.clone();
         let run_sql = run_sql.clone();
         let recent_queries = recent_queries.clone();
+        let history_cap = history_cap.clone();
         window.on_run_new_tab(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -8213,7 +8223,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if pane == 0 {
                 w.set_grid_read_only(true);
             }
-            record_recent(&recent_queries, &stmt);
+            record_recent(&recent_queries, &stmt, history_cap.get());
             run_sql(pane, stmt);
         });
     }
@@ -9228,6 +9238,33 @@ fn main() -> Result<(), slint::PlatformError> {
             let _ = settings
                 .borrow_mut()
                 .update(|s| s.ui_state.sidebar_right = v);
+        });
+    }
+
+    // ----- settings: history retention limit -----
+    {
+        let weak = window.as_weak();
+        let settings = settings.clone();
+        let history_cap = history_cap.clone();
+        let recent_queries = recent_queries.clone();
+        let rebuild_query_tree = rebuild_query_tree.clone();
+        window.on_set_history_max_entries(move |value| {
+            let cap = match value {
+                25 | 50 | 100 | 200 => value as usize,
+                _ => RECENT_CAP,
+            };
+            history_cap.set(cap);
+            recent_queries.borrow_mut().truncate(cap);
+            let _ = settings
+                .borrow_mut()
+                .update(|s| s.editor.history_max_entries = cap as u16);
+            if !mock::mock_mode() {
+                save_recent(&recent_queries.borrow());
+            }
+            if let Some(w) = weak.upgrade() {
+                w.set_history_max_entries(cap as i32);
+                rebuild_query_tree("");
+            }
         });
     }
 
