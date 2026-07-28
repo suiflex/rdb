@@ -614,6 +614,48 @@ struct StoredResult {
     grid: GridState,
 }
 
+fn store_result(
+    results: &mut Vec<StoredResult>,
+    active: &mut usize,
+    result: StoredResult,
+    new_tab: bool,
+) {
+    if new_tab || results.is_empty() {
+        results.push(result);
+        *active = results.len() - 1;
+    } else {
+        *active = (*active).min(results.len() - 1);
+        results[*active] = result;
+    }
+}
+
+#[cfg(test)]
+mod result_tab_tests {
+    use super::*;
+
+    fn result(name: &str) -> StoredResult {
+        StoredResult {
+            view: model::ResultView::Affected(name.into()),
+            meta: String::new(),
+            latency: String::new(),
+            grid: GridState::default(),
+        }
+    }
+
+    #[test]
+    fn replaces_active_or_appends_as_requested() {
+        let mut results = vec![result("first"), result("second")];
+        let mut active = 1;
+        store_result(&mut results, &mut active, result("replacement"), false);
+        assert_eq!(results.len(), 2);
+        assert!(matches!(&results[1].view, model::ResultView::Affected(v) if v == "replacement"));
+
+        store_result(&mut results, &mut active, result("third"), true);
+        assert_eq!(results.len(), 3);
+        assert_eq!(active, 2);
+    }
+}
+
 /// The live editor + result state a single **workspace tab group** owns
 /// independently. The workspace has two groups (left = 0, right = 1); each holds
 /// its own editor buffer, folds, completion, find hits, result set, grid
@@ -1132,14 +1174,22 @@ mod record_recent_tests {
     #[test]
     fn comment_only_is_not_recorded() {
         let list = RefCell::new(Vec::new());
-        record_recent(&list, "-- \\ Check Perizinan\n-- mp.username ilike '%x%'", RECENT_CAP);
+        record_recent(
+            &list,
+            "-- \\ Check Perizinan\n-- mp.username ilike '%x%'",
+            RECENT_CAP,
+        );
         assert!(list.borrow().is_empty());
     }
 
     #[test]
     fn leading_comment_is_stripped_but_sql_kept() {
         let list = RefCell::new(Vec::new());
-        record_recent(&list, "-- pick emiten\nselect * from emiten; -- trailing", RECENT_CAP);
+        record_recent(
+            &list,
+            "-- pick emiten\nselect * from emiten; -- trailing",
+            RECENT_CAP,
+        );
         assert_eq!(list.borrow().as_slice(), ["select * from emiten;"]);
     }
 
@@ -6249,14 +6299,13 @@ fn main() -> Result<(), slint::PlatformError> {
                                 if is_browse {
                                     tab.results.clear();
                                     tab.active_result = 0;
-                                } else if new_tab || tab.results.is_empty() {
-                                    tab.results.push(sr);
-                                    tab.active_result = tab.results.len() - 1;
                                 } else {
-                                    if tab.active_result >= tab.results.len() {
-                                        tab.active_result = 0;
-                                    }
-                                    tab.results[tab.active_result] = sr;
+                                    store_result(
+                                        &mut tab.results,
+                                        &mut tab.active_result,
+                                        sr,
+                                        new_tab,
+                                    );
                                 }
                                 let tab_results = tab.results.clone();
                                 let tab_active = tab.active_result;
@@ -6353,6 +6402,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let browse = panes[pane].browse.clone();
             let stream_cancel = panes[pane].stream_cancel.clone();
             let stream_timer = panes[pane].stream_timer.clone();
+            let result_new_tab = panes[pane].result_new_tab.clone();
             let active_id = if pane == 1 {
                 &active_group1_tab_id
             } else {
@@ -6361,6 +6411,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(target_id) = active_id.lock().unwrap().clone() else {
                 return;
             };
+            let new_tab = result_new_tab.swap(false, std::sync::atomic::Ordering::SeqCst);
             // Stop any in-flight stream, then arm a fresh cancel flag.
             if let Some(prev) = stream_cancel.borrow().as_ref() {
                 prev.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -6490,26 +6541,36 @@ fn main() -> Result<(), slint::PlatformError> {
                                         latency: latency.clone(),
                                         grid: GridState::default(),
                                     };
-                                    if let Some(tab) = workspace_tabs
-                                        .lock()
-                                        .unwrap()
-                                        .iter_mut()
-                                        .find(|t| t.id == target_id)
-                                    {
+                                    let (tab_results, tab_active) = {
+                                        let mut tabs = workspace_tabs.lock().unwrap();
+                                        let Some(tab) = tabs.iter_mut().find(|t| t.id == target_id)
+                                        else {
+                                            return;
+                                        };
                                         tab.loading = false;
                                         tab.view = Some(sr.clone());
-                                        tab.results = vec![sr.clone()];
-                                        tab.active_result = 0;
-                                    }
+                                        store_result(
+                                            &mut tab.results,
+                                            &mut tab.active_result,
+                                            sr.clone(),
+                                            new_tab,
+                                        );
+                                        (tab.results.clone(), tab.active_result)
+                                    };
                                     let active_id = if pane == 1 {
                                         &active_group1_tab_id
                                     } else {
                                         &active_tab_id
                                     };
                                     if active_id.lock().unwrap().as_deref() == Some(&target_id) {
-                                        *results.lock().unwrap() = vec![sr];
-                                        *active_result.lock().unwrap() = 0;
-                                        set_result_tabs(&w, pane, 1, 0);
+                                        *results.lock().unwrap() = tab_results;
+                                        *active_result.lock().unwrap() = tab_active;
+                                        set_result_tabs(
+                                            &w,
+                                            pane,
+                                            results.lock().unwrap().len(),
+                                            tab_active,
+                                        );
                                         present_view(
                                             &w,
                                             pane,
