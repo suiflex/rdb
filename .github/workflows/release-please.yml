@@ -17,8 +17,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v5
+        id: release
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           target-branch: develop
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # The tag stays vX.Y.Z (release-build.yml keys off `v*`); only the
+      # GitHub Release display title gets the "RDB: " prefix.
+      - name: Prefix release title with product name
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          gh release edit "${{ steps.release.outputs.tag_name }}" \
+            --title "RDB: ${{ steps.release.outputs.tag_name }}"
