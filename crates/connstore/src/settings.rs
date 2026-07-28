@@ -55,6 +55,7 @@ pub struct UiState {
 pub struct EditorPrefs {
     pub font_size: u16,
     pub default_page_size: u32,
+    pub history_max_entries: u16,
 }
 
 impl Default for EditorPrefs {
@@ -62,6 +63,7 @@ impl Default for EditorPrefs {
         EditorPrefs {
             font_size: 13,
             default_page_size: 100,
+            history_max_entries: 50,
         }
     }
 }
@@ -169,6 +171,7 @@ mod tests {
         assert!(s.get().update_check);
         assert_eq!(s.get().last_update_check, None);
         assert_eq!(s.get().editor.default_page_size, 100);
+        assert_eq!(s.get().editor.history_max_entries, 50);
     }
 
     #[test]
@@ -182,6 +185,7 @@ mod tests {
             s.ui_state.collapsed_groups = vec!["Prod".into()];
             s.ui_state.last_filter = "pg".into();
             s.editor.font_size = 16;
+            s.editor.history_max_entries = 100;
         })
         .unwrap();
 
@@ -192,6 +196,7 @@ mod tests {
         assert_eq!(reloaded.get().ui_state.collapsed_groups, vec!["Prod"]);
         assert_eq!(reloaded.get().ui_state.last_filter, "pg");
         assert_eq!(reloaded.get().editor.font_size, 16);
+        assert_eq!(reloaded.get().editor.history_max_entries, 100);
     }
 
     #[test]
@@ -203,5 +208,6 @@ mod tests {
         // update_check missing from JSON -> default true, not false.
         assert!(s.get().update_check);
         assert_eq!(s.get().editor.default_page_size, 100);
+        assert_eq!(s.get().editor.history_max_entries, 50);
     }
 }
