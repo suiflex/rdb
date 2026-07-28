@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.2](https://github.com/suiflex/rdb/compare/v0.25.1...v0.25.2) (2026-07-28)
+
+
+### Bug Fixes
+
+* **app:** improve editor history and result tabs ([#146](https://github.com/suiflex/rdb/issues/146)) ([fe181e5](https://github.com/suiflex/rdb/commit/fe181e5489d377d3f83d6d87d6277b4e9ec5c36d))
+
 ## [0.25.1](https://github.com/suiflex/rdb/compare/v0.25.0...v0.25.1) (2026-07-28)
 
 
