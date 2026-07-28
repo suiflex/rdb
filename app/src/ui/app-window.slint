@@ -3,7 +3,7 @@ export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
-    SearchCommandPill, BreadcrumbChip, GlyphButton, IconButton, PrimaryButton, SecondaryButton, SelectBox, TextButton, Tooltip
+    SearchCommandPill, BreadcrumbChip, GlyphButton, IconButton, PrimaryButton, SecondaryButton, SelectBox, TextButton, Toggle, ToggleRow, Tooltip
 } from "components.slint";
 import { NavCluster } from "nav-cluster.slint";
 import { ConnPicker } from "picker.slint";
@@ -120,7 +120,7 @@ export component MainWindow inherits Window {
             }
             MenuItem {
                 title: "About RDB";
-                activated => { root.about-open = true; }
+                activated => { root.settings-tab = 2; root.settings-open = true; }
             }
         }
     }
@@ -522,7 +522,8 @@ callback create-table-commit();
     in property <int> history-max-entries: 50;
     callback set-history-max-entries(int);
     in-out property <bool> shortcuts-open: false;
-    in-out property <bool> about-open: false;
+    // Settings modal active section: 0 Appearance, 1 Updates, 2 About.
+    in-out property <int> settings-tab: 0;
     in property <string> app-version;
 
     // ----- connection form -----
@@ -565,12 +566,11 @@ callback create-table-commit();
         key-pressed(e) => {
             if (e.text == Key.Escape) {
                 if (root.db-modal-open || root.conn-modal-open || root.palette-open
-                    || root.settings-open || root.shortcuts-open || root.about-open) {
+                    || root.settings-open || root.shortcuts-open) {
                     root.db-modal-open = false;
                     root.conn-modal-open = false;
                     root.settings-open = false;
                     root.shortcuts-open = false;
-                    root.about-open = false;
                     if (root.palette-open) { root.toggle-palette(); }
                     return accept;
                 }
@@ -2308,7 +2308,7 @@ callback create-table-commit();
         }
 
         Rectangle {
-            width: 420px;
+            width: 460px;
             x: (parent.width - self.width) / 2;
             y: 120px;
             height: settings-card.preferred-height;
@@ -2336,173 +2336,134 @@ callback create-table-commit();
                     horizontal-alignment: center;
                 }
 
-                // --- appearance ---
+                // --- section tabs ---
                 HorizontalLayout {
-                    spacing: Tokens.sp3;
-                    VerticalLayout {
-                        alignment: center;
-                        horizontal-stretch: 1;
+                    spacing: 2px;
+                    for tab[i] in ["Appearance", "Updates", "About"]: Rectangle {
+                        height: 28px;
+                        border-radius: Tokens.radius;
+                        background: root.settings-tab == i ? Tokens.accent-tint
+                            : (seg-ta.has-hover ? Tokens.chrome : transparent);
                         Text {
-                            text: "Dark mode";
-                            color: Tokens.text;
-                            font-size: 13px;
+                            text: tab;
+                            color: root.settings-tab == i ? Tokens.accent : Tokens.text-dim;
+                            font-size: Tokens.font-sm;
+                            font-weight: root.settings-tab == i ? Tokens.weight-emphasis : 400;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
                         }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        TouchArea {
-                            width: 42px;
-                            height: 24px;
-                            clicked => { root.toggle-theme(); }
-                            Rectangle {
-                                border-radius: 12px;
-                                background: Tokens.dark ? Tokens.accent : Tokens.border-strong;
-                                Rectangle {
-                                    width: 18px;
-                                    height: 18px;
-                                    border-radius: 9px;
-                                    background: #FFFFFF;
-                                    x: Tokens.dark ? parent.width - self.width - 3px : 3px;
-                                    y: (parent.height - self.height) / 2;
-                                }
-                            }
+                        seg-ta := TouchArea {
+                            clicked => { root.settings-tab = i; }
                         }
                     }
                 }
+                Rectangle { height: 1px; background: Tokens.border; }
 
-                // --- sidebar side ---
-                HorizontalLayout {
+                // --- Appearance ---
+                if root.settings-tab == 0: VerticalLayout {
                     spacing: Tokens.sp3;
-                    VerticalLayout {
-                        alignment: center;
-                        horizontal-stretch: 1;
-                        Text {
-                            text: "Sidebar on the right";
-                            color: Tokens.text;
-                            font-size: 13px;
+                    ToggleRow {
+                        label: "Dark mode";
+                        checked: Tokens.dark;
+                        toggled => { root.toggle-theme(); }
+                    }
+                    ToggleRow {
+                        label: "Sidebar on the right";
+                        checked: root.sidebar-right;
+                        toggled => {
+                            root.sidebar-right = !root.sidebar-right;
+                            root.set-sidebar-side(root.sidebar-right);
                         }
                     }
-                    VerticalLayout {
-                        alignment: center;
-                        TouchArea {
-                            width: 42px;
-                            height: 24px;
+                    HorizontalLayout {
+                        spacing: Tokens.sp3;
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            Text {
+                                text: "History entries";
+                                color: Tokens.text;
+                                font-size: 13px;
+                            }
+                        }
+                        SelectBox {
+                            width: 82px;
+                            model: ["25", "50", "100", "200"];
+                            current-value: root.history-max-entries == 25 ? "25"
+                                : root.history-max-entries == 100 ? "100"
+                                : root.history-max-entries == 200 ? "200" : "50";
+                            selected(value) => {
+                                root.set-history-max-entries(value == "25" ? 25
+                                    : value == "100" ? 100 : value == "200" ? 200 : 50);
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        SecondaryButton {
+                            text: "Keyboard Shortcuts";
                             clicked => {
-                                root.sidebar-right = !root.sidebar-right;
-                                root.set-sidebar-side(root.sidebar-right);
-                            }
-                            Rectangle {
-                                border-radius: 12px;
-                                background: root.sidebar-right ? Tokens.accent : Tokens.border-strong;
-                                Rectangle {
-                                    width: 18px;
-                                    height: 18px;
-                                    border-radius: 9px;
-                                    background: #FFFFFF;
-                                    x: root.sidebar-right ? parent.width - self.width - 3px : 3px;
-                                    y: (parent.height - self.height) / 2;
-                                }
+                                root.settings-open = false;
+                                root.shortcuts-open = true;
                             }
                         }
                     }
                 }
 
-                // --- updates ---
-                HorizontalLayout {
+                // --- Updates ---
+                if root.settings-tab == 1: VerticalLayout {
                     spacing: Tokens.sp3;
-                    VerticalLayout {
-                        alignment: center;
-                        horizontal-stretch: 1;
-                        Text {
-                            text: "Check for updates on launch";
-                            color: Tokens.text;
-                            font-size: 13px;
-                        }
+                    ToggleRow {
+                        label: "Check for updates on launch";
+                        checked: root.update-check-enabled;
+                        toggled => { root.set-update-check(!root.update-check-enabled); }
                     }
-                    VerticalLayout {
-                        alignment: center;
-                        TouchArea {
-                            width: 42px;
-                            height: 24px;
-                            clicked => { root.set-update-check(!root.update-check-enabled); }
-                            Rectangle {
-                                border-radius: 12px;
-                                background: root.update-check-enabled ? Tokens.accent : Tokens.border-strong;
-                                Rectangle {
-                                    width: 18px;
-                                    height: 18px;
-                                    border-radius: 9px;
-                                    background: #FFFFFF;
-                                    x: root.update-check-enabled ? parent.width - self.width - 3px : 3px;
-                                    y: (parent.height - self.height) / 2;
-                                }
+                    HorizontalLayout {
+                        spacing: Tokens.sp3;
+                        SecondaryButton {
+                            text: "Check now";
+                            clicked => { root.check-updates-now(); }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            Text {
+                                text: root.update-check-status;
+                                color: Tokens.text-dim;
+                                font-size: 12px;
                             }
                         }
                     }
                 }
 
-                // --- manual update check ---
-                HorizontalLayout {
-                    spacing: Tokens.sp3;
-                    SecondaryButton {
-                        text: "Check now";
-                        clicked => { root.check-updates-now(); }
+                // --- About ---
+                if root.settings-tab == 2: VerticalLayout {
+                    spacing: Tokens.sp2;
+                    Text {
+                        text: "RDB";
+                        color: Tokens.text;
+                        font-size: 22px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
                     }
-                    VerticalLayout {
-                        alignment: center;
-                        horizontal-stretch: 1;
-                        Text {
-                            text: root.update-check-status;
-                            color: Tokens.text-dim;
-                            font-size: 12px;
-                        }
+                    Text {
+                        text: "Version " + root.app-version;
+                        color: Tokens.text-dim;
+                        font-size: Tokens.font-sm;
+                        font-family: Tokens.mono;
+                        horizontal-alignment: center;
                     }
-                }
-
-                // --- query history ---
-                HorizontalLayout {
-                    spacing: Tokens.sp3;
-                    VerticalLayout {
-                        alignment: center;
-                        horizontal-stretch: 1;
-                        Text {
-                            text: "History entries";
-                            color: Tokens.text;
-                            font-size: 13px;
-                        }
+                    Text {
+                        text: "Native cross-platform database manager";
+                        color: Tokens.text-dim;
+                        font-size: Tokens.font-sm;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
                     }
-                    SelectBox {
-                        width: 82px;
-                        model: ["25", "50", "100", "200"];
-                        current-value: root.history-max-entries == 25 ? "25"
-                            : root.history-max-entries == 100 ? "100"
-                            : root.history-max-entries == 200 ? "200" : "50";
-                        selected(value) => {
-                            root.set-history-max-entries(value == "25" ? 25
-                                : value == "100" ? 100 : value == "200" ? 200 : 50);
-                        }
-                    }
-                }
-
-                // --- keyboard shortcuts ---
-                HorizontalLayout {
-                    SecondaryButton {
-                        text: "Keyboard Shortcuts";
-                        clicked => {
-                            root.settings-open = false;
-                            root.shortcuts-open = true;
-                        }
-                    }
-                }
-
-                // --- about ---
-                HorizontalLayout {
-                    SecondaryButton {
-                        text: "About RDB";
-                        clicked => {
-                            root.settings-open = false;
-                            root.about-open = true;
-                        }
+                    Text {
+                        text: "PostgreSQL · MySQL · Redis · MongoDB";
+                        color: Tokens.text-faint;
+                        font-size: Tokens.font-xs;
+                        horizontal-alignment: center;
                     }
                 }
 
@@ -2591,72 +2552,6 @@ callback create-table-commit();
                     PrimaryButton {
                         text: "Done";
                         clicked => { root.shortcuts-open = false; }
-                    }
-                }
-            }
-        }
-    }
-
-    // ----- about modal (veil + centered card) -----
-    if root.about-open: Rectangle {
-        background: Tokens.veil;
-        TouchArea {
-            clicked => { root.about-open = false; }
-        }
-
-        Rectangle {
-            width: 380px;
-            x: (parent.width - self.width) / 2;
-            y: 130px;
-            height: about-card.preferred-height;
-            border-radius: Tokens.modal-radius;
-            background: Tokens.card;
-            border-width: 1px;
-            border-color: Tokens.border;
-            drop-shadow-blur: 42px;
-            drop-shadow-offset-y: 12px;
-            drop-shadow-color: #1C191426;
-
-            TouchArea {}
-
-            about-card := VerticalLayout {
-                padding: Tokens.sp4;
-                padding-top: 22px;
-                spacing: Tokens.sp2;
-
-                Text {
-                    text: "RDB";
-                    color: Tokens.text;
-                    font-size: 22px;
-                    font-weight: 700;
-                    horizontal-alignment: center;
-                }
-                Text {
-                    text: "Version " + root.app-version;
-                    color: Tokens.text-dim;
-                    font-size: Tokens.font-sm;
-                    font-family: Tokens.mono;
-                    horizontal-alignment: center;
-                }
-                Text {
-                    text: "Native cross-platform database manager";
-                    color: Tokens.text-dim;
-                    font-size: Tokens.font-sm;
-                    horizontal-alignment: center;
-                    wrap: word-wrap;
-                }
-                Text {
-                    text: "PostgreSQL · MySQL · Redis · MongoDB";
-                    color: Tokens.text-faint;
-                    font-size: Tokens.font-xs;
-                    horizontal-alignment: center;
-                }
-
-                HorizontalLayout {
-                    alignment: center;
-                    PrimaryButton {
-                        text: "Done";
-                        clicked => { root.about-open = false; }
                     }
                 }
             }
