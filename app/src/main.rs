@@ -1086,6 +1086,45 @@ fn record_recent(list: &RefCell<Vec<String>>, text: &str) {
     }
 }
 
+fn recent_preview(text: &str) -> String {
+    let preview = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out: String = preview.chars().take(180).collect();
+    if preview.chars().count() > out.chars().count() {
+        out.push_str("...");
+    }
+    out
+}
+
+fn remove_recent(list: &RefCell<Vec<String>>, index: usize) -> bool {
+    let mut list = list.borrow_mut();
+    if index >= list.len() {
+        return false;
+    }
+    list.remove(index);
+    true
+}
+
+fn query_timing_meta(
+    rows: u64,
+    statements: usize,
+    total_ms: u64,
+    queue_ms: u64,
+    driver_ms: u64,
+    model_ms: u64,
+) -> String {
+    let prefix = if statements > 1 {
+        format!("{statements} statements · {rows} rows")
+    } else {
+        format!("{rows} rows")
+    };
+    let overhead_ms = queue_ms + model_ms;
+    if overhead_ms >= 25 {
+        format!("{prefix} · {total_ms} ms (db {driver_ms} · wait {queue_ms} · process {model_ms})")
+    } else {
+        format!("{prefix} · {total_ms} ms")
+    }
+}
+
 #[cfg(test)]
 mod record_recent_tests {
     use super::*;
@@ -1102,6 +1141,23 @@ mod record_recent_tests {
         let list = RefCell::new(Vec::new());
         record_recent(&list, "-- pick emiten\nselect * from emiten; -- trailing");
         assert_eq!(list.borrow().as_slice(), ["select * from emiten;"]);
+    }
+
+    #[test]
+    fn query_timing_only_expands_when_client_overhead_is_visible() {
+        assert_eq!(query_timing_meta(1, 1, 12, 1, 10, 1), "1 rows · 12 ms");
+        assert_eq!(
+            query_timing_meta(2, 2, 97, 30, 60, 7),
+            "2 statements · 2 rows · 97 ms (db 60 · wait 30 · process 7)"
+        );
+    }
+
+    #[test]
+    fn remove_recent_only_removes_a_valid_entry() {
+        let list = RefCell::new(vec!["first".into(), "second".into()]);
+        assert!(remove_recent(&list, 0));
+        assert_eq!(list.borrow().as_slice(), ["second"]);
+        assert!(!remove_recent(&list, 1));
     }
 }
 
@@ -3548,13 +3604,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 for (i, q) in recent.iter().enumerate() {
                     // Collapse whitespace to one line so a multi-line query does
                     // not paint over the rows below; the row elides to its width.
-                    let label: String = q.split_whitespace().collect::<Vec<_>>().join(" ");
+                    let label = recent_preview(q);
                     rows.push(TreeNode {
-                        label: label.chars().take(200).collect::<String>().into(),
+                        label: label.clone().into(),
                         depth: 1,
                         kind: "recent".into(),
                         expanded: false,
-                        db: SharedString::default(),
+                        db: SharedString::from(label),
                         count: i as i32,
                     });
                 }
@@ -6066,9 +6122,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 // hid it. The console still updates in place when it is open.
                 cur_db = w.get_schema_name().to_string();
             }
+            let started = std::time::Instant::now();
             let jh = rt.spawn(async move {
                 let guard = current.lock().await;
-                let t0 = std::time::Instant::now();
+                let queue_ms = started.elapsed().as_millis() as u64;
+                let driver_started = std::time::Instant::now();
                 // Multi-statement: SQL engines split on top-level `;` and run
                 // each in order, stopping at the first error. The last result
                 // is what the grid shows (TablePlus semantics). Redis/Mongo
@@ -6139,8 +6197,11 @@ fn main() -> Result<(), slint::PlatformError> {
                         1,
                     ),
                 };
-                let elapsed_ms = t0.elapsed().as_millis().max(1) as u64;
+                let driver_ms = driver_started.elapsed().as_millis() as u64;
+                let model_started = std::time::Instant::now();
                 let view = outcome.as_ref().ok().map(model::to_result_view);
+                let model_ms = model_started.elapsed().as_millis() as u64;
+                let elapsed_ms = started.elapsed().as_millis().max(1) as u64;
                 let err = outcome.err();
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
@@ -6161,11 +6222,9 @@ fn main() -> Result<(), slint::PlatformError> {
                                     model::ResultView::Documents(d) => d.grid.rows.len(),
                                     model::ResultView::Affected(_) => 0,
                                 } as u64;
-                                let meta = if n_stmts > 1 {
-                                    format!("{n_stmts} statements · {shown} rows · {elapsed_ms} ms")
-                                } else {
-                                    format!("{shown} rows · {elapsed_ms} ms")
-                                };
+                                let meta = query_timing_meta(
+                                    shown, n_stmts, elapsed_ms, queue_ms, driver_ms, model_ms,
+                                );
                                 let latency = format!("{elapsed_ms} ms");
                                 let sr = StoredResult {
                                     view: v.clone(),
@@ -6664,6 +6723,37 @@ fn main() -> Result<(), slint::PlatformError> {
                 run_stream(0, text);
             } else {
                 run_sql(0, text);
+            }
+        });
+    }
+
+    // ----- History context menu: insert, run, copy, or remove one entry. -----
+    {
+        let weak = window.as_weak();
+        let recent_queries = recent_queries.clone();
+        let rebuild_query_tree = rebuild_query_tree.clone();
+        window.on_history_action(move |idx, action| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let idx = idx.max(0) as usize;
+            match action {
+                0 => w.invoke_insert_query(idx as i32),
+                1 => w.invoke_rerun_query(idx as i32),
+                2 => {
+                    if let Some(query) = recent_queries.borrow().get(idx) {
+                        clip_set(query);
+                    }
+                }
+                3 => {
+                    if remove_recent(&recent_queries, idx) {
+                        if !mock::mock_mode() {
+                            save_recent(&recent_queries.borrow());
+                        }
+                        rebuild_query_tree("");
+                    }
+                }
+                _ => {}
             }
         });
     }
