@@ -6865,6 +6865,90 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ----- Saved query ▶: run it directly (fresh result, editor untouched) -----
+    {
+        let weak = window.as_weak();
+        let run_sql = run_sql.clone();
+        let run_stream = run_stream.clone();
+        let cur_engine = cur_engine.clone();
+        let saved = saved_queries.clone();
+        window.on_run_saved_query(move |idx| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some((_, text)) = saved.get(idx.max(0) as usize) else {
+                return;
+            };
+            let text = (*text).to_string();
+            if text.trim().is_empty() {
+                return;
+            }
+            if active_tab_kind(&w) != "table" {
+                w.set_grid_read_only(true);
+            }
+            let stream = active_tab_kind(&w) != "table"
+                && cur_engine
+                    .borrow()
+                    .map(|e| is_bare_select(e, &text))
+                    .unwrap_or(false);
+            if stream {
+                run_stream(0, text);
+            } else {
+                run_sql(0, text);
+            }
+        });
+    }
+
+    // ----- Saved query context menu: run, open in new tab, insert, copy -----
+    {
+        let weak = window.as_weak();
+        let saved = saved_queries.clone();
+        let ed_state = ed_state.clone();
+        let sync_editor = sync_editor.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        window.on_query_action(move |idx, action| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let idx = idx.max(0) as usize;
+            let Some((name, sql)) = saved.get(idx) else {
+                return;
+            };
+            let (name, sql) = ((*name).to_string(), (*sql).to_string());
+            match action {
+                0 => w.invoke_run_saved_query(idx as i32),
+                1 => {
+                    // Force a fresh tab, then load the query into it.
+                    w.invoke_new_tab();
+                    w.invoke_open_query(SharedString::from(name), idx as i32);
+                }
+                2 => {
+                    // Append to the editor, never clobbering what's there.
+                    {
+                        let mut ed = ed_state.borrow_mut();
+                        let end_line = ed.lines.len().saturating_sub(1) as i32;
+                        let end_col =
+                            ed.lines.last().map(|l| l.chars().count()).unwrap_or(0) as i32;
+                        ed.move_to(end_line, end_col, false);
+                        let prefix = if ed.text().trim().is_empty() { "" } else { "\n\n" };
+                        ed.insert(&format!("{prefix}{sql}"));
+                    }
+                    sync_editor(0);
+                    if let Some(id) = active_tab_id.lock().unwrap().clone() {
+                        let new_text = ed_state.borrow().text();
+                        let mut tabs = workspace_tabs.lock().unwrap();
+                        if let Some(tab) = tabs.iter_mut().find(|t| t.id == id) {
+                            tab.query_text = new_text;
+                        }
+                    }
+                }
+                3 => clip_set(&sql),
+                _ => {}
+            }
+        });
+    }
+
     // ----- run query in the right split pane -----
     {
         let run_sql = run_sql.clone();
