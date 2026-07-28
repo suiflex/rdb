@@ -1747,6 +1747,13 @@ fn set_p_detail_pretty(w: &MainWindow, pane: usize, m: ModelRc<SharedString>) {
         w.set_p1_detail_pretty(m);
     }
 }
+fn set_p_selected_row(w: &MainWindow, pane: usize, row: i32) {
+    if pane == 0 {
+        w.set_selected_row(row);
+    } else {
+        w.set_p1_selected_row(row);
+    }
+}
 /// Per-column indented JSON for one grid row, empty where the value isn't JSON.
 /// Feeds the Details panel so a JSON cell reads as formatted text there too.
 fn detail_pretty_row(g: &model::GridModel, row: usize) -> Vec<SharedString> {
@@ -2370,6 +2377,11 @@ fn present_view(
     };
     set_p_chart_bars(w, pane, ModelRc::from(Rc::new(VecModel::from(bars))));
     apply_result(w, pane, v);
+    // A fresh result starts on the first row. A stale selection left over from a
+    // larger previous result is out of range for the new (smaller) one, and the
+    // Details gate `(selected-row + 1) * col-count <= cells.length` then evaluates
+    // false — so the panel silently vanishes even while its toggle is on.
+    set_p_selected_row(w, pane, 0);
     // Seed the Details JSON preview for the first row of the new result.
     if let Some(g) = displayed_grid.lock().unwrap().as_ref() {
         refresh_detail_pretty(w, pane, g, 0);
