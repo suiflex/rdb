@@ -1087,6 +1087,56 @@ fn save_recent(list: &[String]) {
     }
 }
 
+/// Seed shown the first time, before the user has a `saved_queries.json`.
+fn default_saved() -> Vec<(String, String)> {
+    [
+        (
+            "emiten-per-sektor",
+            "-- emiten per sektor\nSELECT s.name AS sector, count(*) AS total\nFROM emiten e\nJOIN sectors s ON s.id = e.id_sector\nWHERE e.country = 'indonesia'\nGROUP BY s.name\nORDER BY total DESC;",
+        ),
+        (
+            "seed-sectors",
+            "INSERT INTO sectors (name) VALUES\n  ('Financials'),\n  ('Energy'),\n  ('Healthcare'),\n  ('Industrials'),\n  ('Academic & Educational Services');",
+        ),
+        (
+            "dup-email-check",
+            "SELECT email, count(*)\nFROM users\nGROUP BY email\nHAVING count(*) > 1;",
+        ),
+        (
+            "tx-volume-daily",
+            "SELECT date_trunc('day', created_at) AS day, sum(amount)\nFROM transactions\nGROUP BY 1\nORDER BY 1 DESC;",
+        ),
+    ]
+    .into_iter()
+    .map(|(n, s)| (n.to_string(), s.to_string()))
+    .collect()
+}
+
+/// Load persisted saved queries. A missing/unreadable file falls back to the
+/// seed; a present-but-empty file stays empty so "delete all" sticks.
+fn load_saved() -> Vec<(String, String)> {
+    let Ok(path) = rdb_connstore::ConnStore::saved_queries_path() else {
+        return default_saved();
+    };
+    match std::fs::read_to_string(path) {
+        Ok(s) => serde_json::from_str(&s).unwrap_or_else(|_| default_saved()),
+        Err(_) => default_saved(),
+    }
+}
+
+/// Persist saved queries (best-effort; I/O errors are ignored).
+fn save_saved(list: &[(String, String)]) {
+    let Ok(path) = rdb_connstore::ConnStore::saved_queries_path() else {
+        return;
+    };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(list) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
 /// Pretty-print (indent) a JSON string for read-only display. Returns `None`
 /// when the text isn't a JSON object/array, so plain cells are shown as-is.
 fn pretty_json(s: &str) -> Option<String> {
@@ -3582,24 +3632,14 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     // ----- saved/recent queries (sidebar Queries tab) -----
-    let saved_queries: Rc<Vec<(&str, &str)>> = Rc::new(vec![
-        (
-            "emiten-per-sektor",
-            "-- emiten per sektor\nSELECT s.name AS sector, count(*) AS total\nFROM emiten e\nJOIN sectors s ON s.id = e.id_sector\nWHERE e.country = 'indonesia'\nGROUP BY s.name\nORDER BY total DESC;",
-        ),
-        (
-            "seed-sectors",
-            "INSERT INTO sectors (name) VALUES\n  ('Financials'),\n  ('Energy'),\n  ('Healthcare'),\n  ('Industrials'),\n  ('Academic & Educational Services');",
-        ),
-        (
-            "dup-email-check",
-            "SELECT email, count(*)\nFROM users\nGROUP BY email\nHAVING count(*) > 1;",
-        ),
-        (
-            "tx-volume-daily",
-            "SELECT date_trunc('day', created_at) AS day, sum(amount)\nFROM transactions\nGROUP BY 1\nORDER BY 1 DESC;",
-        ),
-    ]);
+    // User-curated saved queries: seeded on first run, then editable (delete)
+    // and persisted to disk. Mock mode always shows the seed and never writes.
+    let saved_queries: Rc<RefCell<Vec<(String, String)>>> =
+        Rc::new(RefCell::new(if mock::mock_mode() {
+            default_saved()
+        } else {
+            load_saved()
+        }));
     // Live history: filled as queries run; mock mode seeds a few for the
     // screenshot harness.
     let recent_queries: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(if mock::mock_mode() {
@@ -3626,6 +3666,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let history_only = w.get_sidebar_mode() == 2;
             let mut rows: Vec<TreeNode> = Vec::new();
             if !history_only {
+                let saved = saved.borrow();
                 rows.push(TreeNode {
                     label: "Saved".into(),
                     depth: 0,
@@ -3636,10 +3677,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 });
                 for (i, (name, _)) in saved.iter().enumerate() {
                     rows.push(TreeNode {
-                        label: (*name).into(),
+                        label: name.as_str().into(),
                         depth: 1,
                         kind: "query".into(),
-                        expanded: *name == active,
+                        expanded: name == active,
                         db: SharedString::default(),
                         count: i as i32,
                     });
@@ -3687,14 +3728,18 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let (title, text, is_saved) =
-                if let Some((name, sql)) = saved.iter().find(|(n, _)| *n == label.as_str()) {
-                    ((*name).to_string(), (*sql).to_string(), true)
-                } else if let Some(sql) = recent.borrow().get(idx.max(0) as usize) {
-                    ("Query".to_string(), sql.clone(), false)
-                } else {
-                    return;
-                };
+            let saved_hit = saved
+                .borrow()
+                .iter()
+                .find(|(n, _)| n == label.as_str())
+                .map(|(n, s)| (n.clone(), s.clone()));
+            let (title, text, is_saved) = if let Some((name, sql)) = saved_hit {
+                (name, sql, true)
+            } else if let Some(sql) = recent.borrow().get(idx.max(0) as usize) {
+                ("Query".to_string(), sql.clone(), false)
+            } else {
+                return;
+            };
             if active_tab_id.lock().unwrap().is_none() || active_tab_kind(&w) != "sql" {
                 w.invoke_new_tab();
             }
@@ -6876,10 +6921,13 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let Some((_, text)) = saved.get(idx.max(0) as usize) else {
+            let Some(text) = saved
+                .borrow()
+                .get(idx.max(0) as usize)
+                .map(|(_, s)| s.clone())
+            else {
                 return;
             };
-            let text = (*text).to_string();
             if text.trim().is_empty() {
                 return;
             }
@@ -6899,7 +6947,8 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // ----- Saved query context menu: run, open in new tab, insert, copy -----
+    // ----- Saved query context menu: run, open in new tab, insert, copy,
+    // delete (persisted). -----
     {
         let weak = window.as_weak();
         let saved = saved_queries.clone();
@@ -6907,15 +6956,15 @@ fn main() -> Result<(), slint::PlatformError> {
         let sync_editor = sync_editor.clone();
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
+        let rebuild_query_tree = rebuild_query_tree.clone();
         window.on_query_action(move |idx, action| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
             let idx = idx.max(0) as usize;
-            let Some((name, sql)) = saved.get(idx) else {
+            let Some((name, sql)) = saved.borrow().get(idx).cloned() else {
                 return;
             };
-            let (name, sql) = ((*name).to_string(), (*sql).to_string());
             match action {
                 0 => w.invoke_run_saved_query(idx as i32),
                 1 => {
@@ -6931,7 +6980,11 @@ fn main() -> Result<(), slint::PlatformError> {
                         let end_col =
                             ed.lines.last().map(|l| l.chars().count()).unwrap_or(0) as i32;
                         ed.move_to(end_line, end_col, false);
-                        let prefix = if ed.text().trim().is_empty() { "" } else { "\n\n" };
+                        let prefix = if ed.text().trim().is_empty() {
+                            ""
+                        } else {
+                            "\n\n"
+                        };
                         ed.insert(&format!("{prefix}{sql}"));
                     }
                     sync_editor(0);
@@ -6944,6 +6997,23 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 }
                 3 => clip_set(&sql),
+                4 => {
+                    let removed = {
+                        let mut list = saved.borrow_mut();
+                        if idx < list.len() {
+                            list.remove(idx);
+                            true
+                        } else {
+                            false
+                        }
+                    };
+                    if removed {
+                        if !mock::mock_mode() {
+                            save_saved(&saved.borrow());
+                        }
+                        rebuild_query_tree("");
+                    }
+                }
                 _ => {}
             }
         });
