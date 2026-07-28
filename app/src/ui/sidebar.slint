@@ -29,7 +29,7 @@ export component Sidebar inherits Rectangle {
     callback open-query(string, int);      // (label, index in its section)
     callback insert-query(int);            // History row: append its SQL to editor
     callback rerun-query(int);             // History ▶: run it, editor untouched
-    // History menu action: 0 insert, 1 run, 2 copy, 3 delete.
+    // History menu action: 0 insert, 1 run, 2 copy, 3 save to queries, 4 delete.
     callback history-action(int, int);
     callback run-saved-query(int);         // Saved ▶: run it, editor untouched
     // Saved menu action: 0 run, 1 open in new tab, 2 insert, 3 copy, 4 delete.
@@ -424,14 +424,14 @@ export component Sidebar inherits Rectangle {
             drop-shadow-color: Tokens.text.with-alpha(0.25);
             VerticalLayout {
                 padding: 4px;
-                for label[action] in ["Insert to editor", "Run", "Copy query", "Delete"]: Rectangle {
+                for label[action] in ["Insert to editor", "Run", "Copy query", "Save to queries", "Delete"]: Rectangle {
                     height: 28px;
                     border-radius: Tokens.radius;
-                    background: menu-ta.has-hover ? (action == 3 ? Tokens.error-tint : Tokens.accent-tint) : transparent;
+                    background: menu-ta.has-hover ? (action == 4 ? Tokens.error-tint : Tokens.accent-tint) : transparent;
                     Text {
                         x: Tokens.sp2;
                         text: label;
-                        color: action == 3 ? Tokens.error : Tokens.text;
+                        color: action == 4 ? Tokens.error : Tokens.text;
                         font-size: Tokens.font-sm;
                         vertical-alignment: center;
                     }

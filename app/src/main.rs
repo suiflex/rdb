@@ -1137,6 +1137,37 @@ fn save_saved(list: &[(String, String)]) {
     }
 }
 
+/// Build a short, unique slug name when saving a history query into the Saved
+/// list — first non-comment line, alphanumerics only, deduped against existing.
+fn derive_query_name(sql: &str, existing: &[(String, String)]) -> String {
+    let first = sql
+        .lines()
+        .map(|l| l.split("--").next().unwrap_or("").trim())
+        .find(|l| !l.is_empty())
+        .unwrap_or("")
+        .to_lowercase();
+    let mut slug: String = first
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    while slug.contains("--") {
+        slug = slug.replace("--", "-");
+    }
+    let slug: String = slug.trim_matches('-').chars().take(32).collect();
+    let base = if slug.is_empty() {
+        "query".to_string()
+    } else {
+        slug
+    };
+    if !existing.iter().any(|(n, _)| n == &base) {
+        return base;
+    }
+    (2..)
+        .map(|i| format!("{base}-{i}"))
+        .find(|c| !existing.iter().any(|(n, _)| n == c))
+        .unwrap_or(base)
+}
+
 /// Pretty-print (indent) a JSON string for read-only display. Returns `None`
 /// when the text isn't a JSON object/array, so plain cells are shown as-is.
 fn pretty_json(s: &str) -> Option<String> {
@@ -6840,10 +6871,12 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // ----- History context menu: insert, run, copy, or remove one entry. -----
+    // ----- History context menu: insert, run, copy, save to queries, or
+    // remove one entry. -----
     {
         let weak = window.as_weak();
         let recent_queries = recent_queries.clone();
+        let saved_queries = saved_queries.clone();
         let rebuild_query_tree = rebuild_query_tree.clone();
         window.on_history_action(move |idx, action| {
             let Some(w) = weak.upgrade() else {
@@ -6858,7 +6891,19 @@ fn main() -> Result<(), slint::PlatformError> {
                         clip_set(query);
                     }
                 }
-                3 if remove_recent(&recent_queries, idx) => {
+                3 => {
+                    // Promote a history entry into the curated Saved list.
+                    let Some(sql) = recent_queries.borrow().get(idx).cloned() else {
+                        return;
+                    };
+                    let name = derive_query_name(&sql, &saved_queries.borrow());
+                    saved_queries.borrow_mut().push((name, sql));
+                    if !mock::mock_mode() {
+                        save_saved(&saved_queries.borrow());
+                    }
+                    rebuild_query_tree("");
+                }
+                4 if remove_recent(&recent_queries, idx) => {
                     if !mock::mock_mode() {
                         save_recent(&recent_queries.borrow());
                     }
