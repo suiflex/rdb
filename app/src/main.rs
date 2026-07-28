@@ -1031,6 +1031,18 @@ fn save_recent(list: &[String]) {
     }
 }
 
+/// Pretty-print (indent) a JSON string for read-only display. Returns `None`
+/// when the text isn't a JSON object/array, so plain cells are shown as-is.
+fn pretty_json(s: &str) -> Option<String> {
+    let t = s.trim();
+    if !(t.starts_with('{') || t.starts_with('[')) {
+        return None;
+    }
+    serde_json::from_str::<serde_json::Value>(t)
+        .ok()
+        .and_then(|v| serde_json::to_string_pretty(&v).ok())
+}
+
 /// Strip SQL line comments (`--` to end of line) and blank lines, so a
 /// commented-out scratch statement leaves only its runnable SQL. Word-scan, not
 /// a parser: a `--` inside a string literal is a rare edge we accept trimming.
@@ -1728,6 +1740,33 @@ fn set_p_grid_col_filters(w: &MainWindow, pane: usize, m: ModelRc<SharedString>)
         w.set_p1_grid_col_filters(m);
     }
 }
+fn set_p_detail_pretty(w: &MainWindow, pane: usize, m: ModelRc<SharedString>) {
+    if pane == 0 {
+        w.set_grid_detail_pretty(m);
+    } else {
+        w.set_p1_detail_pretty(m);
+    }
+}
+/// Per-column indented JSON for one grid row, empty where the value isn't JSON.
+/// Feeds the Details panel so a JSON cell reads as formatted text there too.
+fn detail_pretty_row(g: &model::GridModel, row: usize) -> Vec<SharedString> {
+    g.rows
+        .get(row)
+        .map(|r| {
+            r.iter()
+                .map(|cell| {
+                    pretty_json(&cell.text)
+                        .map(SharedString::from)
+                        .unwrap_or_default()
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+fn refresh_detail_pretty(w: &MainWindow, pane: usize, g: &model::GridModel, row: i32) {
+    let rows = detail_pretty_row(g, row.max(0) as usize);
+    set_p_detail_pretty(w, pane, ModelRc::from(Rc::new(VecModel::from(rows))));
+}
 fn set_p_editing(w: &MainWindow, pane: usize, row: i32, col: i32) {
     if pane == 0 {
         w.set_editing_row(row);
@@ -2331,6 +2370,10 @@ fn present_view(
     };
     set_p_chart_bars(w, pane, ModelRc::from(Rc::new(VecModel::from(bars))));
     apply_result(w, pane, v);
+    // Seed the Details JSON preview for the first row of the new result.
+    if let Some(g) = displayed_grid.lock().unwrap().as_ref() {
+        refresh_detail_pretty(w, pane, g, 0);
+    }
     let st = browse.lock().unwrap().clone();
     if st.table.is_some() {
         let (start, end, prev, next) = page_bounds(st.page, st.limit, st.total, shown);
@@ -6804,10 +6847,14 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- right-pane grid interactions -----
     {
         let weak = window.as_weak();
+        let panes = panes.clone();
         window.on_p1_select_cell(move |row, col| {
             if let Some(w) = weak.upgrade() {
                 w.set_p1_selected_row(row);
                 w.set_p1_selected_col(col);
+                if let Some(g) = panes[1].displayed_grid.lock().unwrap().as_ref() {
+                    refresh_detail_pretty(&w, 1, g, row);
+                }
             }
         });
     }
@@ -6831,6 +6878,13 @@ fn main() -> Result<(), slint::PlatformError> {
                     .unwrap_or_default()
             } else {
                 SharedString::default()
+            };
+            let value = if w.get_p1_grid_read_only() {
+                pretty_json(value.as_str())
+                    .map(SharedString::from)
+                    .unwrap_or(value)
+            } else {
+                value
             };
             w.set_p1_editing_value(value);
             set_p_editing(&w, 1, row, col);
@@ -8395,6 +8449,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- row nav (j/k) -----
     {
         let weak = window.as_weak();
+        let displayed_grid = displayed_grid.clone();
         window.on_move_row(move |delta| {
             if let Some(w) = weak.upgrade() {
                 let n = w.get_grid_col_count();
@@ -8406,6 +8461,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 if total > 0 {
                     let next = (w.get_selected_row() + delta).clamp(0, total - 1);
                     w.set_selected_row(next);
+                    if let Some(g) = displayed_grid.lock().unwrap().as_ref() {
+                        refresh_detail_pretty(&w, 0, g, next);
+                    }
                 }
             }
         });
@@ -8414,10 +8472,14 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- cell selection (click in the grid) -----
     {
         let weak = window.as_weak();
+        let displayed_grid = displayed_grid.clone();
         window.on_select_cell(move |r, c| {
             if let Some(w) = weak.upgrade() {
                 w.set_selected_row(r);
                 w.set_selected_col(c);
+                if let Some(g) = displayed_grid.lock().unwrap().as_ref() {
+                    refresh_detail_pretty(&w, 0, g, r);
+                }
             }
         });
     }
@@ -8501,6 +8563,15 @@ fn main() -> Result<(), slint::PlatformError> {
                     .unwrap_or_default()
             } else {
                 SharedString::default()
+            };
+            // Read-only (query result): show JSON indented so it's readable.
+            // Editable grids keep the raw text so a save writes back verbatim.
+            let value = if w.get_grid_read_only() {
+                pretty_json(value.as_str())
+                    .map(SharedString::from)
+                    .unwrap_or(value)
+            } else {
+                value
             };
             w.set_editing_value(value);
             w.set_editing_row(r);

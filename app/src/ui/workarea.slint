@@ -65,6 +65,7 @@ export component WorkArea inherits Rectangle {
     callback sort-col(int);
     callback reorder-col(int, length);
     in property <[string]> grid-col-filters;
+    in property <[string]> grid-detail-pretty;
     callback set-col-filter(int, string);
     in-out property <bool> sql-open: false;
     // SQL editor model (Rust lexer output) + cursor
@@ -169,6 +170,7 @@ export component WorkArea inherits Rectangle {
     in property <int> p1-grid-sort-col: -1;
     in property <bool> p1-grid-sort-asc: true;
     in property <[string]> p1-grid-col-filters;
+    in property <[string]> p1-detail-pretty;
     in-out property <int> p1-selected-row;
     in-out property <int> p1-selected-col: -1;
     in property <int> p1-editing-row: -1;
@@ -585,6 +587,7 @@ export component WorkArea inherits Rectangle {
             grid-sort-col: root.grid-sort-col;
             grid-sort-asc: root.grid-sort-asc;
             grid-col-filters: root.grid-col-filters;
+            detail-pretty: root.grid-detail-pretty;
             selected-row <=> root.selected-row;
             selected-col <=> root.selected-col;
             editing-row: root.editing-row;
@@ -701,6 +704,7 @@ export component WorkArea inherits Rectangle {
                 grid-sort-col: root.p1-grid-sort-col;
                 grid-sort-asc: root.p1-grid-sort-asc;
                 grid-col-filters: root.p1-grid-col-filters;
+                detail-pretty: root.p1-detail-pretty;
                 selected-row <=> root.p1-selected-row;
                 selected-col <=> root.p1-selected-col;
                 editing-row: root.p1-editing-row;
