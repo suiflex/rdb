@@ -2582,14 +2582,17 @@ callback create-table-commit();
                             alignment: start;
                             VerticalLayout {
                                 alignment: center;
-                                // kbd chip
+                                // kbd chip — uniform min-width so single keys
+                                // don't look cramped next to the wide ones
                                 Rectangle {
-                                    height: 20px;
+                                    height: 22px;
+                                    min-width: 34px;
                                     border-radius: Tokens.radius;
                                     border-width: 1px;
                                     border-color: Tokens.border-strong;
                                     background: Tokens.chrome;
                                     HorizontalLayout {
+                                        alignment: center;
                                         padding-left: Tokens.sp2;
                                         padding-right: Tokens.sp2;
                                         Text {
@@ -2597,6 +2600,7 @@ callback create-table-commit();
                                             color: Tokens.text;
                                             font-family: Tokens.mono;
                                             font-size: Tokens.font-sm;
+                                            horizontal-alignment: center;
                                             vertical-alignment: center;
                                         }
                                     }
