@@ -150,6 +150,9 @@ export component MainWindow inherits Window {
     callback sort-col(int);
     callback reorder-col(int, length);
     in property <[string]> grid-col-filters;
+    // Per-column indented JSON for the selected row (Details panel preview).
+    in property <[string]> grid-detail-pretty;
+    in property <[string]> p1-detail-pretty;
     callback set-col-filter(int, string);
     in property <[TreeNode]> query-tree;  // sidebar Queries/History rows
     in property <[string]> schema-list;
@@ -1396,6 +1399,7 @@ callback create-table-commit();
                         p1-grid-sort-col: root.p1-grid-sort-col;
                         p1-grid-sort-asc: root.p1-grid-sort-asc;
                         p1-grid-col-filters: root.p1-grid-col-filters;
+                        p1-detail-pretty: root.p1-detail-pretty;
                         p1-selected-row <=> root.p1-selected-row;
                         p1-selected-col <=> root.p1-selected-col;
                         p1-editing-row: root.p1-editing-row;
@@ -1469,6 +1473,7 @@ callback create-table-commit();
                         sort-col(i) => { root.sort-col(i); }
                         reorder-col(i, x) => { root.reorder-col(i, x); }
                         grid-col-filters: root.grid-col-filters;
+                        grid-detail-pretty: root.grid-detail-pretty;
                         set-col-filter(i, t) => { root.set-col-filter(i, t); }
                         editor-lines: root.editor-lines;
                         editor-fold-state: root.editor-fold-state;

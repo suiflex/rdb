@@ -97,6 +97,9 @@ export component QueryPane inherits Rectangle {
     in property <int> grid-sort-col: -1;
     in property <bool> grid-sort-asc: true;
     in property <[string]> grid-col-filters;
+    // Per-column indented JSON for the selected row; blank when not JSON. Lets the
+    // Details panel show a formatted, read-only JSON value.
+    in property <[string]> detail-pretty;
     in-out property <int> selected-row: 0;
     in-out property <int> selected-col: -1;
     in property <int> editing-row: -1;
@@ -546,7 +549,10 @@ export component QueryPane inherits Rectangle {
                             spacing: Tokens.sp3;
                             for c in root.col-count: Rectangle {
                                 property <GridCell> detail-cell: root.cells[root.selected-row * root.col-count + c];
-                                height: 96px;
+                                // Formatted JSON for this cell (read-only results only), else "".
+                                property <string> pretty: root.read-only && root.detail-pretty.length > c ? root.detail-pretty[c] : "";
+                                // Give a JSON value room to breathe; plain cells stay compact.
+                                height: pretty != "" ? 220px : 96px;
                                 VerticalLayout {
                                     spacing: Tokens.sp1;
                                     HorizontalLayout {
@@ -591,7 +597,7 @@ export component QueryPane inherits Rectangle {
                                             y: Tokens.sp2;
                                             width: parent.width - 2 * Tokens.sp2;
                                             height: parent.height - 2 * Tokens.sp2;
-                                            text: detail-cell.is-null ? "" : detail-cell.text;
+                                            text: pretty != "" ? pretty : (detail-cell.is-null ? "" : detail-cell.text);
                                             enabled: !root.read-only;
                                             single-line: false;
                                             wrap: word-wrap;

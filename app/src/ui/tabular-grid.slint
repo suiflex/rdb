@@ -521,12 +521,16 @@ export component TabularGrid inherits Rectangle {
                     border-radius: Tokens.radius;
                     border-width: 1px;
                     border-color: Tokens.border;
-                    ScrollView {
+                    inspector-scroll := ScrollView {
+                        // Pin the viewport to the visible width so only vertical
+                        // scroll kicks in; the TextInput grows to its content height
+                        // so a long value scrolls with a real scrollbar.
+                        viewport-width: self.visible-width;
                         detail-input := TextInput {
                             x: Tokens.sp2;
                             y: Tokens.sp1;
-                            width: parent.visible-width - 2 * Tokens.sp2;
-                            height: max(parent.visible-height - 2 * Tokens.sp1, self.preferred-height);
+                            width: inspector-scroll.visible-width - 2 * Tokens.sp2;
+                            height: max(inspector-scroll.visible-height - 2 * Tokens.sp1, self.preferred-height);
                             read-only: true;
                             text: root.editing-value;
                             color: Tokens.text;

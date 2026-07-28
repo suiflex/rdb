@@ -593,11 +593,25 @@ fn install_macos_app_icon() {}
 
 /// One cached SQL result, shown as a result tab. ⌘⏎ replaces the active one;
 /// ⌘\ appends a new one.
+/// Client-side grid view state (filters/sort/hidden/order/widths) for one result,
+/// so switching Result tabs restores each result exactly as it was left. An empty
+/// `col_order` is the "never touched" sentinel — restore is skipped, leaving the
+/// freshly-presented defaults.
+#[derive(Clone, Default)]
+struct GridState {
+    col_filters: Vec<String>,
+    sort: (i32, bool),
+    hidden: Vec<usize>,
+    col_order: Vec<usize>,
+    col_widths: Vec<f32>,
+}
+
 #[derive(Clone)]
 struct StoredResult {
     view: model::ResultView,
     meta: String,
     latency: String,
+    grid: GridState,
 }
 
 /// The live editor + result state a single **workspace tab group** owns
@@ -1029,6 +1043,18 @@ fn save_recent(list: &[String]) {
     if let Ok(json) = serde_json::to_string_pretty(list) {
         let _ = std::fs::write(path, json);
     }
+}
+
+/// Pretty-print (indent) a JSON string for read-only display. Returns `None`
+/// when the text isn't a JSON object/array, so plain cells are shown as-is.
+fn pretty_json(s: &str) -> Option<String> {
+    let t = s.trim();
+    if !(t.starts_with('{') || t.starts_with('[')) {
+        return None;
+    }
+    serde_json::from_str::<serde_json::Value>(t)
+        .ok()
+        .and_then(|v| serde_json::to_string_pretty(&v).ok())
 }
 
 /// Strip SQL line comments (`--` to end of line) and blank lines, so a
@@ -1728,6 +1754,113 @@ fn set_p_grid_col_filters(w: &MainWindow, pane: usize, m: ModelRc<SharedString>)
         w.set_p1_grid_col_filters(m);
     }
 }
+fn set_p_detail_pretty(w: &MainWindow, pane: usize, m: ModelRc<SharedString>) {
+    if pane == 0 {
+        w.set_grid_detail_pretty(m);
+    } else {
+        w.set_p1_detail_pretty(m);
+    }
+}
+fn set_p_selected_row(w: &MainWindow, pane: usize, row: i32) {
+    if pane == 0 {
+        w.set_selected_row(row);
+    } else {
+        w.set_p1_selected_row(row);
+    }
+}
+/// Per-column indented JSON for one grid row, empty where the value isn't JSON.
+/// Feeds the Details panel so a JSON cell reads as formatted text there too.
+fn detail_pretty_row(g: &model::GridModel, row: usize) -> Vec<SharedString> {
+    g.rows
+        .get(row)
+        .map(|r| {
+            r.iter()
+                .map(|cell| {
+                    pretty_json(&cell.text)
+                        .map(SharedString::from)
+                        .unwrap_or_default()
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+fn refresh_detail_pretty(w: &MainWindow, pane: usize, g: &model::GridModel, row: i32) {
+    let rows = detail_pretty_row(g, row.max(0) as usize);
+    set_p_detail_pretty(w, pane, ModelRc::from(Rc::new(VecModel::from(rows))));
+}
+fn get_p_col_widths(w: &MainWindow, pane: usize) -> Vec<f32> {
+    if pane == 0 {
+        w.get_grid_col_widths().iter().collect()
+    } else {
+        w.get_p1_col_widths().iter().collect()
+    }
+}
+/// Snapshot the live client-side grid view of a group, to stash on the result the
+/// user is leaving so switching back restores filters/sort/hidden/order/widths.
+fn capture_grid_state(w: &MainWindow, pane: usize, g: &GroupRuntime) -> GridState {
+    let mut hidden: Vec<usize> = g.hidden_cols.lock().unwrap().iter().copied().collect();
+    hidden.sort_unstable();
+    GridState {
+        col_filters: g.col_filters.lock().unwrap().clone(),
+        sort: *g.sort_state.lock().unwrap(),
+        hidden,
+        col_order: g.col_order.lock().unwrap().clone(),
+        col_widths: get_p_col_widths(w, pane),
+    }
+}
+/// Re-apply a result's saved grid view after `present_view` reset it to defaults.
+/// No-op when nothing was saved (`col_order` empty = never touched).
+fn restore_grid_state(w: &MainWindow, pane: usize, g: &GroupRuntime, sr: &StoredResult) {
+    let st = &sr.grid;
+    if st.col_order.is_empty() {
+        return;
+    }
+    let ncols = match &sr.view {
+        model::ResultView::Table(grid) => grid.columns.len(),
+        model::ResultView::Documents(d) => d.grid.columns.len(),
+        _ => return,
+    };
+    let hidden: HashSet<usize> = st.hidden.iter().copied().collect();
+    *g.col_filters.lock().unwrap() = st.col_filters.clone();
+    *g.sort_state.lock().unwrap() = st.sort;
+    *g.hidden_cols.lock().unwrap() = hidden.clone();
+    *g.col_order.lock().unwrap() = st.col_order.clone();
+    set_p_grid_sort(w, pane, st.sort.0, st.sort.1);
+    set_p_grid_col_filters(
+        w,
+        pane,
+        ModelRc::from(Rc::new(VecModel::from(display_col_filters(
+            &st.col_filters,
+            &st.col_order,
+            &hidden,
+        )))),
+    );
+    // Column hiding is a left-group feature (no p1 setter); flags apply there.
+    if pane == 0 {
+        let flags: Vec<bool> = (0..ncols).map(|c| hidden.contains(&c)).collect();
+        w.set_col_hidden(ModelRc::from(Rc::new(VecModel::from(flags))));
+    }
+    if !st.col_widths.is_empty() {
+        set_p_col_widths(
+            w,
+            pane,
+            ModelRc::from(Rc::new(VecModel::from(st.col_widths.clone()))),
+        );
+    }
+    let filtered = compute_view(
+        &sr.view,
+        "",
+        "any column",
+        "=",
+        &st.col_filters,
+        &hidden,
+        &st.col_order,
+        st.sort.0,
+        st.sort.1,
+    );
+    *g.displayed_grid.lock().unwrap() = view_grid(&filtered);
+    apply_result(w, pane, filtered);
+}
 fn set_p_editing(w: &MainWindow, pane: usize, row: i32, col: i32) {
     if pane == 0 {
         w.set_editing_row(row);
@@ -2331,6 +2464,15 @@ fn present_view(
     };
     set_p_chart_bars(w, pane, ModelRc::from(Rc::new(VecModel::from(bars))));
     apply_result(w, pane, v);
+    // A fresh result starts on the first row. A stale selection left over from a
+    // larger previous result is out of range for the new (smaller) one, and the
+    // Details gate `(selected-row + 1) * col-count <= cells.length` then evaluates
+    // false — so the panel silently vanishes even while its toggle is on.
+    set_p_selected_row(w, pane, 0);
+    // Seed the Details JSON preview for the first row of the new result.
+    if let Some(g) = displayed_grid.lock().unwrap().as_ref() {
+        refresh_detail_pretty(w, pane, g, 0);
+    }
     let st = browse.lock().unwrap().clone();
     if st.table.is_some() {
         let (start, end, prev, next) = page_bounds(st.page, st.limit, st.total, shown);
@@ -2666,6 +2808,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let spans: Vec<Span> = spans
                         .into_iter()
                         .map(|sp| Span {
+                            cols: sp.text.chars().count() as i32,
                             text: sp.text.into(),
                             kind: sp.kind,
                             sel: sp.sel,
@@ -3482,6 +3625,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let spans: Vec<Span> = editor::lex_line(l)
                         .into_iter()
                         .map(|sp| Span {
+                            cols: sp.text.chars().count() as i32,
                             text: sp.text.into(),
                             kind: sp.kind,
                             sel: false,
@@ -4502,6 +4646,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     view,
                     meta: w.get_results_meta().to_string(),
                     latency: w.get_status_latency().to_string(),
+                    grid: GridState::default(),
                 });
             }
             // Persist SQL scratch tabs so they survive a restart. Cheap JSON
@@ -5416,7 +5561,17 @@ fn main() -> Result<(), slint::PlatformError> {
         let db_override = db_override.clone();
         let tabs_restored = tabs_restored.clone();
         let restore_tab = restore_tab.clone();
+        let save_active_tab = save_active_tab.clone();
+        let save_p1_tab = save_p1_tab.clone();
         window.on_connect_clicked(move |idx| {
+            // Flush the live editor text + results of the active tab(s) into the
+            // workspace model before it is rebuilt for the new connection. Without
+            // this a connection switch reads stale/empty tab text (the query looked
+            // duplicated or lost) and dropped the results of the inactive tabs.
+            if let Some(w) = weak.upgrade() {
+                save_active_tab(&w);
+                save_p1_tab(&w);
+            }
             let i = idx as usize;
             // One-shot: set by the database switcher, empty for a fresh picker
             // connect (which then uses the connection's saved database).
@@ -6009,6 +6164,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                     view: v.clone(),
                                     meta: meta.clone(),
                                     latency: latency.clone(),
+                                    grid: GridState::default(),
                                 };
                                 let mut tabs = workspace_tabs.lock().unwrap();
                                 let Some(tab) = tabs.iter_mut().find(|tab| tab.id == target_id)
@@ -6260,6 +6416,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                         view: view.clone(),
                                         meta: meta.clone(),
                                         latency: latency.clone(),
+                                        grid: GridState::default(),
                                     };
                                     if let Some(tab) = workspace_tabs
                                         .lock()
@@ -6802,10 +6959,14 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- right-pane grid interactions -----
     {
         let weak = window.as_weak();
+        let panes = panes.clone();
         window.on_p1_select_cell(move |row, col| {
             if let Some(w) = weak.upgrade() {
                 w.set_p1_selected_row(row);
                 w.set_p1_selected_col(col);
+                if let Some(g) = panes[1].displayed_grid.lock().unwrap().as_ref() {
+                    refresh_detail_pretty(&w, 1, g, row);
+                }
             }
         });
     }
@@ -6829,6 +6990,13 @@ fn main() -> Result<(), slint::PlatformError> {
                     .unwrap_or_default()
             } else {
                 SharedString::default()
+            };
+            let value = if w.get_p1_grid_read_only() {
+                pretty_json(value.as_str())
+                    .map(SharedString::from)
+                    .unwrap_or(value)
+            } else {
+                value
             };
             w.set_p1_editing_value(value);
             set_p_editing(&w, 1, row, col);
@@ -7968,11 +8136,21 @@ fn main() -> Result<(), slint::PlatformError> {
         let browse = browse.clone();
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
+        let panes = panes.clone();
         window.on_select_result_tab(move |i| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
             let i = i.max(0) as usize;
+            // Stash the current result's live grid view before leaving it, so a
+            // round-trip back restores its filters/sort/hidden/order/widths.
+            let old = *active_result.lock().unwrap();
+            {
+                let state = capture_grid_state(&w, 0, &panes[0]);
+                if let Some(cur) = results.lock().unwrap().get_mut(old) {
+                    cur.grid = state;
+                }
+            }
             let sr = results.lock().unwrap().get(i).cloned();
             let Some(sr) = sr else {
                 return;
@@ -7992,7 +8170,7 @@ fn main() -> Result<(), slint::PlatformError> {
             present_view(
                 &w,
                 0,
-                sr.view,
+                sr.view.clone(),
                 &sr.meta,
                 &sr.latency,
                 &last_view,
@@ -8004,6 +8182,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 &edit_buf,
                 &browse,
             );
+            restore_grid_state(&w, 0, &panes[0], &sr);
         });
     }
     {
@@ -8084,6 +8263,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let i = i.max(0) as usize;
+            let old = *panes[1].active_result.lock().unwrap();
+            {
+                let state = capture_grid_state(&w, 1, &panes[1]);
+                if let Some(cur) = panes[1].results.lock().unwrap().get_mut(old) {
+                    cur.grid = state;
+                }
+            }
             let sr = panes[1].results.lock().unwrap().get(i).cloned();
             let Some(sr) = sr else {
                 return;
@@ -8103,7 +8289,7 @@ fn main() -> Result<(), slint::PlatformError> {
             present_view(
                 &w,
                 1,
-                sr.view,
+                sr.view.clone(),
                 &sr.meta,
                 &sr.latency,
                 &last_view,
@@ -8115,6 +8301,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 &panes[1].edit_buf,
                 &panes[1].browse,
             );
+            restore_grid_state(&w, 1, &panes[1], &sr);
         });
     }
     {
@@ -8393,6 +8580,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- row nav (j/k) -----
     {
         let weak = window.as_weak();
+        let displayed_grid = displayed_grid.clone();
         window.on_move_row(move |delta| {
             if let Some(w) = weak.upgrade() {
                 let n = w.get_grid_col_count();
@@ -8404,6 +8592,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 if total > 0 {
                     let next = (w.get_selected_row() + delta).clamp(0, total - 1);
                     w.set_selected_row(next);
+                    if let Some(g) = displayed_grid.lock().unwrap().as_ref() {
+                        refresh_detail_pretty(&w, 0, g, next);
+                    }
                 }
             }
         });
@@ -8412,10 +8603,14 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- cell selection (click in the grid) -----
     {
         let weak = window.as_weak();
+        let displayed_grid = displayed_grid.clone();
         window.on_select_cell(move |r, c| {
             if let Some(w) = weak.upgrade() {
                 w.set_selected_row(r);
                 w.set_selected_col(c);
+                if let Some(g) = displayed_grid.lock().unwrap().as_ref() {
+                    refresh_detail_pretty(&w, 0, g, r);
+                }
             }
         });
     }
@@ -8499,6 +8694,15 @@ fn main() -> Result<(), slint::PlatformError> {
                     .unwrap_or_default()
             } else {
                 SharedString::default()
+            };
+            // Read-only (query result): show JSON indented so it's readable.
+            // Editable grids keep the raw text so a save writes back verbatim.
+            let value = if w.get_grid_read_only() {
+                pretty_json(value.as_str())
+                    .map(SharedString::from)
+                    .unwrap_or(value)
+            } else {
+                value
             };
             w.set_editing_value(value);
             w.set_editing_row(r);
