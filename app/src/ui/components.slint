@@ -2,6 +2,52 @@
 import { Tokens } from "tokens.slint";
 import { AppIcon } from "icons.slint";
 
+// iOS-style on/off switch. One place for the pill + sliding knob so every
+// settings toggle stays identical.
+export component Toggle inherits TouchArea {
+    in property <bool> checked;
+    callback toggled();
+    width: 42px;
+    height: 24px;
+    clicked => { root.toggled(); }
+    Rectangle {
+        border-radius: 12px;
+        background: root.checked ? Tokens.accent : Tokens.border-strong;
+        Rectangle {
+            width: 18px;
+            height: 18px;
+            border-radius: 9px;
+            background: #FFFFFF;
+            x: root.checked ? parent.width - self.width - 3px : 3px;
+            y: (parent.height - self.height) / 2;
+        }
+    }
+}
+
+// A settings line: label on the left, toggle on the right.
+export component ToggleRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <bool> checked;
+    callback toggled();
+    spacing: Tokens.sp3;
+    VerticalLayout {
+        alignment: center;
+        horizontal-stretch: 1;
+        Text {
+            text: root.label;
+            color: Tokens.text;
+            font-size: 13px;
+        }
+    }
+    VerticalLayout {
+        alignment: center;
+        Toggle {
+            checked: root.checked;
+            toggled => { root.toggled(); }
+        }
+    }
+}
+
 // Shared tooltip state. Buttons report their hovered tooltip + window-space
 // anchor here; a single overlay in app-window.slint draws it on the top layer
 // so it is never clipped by content painted after the toolbar row.
