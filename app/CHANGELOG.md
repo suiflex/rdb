@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.1](https://github.com/suiflex/rdb/compare/v0.25.0...v0.25.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* **app:** connection-switch data loss, result-tab state, autocomplete, editor, JSON ([#143](https://github.com/suiflex/rdb/issues/143)) ([88e4653](https://github.com/suiflex/rdb/commit/88e4653020d93efb07bf89e1988f9273df724009))
+
 ## [0.25.0](https://github.com/suiflex/rdb/compare/v0.24.0...v0.25.0) (2026-07-27)
 
 
