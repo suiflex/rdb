@@ -459,14 +459,14 @@ export component Sidebar inherits Rectangle {
             drop-shadow-color: Tokens.text.with-alpha(0.25);
             VerticalLayout {
                 padding: 4px;
-                for label[action] in ["Run", "Open in new tab", "Insert to editor", "Copy query"]: Rectangle {
+                for label[action] in ["Run", "Open in new tab", "Insert to editor", "Copy query", "Delete"]: Rectangle {
                     height: 28px;
                     border-radius: Tokens.radius;
-                    background: qmenu-ta.has-hover ? Tokens.accent-tint : transparent;
+                    background: qmenu-ta.has-hover ? (action == 4 ? Tokens.error-tint : Tokens.accent-tint) : transparent;
                     Text {
                         x: Tokens.sp2;
                         text: label;
-                        color: Tokens.text;
+                        color: action == 4 ? Tokens.error : Tokens.text;
                         font-size: Tokens.font-sm;
                         vertical-alignment: center;
                     }

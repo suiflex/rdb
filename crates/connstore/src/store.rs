@@ -56,6 +56,13 @@ impl ConnStore {
         Ok(dirs.config_dir().join("recent_queries.json"))
     }
 
+    /// Location of `saved_queries.json` in the same config dir — the user's
+    /// curated saved queries (name + SQL), shown in the sidebar Queries tab.
+    pub fn saved_queries_path() -> Result<PathBuf> {
+        let dirs = ProjectDirs::from("dev", "dbm", "dbm").ok_or(ConnStoreError::NoConfigDir)?;
+        Ok(dirs.config_dir().join("saved_queries.json"))
+    }
+
     /// Location of `query_tabs.json` in the same config dir — the persisted
     /// open query tabs and their SQL text, restored on launch.
     pub fn query_tabs_path() -> Result<PathBuf> {
