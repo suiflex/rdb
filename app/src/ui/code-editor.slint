@@ -18,6 +18,8 @@ export component CodeEditor inherits Rectangle {
     // Ghost hint shown only while the buffer is empty (engine-specific).
     in property <string> placeholder;
     in property <int> cursor-line: 0;
+    // Visual row after folded lines are removed; used only to anchor completion.
+    in property <int> cursor-visual-row: 0;
     in property <int> cursor-col: 0;
     // (key text, meta/ctrl, alt/option, shift) -> true when the editor consumed
     // the key. meta = ⌘ line/doc motions, alt = ⌥ word motions.
@@ -121,12 +123,11 @@ export component CodeEditor inherits Rectangle {
                                         clicked => {
                                             root.toggle-fold(li);
                                         }
-                                        Text {
-                                            text: root.fold-state[li] == 2 ? "▶" : "▼";
+                                        AppIcon {
+                                            name: "caret";
+                                            size: 12px;
                                             color: fold-ta.has-hover ? Tokens.accent : Tokens.text-dim;
-                                            font-size: 10px;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
+                                            transform-rotation: root.fold-state[li] == 2 ? -90deg : 0deg;
                                         }
                                     }
                                 }
@@ -219,7 +220,9 @@ export component CodeEditor inherits Rectangle {
         // Clamp the caret anchor into the editor's own height so the popup stays
         // on-screen even when the scroll offset can't be read precisely (a short,
         // scrolled editor otherwise threw the anchor a thousand px down).
-        property <length> caret-y: clamp(Tokens.sp2 + root.cursor-line * root.line-h + edit-scroll.viewport-y, 0px, root.height);
+        // `viewport-y` is negative while scrolling. Keep the caret's visual
+        // coordinate, rather than clamping a stale content-space coordinate.
+        property <length> caret-y: clamp(Tokens.sp2 + root.cursor-visual-row * root.line-h + edit-scroll.viewport-y, Tokens.sp2, root.height - root.line-h);
         property <length> below-y: caret-y + root.line-h + 6px;
         property <length> above-y: caret-y - self.pop-h - 6px;
         x: min(root.gutter-w + Tokens.sp3 + root.cursor-col * root.charw + edit-scroll.viewport-x, root.width - self.width - Tokens.sp2);
