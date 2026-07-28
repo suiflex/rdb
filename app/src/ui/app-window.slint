@@ -512,6 +512,7 @@ callback create-table-commit();
     in property <string> update-hint;      // install-method upgrade instruction
     callback update-open();                // open the release page
     callback update-dismiss();             // hide until next launch
+    callback update-copy-hint();           // copy the upgrade command/hint
     callback check-updates-now();          // manual check from settings
     in property <string> update-check-status; // settings feedback line
 
@@ -2426,10 +2427,50 @@ callback create-table-commit();
                         VerticalLayout {
                             alignment: center;
                             horizontal-stretch: 1;
-                            Text {
+                            // Plain status while no update is pending; the
+                            // actionable card below takes over once one is.
+                            if !root.update-available: Text {
                                 text: root.update-check-status;
                                 color: Tokens.text-dim;
                                 font-size: 12px;
+                            }
+                        }
+                    }
+
+                    // Actionable prompt: surfaces the same update the corner
+                    // banner shows, but with Open + Copy right where the user
+                    // just clicked "Check now".
+                    if root.update-available: Rectangle {
+                        border-radius: Tokens.radius;
+                        border-width: 1px;
+                        border-color: Tokens.accent;
+                        background: Tokens.accent-tint;
+                        VerticalLayout {
+                            padding: Tokens.sp3;
+                            spacing: Tokens.sp2;
+                            Text {
+                                text: "✔ Update available — v" + root.update-version;
+                                color: Tokens.text;
+                                font-size: 13px;
+                                font-weight: 600;
+                            }
+                            Text {
+                                text: root.update-hint;
+                                color: Tokens.text-dim;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+                            HorizontalLayout {
+                                spacing: Tokens.sp2;
+                                alignment: start;
+                                PrimaryButton {
+                                    text: "Open";
+                                    clicked => { root.update-open(); }
+                                }
+                                SecondaryButton {
+                                    text: "Copy";
+                                    clicked => { root.update-copy-hint(); }
+                                }
                             }
                         }
                     }
