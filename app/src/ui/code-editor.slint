@@ -171,14 +171,6 @@ export component CodeEditor inherits Rectangle {
                                 }
                             }
                         }
-                        // folded indicator: the collapsed statement's body
-                        if root.fold-state[li] == 2: Text {
-                            text: " ⋯";
-                            color: Tokens.text-faint;
-                            font-family: Tokens.mono;
-                            font-size: Tokens.font-md;
-                            vertical-alignment: center;
-                        }
                         Rectangle { horizontal-stretch: 1; }
                     }
 

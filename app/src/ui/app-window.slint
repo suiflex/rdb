@@ -2660,16 +2660,19 @@ callback create-table-commit();
     if Tooltip.shown && Tooltip.text != "": Rectangle {
         x: min(max(Tooltip.x - self.width / 2, 4px), root.width - self.width - 4px);
         y: Tooltip.y;
-        width: tip.preferred-width + 2 * Tokens.sp2;
+        width: min(tip.preferred-width + 2 * Tokens.sp2, Tooltip.max-width);
         height: tip.preferred-height + Tokens.sp1;
         border-radius: Tokens.radius;
         background: Tokens.chrome;
         border-width: 1px;
         border-color: Tokens.border;
         tip := Text {
+            x: Tokens.sp2;
+            width: parent.width - 2 * Tokens.sp2;
             text: Tooltip.text;
             color: Tokens.text;
             font-size: Tokens.font-xs;
+            wrap: word-wrap;
         }
     }
 }

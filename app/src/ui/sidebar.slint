@@ -153,6 +153,7 @@ export component Sidebar inherits Rectangle {
                                 Tooltip.text = node.db;
                                 Tooltip.x = root.absolute-position.x + root.width / 2;
                                 Tooltip.y = self.absolute-position.y + parent.height + 4px;
+                                Tooltip.max-width = 520px;
                                 Tooltip.shown = node.db != "";
                             } else if Tooltip.text == node.db {
                                 Tooltip.shown = false;
