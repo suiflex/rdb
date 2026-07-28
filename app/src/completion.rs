@@ -189,6 +189,32 @@ fn columns_of(nodes: &[VmTreeNode], owner: &str) -> Vec<Candidate> {
     Vec::new()
 }
 
+/// Columns of every table named by a `FROM`/`JOIN` in the current statement, so
+/// a `WHERE`/`SELECT` completion offers the real columns in scope — including
+/// cross-schema tables the active-schema `all_columns` would miss. Scoped to the
+/// current statement (text after the last `;`) so a prior statement's tables
+/// don't leak in.
+fn from_table_columns(before_cursor: &str, nodes: &[VmTreeNode]) -> Vec<Candidate> {
+    let stmt = before_cursor.rsplit(';').next().unwrap_or(before_cursor);
+    let words: Vec<&str> = stmt
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '.'))
+        .filter(|w| !w.is_empty())
+        .collect();
+    let mut cols = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for i in 0..words.len() {
+        let w = words[i].to_uppercase();
+        if (w == "FROM" || w == "JOIN") && i + 1 < words.len() {
+            for c in columns_of(nodes, words[i + 1]) {
+                if seen.insert(c.label.to_lowercase()) {
+                    cols.push(c);
+                }
+            }
+        }
+    }
+    cols
+}
+
 /// The last SQL keyword token on `line`, uppercased (via the editor lexer).
 fn last_keyword(line: &str) -> Option<String> {
     crate::editor::lex_line(line)
@@ -245,7 +271,11 @@ pub fn suggest(
             // next clause (FROM/WHERE/…) is always reachable, e.g. after `*`.
             Some("SELECT") | Some("WHERE") | Some("AND") | Some("OR") | Some("ON")
             | Some("HAVING") | Some("SET") | Some("BY") | Some("VALUES") => {
-                let mut c = all_columns(scope);
+                // Columns of the statement's own FROM/JOIN tables come first (they
+                // are what's actually in scope, cross-schema included), then the
+                // active-schema columns/tables and keywords as a fallback.
+                let mut c = from_table_columns(before_cursor, nodes);
+                c.extend(all_columns(scope));
                 c.extend(tables(scope));
                 c.extend(keywords());
                 c
@@ -349,6 +379,40 @@ mod tests {
         assert!(labels.contains(&"flag_teknis"));
         // `teknis_id` is a real prefix → ranks ahead of the mid-word match.
         assert_eq!(labels.first(), Some(&"teknis_id"));
+    }
+
+    /// WHERE on a cross-schema table (not the active schema) still offers that
+    /// table's columns, resolved from the statement's FROM clause.
+    #[test]
+    fn where_offers_from_table_columns_cross_schema() {
+        let mk = |l: &str, k: &str| VmTreeNode {
+            label: l.into(),
+            kind: k.into(),
+        };
+        let two = vec![
+            mk("public", "database"),
+            mk("users", "table"),
+            mk("id", "field"),
+            mk("oss_rba_common", "database"),
+            mk("step_journal", "table"),
+            mk("step_id", "field"),
+            mk("journal_id", "field"),
+        ];
+        // Active schema is public; the query reads oss_rba_common.step_journal.
+        let (_, c) = suggest(
+            "select * from oss_rba_common.step_journal where step",
+            &two,
+            "public",
+        );
+        let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+        assert!(labels.contains(&"step_id"));
+        // A prior statement's tables must not leak past a `;`.
+        let (_, c2) = suggest(
+            "select * from users;\nselect * from oss_rba_common.step_journal where step",
+            &two,
+            "public",
+        );
+        assert!(c2.iter().any(|x| x.label == "step_id"));
     }
 
     #[test]
