@@ -87,17 +87,35 @@ export component ListModal inherits Rectangle {
                         spacing: 1px;
                         alignment: start;
                         for it[i] in root.items: Rectangle {
+                            // Non-selectable group header (GitHub-style sections).
+                            property <bool> is-section: it.kind == "section";
                             property <bool> is-group: it.kind == "group";
                             property <bool> two-line: it.sub != "";
-                            height: two-line ? 44px : 34px;
+                            height: is-section ? 28px : two-line ? 44px : 34px;
                             border-radius: Tokens.radius;
-                            background: i == root.selected ? Tokens.chrome
+                            background: is-section ? transparent
+                                : i == root.selected ? Tokens.chrome
                                 : it-ta.has-hover ? Tokens.canvas : transparent;
                             it-ta := TouchArea {
-                                clicked => { root.selected = i; }
-                                double-clicked => { root.choose(i); }
+                                clicked => { if (!is-section) { root.selected = i; } }
+                                double-clicked => { if (!is-section) { root.choose(i); } }
                             }
-                            HorizontalLayout {
+                            // Section header: small dim caps, no icon.
+                            if is-section: HorizontalLayout {
+                                padding-left: Tokens.sp2;
+                                padding-right: Tokens.sp2;
+                                VerticalLayout {
+                                    alignment: end;
+                                    Text {
+                                        text: it.label;
+                                        color: Tokens.text-faint;
+                                        font-size: Tokens.font-xs;
+                                        font-weight: 700;
+                                        vertical-alignment: bottom;
+                                    }
+                                }
+                            }
+                            if !is-section: HorizontalLayout {
                                 padding-left: Tokens.sp2;
                                 padding-right: Tokens.sp2;
                                 spacing: Tokens.sp3;

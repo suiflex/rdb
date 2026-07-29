@@ -2074,6 +2074,57 @@ fn restore_grid_state(w: &MainWindow, pane: usize, g: &GroupRuntime, sr: &Stored
     *g.displayed_grid.lock().unwrap() = view_grid(&filtered);
     apply_result(w, pane, filtered);
 }
+/// Build the ⌘K palette model, grouped GitHub-style under non-selectable
+/// "section" header rows. `needle` (lowercase) filters both groups; empty
+/// shows everything. Empty groups drop their header.
+fn build_palette_items(
+    names: &[(String, &'static str)],
+    w: &MainWindow,
+    needle: &str,
+) -> Vec<PaletteItem> {
+    let section = |t: &str| PaletteItem {
+        label: t.into(),
+        kind: "section".into(),
+        sub: SharedString::default(),
+        local: false,
+    };
+    let mut items: Vec<PaletteItem> = Vec::new();
+    let conns: Vec<&(String, &'static str)> = names
+        .iter()
+        .filter(|(n, _)| needle.is_empty() || n.to_lowercase().contains(needle))
+        .collect();
+    if !conns.is_empty() {
+        items.push(section("Connections"));
+        for (n, badge) in conns {
+            items.push(PaletteItem {
+                label: n.clone().into(),
+                kind: (*badge).into(),
+                sub: SharedString::default(),
+                local: false,
+            });
+        }
+    }
+    let tables: Vec<SharedString> = w
+        .get_schema_tree()
+        .iter()
+        .filter(|n| {
+            n.kind == "table" && (needle.is_empty() || n.label.to_lowercase().contains(needle))
+        })
+        .map(|n| n.label.clone())
+        .collect();
+    if !tables.is_empty() {
+        items.push(section("Tables"));
+        for label in tables {
+            items.push(PaletteItem {
+                label,
+                kind: "table".into(),
+                sub: SharedString::default(),
+                local: false,
+            });
+        }
+    }
+    items
+}
 fn set_p_editing(w: &MainWindow, pane: usize, row: i32, col: i32) {
     if pane == 0 {
         w.set_editing_row(row);
@@ -9533,23 +9584,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         .iter()
                         .map(|s| (s.name.clone(), AnyDriver::badge(s.engine)))
                         .collect();
-                    let mut items: Vec<PaletteItem> = names
-                        .iter()
-                        .map(|(n, badge)| PaletteItem {
-                            label: n.clone().into(),
-                            kind: (*badge).into(),
-                            sub: SharedString::default(),
-                            local: false,
-                        })
-                        .collect();
-                    for n in w.get_schema_tree().iter().filter(|n| n.kind == "table") {
-                        items.push(PaletteItem {
-                            label: n.label.clone(),
-                            kind: "table".into(),
-                            sub: SharedString::default(),
-                            local: false,
-                        });
-                    }
+                    let items = build_palette_items(&names, &w, "");
                     w.set_palette_items(ModelRc::from(Rc::new(VecModel::from(items))));
                 }
             }
@@ -9562,35 +9597,13 @@ fn main() -> Result<(), slint::PlatformError> {
         let store = store.clone();
         window.on_palette_filter(move |q| {
             if let Some(w) = weak.upgrade() {
-                let needle = q.to_lowercase();
                 let names: Vec<(String, &'static str)> = store
                     .borrow()
                     .list()
                     .iter()
                     .map(|s| (s.name.clone(), AnyDriver::badge(s.engine)))
                     .collect();
-                let mut items: Vec<PaletteItem> = names
-                    .iter()
-                    .filter(|(n, _)| n.to_lowercase().contains(&needle))
-                    .map(|(n, badge)| PaletteItem {
-                        label: n.clone().into(),
-                        kind: (*badge).into(),
-                        sub: SharedString::default(),
-                        local: false,
-                    })
-                    .collect();
-                for n in w
-                    .get_schema_tree()
-                    .iter()
-                    .filter(|n| n.kind == "table" && n.label.to_lowercase().contains(&needle))
-                {
-                    items.push(PaletteItem {
-                        label: n.label.clone(),
-                        kind: "table".into(),
-                        sub: SharedString::default(),
-                        local: false,
-                    });
-                }
+                let items = build_palette_items(&names, &w, &q.to_lowercase());
                 w.set_palette_items(ModelRc::from(Rc::new(VecModel::from(items))));
             }
         });
