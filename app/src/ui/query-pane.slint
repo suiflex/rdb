@@ -554,8 +554,6 @@ export component QueryPane inherits Rectangle {
                                 property <GridCell> detail-cell: root.cells[root.selected-row * root.col-count + c];
                                 // Formatted JSON for this cell (read-only results only), else "".
                                 property <string> pretty: root.read-only && root.detail-pretty.length > c ? root.detail-pretty[c] : "";
-                                // Give a JSON value room to breathe; plain cells stay compact.
-                                height: pretty != "" ? 220px : 96px;
                                 VerticalLayout {
                                     spacing: Tokens.sp1;
                                     HorizontalLayout {
@@ -588,27 +586,33 @@ export component QueryPane inherits Rectangle {
                                             }
                                         }
                                     }
+                                    // Box grows to fit the value; short values stay
+                                    // compact, long ones cap out and scroll inside.
                                     Rectangle {
-                                        vertical-stretch: 1;
+                                        height: clamp(detail-input.preferred-height + 2 * Tokens.sp2, 44px, 220px);
                                         clip: true;
                                         border-radius: Tokens.radius;
                                         border-width: 1px;
                                         border-color: detail-input.has-focus ? Tokens.accent : Tokens.border-strong;
                                         background: Tokens.canvas;
-                                        detail-input := TextInput {
+                                        ScrollView {
                                             x: Tokens.sp2;
                                             y: Tokens.sp2;
                                             width: parent.width - 2 * Tokens.sp2;
                                             height: parent.height - 2 * Tokens.sp2;
-                                            text: pretty != "" ? pretty : (detail-cell.is-null ? "" : detail-cell.text);
-                                            enabled: !root.read-only;
-                                            single-line: false;
-                                            wrap: word-wrap;
-                                            vertical-alignment: top;
-                                            color: root.read-only ? Tokens.text-dim : Tokens.text;
-                                            font-family: Tokens.mono;
-                                            font-size: Tokens.font-sm;
-                                            edited => { root.stage-cell(root.selected-row, c, self.text); }
+                                            detail-input := TextInput {
+                                                width: parent.visible-width;
+                                                height: max(parent.visible-height, self.preferred-height);
+                                                text: pretty != "" ? pretty : (detail-cell.is-null ? "" : detail-cell.text);
+                                                enabled: !root.read-only;
+                                                single-line: false;
+                                                wrap: word-wrap;
+                                                vertical-alignment: top;
+                                                color: root.read-only ? Tokens.text-dim : Tokens.text;
+                                                font-family: Tokens.mono;
+                                                font-size: Tokens.font-sm;
+                                                edited => { root.stage-cell(root.selected-row, c, self.text); }
+                                            }
                                         }
                                         if detail-cell.is-null && detail-input.text == "": Text {
                                             x: Tokens.sp2;
