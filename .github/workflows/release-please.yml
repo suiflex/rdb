@@ -30,14 +30,16 @@ jobs:
           manifest-file: .release-please-manifest.json
 
       # The tag stays vX.Y.Z (release-build.yml keys off `v*`); only the
-      # GitHub Release display title gets the "RDB: " prefix.
+      # GitHub Release display title gets the "RDB " prefix. Manifest mode
+      # path-prefixes the release outputs, so gate on `app--release_created`
+      # (the bare `release_created` is empty here and left the step skipped).
       - name: Prefix release title with product name
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs['app--release_created'] }}
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
         run: |
-          gh release edit "${{ steps.release.outputs.tag_name }}" \
-            --title "RDB: ${{ steps.release.outputs.tag_name }}"
+          gh release edit "${{ steps.release.outputs['app--tag_name'] }}" \
+            --title "RDB ${{ steps.release.outputs['app--tag_name'] }}"
 
       # Match the CHANGELOG to the release title. release-please regenerates
       # only the newest block on each run, so prefixing the top-most heading on
