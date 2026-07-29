@@ -839,10 +839,13 @@ callback create-table-commit();
                 Rectangle { horizontal-stretch: 1; }
 
                 // --- center: ⌘K pill (flanked by stretch spacers) ---
+                // Stretches toward the corner clusters, capped so it stays
+                // readable on wide windows.
                 VerticalLayout {
                     alignment: center;
+                    horizontal-stretch: 3;
                     SearchCommandPill {
-                        width: 248px;
+                        max-width: 720px;
                         activated => { root.toggle-palette(); }
                     }
                 }
