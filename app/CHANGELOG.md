@@ -18,7 +18,7 @@
 * **app:** even out keyboard shortcut key chips ([b29fa66](https://github.com/suiflex/rdb/commit/b29fa66b463049f8429d11492b2810fb0611550f))
 * **app:** list all six supported engines in About ([a915b5f](https://github.com/suiflex/rdb/commit/a915b5fde0c641fc0eaa721abe1f711c8d7697ec))
 
-## [0.27.0](https://github.com/suiflex/rdb/compare/v0.26.0...v0.27.0) (2026-07-29)
+## RDB: [0.27.0](https://github.com/suiflex/rdb/compare/v0.26.0...v0.27.0) (2026-07-29)
 
 
 ### App Features
