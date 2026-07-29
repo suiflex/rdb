@@ -18,6 +18,23 @@
 * **app:** even out keyboard shortcut key chips ([b29fa66](https://github.com/suiflex/rdb/commit/b29fa66b463049f8429d11492b2810fb0611550f))
 * **app:** list all six supported engines in About ([a915b5f](https://github.com/suiflex/rdb/commit/a915b5fde0c641fc0eaa721abe1f711c8d7697ec))
 
+## [0.27.0](https://github.com/suiflex/rdb/compare/v0.26.0...v0.27.0) (2026-07-29)
+
+
+### App Features
+
+* **app:** add reconnect shortcut (Cmd+Shift+R) ([00c2b68](https://github.com/suiflex/rdb/commit/00c2b68565d8fa839f9c810ce8a647a323e11e55))
+* **app:** group command palette results GitHub-style ([0f3151b](https://github.com/suiflex/rdb/commit/0f3151b21c6fe28d38c07e25ea4ff27a729c7bcf))
+* **app:** run selected statements into separate result tabs ([6d674b1](https://github.com/suiflex/rdb/commit/6d674b1ed2bc2b3bb7671a423b424304ba00a5a6))
+* **app:** widen header search pill toward corner clusters ([fb678b9](https://github.com/suiflex/rdb/commit/fb678b97dcd07123aace63ff5ba1e5a4aeb10756))
+
+
+### Bug Fixes
+
+* **app:** hide console window on Windows ([24ccbbf](https://github.com/suiflex/rdb/commit/24ccbbfe8cb434b1deddf8883078f6a4e42253b8))
+* **app:** persist result filter across tab and query switches ([1c49eee](https://github.com/suiflex/rdb/commit/1c49eeec33c60a2255a471873fcd968e0e1da7b0))
+* **app:** size details value boxes to content with scroll ([b2bb088](https://github.com/suiflex/rdb/commit/b2bb088ffce68e888d7d73829a85aa863ea41f96))
+
 ## [0.25.2](https://github.com/suiflex/rdb/compare/v0.25.1...v0.25.2) (2026-07-28)
 
 
