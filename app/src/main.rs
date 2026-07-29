@@ -604,6 +604,11 @@ struct GridState {
     hidden: Vec<usize>,
     col_order: Vec<usize>,
     col_widths: Vec<f32>,
+    // Client-side search bar state (the "Filter" box above the grid). Kept per
+    // result so switching result/query tabs doesn't drop the active filter.
+    grid_filter: String,
+    filter_col: String,
+    filter_op: String,
 }
 
 #[derive(Clone)]
@@ -1993,6 +1998,9 @@ fn capture_grid_state(w: &MainWindow, pane: usize, g: &GroupRuntime) -> GridStat
         hidden,
         col_order: g.col_order.lock().unwrap().clone(),
         col_widths: get_p_col_widths(w, pane),
+        grid_filter: w.get_grid_filter().to_string(),
+        filter_col: w.get_filter_col().to_string(),
+        filter_op: w.get_filter_op().to_string(),
     }
 }
 /// Re-apply a result's saved grid view after `present_view` reset it to defaults.
@@ -2034,11 +2042,25 @@ fn restore_grid_state(w: &MainWindow, pane: usize, g: &GroupRuntime, sr: &Stored
             ModelRc::from(Rc::new(VecModel::from(st.col_widths.clone()))),
         );
     }
+    // Re-apply the search-bar filter that `present_view` reset to empty.
+    let fcol = if st.filter_col.is_empty() {
+        "any column".to_string()
+    } else {
+        st.filter_col.clone()
+    };
+    let fop = if st.filter_op.is_empty() {
+        "=".to_string()
+    } else {
+        st.filter_op.clone()
+    };
+    w.set_grid_filter(st.grid_filter.clone().into());
+    w.set_filter_col(fcol.clone().into());
+    w.set_filter_op(fop.clone().into());
     let filtered = compute_view(
         &sr.view,
-        "",
-        "any column",
-        "=",
+        &st.grid_filter.to_lowercase(),
+        &fcol,
+        &fop,
         &st.col_filters,
         &hidden,
         &st.col_order,
@@ -4820,6 +4842,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let results = results.clone();
         let active_result = active_result.clone();
         let last_view = last_view.clone();
+        let panes = panes.clone();
         Rc::new(move |w| {
             let Some(id) = active_id.lock().unwrap().clone() else {
                 return;
@@ -4833,8 +4856,14 @@ fn main() -> Result<(), slint::PlatformError> {
             if tab.kind == "table" {
                 tab.browse = browse.lock().unwrap().clone();
             } else if tab.kind == "sql" {
+                // Snapshot the live grid (sort/filters/search) into the active
+                // result before cloning, so it survives a tab switch.
+                let ai = *active_result.lock().unwrap();
+                if let Some(r) = results.lock().unwrap().get_mut(ai) {
+                    r.grid = capture_grid_state(w, 0, &panes[0]);
+                }
                 tab.results = results.lock().unwrap().clone();
-                tab.active_result = *active_result.lock().unwrap();
+                tab.active_result = ai;
             }
             if tab.kind != "function" {
                 tab.view = last_view.lock().unwrap().clone().map(|view| StoredResult {
@@ -4987,6 +5016,13 @@ fn main() -> Result<(), slint::PlatformError> {
                     &panes[pane].edit_buf,
                     &panes[pane].browse,
                 );
+                // present_view reset the grid to defaults; re-apply the saved
+                // sort/filters/search for the active result (sql tabs only).
+                if tab.kind == "sql" {
+                    if let Some(sr) = tab.results.get(tab.active_result) {
+                        restore_grid_state(w, pane, &panes[pane], sr);
+                    }
+                }
             } else {
                 *last_view.lock().unwrap() = None;
                 *panes[pane].displayed_grid.lock().unwrap() = None;
@@ -6376,6 +6412,30 @@ fn main() -> Result<(), slint::PlatformError> {
                                     tab.results.clear();
                                     tab.active_result = 0;
                                 } else {
+                                    // ⌘\ opens a new result tab; snapshot the
+                                    // outgoing result's live grid (sort/filters/
+                                    // search) so returning to it keeps its state.
+                                    if new_tab && is_active {
+                                        if let Some(r) = tab.results.get_mut(tab.active_result) {
+                                            let mut hidden: Vec<usize> = hidden_cols
+                                                .lock()
+                                                .unwrap()
+                                                .iter()
+                                                .copied()
+                                                .collect();
+                                            hidden.sort_unstable();
+                                            r.grid = GridState {
+                                                col_filters: col_filters.lock().unwrap().clone(),
+                                                sort: *sort_state.lock().unwrap(),
+                                                hidden,
+                                                col_order: col_order.lock().unwrap().clone(),
+                                                col_widths: get_p_col_widths(&w, pane),
+                                                grid_filter: w.get_grid_filter().to_string(),
+                                                filter_col: w.get_filter_col().to_string(),
+                                                filter_op: w.get_filter_op().to_string(),
+                                            };
+                                        }
+                                    }
                                     store_result(
                                         &mut tab.results,
                                         &mut tab.active_result,
