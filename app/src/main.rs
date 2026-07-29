@@ -679,6 +679,9 @@ struct GroupRuntime {
     results: Arc<std::sync::Mutex<Vec<StoredResult>>>,
     active_result: Arc<std::sync::Mutex<usize>>,
     result_new_tab: Arc<std::sync::atomic::AtomicBool>,
+    // Set by "Run Selection" when the selection holds 2+ statements: the next
+    // run stores one result tab per statement instead of last-wins.
+    split_results: Arc<std::sync::atomic::AtomicBool>,
     displayed_grid: Arc<std::sync::Mutex<Option<model::GridModel>>>,
     browse: Arc<std::sync::Mutex<BrowseState>>,
     hidden_cols: Arc<std::sync::Mutex<HashSet<usize>>>,
@@ -704,6 +707,7 @@ impl GroupRuntime {
             results: Arc::new(std::sync::Mutex::new(Vec::new())),
             active_result: Arc::new(std::sync::Mutex::new(0)),
             result_new_tab: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            split_results: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             displayed_grid: Arc::new(std::sync::Mutex::new(None)),
             browse: Arc::new(std::sync::Mutex::new(BrowseState {
                 limit: 300,
@@ -6245,6 +6249,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let results = panes[pane].results.clone();
             let active_result = panes[pane].active_result.clone();
             let result_new_tab = panes[pane].result_new_tab.clone();
+            let split_results = panes[pane].split_results.clone();
             let active_id = if pane == 1 {
                 &active_group1_tab_id
             } else {
@@ -6280,6 +6285,8 @@ fn main() -> Result<(), slint::PlatformError> {
             let query_console = query_console.clone();
             // ⌘\ set this; consume it so the next plain run replaces again.
             let new_tab = result_new_tab.swap(false, std::sync::atomic::Ordering::SeqCst);
+            // Run Selection over 2+ statements set this; consume it likewise.
+            let split = split_results.swap(false, std::sync::atomic::Ordering::SeqCst);
             // Currently selected database (top dropdown). Mongo line queries with
             // no `use(...)` run against it, matching what the user sees browsing.
             let mut cur_db = String::new();
@@ -6299,6 +6306,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 // each in order, stopping at the first error. The last result
                 // is what the grid shows (TablePlus semantics). Redis/Mongo
                 // take the whole text as a single command.
+                let mut split_views: Vec<model::ResultView> = Vec::new();
                 let (outcome, n_stmts) = match guard.as_ref() {
                     Some((engine, driver)) => {
                         let stmts = if matches!(
@@ -6355,6 +6363,12 @@ fn main() -> Result<(), slint::PlatformError> {
                                 }
                                 break;
                             }
+                            // Run Selection multi-tab: keep each statement's result.
+                            if split {
+                                if let Ok(rs) = &out {
+                                    split_views.push(model::to_result_view(rs));
+                                }
+                            }
                         }
                         (out, n)
                     }
@@ -6385,6 +6399,68 @@ fn main() -> Result<(), slint::PlatformError> {
                         }
                         match (view, err) {
                             (Some(v), _) => {
+                                // Run Selection over 2+ statements: store one
+                                // result tab per statement and show the first.
+                                if split && split_views.len() >= 2 {
+                                    let stored: Vec<StoredResult> = split_views
+                                        .iter()
+                                        .map(|vw| {
+                                            let rows = match vw {
+                                                model::ResultView::Table(g) => g.rows.len(),
+                                                model::ResultView::Documents(d) => {
+                                                    d.grid.rows.len()
+                                                }
+                                                model::ResultView::Affected(_) => 0,
+                                            }
+                                                as u64;
+                                            StoredResult {
+                                                view: vw.clone(),
+                                                meta: query_timing_meta(
+                                                    rows, 1, elapsed_ms, queue_ms, driver_ms,
+                                                    model_ms,
+                                                ),
+                                                latency: format!("{elapsed_ms} ms"),
+                                                grid: GridState::default(),
+                                            }
+                                        })
+                                        .collect();
+                                    let (first, all) = {
+                                        let mut tabs = workspace_tabs.lock().unwrap();
+                                        let Some(tab) =
+                                            tabs.iter_mut().find(|tab| tab.id == target_id)
+                                        else {
+                                            return;
+                                        };
+                                        tab.loading = false;
+                                        tab.results = stored;
+                                        tab.active_result = 0;
+                                        tab.view = tab.results.first().cloned();
+                                        (tab.results[0].clone(), tab.results.clone())
+                                    };
+                                    if !is_active {
+                                        return;
+                                    }
+                                    let count = all.len();
+                                    *results.lock().unwrap() = all;
+                                    *active_result.lock().unwrap() = 0;
+                                    set_result_tabs(&w, pane, count, 0);
+                                    present_view(
+                                        &w,
+                                        pane,
+                                        first.view,
+                                        &first.meta,
+                                        &first.latency,
+                                        &last_view,
+                                        &displayed_grid,
+                                        &hidden_cols,
+                                        &sort_state,
+                                        &col_order,
+                                        &col_filters,
+                                        &edit_buf,
+                                        &browse,
+                                    );
+                                    return;
+                                }
                                 let shown = match &v {
                                     model::ResultView::Table(g) => g.rows.len(),
                                     model::ResultView::Documents(d) => d.grid.rows.len(),
@@ -7238,6 +7314,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let ed_state = ed_state.clone();
         let recent_queries = recent_queries.clone();
         let history_cap = history_cap.clone();
+        let panes = panes.clone();
         window.on_run_selection(move || {
             let stmt = {
                 let ed = ed_state.borrow();
@@ -7248,11 +7325,13 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             if !stmt.is_empty() {
                 let mut stream = false;
+                let mut not_table = false;
                 if let Some(w) = weak.upgrade() {
-                    if active_tab_kind(&w) != "table" {
+                    not_table = active_tab_kind(&w) != "table";
+                    if not_table {
                         w.set_grid_read_only(true);
                     }
-                    stream = active_tab_kind(&w) != "table"
+                    stream = not_table
                         && browse.lock().unwrap().limit == 0
                         && cur_engine
                             .borrow()
@@ -7263,6 +7342,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 if stream {
                     run_stream(0, stmt);
                 } else {
+                    // 2+ selected statements → one result tab each.
+                    if not_table && editor::split_statements(&stmt).len() >= 2 {
+                        panes[0]
+                            .split_results
+                            .store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
                     run_sql(0, stmt);
                 }
             }
