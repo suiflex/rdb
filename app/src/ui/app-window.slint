@@ -611,6 +611,10 @@ callback create-table-commit();
                     root.commit-edits();
                     return accept;
                 }
+                if (e.text == "r" && e.modifiers.shift) {
+                    root.reconnect();
+                    return accept;
+                }
                 if (e.text == "r") {
                     root.refresh-result();
                     return accept;
@@ -2568,6 +2572,7 @@ callback create-table-commit();
                     { k: "⌘\\", a: "Run in new tab" },
                     { k: "⌘S", a: "Save / commit edits" },
                     { k: "⌘R", a: "Refresh result" },
+                    { k: "⌘⇧R", a: "Reconnect" },
                     { k: "⌘F", a: "Find" },
                     { k: "⌘O", a: "Open connection" },
                     { k: "⌘⇧O", a: "Open database" },
