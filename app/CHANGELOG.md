@@ -35,6 +35,34 @@
 * **app:** persist result filter across tab and query switches ([1c49eee](https://github.com/suiflex/rdb/commit/1c49eeec33c60a2255a471873fcd968e0e1da7b0))
 * **app:** size details value boxes to content with scroll ([b2bb088](https://github.com/suiflex/rdb/commit/b2bb088ffce68e888d7d73829a85aa863ea41f96))
 
+## [0.28.0](https://github.com/suiflex/rdb/compare/v0.27.0...v0.28.0) (2026-07-30)
+
+
+### App Features
+
+* **app:** add NoSQL collection-limit setting for MongoDB sidebar ([bb27c70](https://github.com/suiflex/rdb/commit/bb27c70f0f9876d6aa1006294b355aa5cd100f58))
+* **app:** connection picker affordances ([541f6ad](https://github.com/suiflex/rdb/commit/541f6ad4dd12905530455459c70a4faf45dee1e7))
+* **app:** make autocomplete engine-aware for MongoDB ([f22f535](https://github.com/suiflex/rdb/commit/f22f53591e22e2b46d281e833a5d8cfa4830cbfa))
+* **app:** suggest MongoDB collections after db. ([23bcdf9](https://github.com/suiflex/rdb/commit/23bcdf929cbc95f2bff45b26ac1b7e4bc030137e))
+* **app:** suggest MongoDB methods after db.&lt;collection&gt; ([5e088f0](https://github.com/suiflex/rdb/commit/5e088f078f91a16211b04e386d343601bf79bf7f))
+
+
+### Bug Fixes
+
+* **app:** balance the New Connection button glyph and height ([7674689](https://github.com/suiflex/rdb/commit/7674689accc5ad991222571fa28ea7dadf6794ff))
+* **app:** cancel the in-flight query on disconnect ([c98f1d6](https://github.com/suiflex/rdb/commit/c98f1d6ffd14f5cba130526635df0d361df66b02))
+* **app:** clip filter field text to its box ([ae49fb6](https://github.com/suiflex/rdb/commit/ae49fb6b5a11fe880132bbae5806d5fd5e292748))
+* **app:** make large value previews wrap and scroll ([3b45d44](https://github.com/suiflex/rdb/commit/3b45d4417540484b1a3365ac273b625b9249cb07))
+* **app:** make the result message scrollable ([985a32c](https://github.com/suiflex/rdb/commit/985a32ca6baf807f2ac57114e7e8ea8d0a8ddedb))
+* **app:** match New Connection hover colour to the other footer buttons ([d965816](https://github.com/suiflex/rdb/commit/d965816dad5a6e64ce4b46e53b56b5afc858c774))
+* **app:** run queries and pings without holding the driver mutex ([4fb65ca](https://github.com/suiflex/rdb/commit/4fb65cace8b38a693fedda8c5435f178c8705fee))
+* **app:** run the statement under the caret at a semicolon boundary ([7e27bd4](https://github.com/suiflex/rdb/commit/7e27bd4e045ecaff870b4aef55925bb331ed3e4b))
+* **app:** scope MongoDB sidebar to the connection's selected database ([1195e84](https://github.com/suiflex/rdb/commit/1195e84569963d1169356c38480fd29c85f03313))
+* **app:** scroll filter field to the caret instead of clipping the tail ([b60205f](https://github.com/suiflex/rdb/commit/b60205f8e38c35bfca0acdf16dee9cdf06395c17))
+* **app:** scroll the filter input to the caret so long text stays visible ([d29a0be](https://github.com/suiflex/rdb/commit/d29a0beeed248f645f2159522397923e89c81417))
+* **app:** stop the filter field growing with its text ([0b685b2](https://github.com/suiflex/rdb/commit/0b685b23ea273bafe89bd82493e623c2ae6f162b))
+* **app:** vertically center the New Connection footer button ([aaf3cc4](https://github.com/suiflex/rdb/commit/aaf3cc4a21d79852dfb1a5f276ea3f52659de792))
+
 ## [0.25.2](https://github.com/suiflex/rdb/compare/v0.25.1...v0.25.2) (2026-07-28)
 
 
