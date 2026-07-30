@@ -81,6 +81,9 @@ pub struct AppSettings {
     pub last_update_check: Option<i64>,
     pub ui_state: UiState,
     pub editor: EditorPrefs,
+    /// Max collections listed per database for NoSQL engines (MongoDB). RDBMS
+    /// table listings are unaffected. A large value effectively shows them all.
+    pub nosql_collection_limit: u32,
 }
 
 impl Default for AppSettings {
@@ -91,6 +94,7 @@ impl Default for AppSettings {
             last_update_check: None,
             ui_state: UiState::default(),
             editor: EditorPrefs::default(),
+            nosql_collection_limit: 200,
         }
     }
 }
@@ -172,6 +176,7 @@ mod tests {
         assert_eq!(s.get().last_update_check, None);
         assert_eq!(s.get().editor.default_page_size, 100);
         assert_eq!(s.get().editor.history_max_entries, 50);
+        assert_eq!(s.get().nosql_collection_limit, 200);
     }
 
     #[test]
