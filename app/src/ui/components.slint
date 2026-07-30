@@ -595,15 +595,16 @@ export component FilterField inherits Rectangle {
             alignment: center;
             AppIcon { name: "search"; size: 14px; color: Tokens.text-faint; }
         }
-        // Clip the input to a bounded viewport: a single-line TextInput inside a
-        // layout would otherwise grow to its full text width and spill past the
-        // box. Clipping here lets it scroll to keep the caret (and the newest
-        // characters) visible while typing long content (Mongo JSON filter).
+        // Bounded, clipped viewport that scrolls to the caret. A single-line
+        // TextInput does not scroll on its own (Slint docs): it grows to its full
+        // text width, so long content (e.g. a Mongo JSON filter) would spill past
+        // the box. Grow the input to its text width, clip it here, and shift its
+        // x on cursor moves so the newest characters stay visible while typing.
         Rectangle {
             horizontal-stretch: 1;
             clip: true;
             input := TextInput {
-                width: parent.width;
+                width: max(parent.width, self.preferred-width);
                 height: parent.height;
                 font-size: Tokens.font-sm;
                 color: Tokens.text;
@@ -611,6 +612,13 @@ export component FilterField inherits Rectangle {
                 single-line: true;
                 accepted => { root.submitted(); }
                 edited => { root.edited(self.text); }
+                cursor-position-changed(cursor-position) => {
+                    if cursor-position.x + self.x < 4px {
+                        self.x = -cursor-position.x + 4px;
+                    } else if cursor-position.x + self.x > parent.width - 4px - self.text-cursor-width {
+                        self.x = parent.width - cursor-position.x - 4px - self.text-cursor-width;
+                    }
+                }
             }
         }
         if root.trailing-cap != "": VerticalLayout {
