@@ -2919,7 +2919,11 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     // (engine, driver) so run-query can parse text for the right paradigm.
-    let current: Arc<tokio::sync::Mutex<Option<(rdb_connstore::Engine, AnyDriver)>>> =
+    // The live driver behind an Arc so callers clone it out of the mutex and run
+    // queries/pings lock-free: the mutex only guards the slot swap, never a whole
+    // query. Drivers are `&self`, internally pooled and cheap to clone, so this
+    // removes query↔ping (and query↔query) serialization.
+    let current: Arc<tokio::sync::Mutex<Option<(rdb_connstore::Engine, Arc<AnyDriver>)>>> =
         Arc::new(tokio::sync::Mutex::new(None));
 
     // Set of group labels the user has collapsed in the sidebar.
@@ -4124,8 +4128,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
             };
             rt.spawn(async move {
-                let guard = current.lock_owned().await;
-                let Some((_, driver)) = guard.as_ref() else {
+                let driver = {
+                    let guard = current.lock().await;
+                    guard.as_ref().map(|(_, d)| d.clone())
+                };
+                let Some(driver) = driver else {
                     clear_loading();
                     return;
                 };
@@ -4159,7 +4166,6 @@ fn main() -> Result<(), slint::PlatformError> {
                     Some(engine),
                     "",
                 );
-                drop(guard);
                 *raw_nodes.lock().unwrap() = nodes;
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
@@ -4204,15 +4210,17 @@ fn main() -> Result<(), slint::PlatformError> {
             let weak2 = weak.clone();
             let current = current.clone();
             rt.spawn(async move {
-                let guard = current.lock_owned().await;
-                let res = match guard.as_ref() {
-                    Some((_, driver)) => driver
+                let driver = {
+                    let guard = current.lock().await;
+                    guard.as_ref().map(|(_, d)| d.clone())
+                };
+                let res = match driver {
+                    Some(driver) => driver
                         .query(&rdb_core::query::Query::Sql(sql))
                         .await
                         .map(|_| ()),
                     None => Err(rdb_core::error::RdbError::Query("not connected".into())),
                 };
-                drop(guard);
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
                         match res {
@@ -4365,15 +4373,17 @@ fn main() -> Result<(), slint::PlatformError> {
             let weak2 = weak.clone();
             let current = current.clone();
             rt.spawn(async move {
-                let guard = current.lock_owned().await;
-                let res = match guard.as_ref() {
-                    Some((_, driver)) => driver
+                let driver = {
+                    let guard = current.lock().await;
+                    guard.as_ref().map(|(_, d)| d.clone())
+                };
+                let res = match driver {
+                    Some(driver) => driver
                         .query(&rdb_core::query::Query::Sql(sql))
                         .await
                         .map(|_| ()),
                     None => Err(rdb_core::error::RdbError::Query("not connected".into())),
                 };
-                drop(guard);
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
                         match res {
@@ -4401,12 +4411,15 @@ fn main() -> Result<(), slint::PlatformError> {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                 // None = no driver (picker); Some(ok) = pinged a live connection.
-                let alive = {
+                // Clone the driver out of the mutex before pinging so a slow ping
+                // never blocks an in-flight query.
+                let driver = {
                     let guard = current.lock().await;
-                    match guard.as_ref() {
-                        Some((_, driver)) => Some(driver.ping().await.is_ok()),
-                        None => None,
-                    }
+                    guard.as_ref().map(|(_, d)| d.clone())
+                };
+                let alive = match driver {
+                    Some(driver) => Some(driver.ping().await.is_ok()),
+                    None => None,
                 };
                 let Some(ok) = alive else { continue };
                 let weak = weak.clone();
@@ -6085,7 +6098,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             .into_iter()
                             .map(SharedString::from)
                             .collect();
-                        *slot = Some((engine, driver));
+                        *slot = Some((engine, Arc::new(driver)));
                         drop(slot);
                         let nodes = model::to_tree_model(&schema);
                         let fields = model::to_structure_model(&schema);
@@ -6202,8 +6215,11 @@ fn main() -> Result<(), slint::PlatformError> {
                         if matches!(engine, rdb_connstore::Engine::Postgres)
                             && all_schema_names.len() > 1
                         {
-                            let guard = store_driver.lock_owned().await;
-                            if let Some((_, driver)) = guard.as_ref() {
+                            let driver = {
+                                let guard = store_driver.lock().await;
+                                guard.as_ref().map(|(_, d)| d.clone())
+                            };
+                            if let Some(driver) = driver {
                                 let mut all = Vec::new();
                                 for name in &all_schema_names {
                                     if let Ok(s) = driver.schema_for(name).await {
@@ -6352,7 +6368,10 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             let started = std::time::Instant::now();
             let jh = rt.spawn(async move {
-                let guard = current.lock().await;
+                let picked = {
+                    let guard = current.lock().await;
+                    guard.as_ref().map(|(e, d)| (*e, d.clone()))
+                };
                 let queue_ms = started.elapsed().as_millis() as u64;
                 let driver_started = std::time::Instant::now();
                 // Multi-statement: SQL engines split on top-level `;` and run
@@ -6360,7 +6379,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 // is what the grid shows (TablePlus semantics). Redis/Mongo
                 // take the whole text as a single command.
                 let mut split_views: Vec<model::ResultView> = Vec::new();
-                let (outcome, n_stmts) = match guard.as_ref() {
+                let (outcome, n_stmts) = match picked.as_ref() {
                     Some((engine, driver)) => {
                         let stmts = if matches!(
                             engine,
@@ -6904,18 +6923,23 @@ fn main() -> Result<(), slint::PlatformError> {
             *stream_timer.borrow_mut() = Some(timer);
 
             // Producer task: stream from the driver, forward Send batches to the
-            // UI channel. Holds the driver lock for the whole stream (like a DB
-            // client cursor); Cancel or a new run stops it at the next batch.
+            // UI channel. The driver is cloned out of the mutex up front (the
+            // mongodb/pg client is internally pooled), so the whole stream runs
+            // without holding the lock; Cancel or a new run stops it at the next
+            // batch.
             let q = rdb_core::query::Query::Sql(sql);
             let current = current.clone();
             rt.spawn(async move {
                 let t0 = std::time::Instant::now();
-                let guard = current.lock().await;
+                let driver = {
+                    let guard = current.lock().await;
+                    guard.as_ref().map(|(_, d)| d.clone())
+                };
                 let (ctx, mut crx) = tokio::sync::mpsc::channel::<rdb_core::result::StreamItem>(4);
                 let cancel_prod = cancel.clone();
                 let producer = async move {
-                    match guard.as_ref() {
-                        Some((_engine, driver)) => {
+                    match driver {
+                        Some(driver) => {
                             driver
                                 .query_stream(&q, STREAM_BATCH, cancel_prod, ctx)
                                 .await
@@ -8030,8 +8054,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let active_tab_id = active_tab_id.clone();
             let query_console = query_console.clone();
             rt.spawn(async move {
-                let guard = current.lock().await;
-                let Some((engine, driver)) = guard.as_ref() else {
+                let picked = {
+                    let guard = current.lock().await;
+                    guard.as_ref().map(|(e, d)| (*e, d.clone()))
+                };
+                let Some((engine, driver)) = picked.as_ref() else {
                     return;
                 };
                 let total = driver.count(&table).await.ok();
@@ -8187,8 +8214,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let current = current.clone();
             let browse = browse.clone();
             rt.spawn(async move {
-                let guard = current.lock().await;
-                let Some((_, driver)) = guard.as_ref() else {
+                let driver = {
+                    let guard = current.lock().await;
+                    guard.as_ref().map(|(_, d)| d.clone())
+                };
+                let Some(driver) = driver else {
                     return;
                 };
                 let total = driver.count(&table).await.ok();
@@ -8452,12 +8482,13 @@ fn main() -> Result<(), slint::PlatformError> {
                     let weak2 = weak.clone();
                     let db = label.clone();
                     rt.spawn(async move {
-                        let containers = {
+                        let drv = {
                             let guard = driver.lock().await;
-                            match &*guard {
-                                Some((_, drv)) => drv.containers(&db).await.unwrap_or_default(),
-                                None => return,
-                            }
+                            guard.as_ref().map(|(_, d)| d.clone())
+                        };
+                        let containers = match drv {
+                            Some(drv) => drv.containers(&db).await.unwrap_or_default(),
+                            None => return,
                         };
                         let rows = {
                             let mut nodes = raw_nodes.lock().unwrap();
@@ -9536,14 +9567,15 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_result_status(SharedString::from("saving…"));
             }
             rt.spawn(async move {
-                let outcome = {
+                let driver = {
                     let guard = current.lock().await;
-                    match guard.as_ref() {
-                        Some((_, driver)) => driver.commit(&ops).await,
-                        None => Err(rdb_core::error::RdbError::Connection(
-                            "not connected".into(),
-                        )),
-                    }
+                    guard.as_ref().map(|(_, d)| d.clone())
+                };
+                let outcome = match driver {
+                    Some(driver) => driver.commit(&ops).await,
+                    None => Err(rdb_core::error::RdbError::Connection(
+                        "not connected".into(),
+                    )),
                 };
                 let _ = slint::invoke_from_event_loop(move || {
                     let Some(w) = weak2.upgrade() else {
