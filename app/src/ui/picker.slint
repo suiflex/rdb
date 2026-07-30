@@ -296,7 +296,9 @@ export component ConnPicker inherits Rectangle {
                         padding-left: Tokens.sp6;
                         padding-right: Tokens.sp6;
                         spacing: Tokens.sp4;
-                        Rectangle {
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
                             width: new-row.preferred-width;
                             height: 30px;
                             border-radius: Tokens.radius;
@@ -325,6 +327,7 @@ export component ConnPicker inherits Rectangle {
                             new-ta := TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => { root.add-clicked(); }
+                            }
                             }
                         }
                         Rectangle { horizontal-stretch: 1; }
