@@ -46,8 +46,11 @@ jobs:
       # the release-PR branch is idempotent and leaves older headings untouched.
       - name: Prefix CHANGELOG heading with product name
         if: ${{ steps.release.outputs.pr }}
+        env:
+          # Keep generated PR JSON out of the shell script body.
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
         run: |
-          branch=$(printf '%s' '${{ steps.release.outputs.pr }}' | jq -r '.headBranchName')
+          branch=$(printf '%s' "$RELEASE_PR" | jq -r '.headBranchName')
           git fetch origin "$branch"
           git checkout "$branch"
           awk '!done && /^## \[/ { sub(/^## \[/, "## RDB: ["); done=1 } { print }' \
