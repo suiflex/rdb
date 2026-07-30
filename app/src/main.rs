@@ -2907,6 +2907,7 @@ fn main() -> Result<(), slint::PlatformError> {
         settings.borrow().get().editor.history_max_entries.max(1) as usize,
     ));
     window.set_history_max_entries(history_cap.get() as i32);
+    window.set_nosql_collection_limit(settings.borrow().get().nosql_collection_limit.max(1) as i32);
     window.set_app_version(env!("CARGO_PKG_VERSION").into());
 
     // Fixed window size for the screenshot loop: RDB_WIN=WxH (logical px).
@@ -2923,8 +2924,8 @@ fn main() -> Result<(), slint::PlatformError> {
     // queries/pings lock-free: the mutex only guards the slot swap, never a whole
     // query. Drivers are `&self`, internally pooled and cheap to clone, so this
     // removes query↔ping (and query↔query) serialization.
-    let current: Arc<tokio::sync::Mutex<Option<(rdb_connstore::Engine, Arc<AnyDriver>)>>> =
-        Arc::new(tokio::sync::Mutex::new(None));
+    type DriverSlot = Arc<tokio::sync::Mutex<Option<(rdb_connstore::Engine, Arc<AnyDriver>)>>>;
+    let current: DriverSlot = Arc::new(tokio::sync::Mutex::new(None));
 
     // Set of group labels the user has collapsed in the sidebar.
     let collapsed: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
@@ -6051,6 +6052,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let fn_defs = fn_defs.clone();
             let expanded_tables = expanded_tables.clone();
             let loaded_dbs = loaded_dbs.clone();
+            // NoSQL collection cap to push onto the fresh connection (Mongo only).
+            let nosql_limit = weak
+                .upgrade()
+                .map(|w| w.get_nosql_collection_limit().max(1) as usize)
+                .unwrap_or(200);
             let handle = rt.spawn(async move {
                 let mut slot = match claimed {
                     Some(g) => g,
@@ -6063,6 +6069,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     let cfg =
                         cfg.map_err(|e| rdb_core::error::RdbError::Connection(e.to_string()))?;
                     let driver = AnyDriver::connect(engine, &cfg).await?;
+                    // Apply the NoSQL collection cap before any schema fetch so
+                    // the first sidebar load already honors it (Mongo only).
+                    driver.set_collection_limit(nosql_limit);
                     // MongoDB: when the connection names a database, scope the
                     // sidebar to it (matching the schema switcher) instead of
                     // listing every database on the server.
@@ -9749,6 +9758,91 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_history_max_entries(cap as i32);
                 rebuild_query_tree("");
             }
+        });
+    }
+    // ----- NoSQL collection-limit setting (MongoDB sidebar cap) -----
+    {
+        let weak = window.as_weak();
+        let rt = rt.clone();
+        let current = current.clone();
+        let raw_nodes = raw_nodes.clone();
+        let expanded_tables = expanded_tables.clone();
+        let loaded_dbs = loaded_dbs.clone();
+        let cur_engine = cur_engine.clone();
+        let settings = settings.clone();
+        window.on_set_nosql_collection_limit(move |value| {
+            let n = match value {
+                50 | 100 | 200 | 500 | 1000 => value as usize,
+                _ => 200,
+            };
+            let _ = settings
+                .borrow_mut()
+                .update(|s| s.nosql_collection_limit = n as u32);
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            w.set_nosql_collection_limit(n as i32);
+            // Only MongoDB has a sidebar collection cap; nothing else to refresh.
+            if !matches!(*cur_engine.borrow(), Some(rdb_connstore::Engine::Mongo)) {
+                return;
+            }
+            let schema_name = w.get_schema_name().to_string();
+            if schema_name.is_empty() {
+                return;
+            }
+            // Push the new cap onto the live driver and refetch the open
+            // database's collections so the change shows immediately.
+            w.set_tree_loading(true);
+            let weak2 = weak.clone();
+            let current = current.clone();
+            let raw_nodes = raw_nodes.clone();
+            let expanded_tables = expanded_tables.clone();
+            let loaded_dbs = loaded_dbs.clone();
+            rt.spawn(async move {
+                let clear_loading = move |weak: slint::Weak<MainWindow>| {
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = weak.upgrade() {
+                            w.set_tree_loading(false);
+                        }
+                    });
+                };
+                let driver = {
+                    let guard = current.lock().await;
+                    guard.as_ref().map(|(_, d)| d.clone())
+                };
+                let Some(driver) = driver else {
+                    clear_loading(weak2);
+                    return;
+                };
+                driver.set_collection_limit(n);
+                let Ok(schema) = driver.schema_for(&schema_name).await else {
+                    clear_loading(weak2);
+                    return;
+                };
+                let nodes = model::to_tree_model(&schema);
+                let (exp, loaded) = {
+                    let mut e = expanded_tables.lock().unwrap();
+                    let mut l = loaded_dbs.lock().unwrap();
+                    e.insert(schema_name.clone());
+                    l.insert(schema_name.clone());
+                    (e.clone(), l.clone())
+                };
+                let rows = schema_display_rows(
+                    &nodes,
+                    &exp,
+                    &default_collapsed_cats(),
+                    &loaded,
+                    Some(rdb_connstore::Engine::Mongo),
+                    "",
+                );
+                *raw_nodes.lock().unwrap() = nodes;
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak2.upgrade() {
+                        w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
+                        w.set_tree_loading(false);
+                    }
+                });
+            });
         });
     }
 
