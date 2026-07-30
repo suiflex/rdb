@@ -1,5 +1,7 @@
 use async_trait::async_trait;
 use futures::stream::TryStreamExt;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use mongodb::bson::{doc, Document};
@@ -22,7 +24,13 @@ pub struct MongoDriver {
     client: Client,
     /// Default database used when an op does not imply one.
     default_db: String,
+    /// Max collections listed per database (the sidebar cap). Interior-mutable
+    /// so the UI can push the user's NoSQL limit onto a live connection.
+    collection_limit: Arc<AtomicUsize>,
 }
+
+/// Fallback collection cap when the UI has not pushed a limit yet.
+const DEFAULT_COLLECTION_LIMIT: usize = 200;
 
 /// Mongo's internal databases. Hidden from the sidebar so the user's own
 /// databases aren't buried, matching Compass/TablePlus defaults.
@@ -79,6 +87,12 @@ fn build_uri(cfg: &ConnConfig) -> String {
 }
 
 impl MongoDriver {
+    /// Push the user's NoSQL collection cap onto this live connection. Affects
+    /// subsequent sidebar refreshes.
+    pub fn set_collection_limit(&self, n: usize) {
+        self.collection_limit.store(n.max(1), Ordering::Relaxed);
+    }
+
     /// Resolve a collection in the op's database, falling back to the
     /// connection's default database when the op names none.
     fn collection(&self, op: &MongoOp) -> Collection<Document> {
@@ -102,7 +116,11 @@ impl Driver for MongoDriver {
         let client =
             Client::with_options(options).map_err(|e| RdbError::Connection(e.to_string()))?;
         let default_db = cfg.database.clone().unwrap_or_else(|| "admin".to_string());
-        Ok(MongoDriver { client, default_db })
+        Ok(MongoDriver {
+            client,
+            default_db,
+            collection_limit: Arc::new(AtomicUsize::new(DEFAULT_COLLECTION_LIMIT)),
+        })
     }
 
     async fn ping(&self) -> Result<()> {
@@ -135,6 +153,19 @@ impl Driver for MongoDriver {
         Ok(Schema { databases })
     }
 
+    /// All non-system databases, backing the "schema:" switcher so the user can
+    /// still reach every database even when the tree is scoped to one on connect.
+    async fn list_databases(&self) -> Result<Vec<String>> {
+        Ok(self
+            .client
+            .list_database_names()
+            .await
+            .map_err(|e| RdbError::Schema(e.to_string()))?
+            .into_iter()
+            .filter(|n| !is_system_db(n))
+            .collect())
+    }
+
     /// Scope the sidebar to one database: return just that database with its
     /// collections loaded, so picking it in the schema picker shows only its
     /// collections instead of every database.
@@ -149,10 +180,10 @@ impl Driver for MongoDriver {
         })
     }
 
-    /// Collections of one database, capped so a database with thousands of
-    /// collections stays light. ponytail: fixed cap, add paging if it matters.
+    /// Collections of one database, capped by the user's NoSQL collection limit
+    /// so a database with thousands of collections stays light.
     async fn containers(&self, database: &str) -> Result<Vec<Container>> {
-        const MAX_COLLECTIONS: usize = 20;
+        let limit = self.collection_limit.load(Ordering::Relaxed);
         let coll_names = self
             .client
             .database(database)
@@ -161,7 +192,7 @@ impl Driver for MongoDriver {
             .map_err(|e| RdbError::Schema(e.to_string()))?;
         Ok(coll_names
             .into_iter()
-            .take(MAX_COLLECTIONS)
+            .take(limit)
             .map(|name| Container {
                 name,
                 kind: ContainerKind::Collection,
