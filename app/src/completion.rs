@@ -42,6 +42,41 @@ fn keywords() -> Vec<Candidate> {
         .collect()
 }
 
+/// mongosh collection methods, offered after `db.<collection>.` so Mongo
+/// completion reaches parity with SQL column completion.
+const MONGO_METHODS: &[&str] = &[
+    "find",
+    "findOne",
+    "aggregate",
+    "countDocuments",
+    "distinct",
+    "insertOne",
+    "insertMany",
+    "updateOne",
+    "updateMany",
+    "deleteOne",
+    "deleteMany",
+];
+
+fn mongo_methods() -> Vec<Candidate> {
+    MONGO_METHODS
+        .iter()
+        .map(|m| Candidate {
+            label: (*m).to_string(),
+            kind: "keyword".into(),
+            sub: String::new(),
+        })
+        .collect()
+}
+
+/// Does `name` match a collection node (MongoDB) in the tree?
+fn is_collection(nodes: &[VmTreeNode], name: &str) -> bool {
+    let nl = name.to_lowercase();
+    nodes
+        .iter()
+        .any(|n| n.kind == "collection" && n.label.to_lowercase() == nl)
+}
+
 /// Every column across the schema (deduped by name), for SELECT/WHERE contexts
 /// where the owning table isn't yet known.
 fn all_columns(nodes: &[VmTreeNode]) -> Vec<Candidate> {
@@ -255,6 +290,9 @@ pub fn suggest(
         } else if owner_word.eq_ignore_ascii_case("db") {
             // MongoDB: `db.` is the current database — offer its collections.
             tables(scope)
+        } else if is_collection(nodes, owner_word) {
+            // MongoDB: `db.<collection>.` — offer collection methods.
+            mongo_methods()
         } else if is_database(nodes, owner_word) {
             tables(schema_scope(nodes, owner_word))
         } else {
@@ -369,6 +407,19 @@ mod tests {
         let (n, c) = suggest("db.log", &ns, "public");
         assert_eq!(n, 3);
         assert!(c.iter().any(|x| x.label == "log_inbound"));
+    }
+
+    #[test]
+    fn mongo_collection_dot_suggests_methods() {
+        // `db.<collection>.` offers mongosh methods (parity with SQL columns).
+        let mut ns = nodes();
+        ns.push(VmTreeNode {
+            label: "log_inbound".into(),
+            kind: "collection".into(),
+        });
+        let (_, c) = suggest("db.log_inbound.fi", &ns, "public");
+        assert!(c.iter().any(|x| x.label == "find"));
+        assert!(c.iter().any(|x| x.label == "findOne"));
     }
 
     /// Typing a mid-word `_` segment finds the identifier, and a true prefix
