@@ -706,10 +706,14 @@ impl EditorState {
         if seg_start < chars.len() {
             segments.push((seg_start, chars.len()));
         }
+        // Inclusive upper bound so a caret parked right after a `;` (offset == the
+        // segment's end, which also equals the next segment's start) runs the
+        // statement it just closed, not the following one. `find` yields the
+        // earliest match, so the closing segment wins.
         let (s, e) = segments
             .iter()
             .copied()
-            .find(|&(s, e)| offset >= s && offset < e)
+            .find(|&(s, e)| offset >= s && offset <= e)
             .or_else(|| segments.last().copied())
             .unwrap_or((0, chars.len()));
         let stmt: String = chars[s..e].iter().collect();
@@ -952,6 +956,16 @@ mod tests {
         ed.line = 2;
         ed.col = 0;
         assert_eq!(ed.current_statement(), "SELECT 3");
+    }
+
+    #[test]
+    fn statement_caret_right_after_semicolon_runs_that_statement() {
+        // Caret parked at the end of line 0 (just after its `;`) must run that
+        // statement, not the next one.
+        let mut ed = EditorState::from_text("SELECT 1;\nSELECT 2;");
+        ed.line = 0;
+        ed.col = 9; // right after the first `;`
+        assert_eq!(ed.current_statement(), "SELECT 1;");
     }
 
     #[test]
