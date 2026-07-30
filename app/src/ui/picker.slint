@@ -4,7 +4,7 @@
 import { Tokens } from "tokens.slint";
 import {
     DbBadge, OutlineChip, PrimaryButton, SecondaryButton, TextButton,
-    TagChip, FilterField
+    TagChip, FilterField, Tooltip
 } from "components.slint";
 import { AppIcon } from "icons.slint";
 import { ConnItem, KvRow } from "structs.slint";
@@ -198,6 +198,16 @@ export component ConnPicker inherits Rectangle {
                                                             round((self.mouse-y - self.pressed-y) / 40px));
                                                     }
                                                 }
+                                                changed has-hover => {
+                                                    if self.has-hover {
+                                                        Tooltip.text = "Drag to reorder";
+                                                        Tooltip.x = self.absolute-position.x + self.width / 2;
+                                                        Tooltip.y = self.absolute-position.y + self.height + 4px;
+                                                        Tooltip.shown = true;
+                                                    } else if Tooltip.text == "Drag to reorder" {
+                                                        Tooltip.shown = false;
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -259,6 +269,16 @@ export component ConnPicker inherits Rectangle {
                                             }
                                             star-ta := TouchArea {
                                                 clicked => { root.toggle-favorite(item.index); }
+                                                changed has-hover => {
+                                                    if self.has-hover {
+                                                        Tooltip.text = item.favorite ? "Remove favorite" : "Add to favorites";
+                                                        Tooltip.x = self.absolute-position.x + self.width / 2;
+                                                        Tooltip.y = self.absolute-position.y + self.height + 4px;
+                                                        Tooltip.shown = true;
+                                                    } else {
+                                                        Tooltip.shown = false;
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -278,8 +298,14 @@ export component ConnPicker inherits Rectangle {
                         spacing: Tokens.sp4;
                         Rectangle {
                             width: new-row.preferred-width;
+                            height: 32px;
+                            border-radius: Tokens.radius;
+                            background: new-ta.has-hover ? Tokens.chrome : transparent;
+                            animate background { duration: Tokens.fade; }
                             new-row := HorizontalLayout {
                                 spacing: Tokens.sp2;
+                                padding-left: Tokens.sp3;
+                                padding-right: Tokens.sp3;
                                 Text {
                                     text: "+";
                                     color: Tokens.text;
@@ -294,7 +320,10 @@ export component ConnPicker inherits Rectangle {
                                     vertical-alignment: center;
                                 }
                             }
-                            new-ta := TouchArea { clicked => { root.add-clicked(); } }
+                            new-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.add-clicked(); }
+                            }
                         }
                         Rectangle { horizontal-stretch: 1; }
                         VerticalLayout {
