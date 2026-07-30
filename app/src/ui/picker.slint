@@ -298,7 +298,7 @@ export component ConnPicker inherits Rectangle {
                         spacing: Tokens.sp4;
                         Rectangle {
                             width: new-row.preferred-width;
-                            height: 32px;
+                            height: 30px;
                             border-radius: Tokens.radius;
                             background: new-ta.has-hover ? Tokens.chrome : transparent;
                             animate background { duration: Tokens.fade; }
@@ -306,10 +306,12 @@ export component ConnPicker inherits Rectangle {
                                 spacing: Tokens.sp2;
                                 padding-left: Tokens.sp3;
                                 padding-right: Tokens.sp3;
+                                alignment: center;
                                 Text {
                                     text: "+";
                                     color: Tokens.text;
-                                    font-size: 15px;
+                                    font-size: Tokens.font-md;
+                                    font-weight: 500;
                                     vertical-alignment: center;
                                 }
                                 Text {
