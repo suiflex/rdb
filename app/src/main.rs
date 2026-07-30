@@ -3202,14 +3202,16 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let panes = panes.clone();
         let completion_nodes = completion_nodes.clone();
+        let cur_engine = cur_engine.clone();
         Rc::new(move |pane| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
             let before = panes[pane].ed_state.borrow().before_cursor_doc();
             let schema = w.get_schema_name().to_string();
+            let mongo = matches!(*cur_engine.borrow(), Some(rdb_connstore::Engine::Mongo));
             let (word_len, cands) =
-                completion::suggest(&before, &completion_nodes.lock().unwrap(), &schema);
+                completion::suggest(&before, &completion_nodes.lock().unwrap(), &schema, mongo);
             if cands.is_empty() {
                 set_p_completion_visible(&w, pane, false);
                 *panes[pane].completion_ctx.borrow_mut() = (0, Vec::new());
