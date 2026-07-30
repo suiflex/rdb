@@ -761,11 +761,22 @@ export component QueryPane inherits Rectangle {
                 }
             }
 
-            // Affected-rows toast
-            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0) && root.result-kind == 3: Text {
-                text: root.result-status;
-                color: root.status-error ? Tokens.error : Tokens.text-dim;
-                font-size: Tokens.font-md;
+            // Affected-rows toast / error message. Scroll + wrap so a long error
+            // (Postgres echoes the whole failing statement) stays readable.
+            if root.view-mode == 0 && (root.browse-mode || root.sql-view-mode == 0) && root.result-kind == 3: ScrollView {
+                width: 100%;
+                height: 100%;
+                VerticalLayout {
+                    width: parent.visible-width;
+                    padding: Tokens.sp3;
+                    alignment: start;
+                    Text {
+                        text: root.result-status;
+                        color: root.status-error ? Tokens.error : Tokens.text-dim;
+                        font-size: Tokens.font-md;
+                        wrap: word-wrap;
+                    }
+                }
             }
 
             // Structure view
@@ -821,14 +832,20 @@ export component QueryPane inherits Rectangle {
                 }
             }
 
-            // Message view (SQL footer segment)
-            if !root.browse-mode && root.view-mode == 0 && root.sql-view-mode == 1: VerticalLayout {
-                padding: Tokens.sp3;
-                alignment: start;
-                Text {
-                    text: root.result-status == "" ? "No messages" : root.result-status;
-                    color: root.status-error ? Tokens.error : Tokens.text-dim;
-                    font-size: Tokens.font-md;
+            // Message view (SQL footer segment). Scroll + wrap for long errors.
+            if !root.browse-mode && root.view-mode == 0 && root.sql-view-mode == 1: ScrollView {
+                width: 100%;
+                height: 100%;
+                VerticalLayout {
+                    width: parent.visible-width;
+                    padding: Tokens.sp3;
+                    alignment: start;
+                    Text {
+                        text: root.result-status == "" ? "No messages" : root.result-status;
+                        color: root.status-error ? Tokens.error : Tokens.text-dim;
+                        font-size: Tokens.font-md;
+                        wrap: word-wrap;
+                    }
                 }
             }
 
