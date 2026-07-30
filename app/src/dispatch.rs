@@ -78,6 +78,14 @@ impl AnyDriver {
         })
     }
 
+    /// Push the user's NoSQL collection cap onto a live connection. Only NoSQL
+    /// engines (MongoDB) have a sidebar collection cap; RDBMS variants no-op.
+    pub fn set_collection_limit(&self, n: usize) {
+        if let AnyDriver::Mongo(d) = self {
+            d.set_collection_limit(n);
+        }
+    }
+
     /// Part of the driver surface; wired into the UI status check later.
     pub async fn ping(&self) -> Result<()> {
         match self {

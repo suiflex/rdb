@@ -522,6 +522,9 @@ callback create-table-commit();
     callback set-update-check(bool);
     in property <int> history-max-entries: 50;
     callback set-history-max-entries(int);
+    // Max collections listed per database for NoSQL (MongoDB); RDBMS unaffected.
+    in property <int> nosql-collection-limit: 200;
+    callback set-nosql-collection-limit(int);
     in-out property <bool> shortcuts-open: false;
     // Settings modal active section: 0 Appearance, 1 Updates, 2 About.
     in-out property <int> settings-tab: 0;
@@ -2403,6 +2406,33 @@ callback create-table-commit();
                             selected(value) => {
                                 root.set-history-max-entries(value == "25" ? 25
                                     : value == "100" ? 100 : value == "200" ? 200 : 50);
+                            }
+                        }
+                    }
+                    // NoSQL-only: caps how many collections the MongoDB sidebar
+                    // lists per database. RDBMS table listings are unaffected.
+                    HorizontalLayout {
+                        spacing: Tokens.sp3;
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            Text {
+                                text: "Max collections (MongoDB)";
+                                color: Tokens.text;
+                                font-size: 13px;
+                            }
+                        }
+                        SelectBox {
+                            width: 82px;
+                            model: ["50", "100", "200", "500", "1000"];
+                            current-value: root.nosql-collection-limit == 50 ? "50"
+                                : root.nosql-collection-limit == 100 ? "100"
+                                : root.nosql-collection-limit == 500 ? "500"
+                                : root.nosql-collection-limit == 1000 ? "1000" : "200";
+                            selected(value) => {
+                                root.set-nosql-collection-limit(value == "50" ? 50
+                                    : value == "100" ? 100 : value == "500" ? 500
+                                    : value == "1000" ? 1000 : 200);
                             }
                         }
                     }
