@@ -602,6 +602,11 @@ export component FilterField inherits Rectangle {
         // x on cursor moves so the newest characters stay visible while typing.
         Rectangle {
             horizontal-stretch: 1;
+            // Do not let the input's text width inflate the field: without this
+            // the viewport's preferred width tracks the (unbounded) text and the
+            // whole FilterField grows, defeating the clip.
+            preferred-width: 0px;
+            min-width: 0px;
             clip: true;
             input := TextInput {
                 width: max(parent.width, self.preferred-width);
