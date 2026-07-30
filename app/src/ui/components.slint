@@ -587,9 +587,6 @@ export component FilterField inherits Rectangle {
     border-width: 1px;
     border-color: input.has-focus ? Tokens.accent : Tokens.border;
     background: Tokens.card;
-    // Keep long single-line content inside the box instead of spilling past the
-    // border over neighbouring toolbar controls (Mongo JSON filter).
-    clip: true;
     HorizontalLayout {
         padding-left: Tokens.sp2;
         padding-right: 6px;
@@ -598,14 +595,23 @@ export component FilterField inherits Rectangle {
             alignment: center;
             AppIcon { name: "search"; size: 14px; color: Tokens.text-faint; }
         }
-        input := TextInput {
-            font-size: Tokens.font-sm;
-            color: Tokens.text;
-            vertical-alignment: center;
-            single-line: true;
+        // Clip the input to a bounded viewport: a single-line TextInput inside a
+        // layout would otherwise grow to its full text width and spill past the
+        // box. Clipping here lets it scroll to keep the caret (and the newest
+        // characters) visible while typing long content (Mongo JSON filter).
+        Rectangle {
             horizontal-stretch: 1;
-            accepted => { root.submitted(); }
-            edited => { root.edited(self.text); }
+            clip: true;
+            input := TextInput {
+                width: parent.width;
+                height: parent.height;
+                font-size: Tokens.font-sm;
+                color: Tokens.text;
+                vertical-alignment: center;
+                single-line: true;
+                accepted => { root.submitted(); }
+                edited => { root.edited(self.text); }
+            }
         }
         if root.trailing-cap != "": VerticalLayout {
             alignment: center;
