@@ -587,6 +587,9 @@ export component FilterField inherits Rectangle {
     border-width: 1px;
     border-color: input.has-focus ? Tokens.accent : Tokens.border;
     background: Tokens.card;
+    // Keep long single-line content inside the box instead of spilling past the
+    // border over neighbouring toolbar controls (Mongo JSON filter).
+    clip: true;
     HorizontalLayout {
         padding-left: Tokens.sp2;
         padding-right: 6px;
