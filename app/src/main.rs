@@ -6049,6 +6049,8 @@ fn main() -> Result<(), slint::PlatformError> {
             let raw_nodes = raw_nodes.clone();
             let completion_nodes = completion_nodes.clone();
             let fn_defs = fn_defs.clone();
+            let expanded_tables = expanded_tables.clone();
+            let loaded_dbs = loaded_dbs.clone();
             let handle = rt.spawn(async move {
                 let mut slot = match claimed {
                     Some(g) => g,
@@ -6061,8 +6063,19 @@ fn main() -> Result<(), slint::PlatformError> {
                     let cfg =
                         cfg.map_err(|e| rdb_core::error::RdbError::Connection(e.to_string()))?;
                     let driver = AnyDriver::connect(engine, &cfg).await?;
-                    let schema = driver.schema().await?;
-                    Ok::<_, rdb_core::error::RdbError>((driver, schema))
+                    // MongoDB: when the connection names a database, scope the
+                    // sidebar to it (matching the schema switcher) instead of
+                    // listing every database on the server.
+                    let scoped_db = if matches!(engine, rdb_connstore::Engine::Mongo) {
+                        cfg.database.clone().filter(|d| !d.is_empty())
+                    } else {
+                        None
+                    };
+                    let schema = match &scoped_db {
+                        Some(db) => driver.schema_for(db).await?,
+                        None => driver.schema().await?,
+                    };
+                    Ok::<_, rdb_core::error::RdbError>((driver, schema, scoped_db))
                 };
                 let result =
                     match tokio::time::timeout(std::time::Duration::from_secs(15), attempt).await {
@@ -6073,7 +6086,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     };
 
                 match result {
-                    Ok((driver, schema)) => {
+                    Ok((driver, schema, scoped_db)) => {
                         // Postgres: list real namespaces so the sidebar schema
                         // switcher offers more than "public". Engine-specific SQL
                         // lives in the driver, not here.
@@ -6102,15 +6115,28 @@ fn main() -> Result<(), slint::PlatformError> {
                         drop(slot);
                         let nodes = model::to_tree_model(&schema);
                         let fields = model::to_structure_model(&schema);
+                        // Scoped Mongo tree holds only the selected database: open
+                        // it and mark it loaded so its collections show at once
+                        // (mirrors the schema switcher).
+                        let (exp, loaded) = match &scoped_db {
+                            Some(db) => {
+                                let mut e = expanded_tables.lock().unwrap();
+                                let mut l = loaded_dbs.lock().unwrap();
+                                e.insert(db.clone());
+                                l.insert(db.clone());
+                                (e.clone(), l.clone())
+                            }
+                            None => (HashSet::new(), HashSet::new()),
+                        };
                         // Stash raw nodes for later expand/collapse rebuilds, and
                         // render the initial view (Functions collapsed, Tables open,
                         // fields hidden). Matches the reseed done on connect above;
                         // collapsed_categories itself is !Send so can't cross here.
                         let rows = schema_display_rows(
                             &nodes,
-                            &HashSet::new(),
+                            &exp,
                             &default_collapsed_cats(),
-                            &HashSet::new(),
+                            &loaded,
                             Some(engine),
                             "",
                         );
@@ -6124,6 +6150,10 @@ fn main() -> Result<(), slint::PlatformError> {
                                 } else {
                                     pg_schemas
                                 }
+                            } else if scoped_db.is_some() && !db_names.is_empty() {
+                                // Mongo scoped its tree to one database: still list
+                                // every database so the switcher can reach them.
+                                db_names.clone()
                             } else {
                                 schema
                                     .databases
@@ -6134,12 +6164,16 @@ fn main() -> Result<(), slint::PlatformError> {
                         if schema_names.is_empty() {
                             schema_names.push(SharedString::from("public"));
                         }
-                        // Default to "public" when present, else the first name.
-                        let schema_current = schema_names
-                            .iter()
-                            .find(|s| s.as_str() == "public")
-                            .unwrap_or(&schema_names[0])
-                            .clone();
+                        // Scoped Mongo starts on its selected database; otherwise
+                        // default to "public" when present, else the first name.
+                        let schema_current = match &scoped_db {
+                            Some(db) => SharedString::from(db.clone()),
+                            None => schema_names
+                                .iter()
+                                .find(|s| s.as_str() == "public")
+                                .unwrap_or(&schema_names[0])
+                                .clone(),
+                        };
                         // SQL editor only makes sense for the SQL engines.
                         let sql_capable = matches!(
                             engine,
