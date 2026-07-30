@@ -3,7 +3,7 @@
 // Cells are flat row-major: row r, col c at r*col-count + c.
 import { Tokens } from "tokens.slint";
 import { GridColumn, GridCell } from "structs.slint";
-import { ComboBox, DatePickerPopup, ScrollView } from "std-widgets.slint";
+import { ComboBox, DatePickerPopup, ScrollView, TextEdit } from "std-widgets.slint";
 
 export component TabularGrid inherits Rectangle {
     in property <[GridColumn]> columns;
@@ -515,35 +515,20 @@ export component TabularGrid inherits Rectangle {
                         vertical-alignment: center;
                     }
                 }
-                Rectangle {
+                // TextEdit owns its own viewport/scrollbar, so a large value
+                // wraps and scrolls reliably (the old ScrollView+TextInput had a
+                // cyclic height dependency that broke scrolling on big values).
+                detail-input := TextEdit {
                     vertical-stretch: 1;
-                    background: Tokens.chrome;
-                    border-radius: Tokens.radius;
-                    border-width: 1px;
-                    border-color: Tokens.border;
-                    inspector-scroll := ScrollView {
-                        // Pin the viewport to the visible width so only vertical
-                        // scroll kicks in; the TextInput grows to its content height
-                        // so a long value scrolls with a real scrollbar.
-                        viewport-width: self.visible-width;
-                        detail-input := TextInput {
-                            x: Tokens.sp2;
-                            y: Tokens.sp1;
-                            width: inspector-scroll.visible-width - 2 * Tokens.sp2;
-                            height: max(inspector-scroll.visible-height - 2 * Tokens.sp1, self.preferred-height);
-                            read-only: true;
-                            text: root.editing-value;
-                            color: Tokens.text;
-                            font-family: Tokens.mono;
-                            font-size: Tokens.font-sm;
-                            wrap: word-wrap;
-                            single-line: false;
-                            init => { self.focus(); self.select-all(); }
-                            key-pressed(e) => {
-                                if (e.text == Key.Escape) { root.edit-cancelled(); return accept; }
-                                return reject;
-                            }
-                        }
+                    read-only: true;
+                    text: root.editing-value;
+                    wrap: word-wrap;
+                    font-family: Tokens.mono;
+                    font-size: Tokens.font-sm;
+                    init => { self.focus(); self.select-all(); }
+                    key-pressed(e) => {
+                        if (e.text == Key.Escape) { root.edit-cancelled(); return accept; }
+                        return reject;
                     }
                 }
                 // Say *why* this is view-only: a manual query result has no row
