@@ -10,7 +10,7 @@ import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "palette.slint";
 import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton } from "components.slint";
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView, TextEdit } from "std-widgets.slint";
 import { AppIcon } from "icons.slint";
 
 export component QueryPane inherits Rectangle {
@@ -587,32 +587,31 @@ export component QueryPane inherits Rectangle {
                                         }
                                     }
                                     // Box grows to fit the value; short values stay
-                                    // compact, long ones cap out and scroll inside.
+                                    // compact, long ones cap out. TextEdit owns its
+                                    // own scrollbar so big values wrap and scroll
+                                    // reliably (the old ScrollView+TextInput had a
+                                    // cyclic height that broke scrolling).
                                     Rectangle {
-                                        height: clamp(detail-input.preferred-height + 2 * Tokens.sp2, 44px, 220px);
-                                        clip: true;
-                                        border-radius: Tokens.radius;
-                                        border-width: 1px;
-                                        border-color: detail-input.has-focus ? Tokens.accent : Tokens.border-strong;
-                                        background: Tokens.canvas;
-                                        ScrollView {
-                                            x: Tokens.sp2;
-                                            y: Tokens.sp2;
-                                            width: parent.width - 2 * Tokens.sp2;
-                                            height: parent.height - 2 * Tokens.sp2;
-                                            detail-input := TextInput {
-                                                width: parent.visible-width;
-                                                height: max(parent.visible-height, self.preferred-height);
-                                                text: pretty != "" ? pretty : (detail-cell.is-null ? "" : detail-cell.text);
-                                                enabled: !root.read-only;
-                                                single-line: false;
-                                                wrap: word-wrap;
-                                                vertical-alignment: top;
-                                                color: root.read-only ? Tokens.text-dim : Tokens.text;
-                                                font-family: Tokens.mono;
-                                                font-size: Tokens.font-sm;
-                                                edited => { root.stage-cell(root.selected-row, c, self.text); }
-                                            }
+                                        height: clamp(measurer.preferred-height + 2 * Tokens.sp2, 44px, 220px);
+                                        // Invisible height probe: same width/font as the
+                                        // editor, so the box sizes to the wrapped content.
+                                        measurer := Text {
+                                            width: parent.width - 24px;
+                                            text: pretty != "" ? pretty : (detail-cell.is-null ? "" : detail-cell.text);
+                                            wrap: word-wrap;
+                                            font-family: Tokens.mono;
+                                            font-size: Tokens.font-sm;
+                                            color: transparent;
+                                        }
+                                        detail-input := TextEdit {
+                                            width: 100%;
+                                            height: 100%;
+                                            read-only: root.read-only;
+                                            text: pretty != "" ? pretty : (detail-cell.is-null ? "" : detail-cell.text);
+                                            wrap: word-wrap;
+                                            font-family: Tokens.mono;
+                                            font-size: Tokens.font-sm;
+                                            edited => { root.stage-cell(root.selected-row, c, self.text); }
                                         }
                                         if detail-cell.is-null && detail-input.text == "": Text {
                                             x: Tokens.sp2;
