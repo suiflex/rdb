@@ -5375,10 +5375,25 @@ fn main() -> Result<(), slint::PlatformError> {
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
         let current_connection_id = current_connection_id.clone();
+        let panes = panes.clone();
         window.on_disconnect(move || {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            // Stop any in-flight query first: disconnecting must not leave a query
+            // running on the server. Fire the same cancels the Cancel buttons use
+            // for both panes — aborting the task drops its Arc<AnyDriver> clone so
+            // the connection closes and the server terminates the query.
+            for p in [0usize, 1] {
+                if let Some(c) = panes[p].stream_cancel.borrow().as_ref() {
+                    c.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+                if let Some(h) = panes[p].query_abort.borrow_mut().take() {
+                    h.abort();
+                }
+                set_p_query_running(&w, p, false);
+                set_p_streaming(&w, p, false);
+            }
             w.set_connected(false);
             w.set_selected_conn(-1);
             w.set_active_table(SharedString::default());
