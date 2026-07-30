@@ -138,6 +138,22 @@ brew install suiflex/tap/rdb
 
 Upgrade later with `brew upgrade rdb`.
 
+### Windows
+
+```powershell
+irm https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install.ps1 | iex
+```
+
+Optional:
+
+```powershell
+$env:RDB_VERSION="v0.28.0"; $env:INSTALL_DIR="$env:LOCALAPPDATA\Programs\RDB\bin"; irm https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install.ps1 | iex
+```
+
+The script installs `rdb.exe` into
+`%LOCALAPPDATA%\Programs\RDB\bin` by default and warns if that directory is not
+on `PATH`.
+
 ### Scoop (Windows)
 
 ```powershell
