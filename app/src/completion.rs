@@ -250,7 +250,12 @@ pub fn suggest(
         let owner_word = trailing_word(before_dot);
         let owner = resolve_alias(before_cursor, owner_word);
         let cols = columns_of(nodes, &owner);
-        if cols.is_empty() && is_database(nodes, owner_word) {
+        if !cols.is_empty() {
+            cols
+        } else if owner_word.eq_ignore_ascii_case("db") {
+            // MongoDB: `db.` is the current database — offer its collections.
+            tables(scope)
+        } else if is_database(nodes, owner_word) {
             tables(schema_scope(nodes, owner_word))
         } else {
             cols
@@ -350,6 +355,20 @@ mod tests {
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["config_id", "name"]
         );
+    }
+
+    #[test]
+    fn mongo_db_dot_suggests_collections() {
+        // MongoDB: `db.` is the current database, so it must surface the active
+        // schema's collections even though `db` is not a schema node.
+        let mut ns = nodes();
+        ns.push(VmTreeNode {
+            label: "log_inbound".into(),
+            kind: "collection".into(),
+        });
+        let (n, c) = suggest("db.log", &ns, "public");
+        assert_eq!(n, 3);
+        assert!(c.iter().any(|x| x.label == "log_inbound"));
     }
 
     /// Typing a mid-word `_` segment finds the identifier, and a true prefix
