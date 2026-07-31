@@ -2857,10 +2857,17 @@ fn set_result_tabs(w: &MainWindow, pane: usize, results: &[StoredResult], active
     let items: Vec<ResultTabItem> = results
         .iter()
         .enumerate()
-        .map(|(n, r)| ResultTabItem {
-            label: format!("Result {}", n + 1).into(),
-            engine: r.engine.clone().into(),
-            connection_name: r.connection_name.clone().into(),
+        .map(|(n, r)| {
+            let label = if r.connection_name.is_empty() {
+                format!("Result {}", n + 1)
+            } else {
+                format!("{} {}", r.connection_name, n + 1)
+            };
+            ResultTabItem {
+                label: label.into(),
+                engine: r.engine.clone().into(),
+                connection_name: r.connection_name.clone().into(),
+            }
         })
         .collect();
     let items = ModelRc::from(Rc::new(VecModel::from(items)));

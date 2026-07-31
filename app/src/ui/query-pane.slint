@@ -557,72 +557,70 @@ export component QueryPane inherits Rectangle {
                     ExportButton { export(i) => { root.export-results(i); } }
                     TextButton { text: "Chart"; clicked => { root.sql-view-mode = 2; } }
                 }
-                // result tabs — appear once ⌘\ has spawned a second result
-                if root.result-tabs.length > 1: result-strip := HorizontalLayout {
+                // result tabs — appear once ⌘\ has spawned a second result.
+                // Wrapped in a ScrollView since the row can outgrow the panel
+                // width once several runs pile up; the label already reads
+                // "{connection} {n}", so nothing needs to hide when crowded.
+                if root.result-tabs.length > 1: Rectangle {
                     height: 30px;
-                    padding-left: Tokens.sp3;
-                    padding-right: Tokens.sp3;
-                    spacing: Tokens.sp1;
-                    alignment: start;
-                    // Below this avg-width-per-chip, drop the inline connection
-                    // name and keep only the badge + tooltip (mirrors the
-                    // document tab strip's tabs-compact in app-window.slint).
-                    property <bool> results-compact: self.width / max(1, root.result-tabs.length) < 110px;
-                    for item[i] in root.result-tabs: Rectangle {
-                        height: 24px;
-                        width: rl.preferred-width + 2 * Tokens.sp2 + 18px
-                            + (item.engine != "" ? 15px + Tokens.sp1 : 0px)
-                            + (item.engine != "" && !result-strip.results-compact ? 60px + Tokens.sp1 : 0px);
-                        border-radius: Tokens.radius;
-                        background: i == root.active-result ? Tokens.accent-tint
-                            : rta.has-hover ? Tokens.chrome : transparent;
-                        rta := TouchArea {
-                            clicked => { root.select-result-tab(i); }
-                            changed has-hover => {
-                                if (self.has-hover && item.connection-name != "") {
-                                    Tooltip.text = item.connection-name;
-                                    Tooltip.x = self.absolute-position.x + self.width / 2;
-                                    Tooltip.y = self.absolute-position.y + self.height + 4px;
-                                    Tooltip.shown = true;
-                                } else if Tooltip.text == item.connection-name {
-                                    Tooltip.shown = false;
-                                }
-                            }
-                        }
+                    result-scroll := ScrollView {
+                        width: parent.width;
+                        height: parent.height;
+                        vertical-scrollbar-policy: ScrollBarPolicy.always-off;
                         HorizontalLayout {
-                            padding-left: Tokens.sp2;
-                            padding-right: Tokens.sp1;
+                            height: result-scroll.visible-height;
+                            padding-left: Tokens.sp3;
+                            padding-right: Tokens.sp3;
                             spacing: Tokens.sp1;
-                            if item.engine != "": VerticalLayout {
-                                alignment: center;
-                                DbBadge {
-                                    engine: item.engine;
-                                    size: 13px;
+                            alignment: start;
+                            for item[i] in root.result-tabs: Rectangle {
+                                height: 24px;
+                                width: rl.preferred-width + 2 * Tokens.sp2 + 18px
+                                    + (item.engine != "" ? 15px + Tokens.sp1 : 0px);
+                                border-radius: Tokens.radius;
+                                background: i == root.active-result ? Tokens.accent-tint
+                                    : rta.has-hover ? Tokens.chrome : transparent;
+                                rta := TouchArea {
+                                    clicked => { root.select-result-tab(i); }
+                                    changed has-hover => {
+                                        if (self.has-hover && item.connection-name != "") {
+                                            Tooltip.text = item.connection-name;
+                                            Tooltip.x = self.absolute-position.x + self.width / 2;
+                                            Tooltip.y = self.absolute-position.y + self.height + 4px;
+                                            Tooltip.shown = true;
+                                        } else if Tooltip.text == item.connection-name {
+                                            Tooltip.shown = false;
+                                        }
+                                    }
                                 }
-                            }
-                            if item.engine != "" && !result-strip.results-compact: Text {
-                                text: item.connection-name;
-                                vertical-alignment: center;
-                                color: Tokens.text-faint;
-                                font-size: 9px;
-                                max-width: 60px;
-                                overflow: elide;
-                            }
-                            rl := Text {
-                                text: item.label;
-                                color: i == root.active-result ? Tokens.on-tint : Tokens.text-dim;
-                                font-size: Tokens.font-sm;
-                                vertical-alignment: center;
-                            }
-                            Rectangle {
-                                width: 16px;
-                                Text {
-                                    text: "×";
-                                    color: Tokens.text-faint;
-                                    vertical-alignment: center;
-                                    horizontal-alignment: center;
+                                HorizontalLayout {
+                                    padding-left: Tokens.sp2;
+                                    padding-right: Tokens.sp1;
+                                    spacing: Tokens.sp1;
+                                    if item.engine != "": VerticalLayout {
+                                        alignment: center;
+                                        DbBadge {
+                                            engine: item.engine;
+                                            size: 13px;
+                                        }
+                                    }
+                                    rl := Text {
+                                        text: item.label;
+                                        color: i == root.active-result ? Tokens.on-tint : Tokens.text-dim;
+                                        font-size: Tokens.font-sm;
+                                        vertical-alignment: center;
+                                    }
+                                    Rectangle {
+                                        width: 16px;
+                                        Text {
+                                            text: "×";
+                                            color: Tokens.text-faint;
+                                            vertical-alignment: center;
+                                            horizontal-alignment: center;
+                                        }
+                                        TouchArea { clicked => { root.close-result-tab(i); } }
+                                    }
                                 }
-                                TouchArea { clicked => { root.close-result-tab(i); } }
                             }
                         }
                     }
