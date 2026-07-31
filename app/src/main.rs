@@ -1605,6 +1605,11 @@ fn is_bare_select(engine: rdb_connstore::Engine, sql: &str) -> bool {
     ) {
         return false;
     }
+    // Multiple statements can't stream as one cursor (Postgres rejects multiple
+    // commands in a prepared statement); they take the split-and-run path.
+    if editor::split_statements(sql).len() > 1 {
+        return false;
+    }
     let trimmed = sql.trim_end().trim_end_matches(';').trim_end();
     let words: Vec<&str> = trimmed
         .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
