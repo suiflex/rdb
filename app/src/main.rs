@@ -38,6 +38,12 @@ use dispatch::AnyDriver;
 
 /// Label used for connections with no explicit group.
 const UNGROUPED: &str = "Ungrouped";
+const MIN_FONT_SIZE: i32 = 10;
+const MAX_FONT_SIZE: i32 = 18;
+
+fn clamp_font_size(size: i32) -> i32 {
+    size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE)
+}
 
 /// Open a native "save file" dialog and write `contents` to the chosen path.
 ///
@@ -2901,6 +2907,9 @@ fn main() -> Result<(), slint::PlatformError> {
     window
         .global::<Theme>()
         .set_dark(settings.borrow().get().theme.is_dark());
+    window
+        .global::<Tokens>()
+        .set_font_base(clamp_font_size(settings.borrow().get().editor.font_size as i32) as f32);
     window.set_update_check_enabled(settings.borrow().get().update_check);
     window.set_sidebar_right(settings.borrow().get().ui_state.sidebar_right);
     let history_cap = Rc::new(Cell::new(
@@ -9748,6 +9757,21 @@ fn main() -> Result<(), slint::PlatformError> {
             let _ = settings
                 .borrow_mut()
                 .update(|s| s.ui_state.sidebar_right = v);
+        });
+    }
+
+    // ----- app-wide font size -----
+    {
+        let weak = window.as_weak();
+        let settings = settings.clone();
+        window.on_set_font_size(move |value| {
+            let size = clamp_font_size(value);
+            let _ = settings
+                .borrow_mut()
+                .update(|s| s.editor.font_size = size as u16);
+            if let Some(w) = weak.upgrade() {
+                w.global::<Tokens>().set_font_base(size as f32);
+            }
         });
     }
 

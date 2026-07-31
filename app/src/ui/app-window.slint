@@ -317,6 +317,7 @@ callback create-table-commit();
     // Place the sidebar on the right (detail panel flips to the left).
     in-out property <bool> sidebar-right: false;
     callback set-sidebar-side(bool);
+    callback set-font-size(int);
     in-out property <bool> results-collapsed: false;
     callback editor-key(string, bool, bool, bool) -> bool;
     callback editor-press(int, int);
@@ -581,6 +582,14 @@ callback create-table-commit();
                 return reject;
             }
             if (e.modifiers.control || e.modifiers.meta) {
+                if (e.text == "+" || e.text == "=") {
+                    root.set-font-size(round(Tokens.font-base / 1px) + 1);
+                    return accept;
+                }
+                if (e.text == "-") {
+                    root.set-font-size(round(Tokens.font-base / 1px) - 1);
+                    return accept;
+                }
                 if (e.text == "k") {
                     root.toggle-palette();
                     return accept;
@@ -2603,6 +2612,7 @@ callback create-table-commit();
                     { k: "⌘S", a: "Save / commit edits" },
                     { k: "⌘R", a: "Refresh result" },
                     { k: "⌘⇧R", a: "Reconnect" },
+                    { k: "⌘+ / ⌘-", a: "Zoom in / out" },
                     { k: "⌘F", a: "Find" },
                     { k: "⌘O", a: "Open connection" },
                     { k: "⌘⇧O", a: "Open database" },

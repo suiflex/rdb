@@ -7,15 +7,15 @@ import { AppIcon } from "icons.slint";
 export component Toggle inherits TouchArea {
     in property <bool> checked;
     callback toggled();
-    width: 42px;
-    height: 24px;
+    width: 42px + 2 * Tokens.zoom-delta;
+    height: 24px + Tokens.zoom-delta;
     clicked => { root.toggled(); }
     Rectangle {
         border-radius: 12px;
         background: root.checked ? Tokens.accent : Tokens.border-strong;
         Rectangle {
-            width: 18px;
-            height: 18px;
+            width: 18px + Tokens.zoom-delta;
+            height: 18px + Tokens.zoom-delta;
             border-radius: 9px;
             background: #FFFFFF;
             x: root.checked ? parent.width - self.width - 3px : 3px;
@@ -36,7 +36,7 @@ export component ToggleRow inherits HorizontalLayout {
         Text {
             text: root.label;
             color: Tokens.text;
-            font-size: 13px;
+            font-size: Tokens.font-md;
         }
     }
     VerticalLayout {
@@ -66,7 +66,7 @@ export component SelectBox inherits Rectangle {
     in property <[string]> model;
     in-out property <string> current-value;
     callback selected(string);
-    height: 30px;
+    height: Tokens.button-h + 4px;
     border-radius: Tokens.radius;
     border-width: 1px;
     border-color: ta.has-hover ? Tokens.border-strong : Tokens.border;
@@ -105,7 +105,7 @@ export component SelectBox inherits Rectangle {
             VerticalLayout {
                 padding: 4px;
                 for opt in root.model: Rectangle {
-                    height: 28px;
+                    height: Tokens.button-h + 2px;
                     border-radius: 6px;
                     background: opt-ta.has-hover ? Tokens.accent-tint : transparent;
                     opt-ta := TouchArea {
@@ -379,7 +379,7 @@ export component FormField inherits Rectangle {
 // Small bordered key cap (⌘K, ⌘P, ⌘↵).
 export component KeyCap inherits Rectangle {
     in property <string> text;
-    height: 18px;
+    height: Tokens.font-base + 5px;
     width: label.preferred-width + 10px;
     border-radius: 4px;
     border-width: 1px;
@@ -388,7 +388,7 @@ export component KeyCap inherits Rectangle {
     label := Text {
         text: root.text;
         color: Tokens.text-faint;
-        font-size: 10px;
+        font-size: Tokens.font-xs;
     }
 }
 
@@ -396,7 +396,7 @@ export component KeyCap inherits Rectangle {
 export component SearchCommandPill inherits Rectangle {
     in property <string> placeholder: "Search or run a command...";
     callback activated;
-    height: 28px;
+    height: Tokens.button-h + 2px;
     border-radius: Tokens.radius;
     border-width: 1px;
     border-color: ta.has-hover ? Tokens.border-strong : Tokens.border;
@@ -433,7 +433,7 @@ export component BreadcrumbChip inherits Rectangle {
     in property <bool> caret: false;
     in property <bool> mono: false;
     callback clicked;
-    height: 28px;
+    height: Tokens.button-h + 2px;
     width: content.preferred-width + 2 * Tokens.sp3;
     border-radius: Tokens.radius;
     border-width: 1px;
@@ -495,7 +495,7 @@ export component UnderlineSegment inherits Rectangle {
 // Grey tag chip (mono text: profin, fintech).
 export component TagChip inherits Rectangle {
     in property <string> text;
-    height: 24px;
+    height: Tokens.button-h - 2px;
     width: label.preferred-width + 2 * Tokens.sp3;
     border-radius: Tokens.radius;
     background: Tokens.chrome;
@@ -514,8 +514,8 @@ export component GlyphButton inherits Rectangle {
     in property <bool> danger-hover: false; // close button: red fill + white glyph
     in property <string> tooltip;           // optional hover label
     callback clicked;
-    width: 28px;
-    height: 28px;
+    width: Tokens.button-h + 2px;
+    height: Tokens.button-h + 2px;
     border-radius: Tokens.radius;
     background: ta.has-hover ? (danger-hover ? Tokens.error : Tokens.border) : transparent;
     animate background { duration: Tokens.fade; }
