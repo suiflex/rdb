@@ -633,6 +633,8 @@ struct StoredResult {
     connection_id: Option<String>,
     engine: String,
     connection_name: String,
+    color: slint::Color,
+    has_custom_color: bool,
 }
 
 fn store_result(
@@ -663,6 +665,8 @@ mod result_tab_tests {
             connection_id: None,
             engine: String::new(),
             connection_name: String::new(),
+            color: theme::accent_or_default(""),
+            has_custom_color: false,
         }
     }
 
@@ -771,6 +775,10 @@ struct WorkspaceTab {
     // DbBadge key, e.g. "postgres"; empty when no connection was active yet.
     engine: String,
     connection_name: String,
+    // Connection's custom accent (falls back to a generic color when unset —
+    // has_custom_color says whether to prefer it over the per-engine color).
+    color: slint::Color,
+    has_custom_color: bool,
 }
 
 impl WorkspaceTab {
@@ -795,6 +803,8 @@ impl WorkspaceTab {
             connection_id: None,
             engine: String::new(),
             connection_name: String::new(),
+            color: theme::accent_or_default(""),
+            has_custom_color: false,
         }
     }
 
@@ -807,17 +817,39 @@ fn table_tab_id(connection_id: &str, database: &str, schema: &str, table: &str) 
     format!("table:{connection_id}:{database}:{schema}:{table}")
 }
 
-// Badge key + display name for a saved connection id, empty when unknown
-// (not yet connected, or the connection was deleted since the tab opened).
-fn connection_badge_info(
-    store: &rdb_connstore::ConnStore,
-    connection_id: &str,
-) -> (String, String) {
+// Badge key + display name + accent color for a saved connection id; default
+// (empty strings, generic accent, has_custom_color false) when unknown — not
+// yet connected, or the connection was deleted since the tab opened.
+#[derive(Clone)]
+struct ConnBadgeInfo {
+    engine: String,
+    name: String,
+    color: slint::Color,
+    has_custom_color: bool,
+}
+
+impl Default for ConnBadgeInfo {
+    fn default() -> Self {
+        Self {
+            engine: String::new(),
+            name: String::new(),
+            color: theme::accent_or_default(""),
+            has_custom_color: false,
+        }
+    }
+}
+
+fn connection_badge_info(store: &rdb_connstore::ConnStore, connection_id: &str) -> ConnBadgeInfo {
     store
         .list()
         .iter()
         .find(|c| c.id == connection_id)
-        .map(|c| (AnyDriver::badge(c.engine).to_string(), c.name.clone()))
+        .map(|c| ConnBadgeInfo {
+            engine: AnyDriver::badge(c.engine).to_string(),
+            name: c.name.clone(),
+            color: theme::accent_or_default(c.color.as_deref().unwrap_or("")),
+            has_custom_color: c.color.is_some(),
+        })
         .unwrap_or_default()
 }
 
@@ -918,6 +950,8 @@ fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&
             preview: tab.is_preview(),
             engine: tab.engine.clone().into(),
             connection_name: tab.connection_name.clone().into(),
+            color: tab.color,
+            has_custom_color: tab.has_custom_color,
         })
         .collect();
     w.set_tabs(ModelRc::from(Rc::new(VecModel::from(items))));
@@ -936,6 +970,8 @@ fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&
             preview: tab.is_preview(),
             engine: tab.engine.clone().into(),
             connection_name: tab.connection_name.clone().into(),
+            color: tab.color,
+            has_custom_color: tab.has_custom_color,
         })
         .collect();
     w.set_p1_tabs(ModelRc::from(Rc::new(VecModel::from(p1_items))));
@@ -2875,6 +2911,8 @@ fn set_result_tabs(w: &MainWindow, pane: usize, results: &[StoredResult], active
                 label: label.into(),
                 engine: r.engine.clone().into(),
                 connection_name: r.connection_name.clone().into(),
+                color: r.color,
+                has_custom_color: r.has_custom_color,
             }
         })
         .collect();
@@ -4066,7 +4104,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.get_schema_name(),
                 name
             );
-            let (engine, connection_name) = connection_id
+            let badge = connection_id
                 .as_deref()
                 .map(|cid| connection_badge_info(&store.borrow(), cid))
                 .unwrap_or_default();
@@ -4094,8 +4132,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     split_ratio: 0.5,
                     pane1_query: String::new(),
                     connection_id,
-                    engine,
-                    connection_name,
+                    engine: badge.engine,
+                    connection_name: badge.name,
+                    color: badge.color,
+                    has_custom_color: badge.has_custom_color,
                 });
                 *active_tab_id.lock().unwrap() = Some(id.clone());
                 set_workspace_tabs(&w, &tabs, Some(&id));
@@ -5093,7 +5133,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 tab.active_result = ai;
             }
             if tab.kind != "function" {
-                let (view_id, view_engine, view_name) = tab
+                let (view_id, view_engine, view_name, view_color, view_has_custom_color) = tab
                     .results
                     .get(tab.active_result)
                     .map(|r| {
@@ -5101,9 +5141,19 @@ fn main() -> Result<(), slint::PlatformError> {
                             r.connection_id.clone(),
                             r.engine.clone(),
                             r.connection_name.clone(),
+                            r.color,
+                            r.has_custom_color,
                         )
                     })
-                    .unwrap_or_default();
+                    .unwrap_or_else(|| {
+                        (
+                            None,
+                            String::new(),
+                            String::new(),
+                            theme::accent_or_default(""),
+                            false,
+                        )
+                    });
                 tab.view = last_view.lock().unwrap().clone().map(|view| StoredResult {
                     view,
                     meta: w.get_results_meta().to_string(),
@@ -5112,6 +5162,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     connection_id: view_id,
                     engine: view_engine,
                     connection_name: view_name,
+                    color: view_color,
+                    has_custom_color: view_has_custom_color,
                 });
             }
             // Persist SQL scratch tabs so they survive a restart. Cheap JSON
@@ -5334,14 +5386,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 .clone()
                 .unwrap_or_default();
             let id = format!("query:{connection}:{number}");
-            let (engine, connection_name) = connection_badge_info(&store.borrow(), &connection);
+            let badge = connection_badge_info(&store.borrow(), &connection);
             let right_index = {
                 let mut tabs = workspace_tabs.lock().unwrap();
                 let mut tab = WorkspaceTab::sql(id.clone(), number);
                 tab.group = 1;
                 tab.connection_id = (!connection.is_empty()).then(|| connection.clone());
-                tab.engine = engine;
-                tab.connection_name = connection_name;
+                tab.engine = badge.engine;
+                tab.connection_name = badge.name;
+                tab.color = badge.color;
+                tab.has_custom_color = badge.has_custom_color;
                 tabs.push(tab);
                 let left = active_tab_id.lock().unwrap().clone();
                 set_workspace_tabs(&w, &tabs, left.as_deref());
@@ -6611,7 +6665,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // later from `current_connection_id`, since the user can switch the
             // active connection while the query is in flight.
             let query_connection_id = current_connection_id.lock().unwrap().clone();
-            let (query_engine, query_connection_name) = query_connection_id
+            let query_badge = query_connection_id
                 .as_deref()
                 .map(|cid| connection_badge_info(&store.borrow(), cid))
                 .unwrap_or_default();
@@ -6743,8 +6797,10 @@ fn main() -> Result<(), slint::PlatformError> {
                                                 latency: format!("{elapsed_ms} ms"),
                                                 grid: GridState::default(),
                                                 connection_id: query_connection_id.clone(),
-                                                engine: query_engine.clone(),
-                                                connection_name: query_connection_name.clone(),
+                                                engine: query_badge.engine.clone(),
+                                                connection_name: query_badge.name.clone(),
+                                                color: query_badge.color,
+                                                has_custom_color: query_badge.has_custom_color,
                                             }
                                         })
                                         .collect();
@@ -6799,8 +6855,10 @@ fn main() -> Result<(), slint::PlatformError> {
                                     latency: latency.clone(),
                                     grid: GridState::default(),
                                     connection_id: query_connection_id.clone(),
-                                    engine: query_engine.clone(),
-                                    connection_name: query_connection_name.clone(),
+                                    engine: query_badge.engine.clone(),
+                                    connection_name: query_badge.name.clone(),
+                                    color: query_badge.color,
+                                    has_custom_color: query_badge.has_custom_color,
                                 };
                                 let mut tabs = workspace_tabs.lock().unwrap();
                                 let Some(tab) = tabs.iter_mut().find(|tab| tab.id == target_id)
@@ -6976,7 +7034,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // Snapshot which connection is running THIS stream, same reasoning
             // as run_sql: the active connection can change before it finishes.
             let query_connection_id = current_connection_id.lock().unwrap().clone();
-            let (query_engine, query_connection_name) = query_connection_id
+            let query_badge = query_connection_id
                 .as_deref()
                 .map(|cid| connection_badge_info(&store.borrow(), cid))
                 .unwrap_or_default();
@@ -7011,8 +7069,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let stream_timer_stop = stream_timer.clone();
                 let target_id = target_id.clone();
                 let query_connection_id = query_connection_id.clone();
-                let query_engine = query_engine.clone();
-                let query_connection_name = query_connection_name.clone();
+                let query_badge = query_badge.clone();
                 timer.start(
                     slint::TimerMode::Repeated,
                     std::time::Duration::from_millis(50),
@@ -7087,8 +7144,10 @@ fn main() -> Result<(), slint::PlatformError> {
                                         latency: latency.clone(),
                                         grid: GridState::default(),
                                         connection_id: query_connection_id.clone(),
-                                        engine: query_engine.clone(),
-                                        connection_name: query_connection_name.clone(),
+                                        engine: query_badge.engine.clone(),
+                                        connection_name: query_badge.name.clone(),
+                                        color: query_badge.color,
+                                        has_custom_color: query_badge.has_custom_color,
                                     };
                                     let (tab_results, tab_active) = {
                                         let mut tabs = workspace_tabs.lock().unwrap();
@@ -8392,7 +8451,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 st.col_filters.clear();
             }
             {
-                let (_, connection_name) = connection_badge_info(&store.borrow(), &connection_id);
+                let badge = connection_badge_info(&store.borrow(), &connection_id);
                 let tab = WorkspaceTab {
                     id: tab_id.clone(),
                     title: label.clone(),
@@ -8411,8 +8470,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     split_ratio: 0.5,
                     pane1_query: String::new(),
                     connection_id: (!connection_id.is_empty()).then(|| connection_id.clone()),
-                    engine: AnyDriver::badge(engine).to_string(),
-                    connection_name,
+                    engine: badge.engine,
+                    connection_name: badge.name,
+                    color: badge.color,
+                    has_custom_color: badge.has_custom_color,
                 };
                 let active_id = active_tab_id.lock().unwrap().clone();
                 let mut tabs = workspace_tabs.lock().unwrap();
@@ -9079,12 +9140,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 .clone()
                 .unwrap_or_default();
             let id = format!("query:{connection}:{number}");
-            let (engine, connection_name) = connection_badge_info(&store.borrow(), &connection);
+            let badge = connection_badge_info(&store.borrow(), &connection);
             let mut tabs = workspace_tabs.lock().unwrap();
             let mut tab = WorkspaceTab::sql(id.clone(), number);
             tab.connection_id = (!connection.is_empty()).then(|| connection.clone());
-            tab.engine = engine;
-            tab.connection_name = connection_name;
+            tab.engine = badge.engine;
+            tab.connection_name = badge.name;
+            tab.color = badge.color;
+            tab.has_custom_color = badge.has_custom_color;
             tabs.push(tab);
             *active_tab_id.lock().unwrap() = Some(id.clone());
             set_workspace_tabs(&w, &tabs, Some(&id));

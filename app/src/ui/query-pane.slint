@@ -602,6 +602,7 @@ export component QueryPane inherits Rectangle {
                                         DbBadge {
                                             engine: item.engine;
                                             size: 13px;
+                                            fill: item.has-custom-color ? item.color : Tokens.db-color(item.engine);
                                         }
                                     }
                                     rl := Text {

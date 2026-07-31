@@ -1172,6 +1172,7 @@ callback create-table-commit();
                                         DbBadge {
                                             engine: tab.engine;
                                             size: 13px;
+                                            fill: tab.has-custom-color ? tab.color : Tokens.db-color(tab.engine);
                                         }
                                     }
                                     if tab.engine != "" && !left-group.tabs-compact: Text {
@@ -1360,6 +1361,7 @@ callback create-table-commit();
                                         DbBadge {
                                             engine: tab.engine;
                                             size: 13px;
+                                            fill: tab.has-custom-color ? tab.color : Tokens.db-color(tab.engine);
                                         }
                                     }
                                     if tab.engine != "" && !right-group.tabs-compact: Text {
