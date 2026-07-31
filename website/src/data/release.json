@@ -1,78 +1,78 @@
 {
-  "tag": "v0.28.0",
-  "published": "2026-07-30",
+  "tag": "v0.29.0",
+  "published": "2026-07-31",
   "assets": [
     {
       "name": "rdb-aarch64-apple-darwin.dmg",
-      "size": 8274281,
-      "sha256": "4e867ade139149c8b343e5a630d617dafb20dba8975703cb5b1e2014856d006d",
-      "url": "https://github.com/suiflex/rdb/releases/download/v0.28.0/rdb-aarch64-apple-darwin.dmg"
+      "size": 8293676,
+      "sha256": "c542a4c4b31b17840dae81a3c1cd34acf481644359790e2b589dbd3fbd273106",
+      "url": "https://github.com/suiflex/rdb/releases/download/v0.29.0/rdb-aarch64-apple-darwin.dmg"
     },
     {
       "name": "rdb-aarch64-apple-darwin.tar.gz",
-      "size": 7756651,
-      "sha256": "e39cf112f8d5d9f3a59a26caf97eb19dbe6432d8dc16965367a6b106aa1c4f58",
-      "url": "https://github.com/suiflex/rdb/releases/download/v0.28.0/rdb-aarch64-apple-darwin.tar.gz"
+      "size": 7779043,
+      "sha256": "6484d97d3c725c4a85e2b1dc22bcba18be2befbd53dc5c1bb82a899e4b3da98f",
+      "url": "https://github.com/suiflex/rdb/releases/download/v0.29.0/rdb-aarch64-apple-darwin.tar.gz"
     },
     {
       "name": "rdb-aarch64-pc-windows-msvc.exe",
-      "size": 17354752,
-      "sha256": "0666016b1cd8f754888e836bb767227409ffe0777e0e751980b4f2efa7d13675",
-      "url": "https://github.com/suiflex/rdb/releases/download/v0.28.0/rdb-aarch64-pc-windows-msvc.exe"
+      "size": 17446912,
+      "sha256": "85a402b6d2bc1d727aac7d6ad59570af00e6fb33cf01e49044142cc99e649036",
+      "url": "https://github.com/suiflex/rdb/releases/download/v0.29.0/rdb-aarch64-pc-windows-msvc.exe"
     },
     {
       "name": "rdb-aarch64-pc-windows-msvc.zip",
-      "size": 7992740,
-      "sha256": "fdb9ec33489b3408cb0407bcaeb8ae5fbaf4e1d3b0ed11821f42ed6a9567d4d1",
-      "url": "https://github.com/suiflex/rdb/releases/download/v0.28.0/rdb-aarch64-pc-windows-msvc.zip"
+      "size": 8023853,
+      "sha256": "814b00292734fac75f837ad88aebc8249753f624a7f2ed28856b823993f2ebb1",
+      "url": "https://github.com/suiflex/rdb/releases/download/v0.29.0/rdb-aarch64-pc-windows-msvc.zip"
     },
     {
       "name": "rdb-aarch64-unknown-linux-gnu",
-      "size": 20482928,
-      "sha256": "04c461263a11744dd138e3f2d92f1de84190bd347b998488856ec17d74b91c5e",
-      "url": "https://github.com/suiflex/rdb/releases/download/v0.28.0/rdb-aarch64-unknown-linux-gnu"
+      "size": 20548464,
+      "sha256": "e8bdeac83d342f1b286a30905002c615bdab668a7d0551f745b3d9faf26eff33",
+      "url": "https://github.com/suiflex/rdb/releases/download/v0.29.0/rdb-aarch64-unknown-linux-gnu"
     },
     {
       "name": "rdb-aarch64-unknown-linux-gnu.tar.gz",
-      "size": 9849012,
-      "sha256": "bfff36026cbe299a97176abbd6109a037cd257893312f24b8ffae9422e1b834b",
-      "url": "https://github.com/suiflex/rdb/releases/download/v0.28.0/rdb-aarch64-unknown-linux-gnu.tar.gz"
+      "size": 9883266,
+      "sha256": "69c041d9293634b8b6a60cbf45ab1bb11252dbc8c5f87dd1481157813f0dda28",
+      "url": "https://github.com/suiflex/rdb/releases/download/v0.29.0/rdb-aarch64-unknown-linux-gnu.tar.gz"
     },
     {
       "name": "rdb-x86_64-apple-darwin.dmg",
-      "size": 9301413,
-      "sha256": "eafd08d3261ff4698a433123aad1aa53640070095e624e50148f6d350c2c23c6",
-      "url": "https://github.com/suiflex/rdb/releases/download/v0.28.0/rdb-x86_64-apple-darwin.dmg"
+      "size": 9340881,
+      "sha256": "801548357cc25102c862df40add2135a113df1bedc69e80d78c4aaa0c6685744",
+      "url": "https://github.com/suiflex/rdb/releases/download/v0.29.0/rdb-x86_64-apple-darwin.dmg"
     },
     {
       "name": "rdb-x86_64-apple-darwin.tar.gz",
-      "size": 8299076,
-      "sha256": "22f639bf0c65f4a6feebd208634b7f8c39565c9fa14e3e2eb194982a412f6fa1",
-      "url": "https://github.com/suiflex/rdb/releases/download/v0.28.0/rdb-x86_64-apple-darwin.tar.gz"
+      "size": 8335932,
+      "sha256": "59373f2e2b114fbe319ade10bffebf310df677901b094f00a074fa7dfcdc36e5",
+      "url": "https://github.com/suiflex/rdb/releases/download/v0.29.0/rdb-x86_64-apple-darwin.tar.gz"
     },
     {
       "name": "rdb-x86_64-pc-windows-msvc.exe",
-      "size": 18807296,
-      "sha256": "50b4c4387f8abe2eecf2472cda6317ce4a64f72f7ffa7b75b187707717fb572a",
-      "url": "https://github.com/suiflex/rdb/releases/download/v0.28.0/rdb-x86_64-pc-windows-msvc.exe"
+      "size": 18904576,
+      "sha256": "5ce55068f34eec7576eac529a57b59e80da85b9f8846fa0eaa93403720910f52",
+      "url": "https://github.com/suiflex/rdb/releases/download/v0.29.0/rdb-x86_64-pc-windows-msvc.exe"
     },
     {
       "name": "rdb-x86_64-pc-windows-msvc.zip",
-      "size": 8469694,
-      "sha256": "40d73d9512405a5d0654aba712789873c90aaeb13ecc237362cc9215ed7c2ad2",
-      "url": "https://github.com/suiflex/rdb/releases/download/v0.28.0/rdb-x86_64-pc-windows-msvc.zip"
+      "size": 8504591,
+      "sha256": "81fb0d1001e2f1e28a5fd022173a013c42b27fc4ddabcfbe4718895b6e7aa4a0",
+      "url": "https://github.com/suiflex/rdb/releases/download/v0.29.0/rdb-x86_64-pc-windows-msvc.zip"
     },
     {
       "name": "rdb-x86_64-unknown-linux-gnu",
-      "size": 25356856,
-      "sha256": "04c0fcab34e59431e5cfaa04f0ac02d2231f9ed87ac76ba4f3356d06d1b21551",
-      "url": "https://github.com/suiflex/rdb/releases/download/v0.28.0/rdb-x86_64-unknown-linux-gnu"
+      "size": 25484792,
+      "sha256": "e416faf6d5f15b2bb6ccff337aed86cb33aab933d23898ff0e2e74c62651bd15",
+      "url": "https://github.com/suiflex/rdb/releases/download/v0.29.0/rdb-x86_64-unknown-linux-gnu"
     },
     {
       "name": "rdb-x86_64-unknown-linux-gnu.tar.gz",
-      "size": 10202102,
-      "sha256": "2271695a28f56a885b1adf909382534172083f5b94d61882d6b7c66c4f8eae27",
-      "url": "https://github.com/suiflex/rdb/releases/download/v0.28.0/rdb-x86_64-unknown-linux-gnu.tar.gz"
+      "size": 10244229,
+      "sha256": "0a89e3d9d16c6915a8c74df5fa584247bb71c266f5d7fc38610226026a90f167",
+      "url": "https://github.com/suiflex/rdb/releases/download/v0.29.0/rdb-x86_64-unknown-linux-gnu.tar.gz"
     }
   ]
 }
