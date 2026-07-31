@@ -450,11 +450,24 @@ callback create-table-commit();
     in property <int> p1-editing-col: -1;
     in-out property <string> p1-editing-value;
     in property <int> p1-scroll-grid-tick;
-    in property <int> p1-doc-view;
+    in-out property <int> p1-doc-view;
     in property <[DocRow]> p1-doc-tree;
     in property <[StructField]> p1-structure-columns;
     in property <[IndexRow]> p1-index-rows;
     in property <[ChartBar]> p1-chart-bars;
+    // Browse toolbar mirror for the right split pane.
+    in property <string> p1-sort-text;
+    in-out property <string> p1-mongo-filter;
+    in-out property <string> p1-grid-filter;
+    in property <[string]> p1-filter-columns;
+    in-out property <string> p1-filter-col: "any column";
+    in property <[string]> p1-filter-operators;
+    in-out property <string> p1-filter-op: "=";
+    in property <int> p1-focus-filter-tick;
+    callback p1-apply-mongo-filter();
+    callback p1-apply-filter();
+    callback p1-add-row();
+    callback p1-mark-delete();
     callback p1-run();
     callback p1-run-selection();
     callback p1-format-sql();
@@ -1439,11 +1452,23 @@ callback create-table-commit();
                         p1-editing-col: root.p1-editing-col;
                         p1-editing-value <=> root.p1-editing-value;
                         p1-scroll-grid-tick: root.p1-scroll-grid-tick;
-                        p1-doc-view: root.p1-doc-view;
+                        p1-doc-view <=> root.p1-doc-view;
                         p1-doc-tree: root.p1-doc-tree;
                         p1-structure-columns: root.p1-structure-columns;
                         p1-index-rows: root.p1-index-rows;
                         p1-chart-bars: root.p1-chart-bars;
+                        p1-sort-text: root.p1-sort-text;
+                        p1-mongo-filter <=> root.p1-mongo-filter;
+                        p1-grid-filter <=> root.p1-grid-filter;
+                        p1-filter-columns: root.p1-filter-columns;
+                        p1-filter-col <=> root.p1-filter-col;
+                        p1-filter-operators: root.p1-filter-operators;
+                        p1-filter-op <=> root.p1-filter-op;
+                        p1-focus-filter-tick: root.p1-focus-filter-tick;
+                        p1-apply-mongo-filter() => { root.p1-apply-mongo-filter(); }
+                        p1-apply-filter() => { root.p1-apply-filter(); }
+                        p1-add-row() => { root.p1-add-row(); }
+                        p1-mark-delete() => { root.p1-mark-delete(); }
                         p1-run() => { root.p1-run(); }
                         p1-run-selection() => { root.p1-run-selection(); }
                         p1-format-sql() => { root.p1-format-sql(); }

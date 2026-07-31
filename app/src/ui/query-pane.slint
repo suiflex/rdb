@@ -9,15 +9,15 @@ import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow, DocRow } f
 import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "palette.slint";
-import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton } from "components.slint";
-import { ScrollView, TextEdit } from "std-widgets.slint";
+import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton, FilterField, UnderlineSegment } from "components.slint";
+import { ScrollView, TextEdit, ComboBox } from "std-widgets.slint";
 import { AppIcon } from "icons.slint";
 
 export component QueryPane inherits Rectangle {
     // ----- tab-global context (forwarded from WorkArea) -----
     in property <bool> browse-mode: false;
     in property <string> table-name;
-    in property <bool> browse-editor-open: false;
+    in-out property <bool> browse-editor-open: false;
     in property <bool> fn-mode: false;
     in property <bool> results-collapsed: false;
     in property <bool> detail-visible: true;
@@ -122,8 +122,24 @@ export component QueryPane inherits Rectangle {
     callback stage-cell(int, int, string);
     callback edit-cancelled();
 
+    // ----- browse toolbar (relocated from WorkArea so each pane owns it) -----
+    in property <string> sort-text;            // e.g. "sort: id ↑"
+    in-out property <string> mongo-filter;     // Compass-style Mongo filter doc
+    callback apply-mongo-filter();
+    callback add-row();
+    callback mark-delete();
+    callback apply-filter();
+    // Row add/delete need this pane's commit path; only the primary pane commits.
+    in property <bool> writable: true;
+    in property <int> focus-filter-tick;
+    in property <[string]> filter-columns;     // "any column" + real columns
+    in-out property <string> filter-col: "any column";
+    in property <[string]> filter-operators;
+    in-out property <string> filter-op: "=";
+    in-out property <string> grid-filter;
+
     // ----- other result views -----
-    in property <int> doc-view: 0;
+    in-out property <int> doc-view: 0;
     in property <[DocRow]> doc-tree;
     callback toggle-doc-node(string);
     in property <[StructField]> structure-columns;
@@ -137,16 +153,178 @@ export component QueryPane inherits Rectangle {
         height: 100%;
         spacing: 0;
 
-        if root.browse-mode && root.split: Rectangle {
+        // ================= browse toolbar =================
+        // Each pane owns its toolbar so the split (right) pane keeps full
+        // browse actions — parity with the primary pane.
+        if root.browse-mode: Rectangle {
             height: 42px;
             background: Tokens.canvas;
             HorizontalLayout {
                 padding-left: Tokens.sp3;
                 padding-right: Tokens.sp3;
                 spacing: Tokens.sp3;
-                Text { text: root.table-name; color: Tokens.text; font-size: Tokens.font-sm; font-weight: 600; vertical-alignment: center; }
+
+                // "+ Filter" dashed chip
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        height: 26px;
+                        width: fl.preferred-width + 2 * Tokens.sp3;
+                        border-radius: Tokens.radius;
+                        border-width: 1px;
+                        border-color: filter-ta.has-hover ? Tokens.text-faint : Tokens.border-strong;
+                        background: root.filter-open ? Tokens.accent-tint : Tokens.card;
+                        fl := Text {
+                            text: "+ Filter";
+                            color: root.filter-open ? Tokens.on-tint : Tokens.text-dim;
+                            font-size: Tokens.font-sm;
+                            font-weight: 500;
+                        }
+                        filter-ta := TouchArea {
+                            clicked => { root.filter-open = !root.filter-open; }
+                        }
+                    }
+                }
+                // Mongo filter document (server-side find filter).
+                if root.result-kind == 1: VerticalLayout {
+                    alignment: center;
+                    FilterField {
+                        width: 260px;
+                        height: 28px;
+                        placeholder: "Filter — { \"field\": value }";
+                        text <=> root.mongo-filter;
+                        submitted => { root.apply-mongo-filter(); }
+                    }
+                }
+                // sort text
+                Text {
+                    text: root.sort-text;
+                    color: Tokens.text-faint;
+                    font-size: Tokens.font-sm;
+                    font-family: Tokens.mono;
+                    vertical-alignment: center;
+                }
                 Rectangle { horizontal-stretch: 1; }
-                TextButton { text: "Refresh"; clicked => { root.refresh-page(); } }
+                // Reveal the query editor over the browse grid.
+                VerticalLayout {
+                    alignment: center;
+                    TextButton {
+                        text: root.browse-editor-open ? "Query ▾" : "Query ▸";
+                        clicked => { root.browse-editor-open = !root.browse-editor-open; }
+                    }
+                }
+                // Mongo document view switch (grid table ⇄ JSON tree)
+                if root.result-kind == 1: VerticalLayout {
+                    alignment: center;
+                    HorizontalLayout {
+                        spacing: Tokens.sp3;
+                        UnderlineSegment {
+                            text: "Grid";
+                            active: root.doc-view == 0;
+                            clicked => { root.doc-view = 0; }
+                        }
+                        UnderlineSegment {
+                            text: "Tree";
+                            active: root.doc-view == 1;
+                            clicked => { root.doc-view = 1; }
+                        }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    TextButton { text: "Copy"; clicked => { root.copy-results(); } }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    ExportButton { export(i) => { root.export-results(i); } }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    TextButton {
+                        text: root.sql-view-mode == 2 ? "Data" : "Chart";
+                        clicked => { root.sql-view-mode = root.sql-view-mode == 2 ? 0 : 2; }
+                    }
+                }
+                if root.writable: VerticalLayout {
+                    alignment: center;
+                    SecondaryButton {
+                        text: "+ Row";
+                        enabled: !root.read-only;
+                        clicked => { root.add-row(); }
+                    }
+                }
+                if root.writable: VerticalLayout {
+                    alignment: center;
+                    SecondaryButton {
+                        text: "− Row";
+                        enabled: !root.read-only;
+                        clicked => { root.mark-delete(); }
+                    }
+                }
+                if root.read-only && root.table-name != "": Text {
+                    text: "read-only";
+                    color: Tokens.text-faint;
+                    font-size: Tokens.font-sm;
+                    vertical-alignment: center;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 26px;
+                        height: 26px;
+                        border-radius: Tokens.radius;
+                        border-width: 1px;
+                        border-color: Tokens.border-strong;
+                        background: refresh-ta.has-hover ? Tokens.chrome : Tokens.card;
+                        AppIcon {
+                            name: "refresh";
+                            size: 14px;
+                            color: Tokens.text-dim;
+                        }
+                        refresh-ta := TouchArea { clicked => { root.refresh-page(); } }
+                    }
+                }
+            }
+        }
+
+        // One TablePlus-style condition row.
+        if root.browse-mode && root.filter-open: Rectangle {
+            property <int> focus-tick: root.focus-filter-tick;
+            changed focus-tick => { filter-value.focus-input(); }
+            height: 38px;
+            background: Tokens.chrome;
+            border-width: 1px;
+            border-color: Tokens.border;
+            HorizontalLayout {
+                padding-left: Tokens.sp3;
+                padding-right: Tokens.sp3;
+                padding-top: 4px;
+                padding-bottom: 4px;
+                spacing: Tokens.sp2;
+                ComboBox {
+                    width: 180px;
+                    model: root.filter-columns;
+                    current-value <=> root.filter-col;
+                }
+                ComboBox {
+                    width: 120px;
+                    model: root.filter-operators;
+                    current-value <=> root.filter-op;
+                }
+                filter-value := FilterField {
+                    horizontal-stretch: 1;
+                    max-width: 420px;
+                    placeholder: root.filter-op == "IS NULL" || root.filter-op == "IS NOT NULL"
+                        ? "No value required" : "Value";
+                    text <=> root.grid-filter;
+                    submitted => { root.apply-filter(); }
+                }
+                PrimaryButton {
+                    text: "Apply";
+                    height: 28px;
+                    clicked => { root.apply-filter(); }
+                }
+                Rectangle { horizontal-stretch: 1; }
             }
         }
 

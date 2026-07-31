@@ -1959,6 +1959,27 @@ fn set_p_grid_col_filters(w: &MainWindow, pane: usize, m: ModelRc<SharedString>)
         w.set_p1_grid_col_filters(m);
     }
 }
+fn set_p_filter_columns(w: &MainWindow, pane: usize, m: ModelRc<SharedString>) {
+    if pane == 0 {
+        w.set_filter_columns(m);
+    } else {
+        w.set_p1_filter_columns(m);
+    }
+}
+fn set_p_filter_col(w: &MainWindow, pane: usize, v: SharedString) {
+    if pane == 0 {
+        w.set_filter_col(v);
+    } else {
+        w.set_p1_filter_col(v);
+    }
+}
+fn set_p_grid_filter(w: &MainWindow, pane: usize, v: SharedString) {
+    if pane == 0 {
+        w.set_grid_filter(v);
+    } else {
+        w.set_p1_grid_filter(v);
+    }
+}
 fn set_p_detail_pretty(w: &MainWindow, pane: usize, m: ModelRc<SharedString>) {
     if pane == 0 {
         w.set_grid_detail_pretty(m);
@@ -2658,7 +2679,7 @@ fn present_view(
         model::ResultView::Affected(_) => 0,
     } as u64;
     *last_view.lock().unwrap() = Some(v.clone());
-    w.set_grid_filter(SharedString::default());
+    set_p_grid_filter(w, pane, SharedString::default());
     hidden_cols.lock().unwrap().clear();
     *col_order.lock().unwrap() = (0..ncols).collect();
     *sort_state.lock().unwrap() = (-1, true);
@@ -2692,14 +2713,18 @@ fn present_view(
     ]))));
     let mut fcols: Vec<SharedString> = vec![SharedString::from("any column")];
     fcols.extend(colnames.iter().cloned());
-    w.set_filter_columns(ModelRc::from(Rc::new(VecModel::from(fcols))));
-    w.set_filter_col(
+    set_p_filter_columns(w, pane, ModelRc::from(Rc::new(VecModel::from(fcols))));
+    set_p_filter_col(
+        w,
+        pane,
         colnames
             .first()
             .cloned()
             .unwrap_or_else(|| SharedString::from("any column")),
     );
-    w.set_all_columns(ModelRc::from(Rc::new(VecModel::from(colnames))));
+    if pane == 0 {
+        w.set_all_columns(ModelRc::from(Rc::new(VecModel::from(colnames))));
+    }
     *displayed_grid.lock().unwrap() = view_grid(&v);
     {
         let st = browse.lock().unwrap();
@@ -6035,6 +6060,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     sc.engine,
                 )))));
                 w.set_filter_op(SharedString::from("="));
+                // Mirror the operator list to the right split pane's filter row.
+                w.set_p1_filter_operators(ModelRc::from(Rc::new(VecModel::from(
+                    filter_operators(sc.engine),
+                ))));
+                w.set_p1_filter_op(SharedString::from("="));
                 // Re-present the active tab's stored result so a connection
                 // switch keeps the last result visible instead of blanking the
                 // grid. No-op (clears) when the tab has no stored result, e.g.
@@ -7870,6 +7900,101 @@ fn main() -> Result<(), slint::PlatformError> {
             apply_result(&w, 1, filtered);
         });
     }
+    // ----- right pane: filter row Apply (client-side, mirrors group 0) -----
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_apply_filter(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let view = {
+                let results = panes[1].results.lock().unwrap();
+                let active = *panes[1].active_result.lock().unwrap();
+                results.get(active).map(|result| result.view.clone())
+            };
+            let Some(view) = view else {
+                return;
+            };
+            if matches!(view, model::ResultView::Affected(_)) {
+                return;
+            }
+            let needle = w.get_p1_grid_filter().to_string().to_lowercase();
+            let fcol = w.get_p1_filter_col().to_string();
+            let fop = w.get_p1_filter_op().to_string();
+            let hidden = panes[1].hidden_cols.lock().unwrap().clone();
+            let order = panes[1].col_order.lock().unwrap().clone();
+            let cfilters = panes[1].col_filters.lock().unwrap().clone();
+            let (scol, sasc) = *panes[1].sort_state.lock().unwrap();
+            // Filtering renumbers rows, so pending edits keyed by row index would
+            // land on the wrong rows — drop them.
+            panes[1].edit_buf.lock().unwrap().clear();
+            set_p_editing(&w, 1, -1, -1);
+            let filtered = compute_view(
+                &view, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
+            );
+            *panes[1].displayed_grid.lock().unwrap() = view_grid(&filtered);
+            apply_result(&w, 1, filtered);
+        });
+    }
+    // ----- right pane: Copy result grid as TSV -----
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_copy_results(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some(grid) = panes[1].displayed_grid.lock().unwrap().clone() else {
+                return;
+            };
+            use copypasta::ClipboardProvider;
+            let msg = match copypasta::ClipboardContext::new()
+                .and_then(|mut cb| cb.set_contents(export::to_tsv(&grid)))
+            {
+                Ok(()) => format!("copied {} rows", grid.rows.len()),
+                Err(e) => format!("copy failed: {e}"),
+            };
+            set_p_results_meta(&w, 1, SharedString::from(msg));
+        });
+    }
+    // ----- right pane: Export result grid -----
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_export_results(move |fmt| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some(grid) = panes[1].displayed_grid.lock().unwrap().clone() else {
+                set_p_results_meta(&w, 1, SharedString::from("nothing to export"));
+                return;
+            };
+            let (ext, filter, contents) = match fmt {
+                1 => ("json", "JSON", export::to_json(&grid)),
+                2 => ("tsv", "TSV", export::to_tsv(&grid)),
+                3 => {
+                    let table = w.get_p1_active_table();
+                    let table = if table.is_empty() {
+                        "results"
+                    } else {
+                        table.as_str()
+                    };
+                    ("sql", "SQL", export::to_sql_insert(&grid, table))
+                }
+                4 => ("md", "Markdown", export::to_markdown(&grid)),
+                _ => ("csv", "CSV", export::to_csv(&grid)),
+            };
+            save_via_dialog(
+                &w,
+                format!("rdb-export.{ext}"),
+                filter.to_string(),
+                ext.to_string(),
+                contents,
+                |w, msg| set_p_results_meta(w, 1, SharedString::from(msg)),
+            );
+        });
+    }
     {
         let weak = window.as_weak();
         let panes = panes.clone();
@@ -8426,6 +8551,36 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let run_browse = run_browse.clone();
         window.on_p1_refresh_page(move || run_browse(1));
+    }
+    // ----- right pane: Mongo browse filter (mirrors group 0) -----
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        let run_browse = run_browse.clone();
+        window.on_p1_apply_mongo_filter(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let raw = w.get_p1_mongo_filter().to_string();
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() {
+                if let Err(e) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                    set_p_status_error(&w, 1, true);
+                    set_p_result_status(
+                        &w,
+                        1,
+                        SharedString::from(format!("invalid filter JSON: {e}")),
+                    );
+                    return;
+                }
+            }
+            {
+                let mut st = panes[1].browse.lock().unwrap();
+                st.mongo_filter = trimmed.to_string();
+                st.page = 0;
+            }
+            run_browse(1);
+        });
     }
 
     // ----- Mongo browse filter bar (Compass-style filter document) -----
