@@ -5928,15 +5928,16 @@ fn main() -> Result<(), slint::PlatformError> {
             let (init_tabs, init_active, init_active_p1, init_active_group) = if restore {
                 load_query_tabs()
             } else {
-                // Retain the SQL scratch tabs (with their results) so switching
-                // connection leaves the last result on screen — "standby". Drop
-                // the connection-scoped table/function tabs (their data would be
-                // stale) and only clear the in-flight loading flag so no tab is
-                // left showing a stuck spinner.
+                // Retain every open tab across the switch so the workspace
+                // behaves like a set of persistent documents — the SQL scratch
+                // tabs keep their results ("standby") and the connection-scoped
+                // table/collection tabs stay open too, their last data now a
+                // snapshot until the user hits Refresh against the new
+                // connection. Only the in-flight loading flag is cleared so no
+                // tab is left showing a stuck spinner.
                 let mut kept: Vec<WorkspaceTab> =
                     std::mem::take(&mut *workspace_tabs.lock().unwrap())
                         .into_iter()
-                        .filter(|t| t.kind == "sql")
                         .collect();
                 for t in &mut kept {
                     t.loading = false;
