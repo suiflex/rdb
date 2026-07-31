@@ -1059,12 +1059,13 @@ fn active_tab_kind(w: &MainWindow) -> String {
         .unwrap_or_default()
 }
 
-/// Clipboard write; errors are ignored (no clipboard on some CI machines).
-fn clip_set(s: &str) {
+/// Clipboard write; returns false when no clipboard is available.
+fn clip_set(s: &str) -> bool {
     use copypasta::ClipboardProvider;
     if let Ok(mut c) = copypasta::ClipboardContext::new() {
-        let _ = c.set_contents(s.to_string());
+        return c.set_contents(s.to_string()).is_ok();
     }
+    false
 }
 
 /// Clipboard read; None when empty or unavailable.
@@ -7323,7 +7324,9 @@ fn main() -> Result<(), slint::PlatformError> {
                         }
                     }
                 }
-                3 => clip_set(&sql),
+                3 => {
+                    clip_set(&sql);
+                }
                 4 => {
                     let removed = {
                         let mut list = saved.borrow_mut();
@@ -7388,7 +7391,24 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     // ----- Details panel: copy one field value to the clipboard -----
-    window.on_copy_text(move |s| clip_set(&s));
+    {
+        let weak = window.as_weak();
+        window.on_copy_text(move |s| {
+            let copied = clip_set(&s);
+            if let Some(w) = weak.upgrade() {
+                let msg = if copied {
+                    "copied field"
+                } else {
+                    "copy failed"
+                };
+                if w.get_active_pane() == 1 {
+                    w.set_p1_result_status(msg.into());
+                } else {
+                    w.set_result_status(msg.into());
+                }
+            }
+        });
+    }
 
     // ----- Copy results (TSV → clipboard) / Export CSV (~/Downloads) -----
     {

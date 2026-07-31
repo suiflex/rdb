@@ -574,6 +574,7 @@ export component QueryPane inherits Rectangle {
                                         // copy this field's value to the clipboard
                                         Rectangle {
                                             width: 18px;
+                                            height: 18px;
                                             AppIcon {
                                                 x: 2px;
                                                 y: 2px;
@@ -582,45 +583,53 @@ export component QueryPane inherits Rectangle {
                                                 color: copy-ta.has-hover ? Tokens.accent : Tokens.text-faint;
                                             }
                                             copy-ta := TouchArea {
-                                                clicked => { root.copy-text(detail-cell.is-null ? "" : detail-cell.text); }
+                                                width: 100%;
+                                                height: 100%;
+                                                clicked => { root.copy-text(pretty != "" ? pretty : (detail-cell.is-null ? "" : detail-cell.text)); }
                                             }
                                         }
                                     }
-                                    // Box grows to fit the value; short values stay
-                                    // compact, long ones cap out. TextEdit owns its
-                                    // own scrollbar so big values wrap and scroll
-                                    // reliably (the old ScrollView+TextInput had a
-                                    // cyclic height that broke scrolling).
                                     Rectangle {
-                                        height: clamp(measurer.preferred-height + 2 * Tokens.sp2, 44px, 220px);
+                                        height: root.read-only
+                                            ? max(measurer.preferred-height + 2 * Tokens.sp2, 44px)
+                                            : clamp(measurer.preferred-height + 2 * Tokens.sp2, 44px, 220px);
+                                        background: Tokens.chrome;
+                                        border-radius: Tokens.radius;
+                                        border-width: 1px;
+                                        border-color: Tokens.border-strong;
                                         // Invisible height probe: same width/font as the
                                         // editor, so the box sizes to the wrapped content.
                                         measurer := Text {
-                                            width: parent.width - 24px;
+                                            width: parent.width - 2 * Tokens.sp2;
                                             text: pretty != "" ? pretty : (detail-cell.is-null ? "" : detail-cell.text);
                                             wrap: word-wrap;
                                             font-family: Tokens.mono;
                                             font-size: Tokens.font-sm;
                                             color: transparent;
                                         }
-                                        detail-input := TextEdit {
-                                            width: 100%;
-                                            height: 100%;
-                                            read-only: root.read-only;
+                                        if root.read-only: Text {
+                                            x: Tokens.sp2;
+                                            y: Tokens.sp1;
+                                            width: parent.width - 2 * Tokens.sp2;
                                             text: pretty != "" ? pretty : (detail-cell.is-null ? "" : detail-cell.text);
                                             wrap: word-wrap;
+                                            color: detail-cell.is-null ? Tokens.text-ghost : Tokens.text;
+                                            font-family: Tokens.mono;
+                                            font-size: Tokens.font-sm;
+                                            font-italic: detail-cell.is-null;
+                                        }
+                                        if !root.read-only: edit-detail-input := TextInput {
+                                            x: Tokens.sp2;
+                                            y: Tokens.sp1;
+                                            width: parent.width - 2 * Tokens.sp2;
+                                            height: parent.height - 2 * Tokens.sp1;
+                                            text: detail-cell.is-null ? "" : detail-cell.text;
+                                            wrap: word-wrap;
+                                            single-line: false;
+                                            color: Tokens.text;
                                             font-family: Tokens.mono;
                                             font-size: Tokens.font-sm;
                                             edited => { root.stage-cell(root.selected-row, c, self.text); }
-                                        }
-                                        if detail-cell.is-null && detail-input.text == "": Text {
-                                            x: Tokens.sp2;
-                                            y: Tokens.sp2;
-                                            text: "NULL";
-                                            color: Tokens.text-ghost;
-                                            font-family: Tokens.mono;
-                                            font-size: Tokens.font-sm;
-                                            font-italic: true;
                                         }
                                     }
                                 }
