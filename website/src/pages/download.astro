@@ -42,7 +42,7 @@ const platforms: Platform[] = [
   {
     id: "windows",
     name: "Windows",
-    hint: "Standalone executable. Unzip (or download the .exe) and run rdb.exe.",
+    hint: "Use the PowerShell installer, Scoop, or download the standalone rdb.exe.",
     rows: [
       row("Executable", "x64", "rdb-x86_64-pc-windows-msvc.exe"),
       row("Executable", "ARM64", "rdb-aarch64-pc-windows-msvc.exe"),
@@ -137,6 +137,13 @@ const platforms: Platform[] = [
         <div>
           <h3 class="mb-2 font-mono text-xs text-fg-3">npm (all platforms)</h3>
           <CodeBlock code="npm i -g @suiflex/rdb" label="npm install" />
+        </div>
+        <div>
+          <h3 class="mb-2 font-mono text-xs text-fg-3">Install script (Windows)</h3>
+          <CodeBlock
+            code="irm https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install.ps1 | iex"
+            label="Windows install script"
+          />
         </div>
         <div>
           <h3 class="mb-2 font-mono text-xs text-fg-3">Scoop (Windows)</h3>
