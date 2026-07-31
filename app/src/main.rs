@@ -7109,6 +7109,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let recent_queries = recent_queries.clone();
         let history_cap = history_cap.clone();
         let rebuild_query_tree = rebuild_query_tree.clone();
+        let panes = panes.clone();
         window.on_run_query(move || {
             if let Some(w) = weak.upgrade() {
                 // ⌘⏎ / Run: the highlighted selection, else just the statement
@@ -7141,6 +7142,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 if stream {
                     run_stream(0, text);
                 } else {
+                    // 2+ selected statements → one result tab each (same as the
+                    // Run Selection button).
+                    if active_tab_kind(&w) != "table" && editor::split_statements(&text).len() >= 2
+                    {
+                        panes[0]
+                            .split_results
+                            .store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
                     run_sql(0, text);
                 }
                 if w.get_sidebar_mode() != 0 {
