@@ -625,6 +625,12 @@ struct StoredResult {
     meta: String,
     latency: String,
     grid: GridState,
+    // Connection that produced THIS run — captured when the run started, not
+    // read from the tab, since a long-lived SQL tab can be re-run after the
+    // user switches the active connection (each Result N chip needs its own).
+    connection_id: Option<String>,
+    engine: String,
+    connection_name: String,
 }
 
 fn store_result(
@@ -652,6 +658,9 @@ mod result_tab_tests {
             meta: String::new(),
             latency: String::new(),
             grid: GridState::default(),
+            connection_id: None,
+            engine: String::new(),
+            connection_name: String::new(),
         }
     }
 
@@ -2842,17 +2851,24 @@ fn present_view(
     }
 }
 
-/// Set the result-tab strip labels ("Result 1", …) and active index.
-fn set_result_tabs(w: &MainWindow, pane: usize, count: usize, active: usize) {
-    let labels: Vec<SharedString> = (1..=count)
-        .map(|n| SharedString::from(format!("Result {n}")))
+/// Set the result-tab strip ("Result 1", …, each badged with the connection
+/// that produced it) and active index.
+fn set_result_tabs(w: &MainWindow, pane: usize, results: &[StoredResult], active: usize) {
+    let items: Vec<ResultTabItem> = results
+        .iter()
+        .enumerate()
+        .map(|(n, r)| ResultTabItem {
+            label: format!("Result {}", n + 1).into(),
+            engine: r.engine.clone().into(),
+            connection_name: r.connection_name.clone().into(),
+        })
         .collect();
-    let labels = ModelRc::from(Rc::new(VecModel::from(labels)));
+    let items = ModelRc::from(Rc::new(VecModel::from(items)));
     if pane == 0 {
-        w.set_result_tabs(labels);
+        w.set_result_tabs(items);
         w.set_active_result(active as i32);
     } else {
-        w.set_p1_result_tabs(labels);
+        w.set_p1_result_tabs(items);
         w.set_p1_active_result(active as i32);
     }
 }
@@ -5050,11 +5066,25 @@ fn main() -> Result<(), slint::PlatformError> {
                 tab.active_result = ai;
             }
             if tab.kind != "function" {
+                let (view_id, view_engine, view_name) = tab
+                    .results
+                    .get(tab.active_result)
+                    .map(|r| {
+                        (
+                            r.connection_id.clone(),
+                            r.engine.clone(),
+                            r.connection_name.clone(),
+                        )
+                    })
+                    .unwrap_or_default();
                 tab.view = last_view.lock().unwrap().clone().map(|view| StoredResult {
                     view,
                     meta: w.get_results_meta().to_string(),
                     latency: w.get_status_latency().to_string(),
                     grid: GridState::default(),
+                    connection_id: view_id,
+                    engine: view_engine,
+                    connection_name: view_name,
                 });
             }
             // Persist SQL scratch tabs so they survive a restart. Cheap JSON
@@ -5175,7 +5205,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
             *panes[pane].results.lock().unwrap() = tab.results.clone();
             *panes[pane].active_result.lock().unwrap() = tab.active_result;
-            set_result_tabs(w, pane, tab.results.len(), tab.active_result);
+            set_result_tabs(w, pane, &tab.results, tab.active_result);
             let selected = if tab.kind == "sql" {
                 tab.results
                     .get(tab.active_result)
@@ -6481,6 +6511,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let rt = rt.clone();
         let current = current.clone();
+        let current_connection_id = current_connection_id.clone();
+        let store = store.clone();
         let last_view = last_view.clone();
         let panes = panes.clone();
         let workspace_tabs = workspace_tabs.clone();
@@ -6548,6 +6580,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 // hid it. The console still updates in place when it is open.
                 cur_db = w.get_schema_name().to_string();
             }
+            // Snapshot which connection is running THIS query — not read back
+            // later from `current_connection_id`, since the user can switch the
+            // active connection while the query is in flight.
+            let query_connection_id = current_connection_id.lock().unwrap().clone();
+            let (query_engine, query_connection_name) = query_connection_id
+                .as_deref()
+                .map(|cid| connection_badge_info(&store.borrow(), cid))
+                .unwrap_or_default();
             let started = std::time::Instant::now();
             let jh = rt.spawn(async move {
                 let picked = {
@@ -6675,6 +6715,9 @@ fn main() -> Result<(), slint::PlatformError> {
                                                 ),
                                                 latency: format!("{elapsed_ms} ms"),
                                                 grid: GridState::default(),
+                                                connection_id: query_connection_id.clone(),
+                                                engine: query_engine.clone(),
+                                                connection_name: query_connection_name.clone(),
                                             }
                                         })
                                         .collect();
@@ -6694,10 +6737,9 @@ fn main() -> Result<(), slint::PlatformError> {
                                     if !is_active {
                                         return;
                                     }
-                                    let count = all.len();
-                                    *results.lock().unwrap() = all;
                                     *active_result.lock().unwrap() = 0;
-                                    set_result_tabs(&w, pane, count, 0);
+                                    set_result_tabs(&w, pane, &all, 0);
+                                    *results.lock().unwrap() = all;
                                     present_view(
                                         &w,
                                         pane,
@@ -6729,6 +6771,9 @@ fn main() -> Result<(), slint::PlatformError> {
                                     meta: meta.clone(),
                                     latency: latency.clone(),
                                     grid: GridState::default(),
+                                    connection_id: query_connection_id.clone(),
+                                    engine: query_engine.clone(),
+                                    connection_name: query_connection_name.clone(),
                                 };
                                 let mut tabs = workspace_tabs.lock().unwrap();
                                 let Some(tab) = tabs.iter_mut().find(|tab| tab.id == target_id)
@@ -6781,14 +6826,9 @@ fn main() -> Result<(), slint::PlatformError> {
                                 *results.lock().unwrap() = tab_results;
                                 *active_result.lock().unwrap() = tab_active;
                                 if is_browse {
-                                    set_result_tabs(&w, pane, 0, 0);
+                                    set_result_tabs(&w, pane, &[], 0);
                                 } else {
-                                    set_result_tabs(
-                                        &w,
-                                        pane,
-                                        results.lock().unwrap().len(),
-                                        tab_active,
-                                    );
+                                    set_result_tabs(&w, pane, &results.lock().unwrap(), tab_active);
                                 }
                                 present_view(
                                     &w,
@@ -6847,6 +6887,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let rt = rt.clone();
         let current = current.clone();
+        let current_connection_id = current_connection_id.clone();
+        let store = store.clone();
         let query_console = query_console.clone();
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
@@ -6904,6 +6946,14 @@ fn main() -> Result<(), slint::PlatformError> {
             set_p_result_status(&w, pane, SharedString::from("streaming…"));
             set_p_results_meta(&w, pane, SharedString::default());
 
+            // Snapshot which connection is running THIS stream, same reasoning
+            // as run_sql: the active connection can change before it finishes.
+            let query_connection_id = current_connection_id.lock().unwrap().clone();
+            let (query_engine, query_connection_name) = query_connection_id
+                .as_deref()
+                .map(|cid| connection_badge_info(&store.borrow(), cid))
+                .unwrap_or_default();
+
             // UI-thread accumulator (for filter/sort/export after the stream) and
             // the live cell model we push each batch into.
             let (ui_tx, ui_rx) = std::sync::mpsc::channel::<StreamMsg>();
@@ -6933,6 +6983,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 let active_group1_tab_id = active_group1_tab_id.clone();
                 let stream_timer_stop = stream_timer.clone();
                 let target_id = target_id.clone();
+                let query_connection_id = query_connection_id.clone();
+                let query_engine = query_engine.clone();
+                let query_connection_name = query_connection_name.clone();
                 timer.start(
                     slint::TimerMode::Repeated,
                     std::time::Duration::from_millis(50),
@@ -7006,6 +7059,9 @@ fn main() -> Result<(), slint::PlatformError> {
                                         meta: meta.clone(),
                                         latency: latency.clone(),
                                         grid: GridState::default(),
+                                        connection_id: query_connection_id.clone(),
+                                        engine: query_engine.clone(),
+                                        connection_name: query_connection_name.clone(),
                                     };
                                     let (tab_results, tab_active) = {
                                         let mut tabs = workspace_tabs.lock().unwrap();
@@ -7034,7 +7090,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                         set_result_tabs(
                                             &w,
                                             pane,
-                                            results.lock().unwrap().len(),
+                                            &results.lock().unwrap(),
                                             tab_active,
                                         );
                                         present_view(
@@ -8351,7 +8407,7 @@ fn main() -> Result<(), slint::PlatformError> {
             *last_view.lock().unwrap() = None;
             *displayed_grid.lock().unwrap() = None;
             results.lock().unwrap().clear();
-            set_result_tabs(&w, 0, 0, 0);
+            set_result_tabs(&w, 0, &[], 0);
             clear_grid(&w, 0);
             run_browse(0);
 
@@ -9017,7 +9073,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 ..Default::default()
             };
             *last_view.lock().unwrap() = None;
-            set_result_tabs(&w, 0, 0, 0);
+            set_result_tabs(&w, 0, &[], 0);
             clear_grid(&w, 0);
             w.set_active_pane(0);
             w.set_active_table(SharedString::default());
@@ -9144,7 +9200,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let i = i.max(0) as usize;
-            let (count, active, sr) = {
+            let (results_vec, active, sr) = {
                 let mut rv = results.lock().unwrap();
                 if i >= rv.len() {
                     return;
@@ -9154,9 +9210,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 if *ar >= rv.len() {
                     *ar = rv.len().saturating_sub(1);
                 }
-                (rv.len(), *ar, rv.get(*ar).cloned())
+                (rv.clone(), *ar, rv.get(*ar).cloned())
             };
-            set_result_tabs(&w, 0, count, active);
+            set_result_tabs(&w, 0, &results_vec, active);
             if let Some(id) = active_tab_id.lock().unwrap().clone() {
                 if let Some(tab) = workspace_tabs
                     .lock()
@@ -9255,7 +9311,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let i = i.max(0) as usize;
-            let (count, active, sr) = {
+            let (results_vec, active, sr) = {
                 let mut rv = panes[1].results.lock().unwrap();
                 if i >= rv.len() {
                     return;
@@ -9265,9 +9321,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 if *ar >= rv.len() {
                     *ar = rv.len().saturating_sub(1);
                 }
-                (rv.len(), *ar, rv.get(*ar).cloned())
+                (rv.clone(), *ar, rv.get(*ar).cloned())
             };
-            set_result_tabs(&w, 1, count, active);
+            set_result_tabs(&w, 1, &results_vec, active);
             if let Some(id) = active_group1_tab_id.lock().unwrap().clone() {
                 if let Some(tab) = workspace_tabs
                     .lock()

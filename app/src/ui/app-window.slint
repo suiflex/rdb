@@ -25,6 +25,7 @@ import {
     ChartBar,
     IndexRow,
     DocRow,
+    ResultTabItem,
 } from "structs.slint";
 
 export component MainWindow inherits Window {
@@ -430,7 +431,7 @@ callback create-table-commit();
     in-out property <bool> p1-show-structure: false;
     in property <string> p1-query-label;
     in property <string> p1-results-meta;
-    in property <[string]> p1-result-tabs;
+    in property <[ResultTabItem]> p1-result-tabs;
     in property <int> p1-active-result;
     in-out property <int> p1-sql-view-mode;
     in-out property <bool> p1-filter-open;
@@ -508,7 +509,7 @@ callback create-table-commit();
     in property <[PaletteItem]> palette-items;
     callback new-tab();
     callback run-new-tab();   // ⌘\: run current statement into a new result tab
-    in property <[string]> result-tabs;   // "Result 1", "Result 2", …
+    in property <[ResultTabItem]> result-tabs;   // "Result 1", "Result 2", …
     in property <int> active-result;
     callback select-result-tab(int);
     callback close-result-tab(int);

@@ -5,11 +5,11 @@
 // WorkArea. Lifted verbatim from workarea.slint — property names match 1:1 so
 // the moved markup's `root.<prop>` references resolve to this component.
 import { Tokens } from "tokens.slint";
-import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow, DocRow } from "structs.slint";
+import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow, DocRow, ResultTabItem } from "structs.slint";
 import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "palette.slint";
-import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton, FilterField, UnderlineSegment } from "components.slint";
+import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton, FilterField, UnderlineSegment, DbBadge, Tooltip } from "components.slint";
 import { ScrollView, TextEdit, ComboBox } from "std-widgets.slint";
 import { AppIcon } from "icons.slint";
 
@@ -80,7 +80,7 @@ export component QueryPane inherits Rectangle {
     in property <string> results-meta;
     in-out property <bool> filter-open: false;
     in-out property <int> sql-view-mode: 0;
-    in property <[string]> result-tabs;
+    in property <[ResultTabItem]> result-tabs;
     in property <int> active-result;
     callback select-result-tab(int);
     callback close-result-tab(int);
@@ -558,25 +558,58 @@ export component QueryPane inherits Rectangle {
                     TextButton { text: "Chart"; clicked => { root.sql-view-mode = 2; } }
                 }
                 // result tabs — appear once ⌘\ has spawned a second result
-                if root.result-tabs.length > 1: HorizontalLayout {
+                if root.result-tabs.length > 1: result-strip := HorizontalLayout {
                     height: 30px;
                     padding-left: Tokens.sp3;
                     padding-right: Tokens.sp3;
                     spacing: Tokens.sp1;
                     alignment: start;
-                    for name[i] in root.result-tabs: Rectangle {
+                    // Below this avg-width-per-chip, drop the inline connection
+                    // name and keep only the badge + tooltip (mirrors the
+                    // document tab strip's tabs-compact in app-window.slint).
+                    property <bool> results-compact: self.width / max(1, root.result-tabs.length) < 110px;
+                    for item[i] in root.result-tabs: Rectangle {
                         height: 24px;
-                        width: rl.preferred-width + 2 * Tokens.sp2 + 18px;
+                        width: rl.preferred-width + 2 * Tokens.sp2 + 18px
+                            + (item.engine != "" ? 15px + Tokens.sp1 : 0px)
+                            + (item.engine != "" && !result-strip.results-compact ? 60px + Tokens.sp1 : 0px);
                         border-radius: Tokens.radius;
                         background: i == root.active-result ? Tokens.accent-tint
                             : rta.has-hover ? Tokens.chrome : transparent;
-                        rta := TouchArea { clicked => { root.select-result-tab(i); } }
+                        rta := TouchArea {
+                            clicked => { root.select-result-tab(i); }
+                            changed has-hover => {
+                                if (self.has-hover && item.connection-name != "") {
+                                    Tooltip.text = item.connection-name;
+                                    Tooltip.x = self.absolute-position.x + self.width / 2;
+                                    Tooltip.y = self.absolute-position.y + self.height + 4px;
+                                    Tooltip.shown = true;
+                                } else if Tooltip.text == item.connection-name {
+                                    Tooltip.shown = false;
+                                }
+                            }
+                        }
                         HorizontalLayout {
                             padding-left: Tokens.sp2;
                             padding-right: Tokens.sp1;
                             spacing: Tokens.sp1;
+                            if item.engine != "": VerticalLayout {
+                                alignment: center;
+                                DbBadge {
+                                    engine: item.engine;
+                                    size: 13px;
+                                }
+                            }
+                            if item.engine != "" && !result-strip.results-compact: Text {
+                                text: item.connection-name;
+                                vertical-alignment: center;
+                                color: Tokens.text-faint;
+                                font-size: 9px;
+                                max-width: 60px;
+                                overflow: elide;
+                            }
                             rl := Text {
-                                text: name;
+                                text: item.label;
                                 color: i == root.active-result ? Tokens.on-tint : Tokens.text-dim;
                                 font-size: Tokens.font-sm;
                                 vertical-alignment: center;

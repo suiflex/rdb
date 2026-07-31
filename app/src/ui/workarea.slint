@@ -2,7 +2,7 @@
 // editor + results split. References: design/2-workspace.png,
 // design/3-sql-editor.png, design/11-filter-edit-t2.png.
 import { Tokens } from "tokens.slint";
-import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow, DocRow } from "structs.slint";
+import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow, DocRow, ResultTabItem } from "structs.slint";
 import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "palette.slint";
@@ -85,7 +85,7 @@ export component WorkArea inherits Rectangle {
     in property <string> query-label;    // "emiten-per-sektor.sql · saved"
     in property <string> results-meta;   // "10 rows · 38 ms"
     // result tabs (SQL): ⌘⏎ replaces the active one, ⌘\ appends
-    in property <[string]> result-tabs;
+    in property <[ResultTabItem]> result-tabs;
     in property <int> active-result;
     callback select-result-tab(int);
     callback close-result-tab(int);
@@ -158,7 +158,7 @@ export component WorkArea inherits Rectangle {
     in-out property <bool> p1-show-structure: false;
     in property <string> p1-query-label;
     in property <string> p1-results-meta;
-    in property <[string]> p1-result-tabs;
+    in property <[ResultTabItem]> p1-result-tabs;
     in property <int> p1-active-result;
     in-out property <int> p1-sql-view-mode;
     in-out property <bool> p1-filter-open;
