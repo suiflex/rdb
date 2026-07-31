@@ -35,7 +35,7 @@
 * **app:** persist result filter across tab and query switches ([1c49eee](https://github.com/suiflex/rdb/commit/1c49eeec33c60a2255a471873fcd968e0e1da7b0))
 * **app:** size details value boxes to content with scroll ([b2bb088](https://github.com/suiflex/rdb/commit/b2bb088ffce68e888d7d73829a85aa863ea41f96))
 
-## [0.29.0](https://github.com/suiflex/rdb/compare/v0.28.0...v0.29.0) (2026-07-31)
+## RDB: [0.29.0](https://github.com/suiflex/rdb/compare/v0.28.0...v0.29.0) (2026-07-31)
 
 
 ### App Features
