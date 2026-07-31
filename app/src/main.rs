@@ -1806,6 +1806,26 @@ fn paint_grid_with_edits(
     set_p_cells(w, pane, ModelRc::from(Rc::new(VecModel::from(flat))));
 }
 
+/// Update a `VecModel` to hold `rows` by mutating it in place — set existing
+/// indices, push/remove the tail — instead of replacing the whole model. The
+/// editor's line model is bound to a `for` that renders a per-line `TouchArea`;
+/// swapping in a fresh model recreates every row and drops the `TouchArea`
+/// currently grabbing a mouse drag, which kills drag-select. In-place updates
+/// keep the row items (and the grab) alive.
+fn sync_vec_model<T: Clone + 'static>(m: &VecModel<T>, rows: Vec<T>) {
+    let cur = m.row_count();
+    for (i, r) in rows.iter().enumerate() {
+        if i < cur {
+            m.set_row_data(i, r.clone());
+        } else {
+            m.push(r.clone());
+        }
+    }
+    while m.row_count() > rows.len() {
+        m.remove(m.row_count() - 1);
+    }
+}
+
 /// The grid a view displays, if it has one (for edit-buffer bookkeeping).
 fn view_grid(v: &model::ResultView) -> Option<model::GridModel> {
     match v {
@@ -3098,6 +3118,11 @@ fn main() -> Result<(), slint::PlatformError> {
     let sync_editor = {
         let weak = window.as_weak();
         let panes = panes.clone();
+        // Persistent per-pane line models, mutated in place each sync so the
+        // per-line TouchAreas survive (a fresh model would drop the one holding
+        // an in-flight drag). See `sync_vec_model`.
+        let line_models: [Rc<VecModel<ModelRc<Span>>>; 2] =
+            [Rc::new(VecModel::default()), Rc::new(VecModel::default())];
         move |pane: usize| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -3132,7 +3157,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     ModelRc::from(Rc::new(VecModel::from(spans)))
                 })
                 .collect();
-            let lines = ModelRc::from(Rc::new(VecModel::from(lines)));
+            // Update the persistent model in place; same instance → the `for`
+            // keeps its row items and the TouchArea grabbing a drag stays alive.
+            sync_vec_model(&line_models[pane], lines);
+            let lines = ModelRc::from(line_models[pane].clone());
             // Fold arrows: 1 = open head, 2 = closed head, 0 = plain line.
             // `hidden` blanks out the body lines of a closed region; nested
             // closed regions just union their ranges.
