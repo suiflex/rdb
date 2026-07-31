@@ -16,6 +16,7 @@ desktop.ini
 .agents
 docs/superpowers
 .forgeguard
+.mcp.json
 
 # Env & secrets
 .env

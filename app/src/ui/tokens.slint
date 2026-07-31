@@ -75,16 +75,18 @@ export global Tokens {
     out property <length> palette-width: 640px;
 
     // ----- metrics -----
-    out property <length> titlebar-h: 44px;
-    out property <length> doc-tab-row-h: 35px;
-    out property <length> doc-tab-h: 30px;
+    in-out property <length> font-base: 13px;
+    out property <length> zoom-delta: font-base - 13px;
+    out property <length> titlebar-h: 44px + zoom-delta;
+    out property <length> doc-tab-row-h: 35px + zoom-delta;
+    out property <length> doc-tab-h: 30px + zoom-delta;
     out property <length> sidebar-w: 218px;
-    out property <length> grid-row-h: 24px;
-    out property <length> grid-header-h: 27px;
-    out property <length> status-bar-h: 34px;
+    out property <length> grid-row-h: 24px + zoom-delta;
+    out property <length> grid-header-h: 27px + zoom-delta;
+    out property <length> status-bar-h: 34px + zoom-delta;
     out property <length> radius: 7px;
     out property <length> radius-lg: 8px;
-    out property <length> button-h: 26px;
+    out property <length> button-h: 26px + zoom-delta;
     out property <length> selection-bar-w: 2px; // accent left bar on selection
 
     // ----- spacing (4px grid) -----
@@ -95,15 +97,15 @@ export global Tokens {
     out property <length> sp6: 24px;
 
     // ----- typography -----
-    out property <length> font-xs: 11px;
-    out property <length> font-sm: 12px;
-    out property <length> font-md: 13px;
+    out property <length> font-xs: font-base - 2px;
+    out property <length> font-sm: font-base - 1px;
+    out property <length> font-md: font-base;
     out property <int>    weight-emphasis: 600;
     out property <string> mono: "IBM Plex Mono";
 
     // ----- icons -----
-    out property <length> icon-sm: 14px;
-    out property <length> icon-md: 16px;
+    out property <length> icon-sm: 14px + zoom-delta;
+    out property <length> icon-md: 16px + zoom-delta;
 
     // ----- motion -----
     out property <duration> fade: 100ms;

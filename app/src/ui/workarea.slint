@@ -179,11 +179,24 @@ export component WorkArea inherits Rectangle {
     in property <int> p1-editing-col: -1;
     in-out property <string> p1-editing-value;
     in property <int> p1-scroll-grid-tick;
-    in property <int> p1-doc-view;
+    in-out property <int> p1-doc-view;
     in property <[DocRow]> p1-doc-tree;
     in property <[StructField]> p1-structure-columns;
     in property <[IndexRow]> p1-index-rows;
     in property <[ChartBar]> p1-chart-bars;
+    // Browse toolbar mirror for the right pane.
+    in property <string> p1-sort-text;
+    in-out property <string> p1-mongo-filter;
+    in-out property <string> p1-grid-filter;
+    in property <[string]> p1-filter-columns;
+    in-out property <string> p1-filter-col: "any column";
+    in property <[string]> p1-filter-operators;
+    in-out property <string> p1-filter-op: "=";
+    in property <int> p1-focus-filter-tick;
+    callback p1-apply-mongo-filter();
+    callback p1-apply-filter();
+    callback p1-add-row();
+    callback p1-mark-delete();
     // Pane 1 callbacks carry no pane arg here; they are wired to pane-1 handlers
     // on MainWindow (a later step). Left unhandled = no-op until then.
     callback p1-run();
@@ -282,184 +295,8 @@ export component WorkArea inherits Rectangle {
         height: 100%;
         spacing: 0;
 
-        // ================= browse toolbar =================
-        if root.browse-mode && !root.split: Rectangle {
-            height: 42px;
-            background: Tokens.canvas;
-            HorizontalLayout {
-                padding-left: Tokens.sp3;
-                padding-right: Tokens.sp3;
-                spacing: Tokens.sp3;
-
-                // "+ Filter" dashed chip
-                VerticalLayout {
-                    alignment: center;
-                    Rectangle {
-                        height: 26px;
-                        width: fl.preferred-width + 2 * Tokens.sp3;
-                        border-radius: Tokens.radius;
-                        border-width: 1px;
-                        border-color: filter-ta.has-hover ? Tokens.text-faint : Tokens.border-strong;
-                        // Slint has no dashed borders; hairline chip approximates
-                        background: root.filter-open ? Tokens.accent-tint : Tokens.card;
-                        fl := Text {
-                            text: "+ Filter";
-                            color: root.filter-open ? Tokens.on-tint : Tokens.text-dim;
-                            font-size: Tokens.font-sm;
-                            font-weight: 500;
-                        }
-                        filter-ta := TouchArea {
-                            clicked => { root.filter-open = !root.filter-open; }
-                        }
-                    }
-                }
-                // Mongo filter document (server-side find filter). Enter runs it;
-                // gated on Documents result-kind like the Grid/Tree toggle.
-                if root.result-kind == 1: VerticalLayout {
-                    alignment: center;
-                    FilterField {
-                        width: 260px;
-                        height: 28px;
-                        placeholder: "Filter — { \"field\": value }";
-                        text <=> root.mongo-filter;
-                        submitted => { root.apply-mongo-filter(); }
-                    }
-                }
-                // sort text
-                Text {
-                    text: root.sort-text;
-                    color: Tokens.text-faint;
-                    font-size: Tokens.font-sm;
-                    font-family: Tokens.mono;
-                    vertical-alignment: center;
-                }
-                Rectangle { horizontal-stretch: 1; }
-                // Reveal the query editor over the browse grid so you can run a
-                // line query (e.g. Mongo db.coll.find(...)) without a new tab.
-                VerticalLayout {
-                    alignment: center;
-                    TextButton {
-                        text: root.browse-editor-open ? "Query ▾" : "Query ▸";
-                        clicked => { root.browse-editor-open = !root.browse-editor-open; }
-                    }
-                }
-                // Mongo document view switch (grid table ⇄ JSON tree)
-                if root.result-kind == 1: VerticalLayout {
-                    alignment: center;
-                    HorizontalLayout {
-                        spacing: Tokens.sp3;
-                        UnderlineSegment {
-                            text: "Grid";
-                            active: root.doc-view == 0;
-                            clicked => { root.doc-view = 0; }
-                        }
-                        UnderlineSegment {
-                            text: "Tree";
-                            active: root.doc-view == 1;
-                            clicked => { root.doc-view = 1; }
-                        }
-                    }
-                }
-                // Copy / Export / Chart — parity with the query-result toolbar so
-                // browsing a table offers the same result actions.
-                VerticalLayout {
-                    alignment: center;
-                    TextButton { text: "Copy"; clicked => { root.copy-results(); } }
-                }
-                VerticalLayout {
-                    alignment: center;
-                    ExportButton { export(i) => { root.export-results(i); } }
-                }
-                VerticalLayout {
-                    alignment: center;
-                    TextButton {
-                        text: root.sql-view-mode == 2 ? "Data" : "Chart";
-                        clicked => { root.sql-view-mode = root.sql-view-mode == 2 ? 0 : 2; }
-                    }
-                }
-                VerticalLayout {
-                    alignment: center;
-                    SecondaryButton {
-                        text: "+ Row";
-                        enabled: !root.read-only;
-                        clicked => { root.add-row(); }
-                    }
-                }
-                VerticalLayout {
-                    alignment: center;
-                    SecondaryButton {
-                        text: "− Row";
-                        enabled: !root.read-only;
-                        clicked => { root.mark-delete(); }
-                    }
-                }
-                if root.read-only && root.active-table != "": Text {
-                    text: "read-only";
-                    color: Tokens.text-faint;
-                    font-size: Tokens.font-sm;
-                    vertical-alignment: center;
-                }
-                VerticalLayout {
-                    alignment: center;
-                    Rectangle {
-                        width: 26px;
-                        height: 26px;
-                        border-radius: Tokens.radius;
-                        border-width: 1px;
-                        border-color: Tokens.border-strong;
-                        background: refresh-ta.has-hover ? Tokens.chrome : Tokens.card;
-                        AppIcon {
-                            name: "refresh";
-                            size: 14px;
-                            color: Tokens.text-dim;
-                        }
-                        refresh-ta := TouchArea { clicked => { root.refresh-page(); } }
-                    }
-                }
-            }
-        }
-
-        // One TablePlus-style condition row. Apply and Enter share the same
-        // callback; the toolbar and footer no longer expose duplicate triggers.
-        if root.browse-mode && !root.split && root.filter-open: Rectangle {
-            property <int> focus-tick: root.focus-filter-tick;
-            changed focus-tick => { filter-value.focus-input(); }
-            height: 38px;
-            background: Tokens.chrome;
-            border-width: 1px;
-            border-color: Tokens.border;
-            HorizontalLayout {
-                padding-left: Tokens.sp3;
-                padding-right: Tokens.sp3;
-                padding-top: 4px;
-                padding-bottom: 4px;
-                spacing: Tokens.sp2;
-                ComboBox {
-                    width: 180px;
-                    model: root.filter-columns;
-                    current-value <=> root.filter-col;
-                }
-                ComboBox {
-                    width: 120px;
-                    model: root.filter-operators;
-                    current-value <=> root.filter-op;
-                }
-                filter-value := FilterField {
-                    horizontal-stretch: 1;
-                    max-width: 420px;
-                    placeholder: root.filter-op == "IS NULL" || root.filter-op == "IS NOT NULL"
-                        ? "No value required" : "Value";
-                    text <=> root.grid-filter;
-                    submitted => { root.apply-filter(); }
-                }
-                PrimaryButton {
-                    text: "Apply";
-                    height: 28px;
-                    clicked => { root.apply-filter(); }
-                }
-                Rectangle { horizontal-stretch: 1; }
-            }
-        }
+        // Browse toolbar + filter row now live inside QueryPane so each pane
+        // (including the split/right pane) owns the full set of browse actions.
 
         // ================= function view =================
         if root.fn-mode: Rectangle {
@@ -526,7 +363,19 @@ export component WorkArea inherits Rectangle {
             browse-mode: root.browse-mode;
             table-name: root.active-table;
             refresh-page() => { root.refresh-page(); }
-            browse-editor-open: root.browse-editor-open;
+            browse-editor-open <=> root.browse-editor-open;
+            sort-text: root.sort-text;
+            mongo-filter <=> root.mongo-filter;
+            apply-mongo-filter() => { root.apply-mongo-filter(); }
+            add-row() => { root.add-row(); }
+            mark-delete() => { root.mark-delete(); }
+            apply-filter() => { root.apply-filter(); }
+            focus-filter-tick: root.focus-filter-tick;
+            filter-columns: root.filter-columns;
+            filter-col <=> root.filter-col;
+            filter-operators: root.filter-operators;
+            filter-op <=> root.filter-op;
+            grid-filter <=> root.grid-filter;
             fn-mode: root.fn-mode;
             results-collapsed: root.results-collapsed;
             detail-visible: root.detail-visible;
@@ -607,7 +456,7 @@ export component WorkArea inherits Rectangle {
             cell-advance(r, c, t, fwd) => { root.cell-advance(r, c, t, fwd); }
             stage-cell(r, c, t) => { root.stage-cell(r, c, t); }
             edit-cancelled() => { root.edit-cancelled(); }
-            doc-view: root.doc-view;
+            doc-view <=> root.doc-view;
             doc-tree: root.doc-tree;
             toggle-doc-node(p) => { root.toggle-doc-node(p); }
             structure-columns: root.structure-columns;
@@ -643,7 +492,21 @@ export component WorkArea inherits Rectangle {
                 // Each workspace group owns its browse state.
                 browse-mode: root.p1-active-table != "";
                 table-name: root.p1-active-table;
-                browse-editor-open: root.browse-editor-open;
+                browse-editor-open <=> root.browse-editor-open;
+                // Right pane has no commit path yet; hide row add/delete.
+                writable: false;
+                sort-text: root.p1-sort-text;
+                mongo-filter <=> root.p1-mongo-filter;
+                apply-mongo-filter() => { root.p1-apply-mongo-filter(); }
+                add-row() => { root.p1-add-row(); }
+                mark-delete() => { root.p1-mark-delete(); }
+                apply-filter() => { root.p1-apply-filter(); }
+                focus-filter-tick: root.p1-focus-filter-tick;
+                filter-columns: root.p1-filter-columns;
+                filter-col <=> root.p1-filter-col;
+                filter-operators: root.p1-filter-operators;
+                filter-op <=> root.p1-filter-op;
+                grid-filter <=> root.p1-grid-filter;
                 fn-mode: root.fn-mode;
                 results-collapsed: root.results-collapsed;
                 detail-visible: root.detail-visible;
@@ -725,7 +588,7 @@ export component WorkArea inherits Rectangle {
                 cell-advance(r, c, t, fwd) => { root.p1-cell-advance(r, c, t, fwd); }
                 stage-cell(r, c, t) => { root.p1-stage-cell(r, c, t); }
                 edit-cancelled() => { root.p1-edit-cancelled(); }
-                doc-view: root.p1-doc-view;
+                doc-view <=> root.p1-doc-view;
                 doc-tree: root.p1-doc-tree;
                 toggle-doc-node(p) => { root.p1-toggle-doc-node(p); }
                 structure-columns: root.p1-structure-columns;

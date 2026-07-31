@@ -156,14 +156,17 @@ impl Driver for MongoDriver {
     /// All non-system databases, backing the "schema:" switcher so the user can
     /// still reach every database even when the tree is scoped to one on connect.
     async fn list_databases(&self) -> Result<Vec<String>> {
-        Ok(self
+        let mut names: Vec<String> = self
             .client
             .list_database_names()
             .await
             .map_err(|e| RdbError::Schema(e.to_string()))?
             .into_iter()
             .filter(|n| !is_system_db(n))
-            .collect())
+            .collect();
+        // Alphabetical, matching how the SQL drivers ORDER BY name.
+        names.sort();
+        Ok(names)
     }
 
     /// Scope the sidebar to one database: return just that database with its
@@ -184,12 +187,15 @@ impl Driver for MongoDriver {
     /// so a database with thousands of collections stays light.
     async fn containers(&self, database: &str) -> Result<Vec<Container>> {
         let limit = self.collection_limit.load(Ordering::Relaxed);
-        let coll_names = self
+        let mut coll_names = self
             .client
             .database(database)
             .list_collection_names()
             .await
             .map_err(|e| RdbError::Schema(e.to_string()))?;
+        // Sort before the limit so the A–Z cap is a stable prefix, not a
+        // random slice — mirrors ORDER BY name in the SQL drivers.
+        coll_names.sort();
         Ok(coll_names
             .into_iter()
             .take(limit)

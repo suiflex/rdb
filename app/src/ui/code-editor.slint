@@ -58,6 +58,10 @@ export component CodeEditor inherits Rectangle {
         }
 
         edit-scroll := ScrollView {
+            // Let the per-line TouchArea own mouse drags for text selection;
+            // otherwise the Flickable hijacks a >8px drag as a pan and cancels
+            // the selection. Wheel/trackpad scrolling is unaffected.
+            mouse-drag-pan-enabled: false;
             width: 100%;
             height: 100%;
             VerticalLayout {

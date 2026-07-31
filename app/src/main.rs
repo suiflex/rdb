@@ -38,6 +38,12 @@ use dispatch::AnyDriver;
 
 /// Label used for connections with no explicit group.
 const UNGROUPED: &str = "Ungrouped";
+const MIN_FONT_SIZE: i32 = 10;
+const MAX_FONT_SIZE: i32 = 18;
+
+fn clamp_font_size(size: i32) -> i32 {
+    size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE)
+}
 
 /// Open a native "save file" dialog and write `contents` to the chosen path.
 ///
@@ -1053,12 +1059,13 @@ fn active_tab_kind(w: &MainWindow) -> String {
         .unwrap_or_default()
 }
 
-/// Clipboard write; errors are ignored (no clipboard on some CI machines).
-fn clip_set(s: &str) {
+/// Clipboard write; returns false when no clipboard is available.
+fn clip_set(s: &str) -> bool {
     use copypasta::ClipboardProvider;
     if let Ok(mut c) = copypasta::ClipboardContext::new() {
-        let _ = c.set_contents(s.to_string());
+        return c.set_contents(s.to_string()).is_ok();
     }
+    false
 }
 
 /// Clipboard read; None when empty or unavailable.
@@ -1598,6 +1605,11 @@ fn is_bare_select(engine: rdb_connstore::Engine, sql: &str) -> bool {
     ) {
         return false;
     }
+    // Multiple statements can't stream as one cursor (Postgres rejects multiple
+    // commands in a prepared statement); they take the split-and-run path.
+    if editor::split_statements(sql).len() > 1 {
+        return false;
+    }
     let trimmed = sql.trim_end().trim_end_matches(';').trim_end();
     let words: Vec<&str> = trimmed
         .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
@@ -1794,6 +1806,26 @@ fn paint_grid_with_edits(
     set_p_cells(w, pane, ModelRc::from(Rc::new(VecModel::from(flat))));
 }
 
+/// Update a `VecModel` to hold `rows` by mutating it in place — set existing
+/// indices, push/remove the tail — instead of replacing the whole model. The
+/// editor's line model is bound to a `for` that renders a per-line `TouchArea`;
+/// swapping in a fresh model recreates every row and drops the `TouchArea`
+/// currently grabbing a mouse drag, which kills drag-select. In-place updates
+/// keep the row items (and the grab) alive.
+fn sync_vec_model<T: Clone + 'static>(m: &VecModel<T>, rows: Vec<T>) {
+    let cur = m.row_count();
+    for (i, r) in rows.iter().enumerate() {
+        if i < cur {
+            m.set_row_data(i, r.clone());
+        } else {
+            m.push(r.clone());
+        }
+    }
+    while m.row_count() > rows.len() {
+        m.remove(m.row_count() - 1);
+    }
+}
+
 /// The grid a view displays, if it has one (for edit-buffer bookkeeping).
 fn view_grid(v: &model::ResultView) -> Option<model::GridModel> {
     match v {
@@ -1950,6 +1982,27 @@ fn set_p_grid_col_filters(w: &MainWindow, pane: usize, m: ModelRc<SharedString>)
         w.set_grid_col_filters(m);
     } else {
         w.set_p1_grid_col_filters(m);
+    }
+}
+fn set_p_filter_columns(w: &MainWindow, pane: usize, m: ModelRc<SharedString>) {
+    if pane == 0 {
+        w.set_filter_columns(m);
+    } else {
+        w.set_p1_filter_columns(m);
+    }
+}
+fn set_p_filter_col(w: &MainWindow, pane: usize, v: SharedString) {
+    if pane == 0 {
+        w.set_filter_col(v);
+    } else {
+        w.set_p1_filter_col(v);
+    }
+}
+fn set_p_grid_filter(w: &MainWindow, pane: usize, v: SharedString) {
+    if pane == 0 {
+        w.set_grid_filter(v);
+    } else {
+        w.set_p1_grid_filter(v);
     }
 }
 fn set_p_detail_pretty(w: &MainWindow, pane: usize, m: ModelRc<SharedString>) {
@@ -2651,7 +2704,7 @@ fn present_view(
         model::ResultView::Affected(_) => 0,
     } as u64;
     *last_view.lock().unwrap() = Some(v.clone());
-    w.set_grid_filter(SharedString::default());
+    set_p_grid_filter(w, pane, SharedString::default());
     hidden_cols.lock().unwrap().clear();
     *col_order.lock().unwrap() = (0..ncols).collect();
     *sort_state.lock().unwrap() = (-1, true);
@@ -2685,14 +2738,18 @@ fn present_view(
     ]))));
     let mut fcols: Vec<SharedString> = vec![SharedString::from("any column")];
     fcols.extend(colnames.iter().cloned());
-    w.set_filter_columns(ModelRc::from(Rc::new(VecModel::from(fcols))));
-    w.set_filter_col(
+    set_p_filter_columns(w, pane, ModelRc::from(Rc::new(VecModel::from(fcols))));
+    set_p_filter_col(
+        w,
+        pane,
         colnames
             .first()
             .cloned()
             .unwrap_or_else(|| SharedString::from("any column")),
     );
-    w.set_all_columns(ModelRc::from(Rc::new(VecModel::from(colnames))));
+    if pane == 0 {
+        w.set_all_columns(ModelRc::from(Rc::new(VecModel::from(colnames))));
+    }
     *displayed_grid.lock().unwrap() = view_grid(&v);
     {
         let st = browse.lock().unwrap();
@@ -2901,6 +2958,9 @@ fn main() -> Result<(), slint::PlatformError> {
     window
         .global::<Theme>()
         .set_dark(settings.borrow().get().theme.is_dark());
+    window
+        .global::<Tokens>()
+        .set_font_base(clamp_font_size(settings.borrow().get().editor.font_size as i32) as f32);
     window.set_update_check_enabled(settings.borrow().get().update_check);
     window.set_sidebar_right(settings.borrow().get().ui_state.sidebar_right);
     let history_cap = Rc::new(Cell::new(
@@ -3058,6 +3118,11 @@ fn main() -> Result<(), slint::PlatformError> {
     let sync_editor = {
         let weak = window.as_weak();
         let panes = panes.clone();
+        // Persistent per-pane line models, mutated in place each sync so the
+        // per-line TouchAreas survive (a fresh model would drop the one holding
+        // an in-flight drag). See `sync_vec_model`.
+        let line_models: [Rc<VecModel<ModelRc<Span>>>; 2] =
+            [Rc::new(VecModel::default()), Rc::new(VecModel::default())];
         move |pane: usize| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -3092,7 +3157,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     ModelRc::from(Rc::new(VecModel::from(spans)))
                 })
                 .collect();
-            let lines = ModelRc::from(Rc::new(VecModel::from(lines)));
+            // Update the persistent model in place; same instance → the `for`
+            // keeps its row items and the TouchArea grabbing a drag stays alive.
+            sync_vec_model(&line_models[pane], lines);
+            let lines = ModelRc::from(line_models[pane].clone());
             // Fold arrows: 1 = open head, 2 = closed head, 0 = plain line.
             // `hidden` blanks out the body lines of a closed region; nested
             // closed regions just union their ranges.
@@ -5918,15 +5986,16 @@ fn main() -> Result<(), slint::PlatformError> {
             let (init_tabs, init_active, init_active_p1, init_active_group) = if restore {
                 load_query_tabs()
             } else {
-                // Retain the SQL scratch tabs (with their results) so switching
-                // connection leaves the last result on screen — "standby". Drop
-                // the connection-scoped table/function tabs (their data would be
-                // stale) and only clear the in-flight loading flag so no tab is
-                // left showing a stuck spinner.
+                // Retain every open tab across the switch so the workspace
+                // behaves like a set of persistent documents — the SQL scratch
+                // tabs keep their results ("standby") and the connection-scoped
+                // table/collection tabs stay open too, their last data now a
+                // snapshot until the user hits Refresh against the new
+                // connection. Only the in-flight loading flag is cleared so no
+                // tab is left showing a stuck spinner.
                 let mut kept: Vec<WorkspaceTab> =
                     std::mem::take(&mut *workspace_tabs.lock().unwrap())
                         .into_iter()
-                        .filter(|t| t.kind == "sql")
                         .collect();
                 for t in &mut kept {
                     t.loading = false;
@@ -6024,6 +6093,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     sc.engine,
                 )))));
                 w.set_filter_op(SharedString::from("="));
+                // Mirror the operator list to the right split pane's filter row.
+                w.set_p1_filter_operators(ModelRc::from(Rc::new(VecModel::from(
+                    filter_operators(sc.engine),
+                ))));
+                w.set_p1_filter_op(SharedString::from("="));
                 // Re-present the active tab's stored result so a connection
                 // switch keeps the last result visible instead of blanking the
                 // grid. No-op (clears) when the tab has no stored result, e.g.
@@ -7068,6 +7142,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let recent_queries = recent_queries.clone();
         let history_cap = history_cap.clone();
         let rebuild_query_tree = rebuild_query_tree.clone();
+        let panes = panes.clone();
         window.on_run_query(move || {
             if let Some(w) = weak.upgrade() {
                 // ⌘⏎ / Run: the highlighted selection, else just the statement
@@ -7100,6 +7175,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 if stream {
                     run_stream(0, text);
                 } else {
+                    // 2+ selected statements → one result tab each (same as the
+                    // Run Selection button).
+                    if active_tab_kind(&w) != "table" && editor::split_statements(&text).len() >= 2
+                    {
+                        panes[0]
+                            .split_results
+                            .store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
                     run_sql(0, text);
                 }
                 if w.get_sidebar_mode() != 0 {
@@ -7314,7 +7397,9 @@ fn main() -> Result<(), slint::PlatformError> {
                         }
                     }
                 }
-                3 => clip_set(&sql),
+                3 => {
+                    clip_set(&sql);
+                }
                 4 => {
                     let removed = {
                         let mut list = saved.borrow_mut();
@@ -7379,7 +7464,24 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     // ----- Details panel: copy one field value to the clipboard -----
-    window.on_copy_text(move |s| clip_set(&s));
+    {
+        let weak = window.as_weak();
+        window.on_copy_text(move |s| {
+            let copied = clip_set(&s);
+            if let Some(w) = weak.upgrade() {
+                let msg = if copied {
+                    "copied field"
+                } else {
+                    "copy failed"
+                };
+                if w.get_active_pane() == 1 {
+                    w.set_p1_result_status(msg.into());
+                } else {
+                    w.set_result_status(msg.into());
+                }
+            }
+        });
+    }
 
     // ----- Copy results (TSV → clipboard) / Export CSV (~/Downloads) -----
     {
@@ -7838,6 +7940,101 @@ fn main() -> Result<(), slint::PlatformError> {
             );
             *panes[1].displayed_grid.lock().unwrap() = view_grid(&filtered);
             apply_result(&w, 1, filtered);
+        });
+    }
+    // ----- right pane: filter row Apply (client-side, mirrors group 0) -----
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_apply_filter(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let view = {
+                let results = panes[1].results.lock().unwrap();
+                let active = *panes[1].active_result.lock().unwrap();
+                results.get(active).map(|result| result.view.clone())
+            };
+            let Some(view) = view else {
+                return;
+            };
+            if matches!(view, model::ResultView::Affected(_)) {
+                return;
+            }
+            let needle = w.get_p1_grid_filter().to_string().to_lowercase();
+            let fcol = w.get_p1_filter_col().to_string();
+            let fop = w.get_p1_filter_op().to_string();
+            let hidden = panes[1].hidden_cols.lock().unwrap().clone();
+            let order = panes[1].col_order.lock().unwrap().clone();
+            let cfilters = panes[1].col_filters.lock().unwrap().clone();
+            let (scol, sasc) = *panes[1].sort_state.lock().unwrap();
+            // Filtering renumbers rows, so pending edits keyed by row index would
+            // land on the wrong rows — drop them.
+            panes[1].edit_buf.lock().unwrap().clear();
+            set_p_editing(&w, 1, -1, -1);
+            let filtered = compute_view(
+                &view, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
+            );
+            *panes[1].displayed_grid.lock().unwrap() = view_grid(&filtered);
+            apply_result(&w, 1, filtered);
+        });
+    }
+    // ----- right pane: Copy result grid as TSV -----
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_copy_results(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some(grid) = panes[1].displayed_grid.lock().unwrap().clone() else {
+                return;
+            };
+            use copypasta::ClipboardProvider;
+            let msg = match copypasta::ClipboardContext::new()
+                .and_then(|mut cb| cb.set_contents(export::to_tsv(&grid)))
+            {
+                Ok(()) => format!("copied {} rows", grid.rows.len()),
+                Err(e) => format!("copy failed: {e}"),
+            };
+            set_p_results_meta(&w, 1, SharedString::from(msg));
+        });
+    }
+    // ----- right pane: Export result grid -----
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_export_results(move |fmt| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some(grid) = panes[1].displayed_grid.lock().unwrap().clone() else {
+                set_p_results_meta(&w, 1, SharedString::from("nothing to export"));
+                return;
+            };
+            let (ext, filter, contents) = match fmt {
+                1 => ("json", "JSON", export::to_json(&grid)),
+                2 => ("tsv", "TSV", export::to_tsv(&grid)),
+                3 => {
+                    let table = w.get_p1_active_table();
+                    let table = if table.is_empty() {
+                        "results"
+                    } else {
+                        table.as_str()
+                    };
+                    ("sql", "SQL", export::to_sql_insert(&grid, table))
+                }
+                4 => ("md", "Markdown", export::to_markdown(&grid)),
+                _ => ("csv", "CSV", export::to_csv(&grid)),
+            };
+            save_via_dialog(
+                &w,
+                format!("rdb-export.{ext}"),
+                filter.to_string(),
+                ext.to_string(),
+                contents,
+                |w, msg| set_p_results_meta(w, 1, SharedString::from(msg)),
+            );
         });
     }
     {
@@ -8396,6 +8593,36 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let run_browse = run_browse.clone();
         window.on_p1_refresh_page(move || run_browse(1));
+    }
+    // ----- right pane: Mongo browse filter (mirrors group 0) -----
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        let run_browse = run_browse.clone();
+        window.on_p1_apply_mongo_filter(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let raw = w.get_p1_mongo_filter().to_string();
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() {
+                if let Err(e) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                    set_p_status_error(&w, 1, true);
+                    set_p_result_status(
+                        &w,
+                        1,
+                        SharedString::from(format!("invalid filter JSON: {e}")),
+                    );
+                    return;
+                }
+            }
+            {
+                let mut st = panes[1].browse.lock().unwrap();
+                st.mongo_filter = trimmed.to_string();
+                st.page = 0;
+            }
+            run_browse(1);
+        });
     }
 
     // ----- Mongo browse filter bar (Compass-style filter document) -----
@@ -9748,6 +9975,21 @@ fn main() -> Result<(), slint::PlatformError> {
             let _ = settings
                 .borrow_mut()
                 .update(|s| s.ui_state.sidebar_right = v);
+        });
+    }
+
+    // ----- app-wide font size -----
+    {
+        let weak = window.as_weak();
+        let settings = settings.clone();
+        window.on_set_font_size(move |value| {
+            let size = clamp_font_size(value);
+            let _ = settings
+                .borrow_mut()
+                .update(|s| s.editor.font_size = size as u16);
+            if let Some(w) = weak.upgrade() {
+                w.global::<Tokens>().set_font_base(size as f32);
+            }
         });
     }
 
