@@ -41,7 +41,10 @@ export struct StructField { name: string, type-name: string, nullable: bool }
 // One editable row of the new-table designer.
 export struct TableCol { name: string, type-name: string, nullable: bool, pk: bool }
 // `kind` picks the tab glyph; preview table tabs are italic until pinned.
-export struct TabItem { title: string, kind: string, preview: bool }
+// `engine` is the DbBadge key ("postgres" etc, empty when no connection was
+// active when the tab was created); `connection-name` is the full name shown
+// via tooltip / inline label.
+export struct TabItem { title: string, kind: string, preview: bool, engine: string, connection-name: string }
 // One lexed editor token; `kind`: 0 plain · 1 keyword · 2 string ·
 // 3 function · 4 comment · 5 number (mirrors app/src/editor.rs).
 // `sel` = inside the selection (background highlight). `cols` = char count, so

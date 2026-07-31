@@ -755,6 +755,11 @@ struct WorkspaceTab {
     split: bool,
     split_ratio: f32,
     pane1_query: String,
+    // Connection the tab was created against (snapshot, not live-tracked).
+    connection_id: Option<String>,
+    // DbBadge key, e.g. "postgres"; empty when no connection was active yet.
+    engine: String,
+    connection_name: String,
 }
 
 impl WorkspaceTab {
@@ -776,6 +781,9 @@ impl WorkspaceTab {
             split: false,
             split_ratio: 0.5,
             pane1_query: String::new(),
+            connection_id: None,
+            engine: String::new(),
+            connection_name: String::new(),
         }
     }
 
@@ -786,6 +794,20 @@ impl WorkspaceTab {
 
 fn table_tab_id(connection_id: &str, database: &str, schema: &str, table: &str) -> String {
     format!("table:{connection_id}:{database}:{schema}:{table}")
+}
+
+// Badge key + display name for a saved connection id, empty when unknown
+// (not yet connected, or the connection was deleted since the tab opened).
+fn connection_badge_info(
+    store: &rdb_connstore::ConnStore,
+    connection_id: &str,
+) -> (String, String) {
+    store
+        .list()
+        .iter()
+        .find(|c| c.id == connection_id)
+        .map(|c| (AnyDriver::badge(c.engine).to_string(), c.name.clone()))
+        .unwrap_or_default()
 }
 
 fn workspace_tab_index(tabs: &[WorkspaceTab], active_id: Option<&str>) -> Option<usize> {
@@ -883,6 +905,8 @@ fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&
             kind: tab.kind.clone().into(),
             title: tab.title.clone().into(),
             preview: tab.is_preview(),
+            engine: tab.engine.clone().into(),
+            connection_name: tab.connection_name.clone().into(),
         })
         .collect();
     w.set_tabs(ModelRc::from(Rc::new(VecModel::from(items))));
@@ -899,6 +923,8 @@ fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&
             kind: tab.kind.clone().into(),
             title: tab.title.clone().into(),
             preview: tab.is_preview(),
+            engine: tab.engine.clone().into(),
+            connection_name: tab.connection_name.clone().into(),
         })
         .collect();
     w.set_p1_tabs(ModelRc::from(Rc::new(VecModel::from(p1_items))));
@@ -1326,6 +1352,12 @@ struct PersistedTab {
     pane1_query: String,
     #[serde(default = "default_split_ratio")]
     split_ratio: f32,
+    #[serde(default)]
+    connection_id: Option<String>,
+    #[serde(default)]
+    engine: String,
+    #[serde(default)]
+    connection_name: String,
 }
 
 fn default_split_ratio() -> f32 {
@@ -1364,6 +1396,9 @@ fn save_query_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active: Option<&str>) 
             split: t.split,
             pane1_query: t.pane1_query.clone(),
             split_ratio: t.split_ratio,
+            connection_id: t.connection_id.clone(),
+            engine: t.engine.clone(),
+            connection_name: t.connection_name.clone(),
         })
         .collect();
     let active = active
@@ -1414,6 +1449,9 @@ fn load_query_tabs() -> (Vec<WorkspaceTab>, Option<String>, Option<String>, usiz
             t.split = p.split;
             t.pane1_query = p.pane1_query;
             t.split_ratio = p.split_ratio.clamp(0.2, 0.8);
+            t.connection_id = p.connection_id;
+            t.engine = p.engine;
+            t.connection_name = p.connection_name;
             t
         })
         .collect();
@@ -3958,6 +3996,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
         let current_connection_id = current_connection_id.clone();
+        let store = store.clone();
         window.on_open_function(move |name| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -3987,16 +4026,17 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_fn_name(name.clone());
             w.set_fn_mode(true);
             w.set_active_table(SharedString::default());
+            let connection_id = current_connection_id.lock().unwrap().clone();
             let id = format!(
                 "function:{}:{}:{}",
-                current_connection_id
-                    .lock()
-                    .unwrap()
-                    .as_deref()
-                    .unwrap_or_default(),
+                connection_id.as_deref().unwrap_or_default(),
                 w.get_schema_name(),
                 name
             );
+            let (engine, connection_name) = connection_id
+                .as_deref()
+                .map(|cid| connection_badge_info(&store.borrow(), cid))
+                .unwrap_or_default();
             let mut tabs = workspace_tabs.lock().unwrap();
             if let Some(i) = tabs.iter().position(|tab| tab.id == id) {
                 *active_tab_id.lock().unwrap() = Some(id.clone());
@@ -4020,6 +4060,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     split: false,
                     split_ratio: 0.5,
                     pane1_query: String::new(),
+                    connection_id,
+                    engine,
+                    connection_name,
                 });
                 *active_tab_id.lock().unwrap() = Some(id.clone());
                 set_workspace_tabs(&w, &tabs, Some(&id));
@@ -5217,6 +5260,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let query_number = query_number.clone();
         let save_p1_tab = save_p1_tab.clone();
         let restore_p1_tab = restore_p1_tab.clone();
+        let store = store.clone();
         window.on_new_tab_in_group(move |group| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -5233,10 +5277,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 .clone()
                 .unwrap_or_default();
             let id = format!("query:{connection}:{number}");
+            let (engine, connection_name) = connection_badge_info(&store.borrow(), &connection);
             let right_index = {
                 let mut tabs = workspace_tabs.lock().unwrap();
                 let mut tab = WorkspaceTab::sql(id.clone(), number);
                 tab.group = 1;
+                tab.connection_id = (!connection.is_empty()).then(|| connection.clone());
+                tab.engine = engine;
+                tab.connection_name = connection_name;
                 tabs.push(tab);
                 let left = active_tab_id.lock().unwrap().clone();
                 set_workspace_tabs(&w, &tabs, left.as_deref());
@@ -8204,6 +8252,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let last_view = last_view.clone();
         let displayed_grid = displayed_grid.clone();
         let results = results.clone();
+        let store = store.clone();
         window.on_open_table(move |db, label| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -8260,6 +8309,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 st.col_filters.clear();
             }
             {
+                let (_, connection_name) = connection_badge_info(&store.borrow(), &connection_id);
                 let tab = WorkspaceTab {
                     id: tab_id.clone(),
                     title: label.clone(),
@@ -8277,6 +8327,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     split: false,
                     split_ratio: 0.5,
                     pane1_query: String::new(),
+                    connection_id: (!connection_id.is_empty()).then(|| connection_id.clone()),
+                    engine: AnyDriver::badge(engine).to_string(),
+                    connection_name,
                 };
                 let active_id = active_tab_id.lock().unwrap().clone();
                 let mut tabs = workspace_tabs.lock().unwrap();
@@ -8930,6 +8983,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let browse = browse.clone();
         let last_view = last_view.clone();
         let load_editor_text = load_editor_text.clone();
+        let store = store.clone();
         window.on_new_tab(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -8942,8 +8996,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 .clone()
                 .unwrap_or_default();
             let id = format!("query:{connection}:{number}");
+            let (engine, connection_name) = connection_badge_info(&store.borrow(), &connection);
             let mut tabs = workspace_tabs.lock().unwrap();
-            tabs.push(WorkspaceTab::sql(id.clone(), number));
+            let mut tab = WorkspaceTab::sql(id.clone(), number);
+            tab.connection_id = (!connection.is_empty()).then(|| connection.clone());
+            tab.engine = engine;
+            tab.connection_name = connection_name;
+            tabs.push(tab);
             *active_tab_id.lock().unwrap() = Some(id.clone());
             set_workspace_tabs(&w, &tabs, Some(&id));
             save_query_tabs(&w, &tabs, Some(&id));
@@ -10791,6 +10850,9 @@ mod tests {
                     split: true,
                     pane1_query: "select * from orders;".into(),
                     split_ratio: 0.35,
+                    connection_id: Some("c".into()),
+                    engine: "postgres".into(),
+                    connection_name: "prod-db".into(),
                 },
                 PersistedTab {
                     id: "query:c:2".into(),
@@ -10800,6 +10862,9 @@ mod tests {
                     split: false,
                     pane1_query: String::new(),
                     split_ratio: 0.5,
+                    connection_id: None,
+                    engine: String::new(),
+                    connection_name: String::new(),
                 },
             ],
             active: Some("query:c:2".into()),
@@ -10814,6 +10879,9 @@ mod tests {
         assert!(back.tabs[0].split);
         assert_eq!(back.tabs[0].pane1_query, "select * from orders;");
         assert_eq!(back.tabs[0].split_ratio, 0.35);
+        assert_eq!(back.tabs[0].connection_id.as_deref(), Some("c"));
+        assert_eq!(back.tabs[0].engine, "postgres");
+        assert_eq!(back.tabs[0].connection_name, "prod-db");
         assert_eq!(back.active.as_deref(), Some("query:c:2"));
     }
 

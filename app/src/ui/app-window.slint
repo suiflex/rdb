@@ -3,7 +3,7 @@ export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
-    SearchCommandPill, BreadcrumbChip, GlyphButton, IconButton, PrimaryButton, SecondaryButton, SelectBox, TextButton, Toggle, ToggleRow, Tooltip
+    SearchCommandPill, BreadcrumbChip, DbBadge, GlyphButton, IconButton, PrimaryButton, SecondaryButton, SelectBox, TextButton, Toggle, ToggleRow, Tooltip
 } from "components.slint";
 import { NavCluster } from "nav-cluster.slint";
 import { ConnPicker } from "picker.slint";
@@ -1093,6 +1093,9 @@ callback create-table-commit();
                                 ? (parent.width - 6px) * root.split-ratio : parent.width;
                             height: parent.height;
                             clip: true;
+                            // Below this avg-width-per-tab, drop the inline
+                            // connection name and keep only the badge + tooltip.
+                            property <bool> tabs-compact: self.width / max(1, root.tabs.length) < 110px;
                             HorizontalLayout {
                                 padding-left: Tokens.sp2;
                                 padding-top: Tokens.doc-tab-row-h - Tokens.doc-tab-h;
@@ -1135,6 +1138,16 @@ callback create-table-commit();
                                     double-clicked => {
                                         root.pin-tab(i);
                                     }
+                                    changed has-hover => {
+                                        if (self.has-hover && tab.connection-name != "") {
+                                            Tooltip.text = tab.connection-name;
+                                            Tooltip.x = self.absolute-position.x + self.width / 2;
+                                            Tooltip.y = self.absolute-position.y + self.height + 4px;
+                                            Tooltip.shown = true;
+                                        } else if Tooltip.text == tab.connection-name {
+                                            Tooltip.shown = false;
+                                        }
+                                    }
                                 }
 
                                 // active tab: 2px accent top inset
@@ -1149,6 +1162,21 @@ callback create-table-commit();
                                     padding-left: Tokens.sp3;
                                     padding-right: Tokens.sp1;
                                     spacing: Tokens.sp2;
+                                    if tab.engine != "": VerticalLayout {
+                                        alignment: center;
+                                        DbBadge {
+                                            engine: tab.engine;
+                                            size: 13px;
+                                        }
+                                    }
+                                    if tab.engine != "" && !left-group.tabs-compact: Text {
+                                        text: tab.connection-name;
+                                        vertical-alignment: center;
+                                        color: Tokens.text-faint;
+                                        font-size: 9px;
+                                        max-width: 60px;
+                                        overflow: elide;
+                                    }
                                     if tab.kind == "table": VerticalLayout {
                                         alignment: center;
                                         Rectangle {
@@ -1250,12 +1278,13 @@ callback create-table-commit();
                                 Rectangle { horizontal-stretch: 1; }
                             }
                         }
-                        if root.split || root.tab-drag-source == 0: Rectangle {
+                        if root.split || root.tab-drag-source == 0: right-group := Rectangle {
                             x: (parent.width - 6px) * root.split-ratio + 6px;
                             width: (parent.width - 6px) * (1 - root.split-ratio);
                             height: parent.height;
                             clip: true;
                             background: root.tab-drag-source == 0 ? Tokens.accent-tint : Tokens.chrome;
+                            property <bool> tabs-compact: self.width / max(1, root.p1-tabs.length) < 110px;
                             if !root.split: Text {
                                 text: "Drop tab here";
                                 color: Tokens.accent;
@@ -1301,6 +1330,16 @@ callback create-table-commit();
                                             root.select-p1-tab(i);
                                         }
                                     }
+                                    changed has-hover => {
+                                        if (self.has-hover && tab.connection-name != "") {
+                                            Tooltip.text = tab.connection-name;
+                                            Tooltip.x = self.absolute-position.x + self.width / 2;
+                                            Tooltip.y = self.absolute-position.y + self.height + 4px;
+                                            Tooltip.shown = true;
+                                        } else if Tooltip.text == tab.connection-name {
+                                            Tooltip.shown = false;
+                                        }
+                                    }
                                 }
                                 if i == root.p1-active-tab: Rectangle {
                                     y: 0;
@@ -1311,6 +1350,21 @@ callback create-table-commit();
                                 p1-tab-content := HorizontalLayout {
                                     padding-left: Tokens.sp3;
                                     padding-right: Tokens.sp2;
+                                    if tab.engine != "": VerticalLayout {
+                                        alignment: center;
+                                        DbBadge {
+                                            engine: tab.engine;
+                                            size: 13px;
+                                        }
+                                    }
+                                    if tab.engine != "" && !right-group.tabs-compact: Text {
+                                        text: tab.connection-name;
+                                        vertical-alignment: center;
+                                        color: Tokens.text-faint;
+                                        font-size: 9px;
+                                        max-width: 60px;
+                                        overflow: elide;
+                                    }
                                     Text {
                                         vertical-alignment: center;
                                         text: tab.kind == "sql" ? ">_" : tab.kind == "function" ? "ƒ" : "▦";
