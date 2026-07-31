@@ -199,6 +199,7 @@ fn build_conn_items(
                 name: g.to_uppercase().into(),
                 engine: SharedString::default(),
                 color: theme::accent_or_default(""),
+                has_custom_color: false,
                 is_header: true,
                 expanded,
                 index: -1,
@@ -230,6 +231,7 @@ fn build_conn_items(
                 name: s.name.clone().into(),
                 engine: AnyDriver::badge(s.engine).into(),
                 color: theme::accent_or_default(s.color.as_deref().unwrap_or("")),
+                has_custom_color: s.color.is_some(),
                 is_header: false,
                 expanded: true,
                 index: i as i32,
@@ -2180,7 +2182,7 @@ fn restore_grid_state(w: &MainWindow, pane: usize, g: &GroupRuntime, sr: &Stored
 /// "section" header rows. `needle` (lowercase) filters both groups; empty
 /// shows everything. Empty groups drop their header.
 fn build_palette_items(
-    names: &[(String, &'static str)],
+    names: &[(String, &'static str, slint::Color, bool)],
     w: &MainWindow,
     needle: &str,
 ) -> Vec<PaletteItem> {
@@ -2189,20 +2191,24 @@ fn build_palette_items(
         kind: "section".into(),
         sub: SharedString::default(),
         local: false,
+        color: theme::accent_or_default(""),
+        has_custom_color: false,
     };
     let mut items: Vec<PaletteItem> = Vec::new();
-    let conns: Vec<&(String, &'static str)> = names
+    let conns: Vec<&(String, &'static str, slint::Color, bool)> = names
         .iter()
-        .filter(|(n, _)| needle.is_empty() || n.to_lowercase().contains(needle))
+        .filter(|(n, ..)| needle.is_empty() || n.to_lowercase().contains(needle))
         .collect();
     if !conns.is_empty() {
         items.push(section("Connections"));
-        for (n, badge) in conns {
+        for (n, badge, color, has_custom_color) in conns {
             items.push(PaletteItem {
                 label: n.clone().into(),
                 kind: (*badge).into(),
                 sub: SharedString::default(),
                 local: false,
+                color: *color,
+                has_custom_color: *has_custom_color,
             });
         }
     }
@@ -2222,6 +2228,8 @@ fn build_palette_items(
                 kind: "table".into(),
                 sub: SharedString::default(),
                 local: false,
+                color: theme::accent_or_default(""),
+                has_custom_color: false,
             });
         }
     }
@@ -3353,6 +3361,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     kind: c.kind.clone().into(),
                     sub: c.sub.clone().into(),
                     local: false,
+                    color: theme::accent_or_default(""),
+                    has_custom_color: false,
                 })
                 .collect();
             *panes[pane].completion_ctx.borrow_mut() =
@@ -4111,6 +4121,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     kind: "database".into(),
                     sub: SharedString::default(),
                     local: false,
+                    color: theme::accent_or_default(""),
+                    has_custom_color: false,
                 })
                 .collect();
             if items.is_empty() {
@@ -4154,6 +4166,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     kind: "database".into(),
                     sub: SharedString::default(),
                     local: false,
+                    color: theme::accent_or_default(""),
+                    has_custom_color: false,
                 })
                 .collect();
             if items.is_empty() {
@@ -4594,6 +4608,8 @@ fn main() -> Result<(), slint::PlatformError> {
                         kind: "group".into(),
                         sub: SharedString::default(),
                         local: false,
+                        color: theme::accent_or_default(""),
+                        has_custom_color: false,
                     });
                     map.push(-1);
                 } else {
@@ -4602,6 +4618,8 @@ fn main() -> Result<(), slint::PlatformError> {
                         kind: r.engine,
                         sub: r.subline,
                         local: r.local,
+                        color: r.color,
+                        has_custom_color: r.has_custom_color,
                     });
                     map.push(r.index);
                 }
@@ -4646,6 +4664,8 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_selected_conn(idx);
             w.set_sel_name(s.name.clone().into());
             w.set_sel_engine(AnyDriver::badge(s.engine).into());
+            w.set_sel_color(theme::accent_or_default(s.color.as_deref().unwrap_or("")));
+            w.set_sel_has_custom_color(s.color.is_some());
             let label = AnyDriver::label(s.engine);
             let sub = match s.group.as_deref().filter(|g| !g.trim().is_empty()) {
                 Some(g) => format!("{label} · grup {}", g.to_lowercase()),
@@ -10021,11 +10041,18 @@ fn main() -> Result<(), slint::PlatformError> {
                 let opening = !w.get_palette_open();
                 w.set_palette_open(opening);
                 if opening {
-                    let names: Vec<(String, &'static str)> = store
+                    let names: Vec<(String, &'static str, slint::Color, bool)> = store
                         .borrow()
                         .list()
                         .iter()
-                        .map(|s| (s.name.clone(), AnyDriver::badge(s.engine)))
+                        .map(|s| {
+                            (
+                                s.name.clone(),
+                                AnyDriver::badge(s.engine),
+                                theme::accent_or_default(s.color.as_deref().unwrap_or("")),
+                                s.color.is_some(),
+                            )
+                        })
                         .collect();
                     let items = build_palette_items(&names, &w, "");
                     w.set_palette_items(ModelRc::from(Rc::new(VecModel::from(items))));
@@ -10040,11 +10067,18 @@ fn main() -> Result<(), slint::PlatformError> {
         let store = store.clone();
         window.on_palette_filter(move |q| {
             if let Some(w) = weak.upgrade() {
-                let names: Vec<(String, &'static str)> = store
+                let names: Vec<(String, &'static str, slint::Color, bool)> = store
                     .borrow()
                     .list()
                     .iter()
-                    .map(|s| (s.name.clone(), AnyDriver::badge(s.engine)))
+                    .map(|s| {
+                        (
+                            s.name.clone(),
+                            AnyDriver::badge(s.engine),
+                            theme::accent_or_default(s.color.as_deref().unwrap_or("")),
+                            s.color.is_some(),
+                        )
+                    })
                     .collect();
                 let items = build_palette_items(&names, &w, &q.to_lowercase());
                 w.set_palette_items(ModelRc::from(Rc::new(VecModel::from(items))));

@@ -219,6 +219,8 @@ callback create-table-commit();
     // ----- connections screen detail panel -----
     in property <string> sel-name;
     in property <string> sel-engine;
+    in property <color> sel-color;
+    in property <bool> sel-has-custom-color;
     in property <string> sel-sub;
     in property <bool> sel-local;
     in property <[KvRow]> sel-rows;
@@ -1005,6 +1007,8 @@ callback create-table-commit();
             connecting: root.connecting;
             sel-name: root.sel-name;
             sel-engine: root.sel-engine;
+            sel-color: root.sel-color;
+            sel-has-custom-color: root.sel-has-custom-color;
             sel-sub: root.sel-sub;
             sel-local: root.sel-local;
             sel-rows: root.sel-rows;

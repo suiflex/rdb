@@ -22,6 +22,11 @@ export struct ConnItem {
     name: string,
     engine: string,
     color: color,
+    // Whether `color` is a user-picked accent vs. just the generic fallback
+    // `theme::accent_or_default` returns when no color was ever set — lets
+    // the UI fall back to the per-engine palette instead of that generic
+    // color for connections that never touched the color picker.
+    has-custom-color: bool,
     is-header: bool,
     expanded: bool,
     index: int,
