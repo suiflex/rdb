@@ -3576,6 +3576,12 @@ fn main() -> Result<(), slint::PlatformError> {
                         }
                         return true;
                     }
+                    if text.as_str() == "\\" {
+                        if let Some(w) = weak.upgrade() {
+                            w.invoke_run_new_tab();
+                        }
+                        return true;
+                    }
                     // Editor-owned cmd combos; everything else bubbles up to the
                     // window shortcut scope (⌘S commit, ⌘R refresh, …).
                     let handled = {
