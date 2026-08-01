@@ -645,7 +645,7 @@ callback create-table-commit();
                     root.commit-edits();
                     return accept;
                 }
-                if (e.text == "r" && e.modifiers.shift) {
+                if ((e.text == "r" || e.text == "R") && e.modifiers.shift) {
                     root.reconnect();
                     return accept;
                 }
