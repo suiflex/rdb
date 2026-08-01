@@ -471,6 +471,7 @@ callback create-table-commit();
     callback p1-add-row();
     callback p1-mark-delete();
     callback p1-run();
+    callback p1-run-new-tab();
     callback p1-format-sql();
     callback p1-explain-query();
     callback p1-cancel-stream();
@@ -1536,6 +1537,7 @@ callback create-table-commit();
                         p1-add-row() => { root.p1-add-row(); }
                         p1-mark-delete() => { root.p1-mark-delete(); }
                         p1-run() => { root.p1-run(); }
+                        p1-run-new-tab() => { root.p1-run-new-tab(); }
                         p1-format-sql() => { root.p1-format-sql(); }
                         p1-explain-query() => { root.p1-explain-query(); }
                         p1-cancel-stream() => { root.p1-cancel-stream(); }
@@ -1669,6 +1671,9 @@ callback create-table-commit();
                         limit-text <=> root.limit-text;
                         run => {
                             root.run-query();
+                        }
+                        run-new-tab() => {
+                            root.run-new-tab();
                         }
                         format-sql() => {
                             root.format-sql();

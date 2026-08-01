@@ -39,6 +39,7 @@ export component QueryPane inherits Rectangle {
     in-out property <string> limit-text;
     in property <string> query-label;
     callback run();
+    callback run-new-tab();
     callback format-sql();
     callback explain-query();
     callback cancel-stream();
@@ -354,6 +355,14 @@ export component QueryPane inherits Rectangle {
                             height: 28px;
                             enabled: !root.query-running;
                             clicked => { root.run(); }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        SecondaryButton {
+                            text: "Run New  ⌘\\";
+                            height: 28px;
+                            clicked => { root.run-new-tab(); }
                         }
                     }
                     VerticalLayout {

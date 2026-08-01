@@ -8254,10 +8254,17 @@ fn main() -> Result<(), slint::PlatformError> {
         let panes = panes.clone();
         let sync_editor = sync_editor.clone();
         window.on_format_sql(move || {
-            let mut ed = panes[0].ed_state.borrow_mut();
-            if !ed.current_line().trim().is_empty() {
-                let formatted = sql_format::format(ed.current_line());
-                ed.replace_current_line(&formatted);
+            let changed = {
+                let mut ed = panes[0].ed_state.borrow_mut();
+                if ed.current_line().trim().is_empty() {
+                    false
+                } else {
+                    let formatted = sql_format::format(ed.current_line());
+                    ed.replace_current_line(&formatted);
+                    true
+                }
+            };
+            if changed {
                 sync_editor(0);
             }
         });
@@ -8266,10 +8273,17 @@ fn main() -> Result<(), slint::PlatformError> {
         let panes = panes.clone();
         let sync_editor = sync_editor.clone();
         window.on_p1_format_sql(move || {
-            let mut ed = panes[1].ed_state.borrow_mut();
-            if !ed.current_line().trim().is_empty() {
-                let formatted = sql_format::format(ed.current_line());
-                ed.replace_current_line(&formatted);
+            let changed = {
+                let mut ed = panes[1].ed_state.borrow_mut();
+                if ed.current_line().trim().is_empty() {
+                    false
+                } else {
+                    let formatted = sql_format::format(ed.current_line());
+                    ed.replace_current_line(&formatted);
+                    true
+                }
+            };
+            if changed {
                 sync_editor(1);
             }
         });
@@ -9137,11 +9151,11 @@ fn main() -> Result<(), slint::PlatformError> {
         let run_sql = run_sql.clone();
         let recent_queries = recent_queries.clone();
         let history_cap = history_cap.clone();
-        window.on_run_new_tab(move || {
+        let run_new_tab: Rc<dyn Fn(usize)> = Rc::new(move |pane| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let pane = w.get_active_pane().clamp(0, 1) as usize;
+            let pane = pane.min(1);
             let stmt = {
                 let ed = panes[pane].ed_state.borrow();
                 ed.selected_text()
@@ -9162,6 +9176,15 @@ fn main() -> Result<(), slint::PlatformError> {
             record_recent(&recent_queries, &stmt, history_cap.get());
             run_sql(pane, stmt);
         });
+        let weak = window.as_weak();
+        let run_new_tab_active = run_new_tab.clone();
+        window.on_run_new_tab(move || {
+            if let Some(w) = weak.upgrade() {
+                run_new_tab_active(w.get_active_pane().clamp(0, 1) as usize);
+            }
+        });
+        let run_new_tab_p1 = run_new_tab;
+        window.on_p1_run_new_tab(move || run_new_tab_p1(1));
     }
 
     // ----- switch / close result tabs -----
