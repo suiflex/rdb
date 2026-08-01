@@ -54,6 +54,17 @@ export component MainWindow inherits Window {
                 enabled: root.connected && root.active-tab >= 0;
                 activated => { root.close-tab(root.active-tab); }
             }
+            MenuSeparator {}
+            MenuItem {
+                title: "Open Connection…";
+                shortcut: @keys(Control + O);
+                activated => { root.open-conn-modal(); }
+            }
+            MenuItem {
+                title: "Open Database…";
+                shortcut: @keys(Control + Shift + O);
+                activated => { root.open-db-modal(); }
+            }
             MenuItem {
                 title: "Save Changes";
                 // Slint maps Control to the platform primary modifier:
@@ -616,11 +627,11 @@ callback create-table-commit();
                     root.toggle-palette();
                     return accept;
                 }
-                if (e.text == "o" && e.modifiers.shift) {
+                if ((e.text == "o" || e.text == "O") && e.modifiers.shift) {
                     root.open-db-modal();
                     return accept;
                 }
-                if (e.text == "o") {
+                if (e.text == "o" || e.text == "O") {
                     root.open-conn-modal();
                     return accept;
                 }
