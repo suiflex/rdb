@@ -200,7 +200,6 @@ callback create-table-commit();
     callback reorder-conn(int, int);        // (dragged store index, row-step delta)
     callback open-table(string, string);   // (database, container)
     callback pin-table(string, string);    // double-click pins the object tab
-    callback pin-tab(int);                 // double-click pins a preview tab
     callback toggle-fields(string, string); // (database, table) — expand columns inline
     callback toggle-schema-node(string);
     callback select-schema(string);
@@ -1151,17 +1150,10 @@ callback create-table-commit();
                                         }
                                     }
                                     double-clicked => {
-                                        root.pin-tab(i);
-                                    }
-                                    changed has-hover => {
-                                        if (self.has-hover && tab.connection-name != "") {
-                                            Tooltip.text = tab.connection-name;
-                                            Tooltip.x = self.absolute-position.x + self.width / 2;
-                                            Tooltip.y = self.absolute-position.y + self.height + 4px;
-                                            Tooltip.shown = true;
-                                        } else if Tooltip.text == tab.connection-name {
-                                            Tooltip.shown = false;
-                                        }
+                                        root.rename-target = i;
+                                        root.rename-group = 0;
+                                        root.rename-text = tab.title;
+                                        root.rename-modal-open = true;
                                     }
                                 }
 
@@ -1177,22 +1169,6 @@ callback create-table-commit();
                                     padding-left: Tokens.sp3;
                                     padding-right: Tokens.sp1;
                                     spacing: Tokens.sp2;
-                                    if tab.engine != "": VerticalLayout {
-                                        alignment: center;
-                                        DbBadge {
-                                            engine: tab.engine;
-                                            size: 13px;
-                                            fill: tab.has-custom-color ? tab.color : Tokens.db-color(tab.engine);
-                                        }
-                                    }
-                                    if tab.engine != "" && !left-group.tabs-compact: Text {
-                                        text: tab.connection-name;
-                                        vertical-alignment: center;
-                                        color: Tokens.text-faint;
-                                        font-size: 9px;
-                                        max-width: 60px;
-                                        overflow: elide;
-                                    }
                                     if tab.kind == "table": VerticalLayout {
                                         alignment: center;
                                         Rectangle {
@@ -1346,15 +1322,11 @@ callback create-table-commit();
                                             root.select-p1-tab(i);
                                         }
                                     }
-                                    changed has-hover => {
-                                        if (self.has-hover && tab.connection-name != "") {
-                                            Tooltip.text = tab.connection-name;
-                                            Tooltip.x = self.absolute-position.x + self.width / 2;
-                                            Tooltip.y = self.absolute-position.y + self.height + 4px;
-                                            Tooltip.shown = true;
-                                        } else if Tooltip.text == tab.connection-name {
-                                            Tooltip.shown = false;
-                                        }
+                                    double-clicked => {
+                                        root.rename-target = i;
+                                        root.rename-group = 1;
+                                        root.rename-text = tab.title;
+                                        root.rename-modal-open = true;
                                     }
                                 }
                                 if i == root.p1-active-tab: Rectangle {
@@ -1366,22 +1338,6 @@ callback create-table-commit();
                                 p1-tab-content := HorizontalLayout {
                                     padding-left: Tokens.sp3;
                                     padding-right: Tokens.sp2;
-                                    if tab.engine != "": VerticalLayout {
-                                        alignment: center;
-                                        DbBadge {
-                                            engine: tab.engine;
-                                            size: 13px;
-                                            fill: tab.has-custom-color ? tab.color : Tokens.db-color(tab.engine);
-                                        }
-                                    }
-                                    if tab.engine != "" && !right-group.tabs-compact: Text {
-                                        text: tab.connection-name;
-                                        vertical-alignment: center;
-                                        color: Tokens.text-faint;
-                                        font-size: 9px;
-                                        max-width: 60px;
-                                        overflow: elide;
-                                    }
                                     Text {
                                         vertical-alignment: center;
                                         text: tab.kind == "sql" ? ">_" : tab.kind == "function" ? "ƒ" : "▦";

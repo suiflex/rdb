@@ -8598,28 +8598,6 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    {
-        let weak = window.as_weak();
-        let workspace_tabs = workspace_tabs.clone();
-        let active_tab_id = active_tab_id.clone();
-        window.on_pin_tab(move |index| {
-            let active = active_tab_id.lock().unwrap().clone();
-            let mut tabs = workspace_tabs.lock().unwrap();
-            let index = tabs
-                .iter()
-                .enumerate()
-                .filter(|(_, tab)| tab.group == 0)
-                .nth(index.max(0) as usize)
-                .map(|(index, _)| index);
-            if let Some(tab) = index.and_then(|index| tabs.get_mut(index)) {
-                tab.pinned = true;
-                if let Some(w) = weak.upgrade() {
-                    set_workspace_tabs(&w, &tabs, active.as_deref());
-                }
-            }
-        });
-    }
-
     // ----- pagination footer: prev / next / refresh / limit -----
     {
         let weak = window.as_weak();
