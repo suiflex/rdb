@@ -1118,9 +1118,6 @@ callback create-table-commit();
                                 ? (parent.width - 6px) * root.split-ratio : parent.width;
                             height: parent.height;
                             clip: true;
-                            // Below this avg-width-per-tab, drop the inline
-                            // connection name and keep only the badge + tooltip.
-                            property <bool> tabs-compact: self.width / max(1, root.tabs.length) < 110px;
                             HorizontalLayout {
                                 padding-left: Tokens.sp2;
                                 padding-top: Tokens.doc-tab-row-h - Tokens.doc-tab-h;
@@ -1287,7 +1284,6 @@ callback create-table-commit();
                             height: parent.height;
                             clip: true;
                             background: root.tab-drag-source == 0 ? Tokens.accent-tint : Tokens.chrome;
-                            property <bool> tabs-compact: self.width / max(1, root.p1-tabs.length) < 110px;
                             if !root.split: Text {
                                 text: "Drop tab here";
                                 color: Tokens.accent;
