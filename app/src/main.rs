@@ -7656,8 +7656,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 run_sql(1, text);
             }
         };
-        window.on_p1_run(run_p1.clone());
-        window.on_p1_run_selection(run_p1);
+        window.on_p1_run(run_p1);
     }
 
     // ----- Details panel: copy one field value to the clipboard -----
@@ -7737,56 +7736,6 @@ fn main() -> Result<(), slint::PlatformError> {
                 contents,
                 |w, msg| w.set_results_meta(SharedString::from(msg)),
             );
-        });
-    }
-
-    // ----- Run Selection: selected text, else statement under the cursor -----
-    {
-        let weak = window.as_weak();
-        let run_sql = run_sql.clone();
-        let run_stream = run_stream.clone();
-        let cur_engine = cur_engine.clone();
-        let browse = browse.clone();
-        let ed_state = ed_state.clone();
-        let recent_queries = recent_queries.clone();
-        let history_cap = history_cap.clone();
-        let panes = panes.clone();
-        window.on_run_selection(move || {
-            let stmt = {
-                let ed = ed_state.borrow();
-                ed.selected_text()
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| ed.current_statement())
-            };
-            if !stmt.is_empty() {
-                let mut stream = false;
-                let mut not_table = false;
-                if let Some(w) = weak.upgrade() {
-                    not_table = active_tab_kind(&w) != "table";
-                    if not_table {
-                        w.set_grid_read_only(true);
-                    }
-                    stream = not_table
-                        && browse.lock().unwrap().limit == 0
-                        && cur_engine
-                            .borrow()
-                            .map(|e| is_bare_select(e, &stmt))
-                            .unwrap_or(false);
-                }
-                record_recent(&recent_queries, &stmt, history_cap.get());
-                if stream {
-                    run_stream(0, stmt);
-                } else {
-                    // 2+ selected statements → one result tab each.
-                    if not_table && editor::split_statements(&stmt).len() >= 2 {
-                        panes[0]
-                            .split_results
-                            .store(true, std::sync::atomic::Ordering::SeqCst);
-                    }
-                    run_sql(0, stmt);
-                }
-            }
         });
     }
 

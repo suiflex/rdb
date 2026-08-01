@@ -39,7 +39,6 @@ export component QueryPane inherits Rectangle {
     in-out property <string> limit-text;
     in property <string> query-label;
     callback run();
-    callback run-selection();
     callback format-sql();
     callback explain-query();
     callback cancel-stream();
@@ -356,10 +355,6 @@ export component QueryPane inherits Rectangle {
                             enabled: !root.query-running;
                             clicked => { root.run(); }
                         }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        SecondaryButton { text: "Run Selection"; height: 28px; clicked => { root.run-selection(); } }
                     }
                     VerticalLayout {
                         alignment: center;

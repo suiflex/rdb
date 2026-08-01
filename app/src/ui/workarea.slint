@@ -200,7 +200,6 @@ export component WorkArea inherits Rectangle {
     // Pane 1 callbacks carry no pane arg here; they are wired to pane-1 handlers
     // on MainWindow (a later step). Left unhandled = no-op until then.
     callback p1-run();
-    callback p1-run-selection();
     callback p1-format-sql();
     callback p1-explain-query();
     callback p1-cancel-stream();
@@ -248,7 +247,6 @@ export component WorkArea inherits Rectangle {
     in property <int> scroll-grid-tick;
 
     callback run();
-    callback run-selection();
     callback format-sql();
     callback explain-query();
     callback copy-results();
@@ -389,7 +387,6 @@ export component WorkArea inherits Rectangle {
             limit-text <=> root.limit-text;
             query-label: root.query-label;
             run() => { root.run(); }
-            run-selection() => { root.run-selection(); }
             format-sql() => { root.format-sql(); }
             explain-query() => { root.explain-query(); }
             cancel-stream() => { root.cancel-stream(); }
@@ -521,7 +518,6 @@ export component WorkArea inherits Rectangle {
                 limit-text <=> root.p1-limit-text;
                 query-label: root.p1-query-label;
                 run() => { root.p1-run(); }
-                run-selection() => { root.p1-run-selection(); }
                 format-sql() => { root.p1-format-sql(); }
                 explain-query() => { root.p1-explain-query(); }
                 cancel-stream() => { root.p1-cancel-stream(); }

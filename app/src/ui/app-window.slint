@@ -270,7 +270,6 @@ callback create-table-commit();
     in-out property <string> mongo-filter;
     in property <[length]> grid-col-widths;
     callback run-query();
-    callback run-selection();
     callback format-sql();
     callback explain-query();
     callback copy-results();
@@ -472,7 +471,6 @@ callback create-table-commit();
     callback p1-add-row();
     callback p1-mark-delete();
     callback p1-run();
-    callback p1-run-selection();
     callback p1-format-sql();
     callback p1-explain-query();
     callback p1-cancel-stream();
@@ -1538,7 +1536,6 @@ callback create-table-commit();
                         p1-add-row() => { root.p1-add-row(); }
                         p1-mark-delete() => { root.p1-mark-delete(); }
                         p1-run() => { root.p1-run(); }
-                        p1-run-selection() => { root.p1-run-selection(); }
                         p1-format-sql() => { root.p1-format-sql(); }
                         p1-explain-query() => { root.p1-explain-query(); }
                         p1-cancel-stream() => { root.p1-cancel-stream(); }
@@ -1672,9 +1669,6 @@ callback create-table-commit();
                         limit-text <=> root.limit-text;
                         run => {
                             root.run-query();
-                        }
-                        run-selection() => {
-                            root.run-selection();
                         }
                         format-sql() => {
                             root.format-sql();
