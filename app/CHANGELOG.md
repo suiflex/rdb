@@ -42,6 +42,35 @@
 
 * **app:** v0.29.0 prep — split-pane, editor, tabs, mongo fixes ([#164](https://github.com/suiflex/rdb/issues/164)) ([be408f6](https://github.com/suiflex/rdb/commit/be408f6690a8af9334e759e1af5462b286d01367))
 
+## RDB: [0.30.0](https://github.com/suiflex/rdb/compare/v0.29.0...v0.30.0) (2026-08-01)
+
+
+### App Features
+
+* **app:** add query toolbar tooltips ([8a763a6](https://github.com/suiflex/rdb/commit/8a763a6ec7b313323fb39c4ab9cc3875a62ed6e4))
+* **app:** badge document tabs with their source connection ([d60d9ac](https://github.com/suiflex/rdb/commit/d60d9acd041dd9ffea6e26cea3c3d942db8c641a))
+* **app:** badge result tabs with their source connection ([ec2710f](https://github.com/suiflex/rdb/commit/ec2710fcb5b31930eaf6c9c49c094cabb014c819))
+* **app:** in-app Restart to Update for direct-download installs ([7ccfb7c](https://github.com/suiflex/rdb/commit/7ccfb7caac812e44ca875453d4f9d15110844116))
+* **app:** v0.30.0 prep — connection badges, self-update, UX fixes ([d02f5e7](https://github.com/suiflex/rdb/commit/d02f5e788e3ee870846c79c2eb7001ded8e05ae7))
+
+
+### Bug Fixes
+
+* **app:** add safe run-new-tab action ([6024e31](https://github.com/suiflex/rdb/commit/6024e316ef1e80855bd731252545b0b64ad41fd9))
+* **app:** align shortcuts with active pane and platform ([93d57a2](https://github.com/suiflex/rdb/commit/93d57a23cb0e96da2978e30d67dfd2224bf1d0fc))
+* **app:** export shortcut labels to Rust ([d6b5ed0](https://github.com/suiflex/rdb/commit/d6b5ed03d7d762688d656191686e7314fb6d6815))
+* **app:** format and explain active query line ([976c0be](https://github.com/suiflex/rdb/commit/976c0be4d1db8b88a6b3d68931d8faafcbb3ae34))
+* **app:** handle shifted reconnect shortcut ([93a26df](https://github.com/suiflex/rdb/commit/93a26dff65bdf2030ff349c4410fc5d6bfd10181))
+* **app:** keep active-line formatting on one line ([f0656e3](https://github.com/suiflex/rdb/commit/f0656e34bd16f81a2e6aa58b375baa87c9e07799))
+* **app:** register open shortcuts with native menu ([95e43ef](https://github.com/suiflex/rdb/commit/95e43ef7244d10479c9a4f4532a44754134dc48a))
+* **app:** remove redundant run selection button ([a64963d](https://github.com/suiflex/rdb/commit/a64963d765d0f4d325a4bcbcac6358335d842182))
+* **app:** render each connection's custom accent color ([004f985](https://github.com/suiflex/rdb/commit/004f985e5d4dd67296ed2d042d03313b6ff5a2f8))
+* **app:** restore query tab rename controls ([43768ba](https://github.com/suiflex/rdb/commit/43768baa759ba53da8e5e0d461ecd654b7d1971f))
+* **app:** route command backslash to active query ([2eb13ab](https://github.com/suiflex/rdb/commit/2eb13ab33505b75f7db368b3f7c8194cf29a40e0))
+* **app:** scroll result chips and drop the "Result" word ([68dc640](https://github.com/suiflex/rdb/commit/68dc640fc3bce647e991726235ad89feadf143ec))
+* **app:** use close icon in update dialog ([0c86540](https://github.com/suiflex/rdb/commit/0c86540c5f24eb6982e7e92b7b1fe5d5d5450be0))
+* **app:** use each connection's custom color for tab/result badges ([e27d840](https://github.com/suiflex/rdb/commit/e27d8405e9c32dfd8afe0f81904c5006cdc19d91))
+
 ## [0.28.0](https://github.com/suiflex/rdb/compare/v0.27.0...v0.28.0) (2026-07-30)
 
 
