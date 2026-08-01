@@ -2,12 +2,12 @@
 // editor + results split. References: design/2-workspace.png,
 // design/3-sql-editor.png, design/11-filter-edit-t2.png.
 import { Tokens } from "tokens.slint";
-import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow, DocRow } from "structs.slint";
+import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow, DocRow, ResultTabItem } from "structs.slint";
 import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "palette.slint";
 import {
-    UnderlineSegment, SecondaryButton, PrimaryButton, TextButton, ExportButton, FilterField, KeyCap
+    UnderlineSegment, SecondaryButton, PrimaryButton, TextButton, ExportButton, FilterField, KeyCap, Shortcut
 } from "components.slint";
 import { ScrollView, ComboBox } from "std-widgets.slint";
 import { AppIcon } from "icons.slint";
@@ -85,7 +85,7 @@ export component WorkArea inherits Rectangle {
     in property <string> query-label;    // "emiten-per-sektor.sql · saved"
     in property <string> results-meta;   // "10 rows · 38 ms"
     // result tabs (SQL): ⌘⏎ replaces the active one, ⌘\ appends
-    in property <[string]> result-tabs;
+    in property <[ResultTabItem]> result-tabs;
     in property <int> active-result;
     callback select-result-tab(int);
     callback close-result-tab(int);
@@ -158,7 +158,7 @@ export component WorkArea inherits Rectangle {
     in-out property <bool> p1-show-structure: false;
     in property <string> p1-query-label;
     in property <string> p1-results-meta;
-    in property <[string]> p1-result-tabs;
+    in property <[ResultTabItem]> p1-result-tabs;
     in property <int> p1-active-result;
     in-out property <int> p1-sql-view-mode;
     in-out property <bool> p1-filter-open;
@@ -200,7 +200,7 @@ export component WorkArea inherits Rectangle {
     // Pane 1 callbacks carry no pane arg here; they are wired to pane-1 handlers
     // on MainWindow (a later step). Left unhandled = no-op until then.
     callback p1-run();
-    callback p1-run-selection();
+    callback p1-run-new-tab();
     callback p1-format-sql();
     callback p1-explain-query();
     callback p1-cancel-stream();
@@ -248,7 +248,7 @@ export component WorkArea inherits Rectangle {
     in property <int> scroll-grid-tick;
 
     callback run();
-    callback run-selection();
+    callback run-new-tab();
     callback format-sql();
     callback explain-query();
     callback copy-results();
@@ -389,7 +389,7 @@ export component WorkArea inherits Rectangle {
             limit-text <=> root.limit-text;
             query-label: root.query-label;
             run() => { root.run(); }
-            run-selection() => { root.run-selection(); }
+            run-new-tab() => { root.run-new-tab(); }
             format-sql() => { root.format-sql(); }
             explain-query() => { root.explain-query(); }
             cancel-stream() => { root.cancel-stream(); }
@@ -521,7 +521,7 @@ export component WorkArea inherits Rectangle {
                 limit-text <=> root.p1-limit-text;
                 query-label: root.p1-query-label;
                 run() => { root.p1-run(); }
-                run-selection() => { root.p1-run-selection(); }
+                run-new-tab() => { root.p1-run-new-tab(); }
                 format-sql() => { root.p1-format-sql(); }
                 explain-query() => { root.p1-explain-query(); }
                 cancel-stream() => { root.p1-cancel-stream(); }
@@ -616,7 +616,7 @@ export component WorkArea inherits Rectangle {
                 TextButton { text: "Discard"; clicked => { root.discard-edits(); } }
                 VerticalLayout {
                     alignment: center;
-                    PrimaryButton { text: "Commit  ⌘S"; height: 22px; clicked => { root.commit-edits(); } }
+                    PrimaryButton { text: "Commit  " + Shortcut.primary + Shortcut.separator + "S"; height: 22px; clicked => { root.commit-edits(); } }
                 }
             }
         }

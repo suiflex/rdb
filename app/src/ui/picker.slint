@@ -20,6 +20,8 @@ export component ConnPicker inherits Rectangle {
     // Detail panel (filled by Rust when a row is selected).
     in property <string> sel-name;
     in property <string> sel-engine;
+    in property <color> sel-color;
+    in property <bool> sel-has-custom-color;
     in property <string> sel-sub;      // "PostgreSQL · grup profin"
     in property <bool> sel-local;
     in property <[KvRow]> sel-rows;
@@ -149,7 +151,7 @@ export component ConnPicker inherits Rectangle {
                                 // so it dominates the list (CodexBar-style). Idle
                                 // rows stay plain (engine color still reads from
                                 // the badge square); hover gets a faint tint.
-                                property <color> tint: Tokens.db-color(item.engine);
+                                property <color> tint: item.has-custom-color ? item.color : Tokens.db-color(item.engine);
                                 property <bool> selected: item.index == root.selected-conn;
                                 border-radius: Tokens.radius-lg;
                                 background: selected ? tint
@@ -218,6 +220,7 @@ export component ConnPicker inherits Rectangle {
                                         DbBadge {
                                             engine: item.engine;
                                             size: 24px;
+                                            fill: item.has-custom-color ? item.color : Tokens.db-color(item.engine);
                                             border-width: selected ? 1px : 0;
                                             border-color: white.with-alpha(0.5);
                                         }
@@ -500,7 +503,11 @@ export component ConnPicker inherits Rectangle {
                     // ----- header row -----
                     HorizontalLayout {
                         spacing: Tokens.sp4;
-                        DbBadge { engine: root.sel-engine; size: 44px; }
+                        DbBadge {
+                            engine: root.sel-engine;
+                            size: 44px;
+                            fill: root.sel-has-custom-color ? root.sel-color : Tokens.db-color(root.sel-engine);
+                        }
                         VerticalLayout {
                             alignment: center;
                             spacing: Tokens.sp1;

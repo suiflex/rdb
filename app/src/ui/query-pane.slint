@@ -5,11 +5,11 @@
 // WorkArea. Lifted verbatim from workarea.slint — property names match 1:1 so
 // the moved markup's `root.<prop>` references resolve to this component.
 import { Tokens } from "tokens.slint";
-import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow, DocRow } from "structs.slint";
+import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow, DocRow, ResultTabItem } from "structs.slint";
 import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "palette.slint";
-import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton, FilterField, UnderlineSegment } from "components.slint";
+import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton, FilterField, UnderlineSegment, DbBadge, Tooltip, Shortcut } from "components.slint";
 import { ScrollView, TextEdit, ComboBox } from "std-widgets.slint";
 import { AppIcon } from "icons.slint";
 
@@ -39,7 +39,7 @@ export component QueryPane inherits Rectangle {
     in-out property <string> limit-text;
     in property <string> query-label;
     callback run();
-    callback run-selection();
+    callback run-new-tab();
     callback format-sql();
     callback explain-query();
     callback cancel-stream();
@@ -80,7 +80,7 @@ export component QueryPane inherits Rectangle {
     in property <string> results-meta;
     in-out property <bool> filter-open: false;
     in-out property <int> sql-view-mode: 0;
-    in property <[string]> result-tabs;
+    in property <[ResultTabItem]> result-tabs;
     in property <int> active-result;
     callback select-result-tab(int);
     callback close-result-tab(int);
@@ -351,7 +351,8 @@ export component QueryPane inherits Rectangle {
                     VerticalLayout {
                         alignment: center;
                         PrimaryButton {
-                            text: root.query-running ? "Running…" : "▶ Run  ⌘⏎";
+                            text: root.query-running ? "Running…" : "▶ Run  " + Shortcut.primary + Shortcut.separator + Shortcut.enter;
+                            tooltip: "Run selected SQL or the current statement  " + Shortcut.primary + Shortcut.separator + Shortcut.enter;
                             height: 28px;
                             enabled: !root.query-running;
                             clicked => { root.run(); }
@@ -359,18 +360,29 @@ export component QueryPane inherits Rectangle {
                     }
                     VerticalLayout {
                         alignment: center;
-                        SecondaryButton { text: "Run Selection"; height: 28px; clicked => { root.run-selection(); } }
+                        SecondaryButton {
+                            text: "Run New  " + Shortcut.primary + Shortcut.separator + "\\";
+                            tooltip: "Run the current statement in a new result tab  " + Shortcut.primary + Shortcut.separator + "\\";
+                            height: 28px;
+                            clicked => { root.run-new-tab(); }
+                        }
                     }
                     VerticalLayout {
                         alignment: center;
                         visible: root.sql-capable;
-                        SecondaryButton { text: "Format"; height: 28px; clicked => { root.format-sql(); } }
+                        SecondaryButton {
+                            text: "Format";
+                            tooltip: "Format the active editor line";
+                            height: 28px;
+                            clicked => { root.format-sql(); }
+                        }
                     }
                     VerticalLayout {
                         alignment: center;
                         visible: root.sql-capable;
                         SecondaryButton {
                             text: "Explain";
+                            tooltip: "Run EXPLAIN for the active editor line";
                             height: 28px;
                             clicked => { root.explain-query(); }
                         }
@@ -557,39 +569,71 @@ export component QueryPane inherits Rectangle {
                     ExportButton { export(i) => { root.export-results(i); } }
                     TextButton { text: "Chart"; clicked => { root.sql-view-mode = 2; } }
                 }
-                // result tabs — appear once ⌘\ has spawned a second result
-                if root.result-tabs.length > 1: HorizontalLayout {
+                // result tabs — appear once ⌘\ has spawned a second result.
+                // Wrapped in a ScrollView since the row can outgrow the panel
+                // width once several runs pile up; the label already reads
+                // "{connection} {n}", so nothing needs to hide when crowded.
+                if root.result-tabs.length > 1: Rectangle {
                     height: 30px;
-                    padding-left: Tokens.sp3;
-                    padding-right: Tokens.sp3;
-                    spacing: Tokens.sp1;
-                    alignment: start;
-                    for name[i] in root.result-tabs: Rectangle {
-                        height: 24px;
-                        width: rl.preferred-width + 2 * Tokens.sp2 + 18px;
-                        border-radius: Tokens.radius;
-                        background: i == root.active-result ? Tokens.accent-tint
-                            : rta.has-hover ? Tokens.chrome : transparent;
-                        rta := TouchArea { clicked => { root.select-result-tab(i); } }
+                    result-scroll := ScrollView {
+                        width: parent.width;
+                        height: parent.height;
+                        vertical-scrollbar-policy: ScrollBarPolicy.always-off;
                         HorizontalLayout {
-                            padding-left: Tokens.sp2;
-                            padding-right: Tokens.sp1;
+                            height: result-scroll.visible-height;
+                            padding-left: Tokens.sp3;
+                            padding-right: Tokens.sp3;
                             spacing: Tokens.sp1;
-                            rl := Text {
-                                text: name;
-                                color: i == root.active-result ? Tokens.on-tint : Tokens.text-dim;
-                                font-size: Tokens.font-sm;
-                                vertical-alignment: center;
-                            }
-                            Rectangle {
-                                width: 16px;
-                                Text {
-                                    text: "×";
-                                    color: Tokens.text-faint;
-                                    vertical-alignment: center;
-                                    horizontal-alignment: center;
+                            alignment: start;
+                            for item[i] in root.result-tabs: Rectangle {
+                                height: 24px;
+                                width: rl.preferred-width + 2 * Tokens.sp2 + 18px
+                                    + (item.engine != "" ? 15px + Tokens.sp1 : 0px);
+                                border-radius: Tokens.radius;
+                                background: i == root.active-result ? Tokens.accent-tint
+                                    : rta.has-hover ? Tokens.chrome : transparent;
+                                rta := TouchArea {
+                                    clicked => { root.select-result-tab(i); }
+                                    changed has-hover => {
+                                        if (self.has-hover && item.connection-name != "") {
+                                            Tooltip.text = item.connection-name;
+                                            Tooltip.x = self.absolute-position.x + self.width / 2;
+                                            Tooltip.y = self.absolute-position.y + self.height + 4px;
+                                            Tooltip.shown = true;
+                                        } else if Tooltip.text == item.connection-name {
+                                            Tooltip.shown = false;
+                                        }
+                                    }
                                 }
-                                TouchArea { clicked => { root.close-result-tab(i); } }
+                                HorizontalLayout {
+                                    padding-left: Tokens.sp2;
+                                    padding-right: Tokens.sp1;
+                                    spacing: Tokens.sp1;
+                                    if item.engine != "": VerticalLayout {
+                                        alignment: center;
+                                        DbBadge {
+                                            engine: item.engine;
+                                            size: 13px;
+                                            fill: item.has-custom-color ? item.color : Tokens.db-color(item.engine);
+                                        }
+                                    }
+                                    rl := Text {
+                                        text: item.label;
+                                        color: i == root.active-result ? Tokens.on-tint : Tokens.text-dim;
+                                        font-size: Tokens.font-sm;
+                                        vertical-alignment: center;
+                                    }
+                                    Rectangle {
+                                        width: 16px;
+                                        Text {
+                                            text: "×";
+                                            color: Tokens.text-faint;
+                                            vertical-alignment: center;
+                                            horizontal-alignment: center;
+                                        }
+                                        TouchArea { clicked => { root.close-result-tab(i); } }
+                                    }
+                                }
                             }
                         }
                     }
@@ -1126,7 +1170,7 @@ export component QueryPane inherits Rectangle {
                         vertical-alignment: center;
                     }
                     Text {
-                        text: "⌘C to copy · Esc to close";
+                        text: Shortcut.primary + Shortcut.separator + "C to copy · Esc to close";
                         color: Tokens.text-faint;
                         font-size: Tokens.font-xs;
                         vertical-alignment: center;

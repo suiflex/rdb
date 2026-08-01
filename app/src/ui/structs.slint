@@ -22,6 +22,11 @@ export struct ConnItem {
     name: string,
     engine: string,
     color: color,
+    // Whether `color` is a user-picked accent vs. just the generic fallback
+    // `theme::accent_or_default` returns when no color was ever set — lets
+    // the UI fall back to the per-engine palette instead of that generic
+    // color for connections that never touched the color picker.
+    has-custom-color: bool,
     is-header: bool,
     expanded: bool,
     index: int,
@@ -41,7 +46,15 @@ export struct StructField { name: string, type-name: string, nullable: bool }
 // One editable row of the new-table designer.
 export struct TableCol { name: string, type-name: string, nullable: bool, pk: bool }
 // `kind` picks the tab glyph; preview table tabs are italic until pinned.
-export struct TabItem { title: string, kind: string, preview: bool }
+// `engine` is the DbBadge key ("postgres" etc, empty when no connection was
+// active when the tab was created); `connection-name` is the full name shown
+// via tooltip / inline label.
+export struct TabItem { title: string, kind: string, preview: bool, engine: string, connection-name: string, color: color, has-custom-color: bool }
+// One "Result N" chip in the results panel (a tab can accumulate several runs).
+// `engine`/`connection-name` identify which connection produced that specific
+// run — distinct from the connection on the owning TabItem, since a long-lived
+// SQL tab can be re-run after switching the active connection.
+export struct ResultTabItem { label: string, engine: string, connection-name: string, color: color, has-custom-color: bool }
 // One lexed editor token; `kind`: 0 plain · 1 keyword · 2 string ·
 // 3 function · 4 comment · 5 number (mirrors app/src/editor.rs).
 // `sel` = inside the selection (background highlight). `cols` = char count, so

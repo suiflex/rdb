@@ -59,6 +59,16 @@ export global Tooltip {
     in-out property <bool> shown;
 }
 
+// Display labels follow the desktop convention while the input handlers use
+// Slint's platform-independent Control/Meta modifier checks.
+export global Shortcut {
+    in-out property <string> primary: "⌘";
+    in-out property <string> shift: "⇧";
+    in-out property <string> separator: "";
+    in-out property <string> enter: "↩";
+    in-out property <string> backspace: "⌫";
+}
+
 // Dropdown select: shows the current value + a ▾ caret so it reads as a
 // picker even when closed, then a click opens a themed option list. Replaces
 // std-widgets ComboBox, which rendered as a blank borderless box in this theme.
@@ -134,10 +144,13 @@ export component SelectBox inherits Rectangle {
 export component DbBadge inherits Rectangle {
     in property <string> engine; // "postgres" | "mysql" | "redis" | "sqlite" | "mongo" | "cassandra"
     in property <length> size: 24px;
+    // Callers with a per-connection custom accent can override this; the
+    // default keeps every existing call site's engine-colored look as-is.
+    in property <brush> fill: Tokens.db-color(engine);
     width: self.size;
     height: self.size;
     border-radius: self.size * 0.28;
-    background: Tokens.db-color(engine);
+    background: self.fill;
     // Known engine → white brand glyph (icons/db-<engine>.svg via AppIcon).
     property <bool> known: engine == "postgres" || engine == "mysql"
         || engine == "redis" || engine == "sqlite" || engine == "mongo"
@@ -178,6 +191,7 @@ export component OutlineChip inherits Rectangle {
 export component PrimaryButton inherits Rectangle {
     in property <string> text;
     in property <bool> enabled: true;
+    in property <string> tooltip;            // optional hover label
     callback clicked;
     height: Tokens.button-h;
     width: label.preferred-width + 2 * Tokens.sp4;
@@ -194,6 +208,16 @@ export component PrimaryButton inherits Rectangle {
     ta := TouchArea {
         enabled: root.enabled;
         clicked => { root.clicked(); }
+        changed has-hover => {
+            if self.has-hover && root.tooltip != "" {
+                Tooltip.text = root.tooltip;
+                Tooltip.x = root.absolute-position.x + root.width / 2;
+                Tooltip.y = root.absolute-position.y + root.height + 4px;
+                Tooltip.shown = true;
+            } else if Tooltip.text == root.tooltip {
+                Tooltip.shown = false;
+            }
+        }
     }
 }
 
@@ -419,7 +443,7 @@ export component SearchCommandPill inherits Rectangle {
         }
         VerticalLayout {
             alignment: center;
-            KeyCap { text: "⌘K"; }
+            KeyCap { text: Shortcut.primary + Shortcut.separator + "K"; }
         }
     }
     ta := TouchArea { clicked => { root.activated(); } }

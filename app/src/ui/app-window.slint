@@ -3,8 +3,9 @@ export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
-    SearchCommandPill, BreadcrumbChip, GlyphButton, IconButton, PrimaryButton, SecondaryButton, SelectBox, TextButton, Toggle, ToggleRow, Tooltip
+    SearchCommandPill, BreadcrumbChip, DbBadge, GlyphButton, IconButton, PrimaryButton, SecondaryButton, SelectBox, TextButton, Toggle, ToggleRow, Tooltip, Shortcut
 } from "components.slint";
+export { Shortcut }
 import { NavCluster } from "nav-cluster.slint";
 import { ConnPicker } from "picker.slint";
 import { WorkArea } from "workarea.slint";
@@ -25,6 +26,7 @@ import {
     ChartBar,
     IndexRow,
     DocRow,
+    ResultTabItem,
 } from "structs.slint";
 
 export component MainWindow inherits Window {
@@ -51,6 +53,17 @@ export component MainWindow inherits Window {
                 title: "Close Tab";
                 enabled: root.connected && root.active-tab >= 0;
                 activated => { root.close-tab(root.active-tab); }
+            }
+            MenuSeparator {}
+            MenuItem {
+                title: "Open Connection…";
+                shortcut: @keys(Control + O);
+                activated => { root.open-conn-modal(); }
+            }
+            MenuItem {
+                title: "Open Database…";
+                shortcut: @keys(Control + Shift + O);
+                activated => { root.open-db-modal(); }
             }
             MenuItem {
                 title: "Save Changes";
@@ -198,7 +211,6 @@ callback create-table-commit();
     callback reorder-conn(int, int);        // (dragged store index, row-step delta)
     callback open-table(string, string);   // (database, container)
     callback pin-table(string, string);    // double-click pins the object tab
-    callback pin-tab(int);                 // double-click pins a preview tab
     callback toggle-fields(string, string); // (database, table) — expand columns inline
     callback toggle-schema-node(string);
     callback select-schema(string);
@@ -218,6 +230,8 @@ callback create-table-commit();
     // ----- connections screen detail panel -----
     in property <string> sel-name;
     in property <string> sel-engine;
+    in property <color> sel-color;
+    in property <bool> sel-has-custom-color;
     in property <string> sel-sub;
     in property <bool> sel-local;
     in property <[KvRow]> sel-rows;
@@ -267,7 +281,6 @@ callback create-table-commit();
     in-out property <string> mongo-filter;
     in property <[length]> grid-col-widths;
     callback run-query();
-    callback run-selection();
     callback format-sql();
     callback explain-query();
     callback copy-results();
@@ -430,7 +443,7 @@ callback create-table-commit();
     in-out property <bool> p1-show-structure: false;
     in property <string> p1-query-label;
     in property <string> p1-results-meta;
-    in property <[string]> p1-result-tabs;
+    in property <[ResultTabItem]> p1-result-tabs;
     in property <int> p1-active-result;
     in-out property <int> p1-sql-view-mode;
     in-out property <bool> p1-filter-open;
@@ -469,7 +482,7 @@ callback create-table-commit();
     callback p1-add-row();
     callback p1-mark-delete();
     callback p1-run();
-    callback p1-run-selection();
+    callback p1-run-new-tab();
     callback p1-format-sql();
     callback p1-explain-query();
     callback p1-cancel-stream();
@@ -508,7 +521,7 @@ callback create-table-commit();
     in property <[PaletteItem]> palette-items;
     callback new-tab();
     callback run-new-tab();   // ⌘\: run current statement into a new result tab
-    in property <[string]> result-tabs;   // "Result 1", "Result 2", …
+    in property <[ResultTabItem]> result-tabs;   // "Result 1", "Result 2", …
     in property <int> active-result;
     callback select-result-tab(int);
     callback close-result-tab(int);
@@ -529,6 +542,13 @@ callback create-table-commit();
     callback update-copy-hint();           // copy the upgrade command/hint
     callback check-updates-now();          // manual check from settings
     in property <string> update-check-status; // settings feedback line
+
+    // ----- in-app "Restart to Update" (Other installs only — see update.rs) -----
+    in property <bool> update-self-update-supported: false;
+    in property <string> update-stage: "idle"; // idle | downloading | ready | restarting | error
+    in property <float> update-progress: 0.0;  // 0.0..1.0, valid while downloading
+    in property <string> update-error;         // populated while stage == error
+    callback restart-to-update();              // idle/error: download; ready: swap + relaunch
 
     // ----- app settings modal -----
     in-out property <bool> settings-open: false;
@@ -607,11 +627,11 @@ callback create-table-commit();
                     root.toggle-palette();
                     return accept;
                 }
-                if (e.text == "o" && e.modifiers.shift) {
+                if ((e.text == "o" || e.text == "O") && e.modifiers.shift) {
                     root.open-db-modal();
                     return accept;
                 }
-                if (e.text == "o") {
+                if (e.text == "o" || e.text == "O") {
                     root.open-conn-modal();
                     return accept;
                 }
@@ -636,12 +656,15 @@ callback create-table-commit();
                     root.commit-edits();
                     return accept;
                 }
-                if (e.text == "r" && e.modifiers.shift) {
+                if ((e.text == "r" || e.text == "R") && e.modifiers.shift) {
                     root.reconnect();
                     return accept;
                 }
                 if (e.text == "r") {
-                    root.refresh-result();
+                    if (root.active-pane == 1) {
+                        if (root.p1-active-table != "") { root.p1-refresh-page(); }
+                        else { root.p1-run(); }
+                    } else { root.refresh-result(); }
                     return accept;
                 }
                 if (e.text == "f") {
@@ -668,39 +691,39 @@ callback create-table-commit();
                     return accept;
                 }
                 if (e.text == "1") {
-                    root.select-tab(0);
+                    if (root.active-pane == 1) { root.select-p1-tab(0); } else { root.select-tab(0); }
                     return accept;
                 }
                 if (e.text == "2") {
-                    root.select-tab(1);
+                    if (root.active-pane == 1) { root.select-p1-tab(1); } else { root.select-tab(1); }
                     return accept;
                 }
                 if (e.text == "3") {
-                    root.select-tab(2);
+                    if (root.active-pane == 1) { root.select-p1-tab(2); } else { root.select-tab(2); }
                     return accept;
                 }
                 if (e.text == "4") {
-                    root.select-tab(3);
+                    if (root.active-pane == 1) { root.select-p1-tab(3); } else { root.select-tab(3); }
                     return accept;
                 }
                 if (e.text == "5") {
-                    root.select-tab(4);
+                    if (root.active-pane == 1) { root.select-p1-tab(4); } else { root.select-tab(4); }
                     return accept;
                 }
                 if (e.text == "6") {
-                    root.select-tab(5);
+                    if (root.active-pane == 1) { root.select-p1-tab(5); } else { root.select-tab(5); }
                     return accept;
                 }
                 if (e.text == "7") {
-                    root.select-tab(6);
+                    if (root.active-pane == 1) { root.select-p1-tab(6); } else { root.select-tab(6); }
                     return accept;
                 }
                 if (e.text == "8") {
-                    root.select-tab(7);
+                    if (root.active-pane == 1) { root.select-p1-tab(7); } else { root.select-tab(7); }
                     return accept;
                 }
                 if (e.text == "9") {
-                    root.select-tab(8);
+                    if (root.active-pane == 1) { root.select-p1-tab(8); } else { root.select-tab(8); }
                     return accept;
                 }
             }
@@ -858,7 +881,7 @@ callback create-table-commit();
                         alignment: center;
                         SecondaryButton {
                             text: "SQL";
-                            tooltip: "New query tab  ⌘T";
+                            tooltip: "New query tab  " + Shortcut.primary + Shortcut.separator + "T";
                             height: 28px;
                             clicked => { root.new-tab(); }
                         }
@@ -1004,6 +1027,8 @@ callback create-table-commit();
             connecting: root.connecting;
             sel-name: root.sel-name;
             sel-engine: root.sel-engine;
+            sel-color: root.sel-color;
+            sel-has-custom-color: root.sel-has-custom-color;
             sel-sub: root.sel-sub;
             sel-local: root.sel-local;
             sel-rows: root.sel-rows;
@@ -1133,7 +1158,10 @@ callback create-table-commit();
                                         }
                                     }
                                     double-clicked => {
-                                        root.pin-tab(i);
+                                        root.rename-target = i;
+                                        root.rename-group = 0;
+                                        root.rename-text = tab.title;
+                                        root.rename-modal-open = true;
                                     }
                                 }
 
@@ -1250,7 +1278,7 @@ callback create-table-commit();
                                 Rectangle { horizontal-stretch: 1; }
                             }
                         }
-                        if root.split || root.tab-drag-source == 0: Rectangle {
+                        if root.split || root.tab-drag-source == 0: right-group := Rectangle {
                             x: (parent.width - 6px) * root.split-ratio + 6px;
                             width: (parent.width - 6px) * (1 - root.split-ratio);
                             height: parent.height;
@@ -1300,6 +1328,12 @@ callback create-table-commit();
                                             root.active-pane = 1;
                                             root.select-p1-tab(i);
                                         }
+                                    }
+                                    double-clicked => {
+                                        root.rename-target = i;
+                                        root.rename-group = 1;
+                                        root.rename-text = tab.title;
+                                        root.rename-modal-open = true;
                                     }
                                 }
                                 if i == root.p1-active-tab: Rectangle {
@@ -1470,7 +1504,7 @@ callback create-table-commit();
                         p1-add-row() => { root.p1-add-row(); }
                         p1-mark-delete() => { root.p1-mark-delete(); }
                         p1-run() => { root.p1-run(); }
-                        p1-run-selection() => { root.p1-run-selection(); }
+                        p1-run-new-tab() => { root.p1-run-new-tab(); }
                         p1-format-sql() => { root.p1-format-sql(); }
                         p1-explain-query() => { root.p1-explain-query(); }
                         p1-cancel-stream() => { root.p1-cancel-stream(); }
@@ -1605,8 +1639,8 @@ callback create-table-commit();
                         run => {
                             root.run-query();
                         }
-                        run-selection() => {
-                            root.run-selection();
+                        run-new-tab() => {
+                            root.run-new-tab();
                         }
                         format-sql() => {
                             root.format-sql();
@@ -1706,7 +1740,7 @@ callback create-table-commit();
                                 horizontal-alignment: center;
                             }
                             Text {
-                                text: "Choose a table, or press ⌘T to start a query";
+                            text: "Choose a table, or press " + Shortcut.primary + Shortcut.separator + "T to start a query";
                                 color: Tokens.text-dim;
                                 font-size: Tokens.font-sm;
                                 horizontal-alignment: center;
@@ -2312,23 +2346,41 @@ callback create-table-commit();
                     color: Tokens.text;
                 }
                 Text {
-                    text: root.update-hint;
+                    text: !root.update-self-update-supported ? root.update-hint
+                        : root.update-stage == "downloading" ? "Downloading… " + round(root.update-progress * 100) + "%"
+                        : root.update-stage == "ready" ? "Ready to install"
+                        : root.update-stage == "restarting" ? "Restarting…"
+                        : root.update-stage == "error" ? root.update-error
+                        : "Click to download";
                     font-size: 11px;
-                    color: Tokens.text-dim;
+                    color: root.update-stage == "error" ? Tokens.error : Tokens.text-dim;
+                    overflow: elide;
                 }
             }
 
             TouchArea {
-                width: 62px;
-                clicked => { root.update-open(); }
+                width: root.update-self-update-supported ? 116px : 62px;
+                clicked => {
+                    if root.update-self-update-supported {
+                        root.restart-to-update();
+                    } else {
+                        root.update-open();
+                    }
+                }
                 Rectangle {
                     background: parent.has-hover ? Tokens.accent-hover : Tokens.accent;
                     border-radius: Tokens.radius;
                     Text {
-                        text: "Update";
+                        text: !root.update-self-update-supported ? "Update"
+                            : root.update-stage == "ready" ? "Restart to Update"
+                            : root.update-stage == "downloading" ? "Downloading…"
+                            : root.update-stage == "restarting" ? "Restarting…"
+                            : root.update-stage == "error" ? "Retry"
+                            : "Download";
                         font-size: 12px;
                         font-weight: 600;
                         color: #FFFFFF;
+                        horizontal-alignment: center;
                     }
                 }
             }
@@ -2336,9 +2388,9 @@ callback create-table-commit();
             TouchArea {
                 width: 20px;
                 clicked => { root.update-dismiss(); }
-                Text {
-                    text: "✕";
-                    font-size: 13px;
+                AppIcon {
+                    name: "close";
+                    size: 11px;
                     color: parent.has-hover ? Tokens.text : Tokens.text-dim;
                 }
             }
@@ -2525,22 +2577,48 @@ callback create-table-commit();
                                 font-size: 13px;
                                 font-weight: 600;
                             }
-                            Text {
+                            if !root.update-self-update-supported: Text {
                                 text: root.update-hint;
                                 color: Tokens.text-dim;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+                            if root.update-self-update-supported && root.update-stage == "downloading": Rectangle {
+                                height: 6px;
+                                border-radius: 3px;
+                                background: Tokens.card;
+                                Rectangle {
+                                    x: 0;
+                                    width: parent.width * root.update-progress;
+                                    height: parent.height;
+                                    border-radius: parent.border-radius;
+                                    background: Tokens.accent;
+                                }
+                            }
+                            if root.update-self-update-supported && root.update-stage == "error": Text {
+                                text: root.update-error;
+                                color: Tokens.error;
                                 font-size: 12px;
                                 wrap: word-wrap;
                             }
                             HorizontalLayout {
                                 spacing: Tokens.sp2;
                                 alignment: start;
-                                PrimaryButton {
+                                if !root.update-self-update-supported: PrimaryButton {
                                     text: "Open";
                                     clicked => { root.update-open(); }
                                 }
-                                SecondaryButton {
+                                if !root.update-self-update-supported: SecondaryButton {
                                     text: "Copy";
                                     clicked => { root.update-copy-hint(); }
+                                }
+                                if root.update-self-update-supported: PrimaryButton {
+                                    text: root.update-stage == "ready" ? "Restart to Update"
+                                        : root.update-stage == "downloading" ? "Downloading…"
+                                        : root.update-stage == "restarting" ? "Restarting…"
+                                        : root.update-stage == "error" ? "Retry"
+                                        : "Download";
+                                    clicked => { root.restart-to-update(); }
                                 }
                             }
                         }
@@ -2628,22 +2706,22 @@ callback create-table-commit();
                 }
 
                 for row in [
-                    { k: "⌘K", a: "Command palette" },
-                    { k: "⌘T", a: "New tab" },
-                    { k: "⌘W", a: "Close tab" },
-                    { k: "⌘1–9", a: "Switch to tab" },
-                    { k: "⌘↩", a: "Run query" },
-                    { k: "⌘\\", a: "Run in new tab" },
-                    { k: "⌘S", a: "Save / commit edits" },
-                    { k: "⌘R", a: "Refresh result" },
-                    { k: "⌘⇧R", a: "Reconnect" },
-                    { k: "⌘+ / ⌘-", a: "Zoom in / out" },
-                    { k: "⌘F", a: "Find" },
-                    { k: "⌘O", a: "Open connection" },
-                    { k: "⌘⇧O", a: "Open database" },
-                    { k: "⌘P", a: "Filter sidebar" },
+                    { k: Shortcut.primary + Shortcut.separator + "K", a: "Command palette" },
+                    { k: Shortcut.primary + Shortcut.separator + "T", a: "New tab" },
+                    { k: Shortcut.primary + Shortcut.separator + "W", a: "Close tab" },
+                    { k: Shortcut.primary + Shortcut.separator + "1–9", a: "Switch to tab" },
+                    { k: Shortcut.primary + Shortcut.separator + Shortcut.enter, a: "Run query" },
+                    { k: Shortcut.primary + Shortcut.separator + "\\", a: "Run in new tab" },
+                    { k: Shortcut.primary + Shortcut.separator + "S", a: "Save / commit edits" },
+                    { k: Shortcut.primary + Shortcut.separator + "R", a: "Refresh result" },
+                    { k: Shortcut.primary + Shortcut.separator + Shortcut.shift + Shortcut.separator + "R", a: "Reconnect" },
+                    { k: Shortcut.primary + Shortcut.separator + "+ / " + Shortcut.primary + Shortcut.separator + "-", a: "Zoom in / out" },
+                    { k: Shortcut.primary + Shortcut.separator + "F", a: "Find" },
+                    { k: Shortcut.primary + Shortcut.separator + "O", a: "Open connection" },
+                    { k: Shortcut.primary + Shortcut.separator + Shortcut.shift + Shortcut.separator + "O", a: "Open database" },
+                    { k: Shortcut.primary + Shortcut.separator + "P", a: "Filter sidebar" },
                     { k: "J / K", a: "Grid: next / previous row" },
-                    { k: "⌫ / Del", a: "Grid: mark row for deletion" },
+                    { k: Shortcut.backspace + " / Del", a: "Grid: mark row for deletion" },
                     { k: "Esc", a: "Close dialog" },
                 ]: HorizontalLayout {
                     spacing: Tokens.sp3;

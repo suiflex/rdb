@@ -21,6 +21,7 @@ mod export;
 mod mock;
 mod model;
 mod query_parse;
+mod self_update;
 #[cfg(feature = "mock")]
 mod shot;
 mod sql_format;
@@ -43,6 +44,32 @@ const MAX_FONT_SIZE: i32 = 18;
 
 fn clamp_font_size(size: i32) -> i32 {
     size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE)
+}
+
+fn shortcut_labels(
+    os: &str,
+) -> (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+) {
+    if os == "macos" {
+        ("⌘", "⇧", "", "↩", "⌫")
+    } else {
+        ("Ctrl", "Shift", "+", "Enter", "Backspace")
+    }
+}
+
+#[test]
+fn shortcut_labels_follow_desktop_conventions() {
+    assert_eq!(shortcut_labels("macos"), ("⌘", "⇧", "", "↩", "⌫"));
+    assert_eq!(
+        shortcut_labels("windows"),
+        ("Ctrl", "Shift", "+", "Enter", "Backspace")
+    );
+    assert_eq!(shortcut_labels("linux").0, "Ctrl");
 }
 
 /// Open a native "save file" dialog and write `contents` to the chosen path.
@@ -199,6 +226,7 @@ fn build_conn_items(
                 name: g.to_uppercase().into(),
                 engine: SharedString::default(),
                 color: theme::accent_or_default(""),
+                has_custom_color: false,
                 is_header: true,
                 expanded,
                 index: -1,
@@ -230,6 +258,7 @@ fn build_conn_items(
                 name: s.name.clone().into(),
                 engine: AnyDriver::badge(s.engine).into(),
                 color: theme::accent_or_default(s.color.as_deref().unwrap_or("")),
+                has_custom_color: s.color.is_some(),
                 is_header: false,
                 expanded: true,
                 index: i as i32,
@@ -625,6 +654,14 @@ struct StoredResult {
     meta: String,
     latency: String,
     grid: GridState,
+    // Connection that produced THIS run — captured when the run started, not
+    // read from the tab, since a long-lived SQL tab can be re-run after the
+    // user switches the active connection (each Result N chip needs its own).
+    connection_id: Option<String>,
+    engine: String,
+    connection_name: String,
+    color: slint::Color,
+    has_custom_color: bool,
 }
 
 fn store_result(
@@ -652,6 +689,11 @@ mod result_tab_tests {
             meta: String::new(),
             latency: String::new(),
             grid: GridState::default(),
+            connection_id: None,
+            engine: String::new(),
+            connection_name: String::new(),
+            color: theme::accent_or_default(""),
+            has_custom_color: false,
         }
     }
 
@@ -687,8 +729,7 @@ struct GroupRuntime {
     results: Arc<std::sync::Mutex<Vec<StoredResult>>>,
     active_result: Arc<std::sync::Mutex<usize>>,
     result_new_tab: Arc<std::sync::atomic::AtomicBool>,
-    // Set by "Run Selection" when the selection holds 2+ statements: the next
-    // run stores one result tab per statement instead of last-wins.
+    // Set when a run contains 2+ statements: keep one result tab per statement.
     split_results: Arc<std::sync::atomic::AtomicBool>,
     displayed_grid: Arc<std::sync::Mutex<Option<model::GridModel>>>,
     browse: Arc<std::sync::Mutex<BrowseState>>,
@@ -755,6 +796,15 @@ struct WorkspaceTab {
     split: bool,
     split_ratio: f32,
     pane1_query: String,
+    // Connection the tab was created against (snapshot, not live-tracked).
+    connection_id: Option<String>,
+    // DbBadge key, e.g. "postgres"; empty when no connection was active yet.
+    engine: String,
+    connection_name: String,
+    // Connection's custom accent (falls back to a generic color when unset —
+    // has_custom_color says whether to prefer it over the per-engine color).
+    color: slint::Color,
+    has_custom_color: bool,
 }
 
 impl WorkspaceTab {
@@ -776,6 +826,11 @@ impl WorkspaceTab {
             split: false,
             split_ratio: 0.5,
             pane1_query: String::new(),
+            connection_id: None,
+            engine: String::new(),
+            connection_name: String::new(),
+            color: theme::accent_or_default(""),
+            has_custom_color: false,
         }
     }
 
@@ -786,6 +841,42 @@ impl WorkspaceTab {
 
 fn table_tab_id(connection_id: &str, database: &str, schema: &str, table: &str) -> String {
     format!("table:{connection_id}:{database}:{schema}:{table}")
+}
+
+// Badge key + display name + accent color for a saved connection id; default
+// (empty strings, generic accent, has_custom_color false) when unknown — not
+// yet connected, or the connection was deleted since the tab opened.
+#[derive(Clone)]
+struct ConnBadgeInfo {
+    engine: String,
+    name: String,
+    color: slint::Color,
+    has_custom_color: bool,
+}
+
+impl Default for ConnBadgeInfo {
+    fn default() -> Self {
+        Self {
+            engine: String::new(),
+            name: String::new(),
+            color: theme::accent_or_default(""),
+            has_custom_color: false,
+        }
+    }
+}
+
+fn connection_badge_info(store: &rdb_connstore::ConnStore, connection_id: &str) -> ConnBadgeInfo {
+    store
+        .list()
+        .iter()
+        .find(|c| c.id == connection_id)
+        .map(|c| ConnBadgeInfo {
+            engine: AnyDriver::badge(c.engine).to_string(),
+            name: c.name.clone(),
+            color: theme::accent_or_default(c.color.as_deref().unwrap_or("")),
+            has_custom_color: c.color.is_some(),
+        })
+        .unwrap_or_default()
 }
 
 fn workspace_tab_index(tabs: &[WorkspaceTab], active_id: Option<&str>) -> Option<usize> {
@@ -883,6 +974,10 @@ fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&
             kind: tab.kind.clone().into(),
             title: tab.title.clone().into(),
             preview: tab.is_preview(),
+            engine: tab.engine.clone().into(),
+            connection_name: tab.connection_name.clone().into(),
+            color: tab.color,
+            has_custom_color: tab.has_custom_color,
         })
         .collect();
     w.set_tabs(ModelRc::from(Rc::new(VecModel::from(items))));
@@ -899,6 +994,10 @@ fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&
             kind: tab.kind.clone().into(),
             title: tab.title.clone().into(),
             preview: tab.is_preview(),
+            engine: tab.engine.clone().into(),
+            connection_name: tab.connection_name.clone().into(),
+            color: tab.color,
+            has_custom_color: tab.has_custom_color,
         })
         .collect();
     w.set_p1_tabs(ModelRc::from(Rc::new(VecModel::from(p1_items))));
@@ -1326,6 +1425,12 @@ struct PersistedTab {
     pane1_query: String,
     #[serde(default = "default_split_ratio")]
     split_ratio: f32,
+    #[serde(default)]
+    connection_id: Option<String>,
+    #[serde(default)]
+    engine: String,
+    #[serde(default)]
+    connection_name: String,
 }
 
 fn default_split_ratio() -> f32 {
@@ -1364,6 +1469,9 @@ fn save_query_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active: Option<&str>) 
             split: t.split,
             pane1_query: t.pane1_query.clone(),
             split_ratio: t.split_ratio,
+            connection_id: t.connection_id.clone(),
+            engine: t.engine.clone(),
+            connection_name: t.connection_name.clone(),
         })
         .collect();
     let active = active
@@ -1414,6 +1522,9 @@ fn load_query_tabs() -> (Vec<WorkspaceTab>, Option<String>, Option<String>, usiz
             t.split = p.split;
             t.pane1_query = p.pane1_query;
             t.split_ratio = p.split_ratio.clamp(0.2, 0.8);
+            t.connection_id = p.connection_id;
+            t.engine = p.engine;
+            t.connection_name = p.connection_name;
             t
         })
         .collect();
@@ -2133,7 +2244,7 @@ fn restore_grid_state(w: &MainWindow, pane: usize, g: &GroupRuntime, sr: &Stored
 /// "section" header rows. `needle` (lowercase) filters both groups; empty
 /// shows everything. Empty groups drop their header.
 fn build_palette_items(
-    names: &[(String, &'static str)],
+    names: &[(String, &'static str, slint::Color, bool)],
     w: &MainWindow,
     needle: &str,
 ) -> Vec<PaletteItem> {
@@ -2142,20 +2253,24 @@ fn build_palette_items(
         kind: "section".into(),
         sub: SharedString::default(),
         local: false,
+        color: theme::accent_or_default(""),
+        has_custom_color: false,
     };
     let mut items: Vec<PaletteItem> = Vec::new();
-    let conns: Vec<&(String, &'static str)> = names
+    let conns: Vec<&(String, &'static str, slint::Color, bool)> = names
         .iter()
-        .filter(|(n, _)| needle.is_empty() || n.to_lowercase().contains(needle))
+        .filter(|(n, ..)| needle.is_empty() || n.to_lowercase().contains(needle))
         .collect();
     if !conns.is_empty() {
         items.push(section("Connections"));
-        for (n, badge) in conns {
+        for (n, badge, color, has_custom_color) in conns {
             items.push(PaletteItem {
                 label: n.clone().into(),
                 kind: (*badge).into(),
                 sub: SharedString::default(),
                 local: false,
+                color: *color,
+                has_custom_color: *has_custom_color,
             });
         }
     }
@@ -2175,6 +2290,8 @@ fn build_palette_items(
                 kind: "table".into(),
                 sub: SharedString::default(),
                 local: false,
+                color: theme::accent_or_default(""),
+                has_custom_color: false,
             });
         }
     }
@@ -2804,17 +2921,33 @@ fn present_view(
     }
 }
 
-/// Set the result-tab strip labels ("Result 1", …) and active index.
-fn set_result_tabs(w: &MainWindow, pane: usize, count: usize, active: usize) {
-    let labels: Vec<SharedString> = (1..=count)
-        .map(|n| SharedString::from(format!("Result {n}")))
+/// Set the result-tab strip ("Result 1", …, each badged with the connection
+/// that produced it) and active index.
+fn set_result_tabs(w: &MainWindow, pane: usize, results: &[StoredResult], active: usize) {
+    let items: Vec<ResultTabItem> = results
+        .iter()
+        .enumerate()
+        .map(|(n, r)| {
+            let label = if r.connection_name.is_empty() {
+                format!("Result {}", n + 1)
+            } else {
+                format!("{} {}", r.connection_name, n + 1)
+            };
+            ResultTabItem {
+                label: label.into(),
+                engine: r.engine.clone().into(),
+                connection_name: r.connection_name.clone().into(),
+                color: r.color,
+                has_custom_color: r.has_custom_color,
+            }
+        })
         .collect();
-    let labels = ModelRc::from(Rc::new(VecModel::from(labels)));
+    let items = ModelRc::from(Rc::new(VecModel::from(items)));
     if pane == 0 {
-        w.set_result_tabs(labels);
+        w.set_result_tabs(items);
         w.set_active_result(active as i32);
     } else {
-        w.set_p1_result_tabs(labels);
+        w.set_p1_result_tabs(items);
         w.set_p1_active_result(active as i32);
     }
 }
@@ -2907,6 +3040,13 @@ fn main() -> Result<(), slint::PlatformError> {
     let rt = Arc::new(rt);
 
     let window = MainWindow::new()?;
+    let (primary, shift, separator, enter, backspace) = shortcut_labels(std::env::consts::OS);
+    let shortcuts = Shortcut::get(&window);
+    shortcuts.set_primary(primary.into());
+    shortcuts.set_shift(shift.into());
+    shortcuts.set_separator(separator.into());
+    shortcuts.set_enter(enter.into());
+    shortcuts.set_backspace(backspace.into());
 
     // One store for the app lifetime; all CRUD + password ops go through it.
     // RDB_MOCK=1 swaps in a seeded temp store (never the user's real one).
@@ -3292,6 +3432,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     kind: c.kind.clone().into(),
                     sub: c.sub.clone().into(),
                     local: false,
+                    color: theme::accent_or_default(""),
+                    has_custom_color: false,
                 })
                 .collect();
             *panes[pane].completion_ctx.borrow_mut() =
@@ -3463,6 +3605,12 @@ fn main() -> Result<(), slint::PlatformError> {
                             } else {
                                 w.invoke_p1_run();
                             }
+                        }
+                        return true;
+                    }
+                    if text.as_str() == "\\" {
+                        if let Some(w) = weak.upgrade() {
+                            w.invoke_run_new_tab();
                         }
                         return true;
                     }
@@ -3958,6 +4106,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
         let current_connection_id = current_connection_id.clone();
+        let store = store.clone();
         window.on_open_function(move |name| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -3987,16 +4136,17 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_fn_name(name.clone());
             w.set_fn_mode(true);
             w.set_active_table(SharedString::default());
+            let connection_id = current_connection_id.lock().unwrap().clone();
             let id = format!(
                 "function:{}:{}:{}",
-                current_connection_id
-                    .lock()
-                    .unwrap()
-                    .as_deref()
-                    .unwrap_or_default(),
+                connection_id.as_deref().unwrap_or_default(),
                 w.get_schema_name(),
                 name
             );
+            let badge = connection_id
+                .as_deref()
+                .map(|cid| connection_badge_info(&store.borrow(), cid))
+                .unwrap_or_default();
             let mut tabs = workspace_tabs.lock().unwrap();
             if let Some(i) = tabs.iter().position(|tab| tab.id == id) {
                 *active_tab_id.lock().unwrap() = Some(id.clone());
@@ -4020,6 +4170,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     split: false,
                     split_ratio: 0.5,
                     pane1_query: String::new(),
+                    connection_id,
+                    engine: badge.engine,
+                    connection_name: badge.name,
+                    color: badge.color,
+                    has_custom_color: badge.has_custom_color,
                 });
                 *active_tab_id.lock().unwrap() = Some(id.clone());
                 set_workspace_tabs(&w, &tabs, Some(&id));
@@ -4045,6 +4200,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     kind: "database".into(),
                     sub: SharedString::default(),
                     local: false,
+                    color: theme::accent_or_default(""),
+                    has_custom_color: false,
                 })
                 .collect();
             if items.is_empty() {
@@ -4088,6 +4245,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     kind: "database".into(),
                     sub: SharedString::default(),
                     local: false,
+                    color: theme::accent_or_default(""),
+                    has_custom_color: false,
                 })
                 .collect();
             if items.is_empty() {
@@ -4528,6 +4687,8 @@ fn main() -> Result<(), slint::PlatformError> {
                         kind: "group".into(),
                         sub: SharedString::default(),
                         local: false,
+                        color: theme::accent_or_default(""),
+                        has_custom_color: false,
                     });
                     map.push(-1);
                 } else {
@@ -4536,6 +4697,8 @@ fn main() -> Result<(), slint::PlatformError> {
                         kind: r.engine,
                         sub: r.subline,
                         local: r.local,
+                        color: r.color,
+                        has_custom_color: r.has_custom_color,
                     });
                     map.push(r.index);
                 }
@@ -4580,6 +4743,8 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_selected_conn(idx);
             w.set_sel_name(s.name.clone().into());
             w.set_sel_engine(AnyDriver::badge(s.engine).into());
+            w.set_sel_color(theme::accent_or_default(s.color.as_deref().unwrap_or("")));
+            w.set_sel_has_custom_color(s.color.is_some());
             let label = AnyDriver::label(s.engine);
             let sub = match s.group.as_deref().filter(|g| !g.trim().is_empty()) {
                 Some(g) => format!("{label} · grup {}", g.to_lowercase()),
@@ -5007,11 +5172,37 @@ fn main() -> Result<(), slint::PlatformError> {
                 tab.active_result = ai;
             }
             if tab.kind != "function" {
+                let (view_id, view_engine, view_name, view_color, view_has_custom_color) = tab
+                    .results
+                    .get(tab.active_result)
+                    .map(|r| {
+                        (
+                            r.connection_id.clone(),
+                            r.engine.clone(),
+                            r.connection_name.clone(),
+                            r.color,
+                            r.has_custom_color,
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        (
+                            None,
+                            String::new(),
+                            String::new(),
+                            theme::accent_or_default(""),
+                            false,
+                        )
+                    });
                 tab.view = last_view.lock().unwrap().clone().map(|view| StoredResult {
                     view,
                     meta: w.get_results_meta().to_string(),
                     latency: w.get_status_latency().to_string(),
                     grid: GridState::default(),
+                    connection_id: view_id,
+                    engine: view_engine,
+                    connection_name: view_name,
+                    color: view_color,
+                    has_custom_color: view_has_custom_color,
                 });
             }
             // Persist SQL scratch tabs so they survive a restart. Cheap JSON
@@ -5132,7 +5323,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
             *panes[pane].results.lock().unwrap() = tab.results.clone();
             *panes[pane].active_result.lock().unwrap() = tab.active_result;
-            set_result_tabs(w, pane, tab.results.len(), tab.active_result);
+            set_result_tabs(w, pane, &tab.results, tab.active_result);
             let selected = if tab.kind == "sql" {
                 tab.results
                     .get(tab.active_result)
@@ -5217,6 +5408,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let query_number = query_number.clone();
         let save_p1_tab = save_p1_tab.clone();
         let restore_p1_tab = restore_p1_tab.clone();
+        let store = store.clone();
         window.on_new_tab_in_group(move |group| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -5233,10 +5425,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 .clone()
                 .unwrap_or_default();
             let id = format!("query:{connection}:{number}");
+            let badge = connection_badge_info(&store.borrow(), &connection);
             let right_index = {
                 let mut tabs = workspace_tabs.lock().unwrap();
                 let mut tab = WorkspaceTab::sql(id.clone(), number);
                 tab.group = 1;
+                tab.connection_id = (!connection.is_empty()).then(|| connection.clone());
+                tab.engine = badge.engine;
+                tab.connection_name = badge.name;
+                tab.color = badge.color;
+                tab.has_custom_color = badge.has_custom_color;
                 tabs.push(tab);
                 let left = active_tab_id.lock().unwrap().clone();
                 set_workspace_tabs(&w, &tabs, left.as_deref());
@@ -6433,6 +6631,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let rt = rt.clone();
         let current = current.clone();
+        let current_connection_id = current_connection_id.clone();
+        let store = store.clone();
         let last_view = last_view.clone();
         let panes = panes.clone();
         let workspace_tabs = workspace_tabs.clone();
@@ -6488,7 +6688,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let query_console = query_console.clone();
             // ⌘\ set this; consume it so the next plain run replaces again.
             let new_tab = result_new_tab.swap(false, std::sync::atomic::Ordering::SeqCst);
-            // Run Selection over 2+ statements set this; consume it likewise.
+            // A multi-statement run sets this; consume it likewise.
             let split = split_results.swap(false, std::sync::atomic::Ordering::SeqCst);
             // Currently selected database (top dropdown). Mongo line queries with
             // no `use(...)` run against it, matching what the user sees browsing.
@@ -6500,6 +6700,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 // hid it. The console still updates in place when it is open.
                 cur_db = w.get_schema_name().to_string();
             }
+            // Snapshot which connection is running THIS query — not read back
+            // later from `current_connection_id`, since the user can switch the
+            // active connection while the query is in flight.
+            let query_connection_id = current_connection_id.lock().unwrap().clone();
+            let query_badge = query_connection_id
+                .as_deref()
+                .map(|cid| connection_badge_info(&store.borrow(), cid))
+                .unwrap_or_default();
             let started = std::time::Instant::now();
             let jh = rt.spawn(async move {
                 let picked = {
@@ -6627,6 +6835,11 @@ fn main() -> Result<(), slint::PlatformError> {
                                                 ),
                                                 latency: format!("{elapsed_ms} ms"),
                                                 grid: GridState::default(),
+                                                connection_id: query_connection_id.clone(),
+                                                engine: query_badge.engine.clone(),
+                                                connection_name: query_badge.name.clone(),
+                                                color: query_badge.color,
+                                                has_custom_color: query_badge.has_custom_color,
                                             }
                                         })
                                         .collect();
@@ -6646,10 +6859,9 @@ fn main() -> Result<(), slint::PlatformError> {
                                     if !is_active {
                                         return;
                                     }
-                                    let count = all.len();
-                                    *results.lock().unwrap() = all;
                                     *active_result.lock().unwrap() = 0;
-                                    set_result_tabs(&w, pane, count, 0);
+                                    set_result_tabs(&w, pane, &all, 0);
+                                    *results.lock().unwrap() = all;
                                     present_view(
                                         &w,
                                         pane,
@@ -6681,6 +6893,11 @@ fn main() -> Result<(), slint::PlatformError> {
                                     meta: meta.clone(),
                                     latency: latency.clone(),
                                     grid: GridState::default(),
+                                    connection_id: query_connection_id.clone(),
+                                    engine: query_badge.engine.clone(),
+                                    connection_name: query_badge.name.clone(),
+                                    color: query_badge.color,
+                                    has_custom_color: query_badge.has_custom_color,
                                 };
                                 let mut tabs = workspace_tabs.lock().unwrap();
                                 let Some(tab) = tabs.iter_mut().find(|tab| tab.id == target_id)
@@ -6733,14 +6950,9 @@ fn main() -> Result<(), slint::PlatformError> {
                                 *results.lock().unwrap() = tab_results;
                                 *active_result.lock().unwrap() = tab_active;
                                 if is_browse {
-                                    set_result_tabs(&w, pane, 0, 0);
+                                    set_result_tabs(&w, pane, &[], 0);
                                 } else {
-                                    set_result_tabs(
-                                        &w,
-                                        pane,
-                                        results.lock().unwrap().len(),
-                                        tab_active,
-                                    );
+                                    set_result_tabs(&w, pane, &results.lock().unwrap(), tab_active);
                                 }
                                 present_view(
                                     &w,
@@ -6799,6 +7011,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let rt = rt.clone();
         let current = current.clone();
+        let current_connection_id = current_connection_id.clone();
+        let store = store.clone();
         let query_console = query_console.clone();
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
@@ -6856,6 +7070,14 @@ fn main() -> Result<(), slint::PlatformError> {
             set_p_result_status(&w, pane, SharedString::from("streaming…"));
             set_p_results_meta(&w, pane, SharedString::default());
 
+            // Snapshot which connection is running THIS stream, same reasoning
+            // as run_sql: the active connection can change before it finishes.
+            let query_connection_id = current_connection_id.lock().unwrap().clone();
+            let query_badge = query_connection_id
+                .as_deref()
+                .map(|cid| connection_badge_info(&store.borrow(), cid))
+                .unwrap_or_default();
+
             // UI-thread accumulator (for filter/sort/export after the stream) and
             // the live cell model we push each batch into.
             let (ui_tx, ui_rx) = std::sync::mpsc::channel::<StreamMsg>();
@@ -6885,6 +7107,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 let active_group1_tab_id = active_group1_tab_id.clone();
                 let stream_timer_stop = stream_timer.clone();
                 let target_id = target_id.clone();
+                let query_connection_id = query_connection_id.clone();
+                let query_badge = query_badge.clone();
                 timer.start(
                     slint::TimerMode::Repeated,
                     std::time::Duration::from_millis(50),
@@ -6958,6 +7182,11 @@ fn main() -> Result<(), slint::PlatformError> {
                                         meta: meta.clone(),
                                         latency: latency.clone(),
                                         grid: GridState::default(),
+                                        connection_id: query_connection_id.clone(),
+                                        engine: query_badge.engine.clone(),
+                                        connection_name: query_badge.name.clone(),
+                                        color: query_badge.color,
+                                        has_custom_color: query_badge.has_custom_color,
                                     };
                                     let (tab_results, tab_active) = {
                                         let mut tabs = workspace_tabs.lock().unwrap();
@@ -6986,7 +7215,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                         set_result_tabs(
                                             &w,
                                             pane,
-                                            results.lock().unwrap().len(),
+                                            &results.lock().unwrap(),
                                             tab_active,
                                         );
                                         present_view(
@@ -7175,8 +7404,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 if stream {
                     run_stream(0, text);
                 } else {
-                    // 2+ selected statements → one result tab each (same as the
-                    // Run Selection button).
+                    // 2+ statements → one result tab each.
                     if active_tab_kind(&w) != "table" && editor::split_statements(&text).len() >= 2
                     {
                         panes[0]
@@ -7459,8 +7687,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 run_sql(1, text);
             }
         };
-        window.on_p1_run(run_p1.clone());
-        window.on_p1_run_selection(run_p1);
+        window.on_p1_run(run_p1);
     }
 
     // ----- Details panel: copy one field value to the clipboard -----
@@ -7540,56 +7767,6 @@ fn main() -> Result<(), slint::PlatformError> {
                 contents,
                 |w, msg| w.set_results_meta(SharedString::from(msg)),
             );
-        });
-    }
-
-    // ----- Run Selection: selected text, else statement under the cursor -----
-    {
-        let weak = window.as_weak();
-        let run_sql = run_sql.clone();
-        let run_stream = run_stream.clone();
-        let cur_engine = cur_engine.clone();
-        let browse = browse.clone();
-        let ed_state = ed_state.clone();
-        let recent_queries = recent_queries.clone();
-        let history_cap = history_cap.clone();
-        let panes = panes.clone();
-        window.on_run_selection(move || {
-            let stmt = {
-                let ed = ed_state.borrow();
-                ed.selected_text()
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| ed.current_statement())
-            };
-            if !stmt.is_empty() {
-                let mut stream = false;
-                let mut not_table = false;
-                if let Some(w) = weak.upgrade() {
-                    not_table = active_tab_kind(&w) != "table";
-                    if not_table {
-                        w.set_grid_read_only(true);
-                    }
-                    stream = not_table
-                        && browse.lock().unwrap().limit == 0
-                        && cur_engine
-                            .borrow()
-                            .map(|e| is_bare_select(e, &stmt))
-                            .unwrap_or(false);
-                }
-                record_recent(&recent_queries, &stmt, history_cap.get());
-                if stream {
-                    run_stream(0, stmt);
-                } else {
-                    // 2+ selected statements → one result tab each.
-                    if not_table && editor::split_statements(&stmt).len() >= 2 {
-                        panes[0]
-                            .split_results
-                            .store(true, std::sync::atomic::Ordering::SeqCst);
-                    }
-                    run_sql(0, stmt);
-                }
-            }
         });
     }
 
@@ -8054,6 +8231,7 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let run_sql = run_sql.clone();
+        let panes = panes.clone();
         window.on_explain_query(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -8061,7 +8239,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if !w.get_sql_capable() {
                 return;
             }
-            let text = w.get_query_text().to_string();
+            let text = panes[0].ed_state.borrow().current_line().to_string();
             let trimmed = text.trim();
             if trimmed.is_empty() {
                 return;
@@ -8087,7 +8265,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if !w.get_sql_capable() {
                 return;
             }
-            let text = panes[1].ed_state.borrow().text();
+            let text = panes[1].ed_state.borrow().current_line().to_string();
             let trimmed = text.trim();
             if trimmed.is_empty() {
                 return;
@@ -8106,24 +8284,40 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // ----- Format button: tidy the editor SQL in place -----
     {
-        let weak = window.as_weak();
-        let load_editor_text = load_editor_text.clone();
+        let panes = panes.clone();
+        let sync_editor = sync_editor.clone();
         window.on_format_sql(move || {
-            if let Some(w) = weak.upgrade() {
-                let text = w.get_query_text().to_string();
-                if !text.trim().is_empty() {
-                    load_editor_text(0, &sql_format::format(&text));
+            let changed = {
+                let mut ed = panes[0].ed_state.borrow_mut();
+                if ed.current_line().trim().is_empty() {
+                    false
+                } else {
+                    let formatted = sql_format::format_line(ed.current_line());
+                    ed.replace_current_line(&formatted);
+                    true
                 }
+            };
+            if changed {
+                sync_editor(0);
             }
         });
     }
     {
-        let load_editor_text = load_editor_text.clone();
         let panes = panes.clone();
+        let sync_editor = sync_editor.clone();
         window.on_p1_format_sql(move || {
-            let text = panes[1].ed_state.borrow().text();
-            if !text.trim().is_empty() {
-                load_editor_text(1, &sql_format::format(&text));
+            let changed = {
+                let mut ed = panes[1].ed_state.borrow_mut();
+                if ed.current_line().trim().is_empty() {
+                    false
+                } else {
+                    let formatted = sql_format::format_line(ed.current_line());
+                    ed.replace_current_line(&formatted);
+                    true
+                }
+            };
+            if changed {
+                sync_editor(1);
             }
         });
     }
@@ -8204,6 +8398,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let last_view = last_view.clone();
         let displayed_grid = displayed_grid.clone();
         let results = results.clone();
+        let store = store.clone();
         window.on_open_table(move |db, label| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -8260,6 +8455,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 st.col_filters.clear();
             }
             {
+                let badge = connection_badge_info(&store.borrow(), &connection_id);
                 let tab = WorkspaceTab {
                     id: tab_id.clone(),
                     title: label.clone(),
@@ -8277,6 +8473,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     split: false,
                     split_ratio: 0.5,
                     pane1_query: String::new(),
+                    connection_id: (!connection_id.is_empty()).then(|| connection_id.clone()),
+                    engine: badge.engine,
+                    connection_name: badge.name,
+                    color: badge.color,
+                    has_custom_color: badge.has_custom_color,
                 };
                 let active_id = active_tab_id.lock().unwrap().clone();
                 let mut tabs = workspace_tabs.lock().unwrap();
@@ -8298,7 +8499,7 @@ fn main() -> Result<(), slint::PlatformError> {
             *last_view.lock().unwrap() = None;
             *displayed_grid.lock().unwrap() = None;
             results.lock().unwrap().clear();
-            set_result_tabs(&w, 0, 0, 0);
+            set_result_tabs(&w, 0, &[], 0);
             clear_grid(&w, 0);
             run_browse(0);
 
@@ -8392,28 +8593,6 @@ fn main() -> Result<(), slint::PlatformError> {
                 tab.pinned = true;
                 if let Some(w) = weak.upgrade() {
                     set_workspace_tabs(&w, &tabs, Some(&id));
-                }
-            }
-        });
-    }
-
-    {
-        let weak = window.as_weak();
-        let workspace_tabs = workspace_tabs.clone();
-        let active_tab_id = active_tab_id.clone();
-        window.on_pin_tab(move |index| {
-            let active = active_tab_id.lock().unwrap().clone();
-            let mut tabs = workspace_tabs.lock().unwrap();
-            let index = tabs
-                .iter()
-                .enumerate()
-                .filter(|(_, tab)| tab.group == 0)
-                .nth(index.max(0) as usize)
-                .map(|(index, _)| index);
-            if let Some(tab) = index.and_then(|index| tabs.get_mut(index)) {
-                tab.pinned = true;
-                if let Some(w) = weak.upgrade() {
-                    set_workspace_tabs(&w, &tabs, active.as_deref());
                 }
             }
         });
@@ -8930,6 +9109,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let browse = browse.clone();
         let last_view = last_view.clone();
         let load_editor_text = load_editor_text.clone();
+        let store = store.clone();
         window.on_new_tab(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -8942,8 +9122,15 @@ fn main() -> Result<(), slint::PlatformError> {
                 .clone()
                 .unwrap_or_default();
             let id = format!("query:{connection}:{number}");
+            let badge = connection_badge_info(&store.borrow(), &connection);
             let mut tabs = workspace_tabs.lock().unwrap();
-            tabs.push(WorkspaceTab::sql(id.clone(), number));
+            let mut tab = WorkspaceTab::sql(id.clone(), number);
+            tab.connection_id = (!connection.is_empty()).then(|| connection.clone());
+            tab.engine = badge.engine;
+            tab.connection_name = badge.name;
+            tab.color = badge.color;
+            tab.has_custom_color = badge.has_custom_color;
+            tabs.push(tab);
             *active_tab_id.lock().unwrap() = Some(id.clone());
             set_workspace_tabs(&w, &tabs, Some(&id));
             save_query_tabs(&w, &tabs, Some(&id));
@@ -8958,7 +9145,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 ..Default::default()
             };
             *last_view.lock().unwrap() = None;
-            set_result_tabs(&w, 0, 0, 0);
+            set_result_tabs(&w, 0, &[], 0);
             clear_grid(&w, 0);
             w.set_active_pane(0);
             w.set_active_table(SharedString::default());
@@ -8975,11 +9162,11 @@ fn main() -> Result<(), slint::PlatformError> {
         let run_sql = run_sql.clone();
         let recent_queries = recent_queries.clone();
         let history_cap = history_cap.clone();
-        window.on_run_new_tab(move || {
+        let run_new_tab: Rc<dyn Fn(usize)> = Rc::new(move |pane| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let pane = w.get_active_pane().clamp(0, 1) as usize;
+            let pane = pane.min(1);
             let stmt = {
                 let ed = panes[pane].ed_state.borrow();
                 ed.selected_text()
@@ -9000,6 +9187,15 @@ fn main() -> Result<(), slint::PlatformError> {
             record_recent(&recent_queries, &stmt, history_cap.get());
             run_sql(pane, stmt);
         });
+        let weak = window.as_weak();
+        let run_new_tab_active = run_new_tab.clone();
+        window.on_run_new_tab(move || {
+            if let Some(w) = weak.upgrade() {
+                run_new_tab_active(w.get_active_pane().clamp(0, 1) as usize);
+            }
+        });
+        let run_new_tab_p1 = run_new_tab;
+        window.on_p1_run_new_tab(move || run_new_tab_p1(1));
     }
 
     // ----- switch / close result tabs -----
@@ -9085,7 +9281,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let i = i.max(0) as usize;
-            let (count, active, sr) = {
+            let (results_vec, active, sr) = {
                 let mut rv = results.lock().unwrap();
                 if i >= rv.len() {
                     return;
@@ -9095,9 +9291,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 if *ar >= rv.len() {
                     *ar = rv.len().saturating_sub(1);
                 }
-                (rv.len(), *ar, rv.get(*ar).cloned())
+                (rv.clone(), *ar, rv.get(*ar).cloned())
             };
-            set_result_tabs(&w, 0, count, active);
+            set_result_tabs(&w, 0, &results_vec, active);
             if let Some(id) = active_tab_id.lock().unwrap().clone() {
                 if let Some(tab) = workspace_tabs
                     .lock()
@@ -9196,7 +9392,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let i = i.max(0) as usize;
-            let (count, active, sr) = {
+            let (results_vec, active, sr) = {
                 let mut rv = panes[1].results.lock().unwrap();
                 if i >= rv.len() {
                     return;
@@ -9206,9 +9402,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 if *ar >= rv.len() {
                     *ar = rv.len().saturating_sub(1);
                 }
-                (rv.len(), *ar, rv.get(*ar).cloned())
+                (rv.clone(), *ar, rv.get(*ar).cloned())
             };
-            set_result_tabs(&w, 1, count, active);
+            set_result_tabs(&w, 1, &results_vec, active);
             if let Some(id) = active_group1_tab_id.lock().unwrap().clone() {
                 if let Some(tab) = workspace_tabs
                     .lock()
@@ -9461,20 +9657,35 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- row nav (j/k) -----
     {
         let weak = window.as_weak();
-        let displayed_grid = displayed_grid.clone();
+        let panes = panes.clone();
         window.on_move_row(move |delta| {
             if let Some(w) = weak.upgrade() {
-                let n = w.get_grid_col_count();
+                let pane = w.get_active_pane().clamp(0, 1) as usize;
+                let n = if pane == 0 {
+                    w.get_grid_col_count()
+                } else {
+                    w.get_p1_col_count()
+                };
                 let total = if n > 0 {
-                    (w.get_grid_cells().row_count() as i32) / n
+                    let cells = if pane == 0 {
+                        w.get_grid_cells()
+                    } else {
+                        w.get_p1_cells()
+                    };
+                    (cells.row_count() as i32) / n
                 } else {
                     0
                 };
                 if total > 0 {
-                    let next = (w.get_selected_row() + delta).clamp(0, total - 1);
-                    w.set_selected_row(next);
-                    if let Some(g) = displayed_grid.lock().unwrap().as_ref() {
-                        refresh_detail_pretty(&w, 0, g, next);
+                    let selected = if pane == 0 {
+                        w.get_selected_row()
+                    } else {
+                        w.get_p1_selected_row()
+                    };
+                    let next = (selected + delta).clamp(0, total - 1);
+                    set_p_selected_row(&w, pane, next);
+                    if let Some(g) = panes[pane].displayed_grid.lock().unwrap().as_ref() {
+                        refresh_detail_pretty(&w, pane, g, next);
                     }
                 }
             }
@@ -9740,6 +9951,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            // The right split pane is read-only, so a delete key there must
+            // not mutate the editable left-pane buffer.
+            if w.get_active_pane() == 1 {
+                return;
+            }
             if w.get_grid_read_only() {
                 return;
             }
@@ -9899,11 +10115,18 @@ fn main() -> Result<(), slint::PlatformError> {
                 let opening = !w.get_palette_open();
                 w.set_palette_open(opening);
                 if opening {
-                    let names: Vec<(String, &'static str)> = store
+                    let names: Vec<(String, &'static str, slint::Color, bool)> = store
                         .borrow()
                         .list()
                         .iter()
-                        .map(|s| (s.name.clone(), AnyDriver::badge(s.engine)))
+                        .map(|s| {
+                            (
+                                s.name.clone(),
+                                AnyDriver::badge(s.engine),
+                                theme::accent_or_default(s.color.as_deref().unwrap_or("")),
+                                s.color.is_some(),
+                            )
+                        })
                         .collect();
                     let items = build_palette_items(&names, &w, "");
                     w.set_palette_items(ModelRc::from(Rc::new(VecModel::from(items))));
@@ -9918,11 +10141,18 @@ fn main() -> Result<(), slint::PlatformError> {
         let store = store.clone();
         window.on_palette_filter(move |q| {
             if let Some(w) = weak.upgrade() {
-                let names: Vec<(String, &'static str)> = store
+                let names: Vec<(String, &'static str, slint::Color, bool)> = store
                     .borrow()
                     .list()
                     .iter()
-                    .map(|s| (s.name.clone(), AnyDriver::badge(s.engine)))
+                    .map(|s| {
+                        (
+                            s.name.clone(),
+                            AnyDriver::badge(s.engine),
+                            theme::accent_or_default(s.color.as_deref().unwrap_or("")),
+                            s.color.is_some(),
+                        )
+                    })
                     .collect();
                 let items = build_palette_items(&names, &w, &q.to_lowercase());
                 w.set_palette_items(ModelRc::from(Rc::new(VecModel::from(items))));
@@ -10603,6 +10833,16 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // Whether the in-app swap-and-relaunch flow applies to this exact
+    // install; false in mock mode so screenshot tests never depend on the
+    // build machine's binary path. Homebrew/Scoop are never eligible — see
+    // `InstallMethod::self_update_supported`.
+    fn self_update_supported_now() -> bool {
+        !mock::mock_mode()
+            && update::InstallMethod::detect()
+                .self_update_supported(std::env::current_exe().ok().as_deref())
+    }
+
     // ----- update reminder: open the release page / dismiss -----
     {
         window.on_update_open(move || {
@@ -10614,6 +10854,100 @@ fn main() -> Result<(), slint::PlatformError> {
         window.on_update_dismiss(move || {
             if let Some(w) = weak.upgrade() {
                 w.set_update_available(false);
+            }
+        });
+    }
+    // ----- restart to update: idle/error -> download, ready -> swap + relaunch -----
+    {
+        let weak = window.as_weak();
+        let staged_path: Arc<std::sync::Mutex<Option<std::path::PathBuf>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        window.on_restart_to_update(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let stage = w.get_update_stage();
+            match stage.as_str() {
+                "idle" | "error" => {
+                    w.set_update_stage(SharedString::from("downloading"));
+                    w.set_update_progress(0.0);
+                    w.set_update_error(SharedString::default());
+                    let weak2 = weak.clone();
+                    let staged_path = staged_path.clone();
+                    std::thread::spawn(move || {
+                        let last_reported = std::sync::atomic::AtomicI32::new(-1);
+                        let result = self_update::fetch_latest_assets()
+                            .map_err(|e| e.to_string())
+                            .and_then(|assets| {
+                                self_update::pick_asset(&assets).ok_or_else(|| {
+                                    "no matching release asset for this platform".to_string()
+                                })
+                            })
+                            .and_then(|asset| {
+                                let weak3 = weak2.clone();
+                                self_update::download_asset(&asset, |frac| {
+                                    let pct = (frac * 100.0) as i32;
+                                    if pct
+                                        == last_reported
+                                            .swap(pct, std::sync::atomic::Ordering::Relaxed)
+                                    {
+                                        return;
+                                    }
+                                    let weak4 = weak3.clone();
+                                    let _ = slint::invoke_from_event_loop(move || {
+                                        if let Some(w) = weak4.upgrade() {
+                                            w.set_update_progress(pct as f32 / 100.0);
+                                        }
+                                    });
+                                })
+                                .map_err(|e| e.to_string())
+                            });
+                        match result {
+                            Ok(path) => {
+                                *staged_path.lock().unwrap() = Some(path);
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(w) = weak2.upgrade() {
+                                        w.set_update_progress(1.0);
+                                        w.set_update_stage(SharedString::from("ready"));
+                                    }
+                                });
+                            }
+                            Err(e) => {
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(w) = weak2.upgrade() {
+                                        w.set_update_error(SharedString::from(e));
+                                        w.set_update_stage(SharedString::from("error"));
+                                    }
+                                });
+                            }
+                        }
+                    });
+                }
+                "ready" => {
+                    let Some(path) = staged_path.lock().unwrap().clone() else {
+                        w.set_update_stage(SharedString::from("idle"));
+                        return;
+                    };
+                    w.set_update_stage(SharedString::from("restarting"));
+                    let weak2 = weak.clone();
+                    std::thread::spawn(move || match self_update::perform_swap(&path) {
+                        Ok(()) => {
+                            let _ = slint::invoke_from_event_loop(|| {
+                                let _ = slint::quit_event_loop();
+                            });
+                        }
+                        Err(e) => {
+                            let msg = e.to_string();
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(w) = weak2.upgrade() {
+                                    w.set_update_error(SharedString::from(msg));
+                                    w.set_update_stage(SharedString::from("error"));
+                                }
+                            });
+                        }
+                    });
+                }
+                _ => {} // "downloading"/"restarting": ignore repeat clicks
             }
         });
     }
@@ -10651,6 +10985,8 @@ fn main() -> Result<(), slint::PlatformError> {
                                 )));
                                 w.set_update_version(version.into());
                                 w.set_update_hint(hint.into());
+                                w.set_update_self_update_supported(self_update_supported_now());
+                                w.set_update_stage(SharedString::from("idle"));
                                 w.set_update_available(true);
                             }
                             Some(_) => w.set_update_check_status(SharedString::from(format!(
@@ -10701,6 +11037,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     if let Some(w) = weak.upgrade() {
                         w.set_update_version(version.into());
                         w.set_update_hint(hint.into());
+                        w.set_update_self_update_supported(self_update_supported_now());
+                        w.set_update_stage(SharedString::from("idle"));
                         w.set_update_available(true);
                     }
                 });
@@ -10791,6 +11129,9 @@ mod tests {
                     split: true,
                     pane1_query: "select * from orders;".into(),
                     split_ratio: 0.35,
+                    connection_id: Some("c".into()),
+                    engine: "postgres".into(),
+                    connection_name: "prod-db".into(),
                 },
                 PersistedTab {
                     id: "query:c:2".into(),
@@ -10800,6 +11141,9 @@ mod tests {
                     split: false,
                     pane1_query: String::new(),
                     split_ratio: 0.5,
+                    connection_id: None,
+                    engine: String::new(),
+                    connection_name: String::new(),
                 },
             ],
             active: Some("query:c:2".into()),
@@ -10814,6 +11158,9 @@ mod tests {
         assert!(back.tabs[0].split);
         assert_eq!(back.tabs[0].pane1_query, "select * from orders;");
         assert_eq!(back.tabs[0].split_ratio, 0.35);
+        assert_eq!(back.tabs[0].connection_id.as_deref(), Some("c"));
+        assert_eq!(back.tabs[0].engine, "postgres");
+        assert_eq!(back.tabs[0].connection_name, "prod-db");
         assert_eq!(back.active.as_deref(), Some("query:c:2"));
     }
 

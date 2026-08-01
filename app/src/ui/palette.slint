@@ -13,6 +13,9 @@ export struct PaletteItem {
     kind: string,
     sub: string,
     local: bool,
+    // Per-connection custom accent (connection rows only; ignored elsewhere).
+    color: color,
+    has-custom-color: bool,
 }
 
 export component ListModal inherits Rectangle {
@@ -173,6 +176,7 @@ export component ListModal inherits Rectangle {
                                     if it.kind == "postgres" || it.kind == "mysql" || it.kind == "redis" || it.kind == "mongo" || it.kind == "sqlite" || it.kind == "cassandra": DbBadge {
                                         engine: it.kind;
                                         size: 24px;
+                                        fill: it.has-custom-color ? it.color : Tokens.db-color(it.kind);
                                     }
                                 }
 

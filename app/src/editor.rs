@@ -665,6 +665,13 @@ impl EditorState {
         &self.lines[self.line]
     }
 
+    /// Replace only the physical line under the caret and keep the caret in it.
+    pub fn replace_current_line(&mut self, text: &str) {
+        self.lines[self.line] = text.to_string();
+        self.col = self.col.min(text.chars().count());
+        self.sel = None;
+    }
+
     /// Statement under the cursor: the `;`-delimited segment containing the
     /// cursor, ignoring semicolons inside single-quoted literals. Falls back
     /// to the current line when the segment is empty.
@@ -991,6 +998,16 @@ mod tests {
         ed.line = 3; // on `y = 2`, past the commented `;`
         ed.col = 0;
         assert_eq!(ed.current_statement(), text);
+    }
+
+    #[test]
+    fn replace_current_line_preserves_other_lines() {
+        let mut ed = EditorState::from_text("select 1\nselect 2\nselect 3");
+        ed.line = 1;
+        ed.col = 8;
+        ed.replace_current_line("SELECT 2");
+        assert_eq!(ed.text(), "select 1\nSELECT 2\nselect 3");
+        assert_eq!((ed.line, ed.col), (1, 8));
     }
 
     // ----- selection -----
