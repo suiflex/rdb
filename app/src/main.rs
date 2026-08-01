@@ -21,6 +21,7 @@ mod export;
 mod mock;
 mod model;
 mod query_parse;
+mod self_update;
 #[cfg(feature = "mock")]
 mod shot;
 mod sql_format;
@@ -10822,6 +10823,16 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // Whether the in-app swap-and-relaunch flow applies to this exact
+    // install; false in mock mode so screenshot tests never depend on the
+    // build machine's binary path. Homebrew/Scoop are never eligible — see
+    // `InstallMethod::self_update_supported`.
+    fn self_update_supported_now() -> bool {
+        !mock::mock_mode()
+            && update::InstallMethod::detect()
+                .self_update_supported(std::env::current_exe().ok().as_deref())
+    }
+
     // ----- update reminder: open the release page / dismiss -----
     {
         window.on_update_open(move || {
@@ -10833,6 +10844,100 @@ fn main() -> Result<(), slint::PlatformError> {
         window.on_update_dismiss(move || {
             if let Some(w) = weak.upgrade() {
                 w.set_update_available(false);
+            }
+        });
+    }
+    // ----- restart to update: idle/error -> download, ready -> swap + relaunch -----
+    {
+        let weak = window.as_weak();
+        let staged_path: Arc<std::sync::Mutex<Option<std::path::PathBuf>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        window.on_restart_to_update(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let stage = w.get_update_stage();
+            match stage.as_str() {
+                "idle" | "error" => {
+                    w.set_update_stage(SharedString::from("downloading"));
+                    w.set_update_progress(0.0);
+                    w.set_update_error(SharedString::default());
+                    let weak2 = weak.clone();
+                    let staged_path = staged_path.clone();
+                    std::thread::spawn(move || {
+                        let last_reported = std::sync::atomic::AtomicI32::new(-1);
+                        let result = self_update::fetch_latest_assets()
+                            .map_err(|e| e.to_string())
+                            .and_then(|assets| {
+                                self_update::pick_asset(&assets).ok_or_else(|| {
+                                    "no matching release asset for this platform".to_string()
+                                })
+                            })
+                            .and_then(|asset| {
+                                let weak3 = weak2.clone();
+                                self_update::download_asset(&asset, |frac| {
+                                    let pct = (frac * 100.0) as i32;
+                                    if pct
+                                        == last_reported
+                                            .swap(pct, std::sync::atomic::Ordering::Relaxed)
+                                    {
+                                        return;
+                                    }
+                                    let weak4 = weak3.clone();
+                                    let _ = slint::invoke_from_event_loop(move || {
+                                        if let Some(w) = weak4.upgrade() {
+                                            w.set_update_progress(pct as f32 / 100.0);
+                                        }
+                                    });
+                                })
+                                .map_err(|e| e.to_string())
+                            });
+                        match result {
+                            Ok(path) => {
+                                *staged_path.lock().unwrap() = Some(path);
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(w) = weak2.upgrade() {
+                                        w.set_update_progress(1.0);
+                                        w.set_update_stage(SharedString::from("ready"));
+                                    }
+                                });
+                            }
+                            Err(e) => {
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(w) = weak2.upgrade() {
+                                        w.set_update_error(SharedString::from(e));
+                                        w.set_update_stage(SharedString::from("error"));
+                                    }
+                                });
+                            }
+                        }
+                    });
+                }
+                "ready" => {
+                    let Some(path) = staged_path.lock().unwrap().clone() else {
+                        w.set_update_stage(SharedString::from("idle"));
+                        return;
+                    };
+                    w.set_update_stage(SharedString::from("restarting"));
+                    let weak2 = weak.clone();
+                    std::thread::spawn(move || match self_update::perform_swap(&path) {
+                        Ok(()) => {
+                            let _ = slint::invoke_from_event_loop(|| {
+                                let _ = slint::quit_event_loop();
+                            });
+                        }
+                        Err(e) => {
+                            let msg = e.to_string();
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(w) = weak2.upgrade() {
+                                    w.set_update_error(SharedString::from(msg));
+                                    w.set_update_stage(SharedString::from("error"));
+                                }
+                            });
+                        }
+                    });
+                }
+                _ => {} // "downloading"/"restarting": ignore repeat clicks
             }
         });
     }
@@ -10870,6 +10975,8 @@ fn main() -> Result<(), slint::PlatformError> {
                                 )));
                                 w.set_update_version(version.into());
                                 w.set_update_hint(hint.into());
+                                w.set_update_self_update_supported(self_update_supported_now());
+                                w.set_update_stage(SharedString::from("idle"));
                                 w.set_update_available(true);
                             }
                             Some(_) => w.set_update_check_status(SharedString::from(format!(
@@ -10920,6 +11027,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     if let Some(w) = weak.upgrade() {
                         w.set_update_version(version.into());
                         w.set_update_hint(hint.into());
+                        w.set_update_self_update_supported(self_update_supported_now());
+                        w.set_update_stage(SharedString::from("idle"));
                         w.set_update_available(true);
                     }
                 });

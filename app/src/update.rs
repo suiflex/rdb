@@ -49,12 +49,25 @@ impl InstallMethod {
             InstallMethod::Other => "Open the download page",
         }
     }
+
+    /// Whether the in-app "Restart to Update" flow (`self_update.rs`) can run
+    /// for this install. Homebrew/Scoop are never eligible — self-updating a
+    /// package-manager-owned install would fight `brew upgrade`/`scoop
+    /// update`, so those keep the plain hint + release-page link below.
+    /// `Other` still needs `self_update::is_swappable` to confirm this
+    /// specific binary is actually a layout we know how to swap (a real
+    /// `.app` bundle on macOS, a recognized target on Windows) — a dev build
+    /// or unsupported platform falls back to the same hint-only behavior.
+    pub fn self_update_supported(self, exe: Option<&std::path::Path>) -> bool {
+        self == InstallMethod::Other && crate::self_update::is_swappable(exe)
+    }
 }
 
-/// Clicking the banner opens the release page for every install method —
-/// self-updating a brew/scoop install from inside the app would fight the
-/// package manager, and the banner text already shows the exact command.
-/// ponytail: no self-update machinery until asked.
+/// Clicking the banner opens the release page — still the only action for
+/// Homebrew/Scoop (fighting the package manager) and for any `Other` install
+/// this build can't safely swap in place. Installs where
+/// `InstallMethod::self_update_supported` is true get the "Restart to
+/// Update" flow instead (see `self_update.rs`).
 pub fn release_page() -> &'static str {
     RELEASES_PAGE
 }
