@@ -2421,9 +2421,9 @@ callback create-table-commit();
             TouchArea {
                 width: 20px;
                 clicked => { root.update-dismiss(); }
-                Text {
-                    text: "✕";
-                    font-size: 13px;
+                AppIcon {
+                    name: "close";
+                    size: 11px;
                     color: parent.has-hover ? Tokens.text : Tokens.text-dim;
                 }
             }
