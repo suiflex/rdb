@@ -8259,7 +8259,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 if ed.current_line().trim().is_empty() {
                     false
                 } else {
-                    let formatted = sql_format::format(ed.current_line());
+                    let formatted = sql_format::format_line(ed.current_line());
                     ed.replace_current_line(&formatted);
                     true
                 }
@@ -8278,7 +8278,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 if ed.current_line().trim().is_empty() {
                     false
                 } else {
-                    let formatted = sql_format::format(ed.current_line());
+                    let formatted = sql_format::format_line(ed.current_line());
                     ed.replace_current_line(&formatted);
                     true
                 }
