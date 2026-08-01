@@ -703,8 +703,7 @@ struct GroupRuntime {
     results: Arc<std::sync::Mutex<Vec<StoredResult>>>,
     active_result: Arc<std::sync::Mutex<usize>>,
     result_new_tab: Arc<std::sync::atomic::AtomicBool>,
-    // Set by "Run Selection" when the selection holds 2+ statements: the next
-    // run stores one result tab per statement instead of last-wins.
+    // Set when a run contains 2+ statements: keep one result tab per statement.
     split_results: Arc<std::sync::atomic::AtomicBool>,
     displayed_grid: Arc<std::sync::Mutex<Option<model::GridModel>>>,
     browse: Arc<std::sync::Mutex<BrowseState>>,
@@ -6656,7 +6655,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let query_console = query_console.clone();
             // ⌘\ set this; consume it so the next plain run replaces again.
             let new_tab = result_new_tab.swap(false, std::sync::atomic::Ordering::SeqCst);
-            // Run Selection over 2+ statements set this; consume it likewise.
+            // A multi-statement run sets this; consume it likewise.
             let split = split_results.swap(false, std::sync::atomic::Ordering::SeqCst);
             // Currently selected database (top dropdown). Mongo line queries with
             // no `use(...)` run against it, matching what the user sees browsing.
@@ -7372,8 +7371,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 if stream {
                     run_stream(0, text);
                 } else {
-                    // 2+ selected statements → one result tab each (same as the
-                    // Run Selection button).
+                    // 2+ statements → one result tab each.
                     if active_tab_kind(&w) != "table" && editor::split_statements(&text).len() >= 2
                     {
                         panes[0]
@@ -8200,6 +8198,7 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let run_sql = run_sql.clone();
+        let panes = panes.clone();
         window.on_explain_query(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -8207,7 +8206,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if !w.get_sql_capable() {
                 return;
             }
-            let text = w.get_query_text().to_string();
+            let text = panes[0].ed_state.borrow().current_line().to_string();
             let trimmed = text.trim();
             if trimmed.is_empty() {
                 return;
@@ -8233,7 +8232,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if !w.get_sql_capable() {
                 return;
             }
-            let text = panes[1].ed_state.borrow().text();
+            let text = panes[1].ed_state.borrow().current_line().to_string();
             let trimmed = text.trim();
             if trimmed.is_empty() {
                 return;
@@ -8252,24 +8251,26 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // ----- Format button: tidy the editor SQL in place -----
     {
-        let weak = window.as_weak();
-        let load_editor_text = load_editor_text.clone();
+        let panes = panes.clone();
+        let sync_editor = sync_editor.clone();
         window.on_format_sql(move || {
-            if let Some(w) = weak.upgrade() {
-                let text = w.get_query_text().to_string();
-                if !text.trim().is_empty() {
-                    load_editor_text(0, &sql_format::format(&text));
-                }
+            let mut ed = panes[0].ed_state.borrow_mut();
+            if !ed.current_line().trim().is_empty() {
+                let formatted = sql_format::format(ed.current_line());
+                ed.replace_current_line(&formatted);
+                sync_editor(0);
             }
         });
     }
     {
-        let load_editor_text = load_editor_text.clone();
         let panes = panes.clone();
+        let sync_editor = sync_editor.clone();
         window.on_p1_format_sql(move || {
-            let text = panes[1].ed_state.borrow().text();
-            if !text.trim().is_empty() {
-                load_editor_text(1, &sql_format::format(&text));
+            let mut ed = panes[1].ed_state.borrow_mut();
+            if !ed.current_line().trim().is_empty() {
+                let formatted = sql_format::format(ed.current_line());
+                ed.replace_current_line(&formatted);
+                sync_editor(1);
             }
         });
     }
