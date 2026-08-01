@@ -59,6 +59,16 @@ export global Tooltip {
     in-out property <bool> shown;
 }
 
+// Display labels follow the desktop convention while the input handlers use
+// Slint's platform-independent Control/Meta modifier checks.
+export global Shortcut {
+    in-out property <string> primary: "⌘";
+    in-out property <string> shift: "⇧";
+    in-out property <string> separator: "";
+    in-out property <string> enter: "↩";
+    in-out property <string> backspace: "⌫";
+}
+
 // Dropdown select: shows the current value + a ▾ caret so it reads as a
 // picker even when closed, then a click opens a themed option list. Replaces
 // std-widgets ComboBox, which rendered as a blank borderless box in this theme.
@@ -433,7 +443,7 @@ export component SearchCommandPill inherits Rectangle {
         }
         VerticalLayout {
             alignment: center;
-            KeyCap { text: "⌘K"; }
+            KeyCap { text: Shortcut.primary + Shortcut.separator + "K"; }
         }
     }
     ta := TouchArea { clicked => { root.activated(); } }

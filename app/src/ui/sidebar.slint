@@ -3,7 +3,7 @@
 // Reference: design/2-workspace.png (left column).
 import { Tokens } from "tokens.slint";
 import { TreeNode } from "structs.slint";
-import { FilterField, KeyCap, Tooltip } from "components.slint";
+import { FilterField, KeyCap, Tooltip, Shortcut } from "components.slint";
 import { AppIcon } from "icons.slint";
 import { ScrollView, Spinner } from "std-widgets.slint";
 
@@ -108,7 +108,7 @@ export component Sidebar inherits Rectangle {
             fld := FilterField {
                 height: 28px;
                 placeholder: root.mode == 1 ? "Filter queries..." : "Filter items...";
-                trailing-cap: root.mode == 0 ? "⌘P" : "";
+                trailing-cap: root.mode == 0 ? Shortcut.primary + Shortcut.separator + "P" : "";
                 edited(t) => { root.filter-tree(t); }
             }
         }

@@ -46,6 +46,32 @@ fn clamp_font_size(size: i32) -> i32 {
     size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE)
 }
 
+fn shortcut_labels(
+    os: &str,
+) -> (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+) {
+    if os == "macos" {
+        ("⌘", "⇧", "", "↩", "⌫")
+    } else {
+        ("Ctrl", "Shift", "+", "Enter", "Backspace")
+    }
+}
+
+#[test]
+fn shortcut_labels_follow_desktop_conventions() {
+    assert_eq!(shortcut_labels("macos"), ("⌘", "⇧", "", "↩", "⌫"));
+    assert_eq!(
+        shortcut_labels("windows"),
+        ("Ctrl", "Shift", "+", "Enter", "Backspace")
+    );
+    assert_eq!(shortcut_labels("linux").0, "Ctrl");
+}
+
 /// Open a native "save file" dialog and write `contents` to the chosen path.
 ///
 /// macOS: rfd's NSSavePanel would not present from this non-bundled + winit
@@ -3014,6 +3040,13 @@ fn main() -> Result<(), slint::PlatformError> {
     let rt = Arc::new(rt);
 
     let window = MainWindow::new()?;
+    let (primary, shift, separator, enter, backspace) = shortcut_labels(std::env::consts::OS);
+    let shortcuts = Shortcut::get(&window);
+    shortcuts.set_primary(primary.into());
+    shortcuts.set_shift(shift.into());
+    shortcuts.set_separator(separator.into());
+    shortcuts.set_enter(enter.into());
+    shortcuts.set_backspace(backspace.into());
 
     // One store for the app lifetime; all CRUD + password ops go through it.
     // RDB_MOCK=1 swaps in a seeded temp store (never the user's real one).
@@ -9646,20 +9679,35 @@ fn main() -> Result<(), slint::PlatformError> {
     // ----- row nav (j/k) -----
     {
         let weak = window.as_weak();
-        let displayed_grid = displayed_grid.clone();
+        let panes = panes.clone();
         window.on_move_row(move |delta| {
             if let Some(w) = weak.upgrade() {
-                let n = w.get_grid_col_count();
+                let pane = w.get_active_pane().clamp(0, 1) as usize;
+                let n = if pane == 0 {
+                    w.get_grid_col_count()
+                } else {
+                    w.get_p1_col_count()
+                };
                 let total = if n > 0 {
-                    (w.get_grid_cells().row_count() as i32) / n
+                    let cells = if pane == 0 {
+                        w.get_grid_cells()
+                    } else {
+                        w.get_p1_cells()
+                    };
+                    (cells.row_count() as i32) / n
                 } else {
                     0
                 };
                 if total > 0 {
-                    let next = (w.get_selected_row() + delta).clamp(0, total - 1);
-                    w.set_selected_row(next);
-                    if let Some(g) = displayed_grid.lock().unwrap().as_ref() {
-                        refresh_detail_pretty(&w, 0, g, next);
+                    let selected = if pane == 0 {
+                        w.get_selected_row()
+                    } else {
+                        w.get_p1_selected_row()
+                    };
+                    let next = (selected + delta).clamp(0, total - 1);
+                    set_p_selected_row(&w, pane, next);
+                    if let Some(g) = panes[pane].displayed_grid.lock().unwrap().as_ref() {
+                        refresh_detail_pretty(&w, pane, g, next);
                     }
                 }
             }
@@ -9925,6 +9973,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            // The right split pane is read-only, so a delete key there must
+            // not mutate the editable left-pane buffer.
+            if w.get_active_pane() == 1 {
+                return;
+            }
             if w.get_grid_read_only() {
                 return;
             }

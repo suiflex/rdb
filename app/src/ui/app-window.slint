@@ -3,7 +3,7 @@ export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
-    SearchCommandPill, BreadcrumbChip, DbBadge, GlyphButton, IconButton, PrimaryButton, SecondaryButton, SelectBox, TextButton, Toggle, ToggleRow, Tooltip
+    SearchCommandPill, BreadcrumbChip, DbBadge, GlyphButton, IconButton, PrimaryButton, SecondaryButton, SelectBox, TextButton, Toggle, ToggleRow, Tooltip, Shortcut
 } from "components.slint";
 import { NavCluster } from "nav-cluster.slint";
 import { ConnPicker } from "picker.slint";
@@ -650,7 +650,10 @@ callback create-table-commit();
                     return accept;
                 }
                 if (e.text == "r") {
-                    root.refresh-result();
+                    if (root.active-pane == 1) {
+                        if (root.p1-active-table != "") { root.p1-refresh-page(); }
+                        else { root.p1-run(); }
+                    } else { root.refresh-result(); }
                     return accept;
                 }
                 if (e.text == "f") {
@@ -677,39 +680,39 @@ callback create-table-commit();
                     return accept;
                 }
                 if (e.text == "1") {
-                    root.select-tab(0);
+                    if (root.active-pane == 1) { root.select-p1-tab(0); } else { root.select-tab(0); }
                     return accept;
                 }
                 if (e.text == "2") {
-                    root.select-tab(1);
+                    if (root.active-pane == 1) { root.select-p1-tab(1); } else { root.select-tab(1); }
                     return accept;
                 }
                 if (e.text == "3") {
-                    root.select-tab(2);
+                    if (root.active-pane == 1) { root.select-p1-tab(2); } else { root.select-tab(2); }
                     return accept;
                 }
                 if (e.text == "4") {
-                    root.select-tab(3);
+                    if (root.active-pane == 1) { root.select-p1-tab(3); } else { root.select-tab(3); }
                     return accept;
                 }
                 if (e.text == "5") {
-                    root.select-tab(4);
+                    if (root.active-pane == 1) { root.select-p1-tab(4); } else { root.select-tab(4); }
                     return accept;
                 }
                 if (e.text == "6") {
-                    root.select-tab(5);
+                    if (root.active-pane == 1) { root.select-p1-tab(5); } else { root.select-tab(5); }
                     return accept;
                 }
                 if (e.text == "7") {
-                    root.select-tab(6);
+                    if (root.active-pane == 1) { root.select-p1-tab(6); } else { root.select-tab(6); }
                     return accept;
                 }
                 if (e.text == "8") {
-                    root.select-tab(7);
+                    if (root.active-pane == 1) { root.select-p1-tab(7); } else { root.select-tab(7); }
                     return accept;
                 }
                 if (e.text == "9") {
-                    root.select-tab(8);
+                    if (root.active-pane == 1) { root.select-p1-tab(8); } else { root.select-tab(8); }
                     return accept;
                 }
             }
@@ -867,7 +870,7 @@ callback create-table-commit();
                         alignment: center;
                         SecondaryButton {
                             text: "SQL";
-                            tooltip: "New query tab  ⌘T";
+                            tooltip: "New query tab  " + Shortcut.primary + Shortcut.separator + "T";
                             height: 28px;
                             clicked => { root.new-tab(); }
                         }
@@ -1773,7 +1776,7 @@ callback create-table-commit();
                                 horizontal-alignment: center;
                             }
                             Text {
-                                text: "Choose a table, or press ⌘T to start a query";
+                            text: "Choose a table, or press " + Shortcut.primary + Shortcut.separator + "T to start a query";
                                 color: Tokens.text-dim;
                                 font-size: Tokens.font-sm;
                                 horizontal-alignment: center;
@@ -2739,22 +2742,22 @@ callback create-table-commit();
                 }
 
                 for row in [
-                    { k: "⌘K", a: "Command palette" },
-                    { k: "⌘T", a: "New tab" },
-                    { k: "⌘W", a: "Close tab" },
-                    { k: "⌘1–9", a: "Switch to tab" },
-                    { k: "⌘↩", a: "Run query" },
-                    { k: "⌘\\", a: "Run in new tab" },
-                    { k: "⌘S", a: "Save / commit edits" },
-                    { k: "⌘R", a: "Refresh result" },
-                    { k: "⌘⇧R", a: "Reconnect" },
-                    { k: "⌘+ / ⌘-", a: "Zoom in / out" },
-                    { k: "⌘F", a: "Find" },
-                    { k: "⌘O", a: "Open connection" },
-                    { k: "⌘⇧O", a: "Open database" },
-                    { k: "⌘P", a: "Filter sidebar" },
+                    { k: Shortcut.primary + Shortcut.separator + "K", a: "Command palette" },
+                    { k: Shortcut.primary + Shortcut.separator + "T", a: "New tab" },
+                    { k: Shortcut.primary + Shortcut.separator + "W", a: "Close tab" },
+                    { k: Shortcut.primary + Shortcut.separator + "1–9", a: "Switch to tab" },
+                    { k: Shortcut.primary + Shortcut.separator + Shortcut.enter, a: "Run query" },
+                    { k: Shortcut.primary + Shortcut.separator + "\\", a: "Run in new tab" },
+                    { k: Shortcut.primary + Shortcut.separator + "S", a: "Save / commit edits" },
+                    { k: Shortcut.primary + Shortcut.separator + "R", a: "Refresh result" },
+                    { k: Shortcut.primary + Shortcut.separator + Shortcut.shift + Shortcut.separator + "R", a: "Reconnect" },
+                    { k: Shortcut.primary + Shortcut.separator + "+ / " + Shortcut.primary + Shortcut.separator + "-", a: "Zoom in / out" },
+                    { k: Shortcut.primary + Shortcut.separator + "F", a: "Find" },
+                    { k: Shortcut.primary + Shortcut.separator + "O", a: "Open connection" },
+                    { k: Shortcut.primary + Shortcut.separator + Shortcut.shift + Shortcut.separator + "O", a: "Open database" },
+                    { k: Shortcut.primary + Shortcut.separator + "P", a: "Filter sidebar" },
                     { k: "J / K", a: "Grid: next / previous row" },
-                    { k: "⌫ / Del", a: "Grid: mark row for deletion" },
+                    { k: Shortcut.backspace + " / Del", a: "Grid: mark row for deletion" },
                     { k: "Esc", a: "Close dialog" },
                 ]: HorizontalLayout {
                     spacing: Tokens.sp3;

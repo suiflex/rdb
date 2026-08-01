@@ -9,7 +9,7 @@ import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow, DocRow, Re
 import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "palette.slint";
-import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton, FilterField, UnderlineSegment, DbBadge, Tooltip } from "components.slint";
+import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton, FilterField, UnderlineSegment, DbBadge, Tooltip, Shortcut } from "components.slint";
 import { ScrollView, TextEdit, ComboBox } from "std-widgets.slint";
 import { AppIcon } from "icons.slint";
 
@@ -351,8 +351,8 @@ export component QueryPane inherits Rectangle {
                     VerticalLayout {
                         alignment: center;
                         PrimaryButton {
-                            text: root.query-running ? "Running…" : "▶ Run  ⌘⏎";
-                            tooltip: "Run selected SQL or the current statement  ⌘↩";
+                            text: root.query-running ? "Running…" : "▶ Run  " + Shortcut.primary + Shortcut.separator + Shortcut.enter;
+                            tooltip: "Run selected SQL or the current statement  " + Shortcut.primary + Shortcut.separator + Shortcut.enter;
                             height: 28px;
                             enabled: !root.query-running;
                             clicked => { root.run(); }
@@ -361,8 +361,8 @@ export component QueryPane inherits Rectangle {
                     VerticalLayout {
                         alignment: center;
                         SecondaryButton {
-                            text: "Run New  ⌘\\";
-                            tooltip: "Run the current statement in a new result tab  ⌘\\";
+                            text: "Run New  " + Shortcut.primary + Shortcut.separator + "\\";
+                            tooltip: "Run the current statement in a new result tab  " + Shortcut.primary + Shortcut.separator + "\\";
                             height: 28px;
                             clicked => { root.run-new-tab(); }
                         }
@@ -1170,7 +1170,7 @@ export component QueryPane inherits Rectangle {
                         vertical-alignment: center;
                     }
                     Text {
-                        text: "⌘C to copy · Esc to close";
+                        text: Shortcut.primary + Shortcut.separator + "C to copy · Esc to close";
                         color: Tokens.text-faint;
                         font-size: Tokens.font-xs;
                         vertical-alignment: center;

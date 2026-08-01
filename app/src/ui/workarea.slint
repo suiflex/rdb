@@ -7,7 +7,7 @@ import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "palette.slint";
 import {
-    UnderlineSegment, SecondaryButton, PrimaryButton, TextButton, ExportButton, FilterField, KeyCap
+    UnderlineSegment, SecondaryButton, PrimaryButton, TextButton, ExportButton, FilterField, KeyCap, Shortcut
 } from "components.slint";
 import { ScrollView, ComboBox } from "std-widgets.slint";
 import { AppIcon } from "icons.slint";
@@ -616,7 +616,7 @@ export component WorkArea inherits Rectangle {
                 TextButton { text: "Discard"; clicked => { root.discard-edits(); } }
                 VerticalLayout {
                     alignment: center;
-                    PrimaryButton { text: "Commit  ⌘S"; height: 22px; clicked => { root.commit-edits(); } }
+                    PrimaryButton { text: "Commit  " + Shortcut.primary + Shortcut.separator + "S"; height: 22px; clicked => { root.commit-edits(); } }
                 }
             }
         }

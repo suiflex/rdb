@@ -4,6 +4,7 @@
 import { Tokens } from "tokens.slint";
 import { GridColumn, GridCell } from "structs.slint";
 import { ComboBox, DatePickerPopup, ScrollView, TextEdit } from "std-widgets.slint";
+import { Shortcut } from "components.slint";
 
 export component TabularGrid inherits Rectangle {
     in property <[GridColumn]> columns;
@@ -509,7 +510,7 @@ export component TabularGrid inherits Rectangle {
                         vertical-alignment: center;
                     }
                     Text {
-                        text: "⌘C to copy · Esc to close";
+                        text: Shortcut.primary + Shortcut.separator + "C to copy · Esc to close";
                         color: Tokens.text-faint;
                         font-size: Tokens.font-xs;
                         vertical-alignment: center;
