@@ -352,6 +352,7 @@ export component QueryPane inherits Rectangle {
                         alignment: center;
                         PrimaryButton {
                             text: root.query-running ? "Running…" : "▶ Run  ⌘⏎";
+                            tooltip: "Run selected SQL or the current statement  ⌘↩";
                             height: 28px;
                             enabled: !root.query-running;
                             clicked => { root.run(); }
@@ -361,6 +362,7 @@ export component QueryPane inherits Rectangle {
                         alignment: center;
                         SecondaryButton {
                             text: "Run New  ⌘\\";
+                            tooltip: "Run the current statement in a new result tab  ⌘\\";
                             height: 28px;
                             clicked => { root.run-new-tab(); }
                         }
@@ -368,13 +370,19 @@ export component QueryPane inherits Rectangle {
                     VerticalLayout {
                         alignment: center;
                         visible: root.sql-capable;
-                        SecondaryButton { text: "Format"; height: 28px; clicked => { root.format-sql(); } }
+                        SecondaryButton {
+                            text: "Format";
+                            tooltip: "Format the active editor line";
+                            height: 28px;
+                            clicked => { root.format-sql(); }
+                        }
                     }
                     VerticalLayout {
                         alignment: center;
                         visible: root.sql-capable;
                         SecondaryButton {
                             text: "Explain";
+                            tooltip: "Run EXPLAIN for the active editor line";
                             height: 28px;
                             clicked => { root.explain-query(); }
                         }

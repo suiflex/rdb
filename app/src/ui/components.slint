@@ -181,6 +181,7 @@ export component OutlineChip inherits Rectangle {
 export component PrimaryButton inherits Rectangle {
     in property <string> text;
     in property <bool> enabled: true;
+    in property <string> tooltip;            // optional hover label
     callback clicked;
     height: Tokens.button-h;
     width: label.preferred-width + 2 * Tokens.sp4;
@@ -197,6 +198,16 @@ export component PrimaryButton inherits Rectangle {
     ta := TouchArea {
         enabled: root.enabled;
         clicked => { root.clicked(); }
+        changed has-hover => {
+            if self.has-hover && root.tooltip != "" {
+                Tooltip.text = root.tooltip;
+                Tooltip.x = root.absolute-position.x + root.width / 2;
+                Tooltip.y = root.absolute-position.y + root.height + 4px;
+                Tooltip.shown = true;
+            } else if Tooltip.text == root.tooltip {
+                Tooltip.shown = false;
+            }
+        }
     }
 }
 
