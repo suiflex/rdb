@@ -42,7 +42,7 @@
 
 * **app:** v0.29.0 prep — split-pane, editor, tabs, mongo fixes ([#164](https://github.com/suiflex/rdb/issues/164)) ([be408f6](https://github.com/suiflex/rdb/commit/be408f6690a8af9334e759e1af5462b286d01367))
 
-## [0.30.0](https://github.com/suiflex/rdb/compare/v0.29.0...v0.30.0) (2026-08-01)
+## RDB: [0.30.0](https://github.com/suiflex/rdb/compare/v0.29.0...v0.30.0) (2026-08-01)
 
 
 ### App Features
