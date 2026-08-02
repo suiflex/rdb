@@ -132,7 +132,7 @@ export component ConnForm inherits Rectangle {
             HorizontalLayout {
                 height: 30px;
                 spacing: Tokens.sp2;
-                FormLabel { text: "Environment"; }
+                FormLabel { text: "ENV"; }
                 HorizontalLayout {
                     spacing: Tokens.sp1;
                     for name[i] in EnvSwatches.names: Rectangle {
@@ -163,7 +163,11 @@ export component ConnForm inherits Rectangle {
                     horizontal-stretch: 1;
                     min-width: 0px;
                     text <=> root.f-import-url;
-                    placeholder: "postgresql://user:pass@host:5432/db?sslmode=require";
+                    placeholder: root.f-engine == "MySQL" ? "mysql://user:pass@host:3306/db"
+                        : root.f-engine == "Redis" ? "redis://user:pass@host:6379"
+                        : root.f-engine == "MongoDB" ? "mongodb://user:pass@host:27017/db"
+                        : root.f-engine == "Cassandra" ? "cassandra://user:pass@host:9042/keyspace"
+                        : "postgresql://user:pass@host:5432/db?sslmode=require";
                     accepted => { root.import-url(); }
                 }
                 SecondaryButton {
