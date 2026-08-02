@@ -3,7 +3,7 @@
 // Reference: design/2-workspace.png (left column).
 import { Tokens } from "tokens.slint";
 import { TreeNode } from "structs.slint";
-import { FilterField, KeyCap, Tooltip, Shortcut } from "components.slint";
+import { DbBadge, FilterField, KeyCap, Tooltip, Shortcut } from "components.slint";
 import { AppIcon } from "icons.slint";
 import { ScrollView, Spinner } from "std-widgets.slint";
 
@@ -313,15 +313,13 @@ export component Sidebar inherits Rectangle {
                             overflow: elide;
                         }
 
-                        // Connection name a History row ran against.
-                        if node.kind == "recent" && node.sub != "": Text {
-                            width: 72px;
-                            text: node.sub;
-                            color: is-active ? Tokens.on-tint.with-alpha(0.75) : Tokens.text-faint;
-                            font-size: Tokens.font-xs;
-                            horizontal-alignment: right;
-                            vertical-alignment: center;
-                            overflow: elide;
+                        // Driver badge for the engine a History row ran against.
+                        if node.kind == "recent" && node.sub != "": Rectangle {
+                            width: 16px;
+                            VerticalLayout {
+                                alignment: center;
+                                DbBadge { engine: node.sub; size: 14px; }
+                            }
                         }
 
                         // ▶: re-run this entry directly (editor untouched).

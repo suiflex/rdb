@@ -1198,10 +1198,12 @@ struct HistoryEntry {
     sql: String,
     /// Unix seconds; 0 means unknown (migrated from the pre-timestamp format).
     ran_at: u64,
-    /// Snapshot of the connection name at run time (not a live reference —
-    /// renaming/deleting the connection later doesn't touch past entries).
+    /// Driver badge key at run time (`AnyDriver::badge`, e.g. "postgres") —
+    /// tagging by engine reads better than by connection name, since many
+    /// connections share the same driver and the tag stays meaningful even
+    /// if the connection is later renamed or deleted.
     #[serde(default)]
-    conn_name: Option<String>,
+    engine: Option<String>,
 }
 
 /// Parse persisted history JSON, falling back to the pre-timestamp
@@ -1217,7 +1219,7 @@ fn parse_recent(raw: &str) -> Vec<HistoryEntry> {
         .map(|sql| HistoryEntry {
             sql,
             ran_at: 0,
-            conn_name: None,
+            engine: None,
         })
         .collect()
 }
@@ -1376,13 +1378,13 @@ fn strip_sql_comments(text: &str) -> String {
 /// Record an executed query at the head of the history (dedupe, cap
 /// `cap`) and persist it, except in mock mode. Comment-only text is
 /// dropped and comments are stripped so history keeps only runnable SQL.
-/// Re-running the same SQL updates its recorded time/connection and floats
+/// Re-running the same SQL updates its recorded time/engine and floats
 /// it back to the top rather than adding a second entry.
 fn record_recent(
     list: &RefCell<Vec<HistoryEntry>>,
     text: &str,
     cap: usize,
-    conn_name: Option<String>,
+    engine: Option<String>,
 ) {
     let t = strip_sql_comments(text);
     let t = t.trim();
@@ -1400,23 +1402,13 @@ fn record_recent(
         HistoryEntry {
             sql: t.to_string(),
             ran_at,
-            conn_name,
+            engine,
         },
     );
     v.truncate(cap.max(1));
     if !mock::mock_mode() {
         save_recent(&v);
     }
-}
-
-/// Snapshot the currently-connected connection's name, for stamping onto a
-/// new history entry. `None` if nothing is connected or it was deleted.
-fn resolve_conn_name(
-    current_connection_id: &std::sync::Mutex<Option<String>>,
-    store: &RefCell<rdb_connstore::ConnStore>,
-) -> Option<String> {
-    let id = current_connection_id.lock().unwrap().clone()?;
-    store.borrow().get(&id).map(|sc| sc.name.clone())
 }
 
 fn recent_preview(text: &str) -> String {
@@ -1481,11 +1473,11 @@ mod record_recent_tests {
             &list,
             "-- pick emiten\nselect * from emiten; -- trailing",
             RECENT_CAP,
-            Some("Prod".into()),
+            Some("postgres".into()),
         );
         let entries = list.borrow();
         assert_eq!(entries[0].sql, "select * from emiten;");
-        assert_eq!(entries[0].conn_name.as_deref(), Some("Prod"));
+        assert_eq!(entries[0].engine.as_deref(), Some("postgres"));
     }
 
     #[test]
@@ -1503,15 +1495,15 @@ mod record_recent_tests {
         let entries = parse_recent(r#"["select 1"]"#);
         assert_eq!(entries[0].sql, "select 1");
         assert_eq!(entries[0].ran_at, 0);
-        assert!(entries[0].conn_name.is_none());
+        assert!(entries[0].engine.is_none());
     }
 
     #[test]
     fn parse_recent_reads_current_format() {
-        let entries = parse_recent(r#"[{"sql":"select 2","ran_at":100,"conn_name":"Prod"}]"#);
+        let entries = parse_recent(r#"[{"sql":"select 2","ran_at":100,"engine":"mysql"}]"#);
         assert_eq!(entries[0].sql, "select 2");
         assert_eq!(entries[0].ran_at, 100);
-        assert_eq!(entries[0].conn_name.as_deref(), Some("Prod"));
+        assert_eq!(entries[0].engine.as_deref(), Some("mysql"));
     }
 
     #[test]
@@ -1528,7 +1520,7 @@ mod record_recent_tests {
         let entry = |sql: &str| HistoryEntry {
             sql: sql.into(),
             ran_at: 0,
-            conn_name: None,
+            engine: None,
         };
         let list = RefCell::new(vec![entry("first"), entry("second")]);
         assert!(remove_recent(&list, 0));
@@ -4128,17 +4120,17 @@ fn main() -> Result<(), slint::PlatformError> {
                 HistoryEntry {
                     sql: "SELECT * FROM emiten LIMIT 100;".into(),
                     ran_at: now,
-                    conn_name: Some("Local PG".into()),
+                    engine: Some("postgres".into()),
                 },
                 HistoryEntry {
                     sql: "INSERT INTO sectors (name) VALUES ('Technology');".into(),
                     ran_at: now,
-                    conn_name: Some("Local PG".into()),
+                    engine: Some("postgres".into()),
                 },
                 HistoryEntry {
                     sql: "UPDATE emiten SET updated_at = now() WHERE code = '93344';".into(),
                     ran_at: now,
-                    conn_name: Some("Local PG".into()),
+                    engine: Some("postgres".into()),
                 },
             ]
         } else {
@@ -4234,7 +4226,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             expanded: false,
                             db: SharedString::from(preview),
                             count: i as i32,
-                            sub: recent[i].conn_name.clone().unwrap_or_default().into(),
+                            sub: recent[i].engine.clone().unwrap_or_default().into(),
                         });
                     }
                 }
@@ -7578,8 +7570,6 @@ fn main() -> Result<(), slint::PlatformError> {
         let history_cap = history_cap.clone();
         let rebuild_query_tree = rebuild_query_tree.clone();
         let panes = panes.clone();
-        let store = store.clone();
-        let current_connection_id = current_connection_id.clone();
         window.on_run_query(move || {
             if let Some(w) = weak.upgrade() {
                 // ⌘⏎ / Run: the highlighted selection, else just the statement
@@ -7599,8 +7589,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     &recent_queries,
                     &text,
                     history_cap.get(),
-                    resolve_conn_name(&current_connection_id, &store),
+                    cur_engine.borrow().map(AnyDriver::badge).map(String::from),
                 );
+                if w.get_sidebar_mode() == 2 {
+                    rebuild_query_tree("");
+                }
                 // A manual query result has no row identity — never editable.
                 // (The browse path re-enables editing after its PK fetch.)
                 if active_tab_kind(&w) != "table" {
@@ -7880,8 +7873,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let recent_queries = recent_queries.clone();
         let history_cap = history_cap.clone();
-        let store = store.clone();
-        let current_connection_id = current_connection_id.clone();
+        let rebuild_query_tree = rebuild_query_tree.clone();
         let run_p1 = move || {
             let text = {
                 let ed = panes[1].ed_state.borrow();
@@ -7897,8 +7889,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 &recent_queries,
                 &text,
                 history_cap.get(),
-                resolve_conn_name(&current_connection_id, &store),
+                cur_engine.borrow().map(AnyDriver::badge).map(String::from),
             );
+            if weak.upgrade().is_some_and(|w| w.get_sidebar_mode() == 2) {
+                rebuild_query_tree("");
+            }
             let stream = weak
                 .upgrade()
                 .map(|w| {
@@ -9406,8 +9401,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let run_sql = run_sql.clone();
         let recent_queries = recent_queries.clone();
         let history_cap = history_cap.clone();
-        let store = store.clone();
-        let current_connection_id = current_connection_id.clone();
+        let cur_engine = cur_engine.clone();
+        let rebuild_query_tree = rebuild_query_tree.clone();
         let run_new_tab: Rc<dyn Fn(usize)> = Rc::new(move |pane| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -9434,8 +9429,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 &recent_queries,
                 &stmt,
                 history_cap.get(),
-                resolve_conn_name(&current_connection_id, &store),
+                cur_engine.borrow().map(AnyDriver::badge).map(String::from),
             );
+            if w.get_sidebar_mode() == 2 {
+                rebuild_query_tree("");
+            }
             run_sql(pane, stmt);
         });
         let weak = window.as_weak();
