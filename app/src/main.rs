@@ -365,6 +365,7 @@ fn schema_display_rows(
             } else {
                 container_count
             },
+            sub: SharedString::default(),
         });
         if !cat_open {
             continue;
@@ -381,6 +382,7 @@ fn schema_display_rows(
                     expanded: false,
                     db: SharedString::default(),
                     count: 0,
+                    sub: SharedString::default(),
                 });
             }
             continue;
@@ -400,6 +402,7 @@ fn schema_display_rows(
                     expanded: false,
                     db: SharedString::default(),
                     count: 0,
+                    sub: SharedString::default(),
                 });
             } else if is_container {
                 if !matches(&n.label) {
@@ -414,6 +417,7 @@ fn schema_display_rows(
                     expanded: show_fields,
                     db: SharedString::default(),
                     count: 0,
+                    sub: SharedString::default(),
                 });
             } else if n.kind != "function" {
                 // database row: categories replace it; reset field visibility
@@ -471,6 +475,7 @@ fn nested_display_rows(
             expanded: db_open,
             db: db.clone().into(),
             count: leaves.len() as i32,
+            sub: SharedString::default(),
         });
         if !db_open {
             continue;
@@ -491,6 +496,7 @@ fn nested_display_rows(
                 expanded: false,
                 db: db.clone().into(),
                 count: 0,
+                sub: SharedString::default(),
             });
             continue;
         }
@@ -502,6 +508,7 @@ fn nested_display_rows(
                 expanded: false,
                 db: db.clone().into(),
                 count: 0,
+                sub: SharedString::default(),
             });
         }
     }
@@ -1185,19 +1192,49 @@ fn clip_get() -> Option<String> {
 /// Max recent queries kept, in memory and on disk.
 const RECENT_CAP: usize = 50;
 
+/// One run of a query, kept for the History sidebar tab.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+struct HistoryEntry {
+    sql: String,
+    /// Unix seconds; 0 means unknown (migrated from the pre-timestamp format).
+    ran_at: u64,
+    /// Snapshot of the connection name at run time (not a live reference —
+    /// renaming/deleting the connection later doesn't touch past entries).
+    #[serde(default)]
+    conn_name: Option<String>,
+}
+
+/// Parse persisted history JSON, falling back to the pre-timestamp
+/// plain-string-array format so existing `recent_queries.json` files keep
+/// loading (migrated entries get `ran_at: 0`).
+fn parse_recent(raw: &str) -> Vec<HistoryEntry> {
+    if let Ok(entries) = serde_json::from_str::<Vec<HistoryEntry>>(raw) {
+        return entries;
+    }
+    serde_json::from_str::<Vec<String>>(raw)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|sql| HistoryEntry {
+            sql,
+            ran_at: 0,
+            conn_name: None,
+        })
+        .collect()
+}
+
 /// Load persisted recent-query history; empty on a missing/unreadable file.
-fn load_recent() -> Vec<String> {
+fn load_recent() -> Vec<HistoryEntry> {
     let Ok(path) = rdb_connstore::ConnStore::recent_queries_path() else {
         return Vec::new();
     };
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    parse_recent(&raw)
 }
 
 /// Persist the recent-query history (best-effort; I/O errors are ignored).
-fn save_recent(list: &[String]) {
+fn save_recent(list: &[HistoryEntry]) {
     let Ok(path) = rdb_connstore::ConnStore::recent_queries_path() else {
         return;
     };
@@ -1206,6 +1243,29 @@ fn save_recent(list: &[String]) {
     }
     if let Ok(json) = serde_json::to_string_pretty(list) {
         let _ = std::fs::write(path, json);
+    }
+}
+
+/// "Today" / "Yesterday" / "Mon D, YYYY" bucket label for a history entry,
+/// in local time. `ran_at == 0` (pre-migration entries) always bucket last.
+fn history_date_label(ran_at: u64, now: u64) -> String {
+    use chrono::TimeZone;
+    if ran_at == 0 {
+        return "Earlier".into();
+    }
+    let day = chrono::Local
+        .timestamp_opt(ran_at as i64, 0)
+        .single()
+        .map(|dt| dt.date_naive());
+    let today = chrono::Local
+        .timestamp_opt(now as i64, 0)
+        .single()
+        .map(|dt| dt.date_naive());
+    match (day, today) {
+        (Some(d), Some(t)) if d == t => "Today".into(),
+        (Some(d), Some(t)) if Some(d) == t.pred_opt() => "Yesterday".into(),
+        (Some(d), _) => d.format("%b %-d, %Y").to_string(),
+        _ => "Earlier".into(),
     }
 }
 
@@ -1316,19 +1376,47 @@ fn strip_sql_comments(text: &str) -> String {
 /// Record an executed query at the head of the history (dedupe, cap
 /// `cap`) and persist it, except in mock mode. Comment-only text is
 /// dropped and comments are stripped so history keeps only runnable SQL.
-fn record_recent(list: &RefCell<Vec<String>>, text: &str, cap: usize) {
+/// Re-running the same SQL updates its recorded time/connection and floats
+/// it back to the top rather than adding a second entry.
+fn record_recent(
+    list: &RefCell<Vec<HistoryEntry>>,
+    text: &str,
+    cap: usize,
+    conn_name: Option<String>,
+) {
     let t = strip_sql_comments(text);
     let t = t.trim();
     if t.is_empty() {
         return;
     }
+    let ran_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let mut v = list.borrow_mut();
-    v.retain(|s| s != t);
-    v.insert(0, t.to_string());
+    v.retain(|e| e.sql != t);
+    v.insert(
+        0,
+        HistoryEntry {
+            sql: t.to_string(),
+            ran_at,
+            conn_name,
+        },
+    );
     v.truncate(cap.max(1));
     if !mock::mock_mode() {
         save_recent(&v);
     }
+}
+
+/// Snapshot the currently-connected connection's name, for stamping onto a
+/// new history entry. `None` if nothing is connected or it was deleted.
+fn resolve_conn_name(
+    current_connection_id: &std::sync::Mutex<Option<String>>,
+    store: &RefCell<rdb_connstore::ConnStore>,
+) -> Option<String> {
+    let id = current_connection_id.lock().unwrap().clone()?;
+    store.borrow().get(&id).map(|sc| sc.name.clone())
 }
 
 fn recent_preview(text: &str) -> String {
@@ -1340,7 +1428,7 @@ fn recent_preview(text: &str) -> String {
     out
 }
 
-fn remove_recent(list: &RefCell<Vec<String>>, index: usize) -> bool {
+fn remove_recent(list: &RefCell<Vec<HistoryEntry>>, index: usize) -> bool {
     let mut list = list.borrow_mut();
     if index >= list.len() {
         return false;
@@ -1381,6 +1469,7 @@ mod record_recent_tests {
             &list,
             "-- \\ Check Perizinan\n-- mp.username ilike '%x%'",
             RECENT_CAP,
+            None,
         );
         assert!(list.borrow().is_empty());
     }
@@ -1392,8 +1481,37 @@ mod record_recent_tests {
             &list,
             "-- pick emiten\nselect * from emiten; -- trailing",
             RECENT_CAP,
+            Some("Prod".into()),
         );
-        assert_eq!(list.borrow().as_slice(), ["select * from emiten;"]);
+        let entries = list.borrow();
+        assert_eq!(entries[0].sql, "select * from emiten;");
+        assert_eq!(entries[0].conn_name.as_deref(), Some("Prod"));
+    }
+
+    #[test]
+    fn history_date_label_buckets() {
+        let now = 1_800_000_000u64; // arbitrary fixed reference instant
+        assert_eq!(history_date_label(0, now), "Earlier");
+        assert_eq!(history_date_label(now, now), "Today");
+        assert_eq!(history_date_label(now - 86_400, now), "Yesterday");
+        assert!(!["Today", "Yesterday", "Earlier"]
+            .contains(&history_date_label(now - 20 * 86_400, now).as_str()));
+    }
+
+    #[test]
+    fn parse_recent_migrates_plain_string_array() {
+        let entries = parse_recent(r#"["select 1"]"#);
+        assert_eq!(entries[0].sql, "select 1");
+        assert_eq!(entries[0].ran_at, 0);
+        assert!(entries[0].conn_name.is_none());
+    }
+
+    #[test]
+    fn parse_recent_reads_current_format() {
+        let entries = parse_recent(r#"[{"sql":"select 2","ran_at":100,"conn_name":"Prod"}]"#);
+        assert_eq!(entries[0].sql, "select 2");
+        assert_eq!(entries[0].ran_at, 100);
+        assert_eq!(entries[0].conn_name.as_deref(), Some("Prod"));
     }
 
     #[test]
@@ -1407,9 +1525,14 @@ mod record_recent_tests {
 
     #[test]
     fn remove_recent_only_removes_a_valid_entry() {
-        let list = RefCell::new(vec!["first".into(), "second".into()]);
+        let entry = |sql: &str| HistoryEntry {
+            sql: sql.into(),
+            ran_at: 0,
+            conn_name: None,
+        };
+        let list = RefCell::new(vec![entry("first"), entry("second")]);
         assert!(remove_recent(&list, 0));
-        assert_eq!(list.borrow().as_slice(), ["second"]);
+        assert_eq!(list.borrow()[0].sql, "second");
         assert!(!remove_recent(&list, 1));
     }
 }
@@ -3995,21 +4118,44 @@ fn main() -> Result<(), slint::PlatformError> {
         }));
     // Live history: filled as queries run; mock mode seeds a few for the
     // screenshot harness.
-    let recent_queries: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(if mock::mock_mode() {
-        vec![
-            "SELECT * FROM emiten LIMIT 100;".into(),
-            "INSERT INTO sectors (name) VALUES ('Technology');".into(),
-            "UPDATE emiten SET updated_at = now() WHERE code = '93344';".into(),
-        ]
-    } else {
-        let mut recent = load_recent();
-        recent.truncate(history_cap.get());
-        recent
-    }));
+    let recent_queries: Rc<RefCell<Vec<HistoryEntry>>> =
+        Rc::new(RefCell::new(if mock::mock_mode() {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            vec![
+                HistoryEntry {
+                    sql: "SELECT * FROM emiten LIMIT 100;".into(),
+                    ran_at: now,
+                    conn_name: Some("Local PG".into()),
+                },
+                HistoryEntry {
+                    sql: "INSERT INTO sectors (name) VALUES ('Technology');".into(),
+                    ran_at: now,
+                    conn_name: Some("Local PG".into()),
+                },
+                HistoryEntry {
+                    sql: "UPDATE emiten SET updated_at = now() WHERE code = '93344';".into(),
+                    ran_at: now,
+                    conn_name: Some("Local PG".into()),
+                },
+            ]
+        } else {
+            let mut recent = load_recent();
+            recent.truncate(history_cap.get());
+            recent
+        }));
+    // Date-bucket headers in the History tab (e.g. "Today"/"Yesterday") that
+    // the user has folded. Kept separate from `collapsed_categories` (the
+    // Items-tree schema headers) so toggling one never touches the other.
+    let collapsed_history_groups: Rc<RefCell<HashSet<String>>> =
+        Rc::new(RefCell::new(HashSet::new()));
     let rebuild_query_tree = {
         let weak = window.as_weak();
         let saved = saved_queries.clone();
         let recent = recent_queries.clone();
+        let collapsed_history_groups = collapsed_history_groups.clone();
         move |active: &str| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -4027,6 +4173,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     expanded: true,
                     db: SharedString::default(),
                     count: saved.len() as i32,
+                    sub: SharedString::default(),
                 });
                 for (i, (name, _)) in saved.iter().enumerate() {
                     rows.push(TreeNode {
@@ -4036,33 +4183,60 @@ fn main() -> Result<(), slint::PlatformError> {
                         expanded: name == active,
                         db: SharedString::default(),
                         count: i as i32,
+                        sub: SharedString::default(),
                     });
                 }
             }
             // Queries (mode 1) is the curated Saved list only; History (mode 2)
-            // is the live run history — they no longer duplicate a "Recent" list.
+            // is the live run history, grouped by the date each query ran
+            // (entries are already newest-first, so same-label runs stay
+            // contiguous — no need to bucket out of order).
             if history_only {
                 let recent = recent.borrow();
-                rows.push(TreeNode {
-                    label: "History".into(),
-                    depth: 0,
-                    kind: "qcat".into(),
-                    expanded: true,
-                    db: SharedString::default(),
-                    count: recent.len() as i32,
-                });
-                for (i, q) in recent.iter().enumerate() {
-                    // Collapse whitespace to one line so a multi-line query does
-                    // not paint over the rows below; the row elides to its width.
-                    let label = recent_preview(q);
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let collapsed = collapsed_history_groups.borrow();
+                let mut order: Vec<String> = Vec::new();
+                let mut buckets: std::collections::HashMap<String, Vec<usize>> =
+                    std::collections::HashMap::new();
+                for (i, entry) in recent.iter().enumerate() {
+                    let label = history_date_label(entry.ran_at, now);
+                    if !buckets.contains_key(&label) {
+                        order.push(label.clone());
+                    }
+                    buckets.entry(label).or_default().push(i);
+                }
+                for label in &order {
+                    let idxs = &buckets[label];
+                    let is_open = !collapsed.contains(label);
                     rows.push(TreeNode {
-                        label: label.clone().into(),
-                        depth: 1,
-                        kind: "recent".into(),
-                        expanded: false,
-                        db: SharedString::from(label),
-                        count: i as i32,
+                        label: label.as_str().into(),
+                        depth: 0,
+                        kind: "qcat".into(),
+                        expanded: is_open,
+                        db: SharedString::default(),
+                        count: idxs.len() as i32,
+                        sub: SharedString::default(),
                     });
+                    if !is_open {
+                        continue;
+                    }
+                    for &i in idxs {
+                        // Collapse whitespace to one line so a multi-line query
+                        // does not paint over the rows below; the row elides.
+                        let preview = recent_preview(&recent[i].sql);
+                        rows.push(TreeNode {
+                            label: preview.clone().into(),
+                            depth: 1,
+                            kind: "recent".into(),
+                            expanded: false,
+                            db: SharedString::from(preview),
+                            count: i as i32,
+                            sub: recent[i].conn_name.clone().unwrap_or_default().into(),
+                        });
+                    }
                 }
             }
             w.set_query_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
@@ -4088,8 +4262,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 .map(|(n, s)| (n.clone(), s.clone()));
             let (title, text, is_saved) = if let Some((name, sql)) = saved_hit {
                 (name, sql, true)
-            } else if let Some(sql) = recent.borrow().get(idx.max(0) as usize) {
-                ("Query".to_string(), sql.clone(), false)
+            } else if let Some(entry) = recent.borrow().get(idx.max(0) as usize) {
+                ("Query".to_string(), entry.sql.clone(), false)
             } else {
                 return;
             };
@@ -7404,6 +7578,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let history_cap = history_cap.clone();
         let rebuild_query_tree = rebuild_query_tree.clone();
         let panes = panes.clone();
+        let store = store.clone();
+        let current_connection_id = current_connection_id.clone();
         window.on_run_query(move || {
             if let Some(w) = weak.upgrade() {
                 // ⌘⏎ / Run: the highlighted selection, else just the statement
@@ -7419,7 +7595,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 if text.is_empty() {
                     return;
                 }
-                record_recent(&recent_queries, &text, history_cap.get());
+                record_recent(
+                    &recent_queries,
+                    &text,
+                    history_cap.get(),
+                    resolve_conn_name(&current_connection_id, &store),
+                );
                 // A manual query result has no row identity — never editable.
                 // (The browse path re-enables editing after its PK fetch.)
                 if active_tab_kind(&w) != "table" {
@@ -7463,7 +7644,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let Some(text) = recent_queries.borrow().get(idx.max(0) as usize).cloned() else {
+            let Some(text) = recent_queries
+                .borrow()
+                .get(idx.max(0) as usize)
+                .map(|e| e.sql.clone())
+            else {
                 return;
             };
             if text.trim().is_empty() {
@@ -7503,13 +7688,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 0 => w.invoke_insert_query(idx as i32),
                 1 => w.invoke_rerun_query(idx as i32),
                 2 => {
-                    if let Some(query) = recent_queries.borrow().get(idx) {
-                        clip_set(query);
+                    if let Some(entry) = recent_queries.borrow().get(idx) {
+                        clip_set(&entry.sql);
                     }
                 }
                 3 => {
                     // Promote a history entry into the curated Saved list.
-                    let Some(sql) = recent_queries.borrow().get(idx).cloned() else {
+                    let Some(sql) = recent_queries.borrow().get(idx).map(|e| e.sql.clone()) else {
                         return;
                     };
                     let name = derive_query_name(&sql, &saved_queries.borrow());
@@ -7542,7 +7727,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let Some(text) = recent_queries.borrow().get(idx.max(0) as usize).cloned() else {
+            let Some(text) = recent_queries
+                .borrow()
+                .get(idx.max(0) as usize)
+                .map(|e| e.sql.clone())
+            else {
                 return;
             };
             {
@@ -7691,6 +7880,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let recent_queries = recent_queries.clone();
         let history_cap = history_cap.clone();
+        let store = store.clone();
+        let current_connection_id = current_connection_id.clone();
         let run_p1 = move || {
             let text = {
                 let ed = panes[1].ed_state.borrow();
@@ -7702,7 +7893,12 @@ fn main() -> Result<(), slint::PlatformError> {
             if text.is_empty() {
                 return;
             }
-            record_recent(&recent_queries, &text, history_cap.get());
+            record_recent(
+                &recent_queries,
+                &text,
+                history_cap.get(),
+                resolve_conn_name(&current_connection_id, &store),
+            );
             let stream = weak
                 .upgrade()
                 .map(|w| {
@@ -8931,12 +9127,28 @@ fn main() -> Result<(), slint::PlatformError> {
         let current = current.clone();
         let rt = rt.clone();
         let sidebar_filter = sidebar_filter.clone();
+        let collapsed_history_groups = collapsed_history_groups.clone();
+        let rebuild_query_tree = rebuild_query_tree.clone();
         window.on_toggle_schema_node(move |label| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let engine = *cur_engine.borrow();
             let label = label.to_string();
+
+            // History tab's date-bucket headers are a separate tree
+            // (`query_tree`, not the Items `schema_tree`) with their own
+            // collapse set, so they're handled here before anything else.
+            if w.get_sidebar_mode() == 2 {
+                let mut c = collapsed_history_groups.borrow_mut();
+                if !c.remove(&label) {
+                    c.insert(label);
+                }
+                drop(c);
+                rebuild_query_tree("");
+                return;
+            }
+
+            let engine = *cur_engine.borrow();
 
             // Mongo/Redis/Cassandra: database (or keyspace) headers open an
             // opt-in set (default closed) and load their leaves (collections /
@@ -9194,6 +9406,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let run_sql = run_sql.clone();
         let recent_queries = recent_queries.clone();
         let history_cap = history_cap.clone();
+        let store = store.clone();
+        let current_connection_id = current_connection_id.clone();
         let run_new_tab: Rc<dyn Fn(usize)> = Rc::new(move |pane| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -9216,7 +9430,12 @@ fn main() -> Result<(), slint::PlatformError> {
             if pane == 0 {
                 w.set_grid_read_only(true);
             }
-            record_recent(&recent_queries, &stmt, history_cap.get());
+            record_recent(
+                &recent_queries,
+                &stmt,
+                history_cap.get(),
+                resolve_conn_name(&current_connection_id, &store),
+            );
             run_sql(pane, stmt);
         });
         let weak = window.as_weak();

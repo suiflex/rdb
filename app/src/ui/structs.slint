@@ -9,7 +9,9 @@ export struct GridCell { text: string, is-null: bool, state: int }
 // empty for SQL/Redis where the category path is used instead.
 // `count` is the number of (filter-matching) containers under a header row;
 // 0 hides the badge. Non-header rows always carry 0.
-export struct TreeNode { label: string, depth: int, kind: string, expanded: bool, db: string, count: int }
+// `sub` is a small dim subtitle; only "recent" (History) rows use it, for the
+// connection name the query ran on. Empty for every other kind.
+export struct TreeNode { label: string, depth: int, kind: string, expanded: bool, db: string, count: int, sub: string }
 // One row of the collapsible Mongo document (JSON) tree. `path` is the stable
 // collapse key; `expandable` shows a fold caret, `expanded` its state.
 export struct DocRow { depth: int, key: string, preview: string, full: string, expandable: bool, expanded: bool, path: string }

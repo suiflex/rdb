@@ -313,6 +313,17 @@ export component Sidebar inherits Rectangle {
                             overflow: elide;
                         }
 
+                        // Connection name a History row ran against.
+                        if node.kind == "recent" && node.sub != "": Text {
+                            width: 72px;
+                            text: node.sub;
+                            color: is-active ? Tokens.on-tint.with-alpha(0.75) : Tokens.text-faint;
+                            font-size: Tokens.font-xs;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+
                         // ▶: re-run this entry directly (editor untouched).
                         // Nested TouchArea wins over the row, so the row still
                         // performs its own click action (append / open).

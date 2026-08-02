@@ -43,6 +43,8 @@ notify-rust = "4"
 # GTK3 bindings; tokio matches the app runtime. macOS/Windows use their
 # native panels.
 rfd = { version = "0.16", default-features = false, features = ["xdg-portal", "tokio"] }
+# History date-grouping (Today/Yesterday/date): local-timezone civil-date math.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Set the Dock icon even for `cargo run`; macOS ignores a window icon on an

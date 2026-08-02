@@ -5597,6 +5597,7 @@ name = "rdb"
 version = "0.30.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "copypasta",
  "json5",
  "notify-rust",
