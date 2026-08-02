@@ -1,39 +1,40 @@
 # Changelog
 
-## RDB: [0.26.0](https://github.com/suiflex/rdb/compare/v0.25.2...v0.26.0) (2026-07-28)
+## RDB: [0.30.0](https://github.com/suiflex/rdb/compare/v0.29.0...v0.30.0) (2026-08-01)
 
 
 ### App Features
 
-* **app:** add run/open/insert/copy actions to saved query rows ([91c768c](https://github.com/suiflex/rdb/commit/91c768c97efc25601cd6061784447052f3a173c6))
-* **app:** add save-to-queries action to history rows ([b186894](https://github.com/suiflex/rdb/commit/b1868941f9360eadede0e375deedb81c095ab399))
-* **app:** persist saved queries and support delete ([76d8c34](https://github.com/suiflex/rdb/commit/76d8c34b65404ccb7d9ee4d07968cf27601c04f9))
-* **app:** polish keyboard shortcuts dialog ([cecbc77](https://github.com/suiflex/rdb/commit/cecbc7729d697fc560011e314145162679d12e83))
-* **app:** redesign settings into tabbed sections ([d546c6f](https://github.com/suiflex/rdb/commit/d546c6fb786604a1aff81042402f28af822d8a80))
-* **app:** show actionable update prompt in settings ([9287c4a](https://github.com/suiflex/rdb/commit/9287c4aa31a727a59fd98199b78f91399b1e6a80))
+* **app:** add query toolbar tooltips ([8a763a6](https://github.com/suiflex/rdb/commit/8a763a6ec7b313323fb39c4ab9cc3875a62ed6e4))
+* **app:** badge document tabs with their source connection ([d60d9ac](https://github.com/suiflex/rdb/commit/d60d9acd041dd9ffea6e26cea3c3d942db8c641a))
+* **app:** badge result tabs with their source connection ([ec2710f](https://github.com/suiflex/rdb/commit/ec2710fcb5b31930eaf6c9c49c094cabb014c819))
+* **app:** in-app Restart to Update for direct-download installs ([7ccfb7c](https://github.com/suiflex/rdb/commit/7ccfb7caac812e44ca875453d4f9d15110844116))
+* **app:** v0.30.0 prep — connection badges, self-update, UX fixes ([d02f5e7](https://github.com/suiflex/rdb/commit/d02f5e788e3ee870846c79c2eb7001ded8e05ae7))
 
 
 ### Bug Fixes
 
-* **app:** even out keyboard shortcut key chips ([b29fa66](https://github.com/suiflex/rdb/commit/b29fa66b463049f8429d11492b2810fb0611550f))
-* **app:** list all six supported engines in About ([a915b5f](https://github.com/suiflex/rdb/commit/a915b5fde0c641fc0eaa721abe1f711c8d7697ec))
+* **app:** add safe run-new-tab action ([6024e31](https://github.com/suiflex/rdb/commit/6024e316ef1e80855bd731252545b0b64ad41fd9))
+* **app:** align shortcuts with active pane and platform ([93d57a2](https://github.com/suiflex/rdb/commit/93d57a23cb0e96da2978e30d67dfd2224bf1d0fc))
+* **app:** export shortcut labels to Rust ([d6b5ed0](https://github.com/suiflex/rdb/commit/d6b5ed03d7d762688d656191686e7314fb6d6815))
+* **app:** format and explain active query line ([976c0be](https://github.com/suiflex/rdb/commit/976c0be4d1db8b88a6b3d68931d8faafcbb3ae34))
+* **app:** handle shifted reconnect shortcut ([93a26df](https://github.com/suiflex/rdb/commit/93a26dff65bdf2030ff349c4410fc5d6bfd10181))
+* **app:** keep active-line formatting on one line ([f0656e3](https://github.com/suiflex/rdb/commit/f0656e34bd16f81a2e6aa58b375baa87c9e07799))
+* **app:** register open shortcuts with native menu ([95e43ef](https://github.com/suiflex/rdb/commit/95e43ef7244d10479c9a4f4532a44754134dc48a))
+* **app:** remove redundant run selection button ([a64963d](https://github.com/suiflex/rdb/commit/a64963d765d0f4d325a4bcbcac6358335d842182))
+* **app:** render each connection's custom accent color ([004f985](https://github.com/suiflex/rdb/commit/004f985e5d4dd67296ed2d042d03313b6ff5a2f8))
+* **app:** restore query tab rename controls ([43768ba](https://github.com/suiflex/rdb/commit/43768baa759ba53da8e5e0d461ecd654b7d1971f))
+* **app:** route command backslash to active query ([2eb13ab](https://github.com/suiflex/rdb/commit/2eb13ab33505b75f7db368b3f7c8194cf29a40e0))
+* **app:** scroll result chips and drop the "Result" word ([68dc640](https://github.com/suiflex/rdb/commit/68dc640fc3bce647e991726235ad89feadf143ec))
+* **app:** use close icon in update dialog ([0c86540](https://github.com/suiflex/rdb/commit/0c86540c5f24eb6982e7e92b7b1fe5d5d5450be0))
+* **app:** use each connection's custom color for tab/result badges ([e27d840](https://github.com/suiflex/rdb/commit/e27d8405e9c32dfd8afe0f81904c5006cdc19d91))
 
-## RDB: [0.27.0](https://github.com/suiflex/rdb/compare/v0.26.0...v0.27.0) (2026-07-29)
+## RDB: [0.29.0](https://github.com/suiflex/rdb/compare/v0.28.0...v0.29.0) (2026-07-31)
 
 
 ### App Features
 
-* **app:** add reconnect shortcut (Cmd+Shift+R) ([00c2b68](https://github.com/suiflex/rdb/commit/00c2b68565d8fa839f9c810ce8a647a323e11e55))
-* **app:** group command palette results GitHub-style ([0f3151b](https://github.com/suiflex/rdb/commit/0f3151b21c6fe28d38c07e25ea4ff27a729c7bcf))
-* **app:** run selected statements into separate result tabs ([6d674b1](https://github.com/suiflex/rdb/commit/6d674b1ed2bc2b3bb7671a423b424304ba00a5a6))
-* **app:** widen header search pill toward corner clusters ([fb678b9](https://github.com/suiflex/rdb/commit/fb678b97dcd07123aace63ff5ba1e5a4aeb10756))
-
-
-### Bug Fixes
-
-* **app:** hide console window on Windows ([24ccbbf](https://github.com/suiflex/rdb/commit/24ccbbfe8cb434b1deddf8883078f6a4e42253b8))
-* **app:** persist result filter across tab and query switches ([1c49eee](https://github.com/suiflex/rdb/commit/1c49eeec33c60a2255a471873fcd968e0e1da7b0))
-* **app:** size details value boxes to content with scroll ([b2bb088](https://github.com/suiflex/rdb/commit/b2bb088ffce68e888d7d73829a85aa863ea41f96))
+* **app:** v0.29.0 prep — split-pane, editor, tabs, mongo fixes ([#164](https://github.com/suiflex/rdb/issues/164)) ([be408f6](https://github.com/suiflex/rdb/commit/be408f6690a8af9334e759e1af5462b286d01367))
 
 ## RDB: [0.28.0](https://github.com/suiflex/rdb/compare/v0.27.0...v0.28.0) (2026-07-30)
 
@@ -63,41 +64,40 @@
 * **app:** stop the filter field growing with its text ([0b685b2](https://github.com/suiflex/rdb/commit/0b685b23ea273bafe89bd82493e623c2ae6f162b))
 * **app:** vertically center the New Connection footer button ([aaf3cc4](https://github.com/suiflex/rdb/commit/aaf3cc4a21d79852dfb1a5f276ea3f52659de792))
 
-## RDB: [0.29.0](https://github.com/suiflex/rdb/compare/v0.28.0...v0.29.0) (2026-07-31)
+## RDB: [0.27.0](https://github.com/suiflex/rdb/compare/v0.26.0...v0.27.0) (2026-07-29)
 
 
 ### App Features
 
-* **app:** v0.29.0 prep — split-pane, editor, tabs, mongo fixes ([#164](https://github.com/suiflex/rdb/issues/164)) ([be408f6](https://github.com/suiflex/rdb/commit/be408f6690a8af9334e759e1af5462b286d01367))
-
-## RDB: [0.30.0](https://github.com/suiflex/rdb/compare/v0.29.0...v0.30.0) (2026-08-01)
-
-
-### App Features
-
-* **app:** add query toolbar tooltips ([8a763a6](https://github.com/suiflex/rdb/commit/8a763a6ec7b313323fb39c4ab9cc3875a62ed6e4))
-* **app:** badge document tabs with their source connection ([d60d9ac](https://github.com/suiflex/rdb/commit/d60d9acd041dd9ffea6e26cea3c3d942db8c641a))
-* **app:** badge result tabs with their source connection ([ec2710f](https://github.com/suiflex/rdb/commit/ec2710fcb5b31930eaf6c9c49c094cabb014c819))
-* **app:** in-app Restart to Update for direct-download installs ([7ccfb7c](https://github.com/suiflex/rdb/commit/7ccfb7caac812e44ca875453d4f9d15110844116))
-* **app:** v0.30.0 prep — connection badges, self-update, UX fixes ([d02f5e7](https://github.com/suiflex/rdb/commit/d02f5e788e3ee870846c79c2eb7001ded8e05ae7))
+* **app:** add reconnect shortcut (Cmd+Shift+R) ([00c2b68](https://github.com/suiflex/rdb/commit/00c2b68565d8fa839f9c810ce8a647a323e11e55))
+* **app:** group command palette results GitHub-style ([0f3151b](https://github.com/suiflex/rdb/commit/0f3151b21c6fe28d38c07e25ea4ff27a729c7bcf))
+* **app:** run selected statements into separate result tabs ([6d674b1](https://github.com/suiflex/rdb/commit/6d674b1ed2bc2b3bb7671a423b424304ba00a5a6))
+* **app:** widen header search pill toward corner clusters ([fb678b9](https://github.com/suiflex/rdb/commit/fb678b97dcd07123aace63ff5ba1e5a4aeb10756))
 
 
 ### Bug Fixes
 
-* **app:** add safe run-new-tab action ([6024e31](https://github.com/suiflex/rdb/commit/6024e316ef1e80855bd731252545b0b64ad41fd9))
-* **app:** align shortcuts with active pane and platform ([93d57a2](https://github.com/suiflex/rdb/commit/93d57a23cb0e96da2978e30d67dfd2224bf1d0fc))
-* **app:** export shortcut labels to Rust ([d6b5ed0](https://github.com/suiflex/rdb/commit/d6b5ed03d7d762688d656191686e7314fb6d6815))
-* **app:** format and explain active query line ([976c0be](https://github.com/suiflex/rdb/commit/976c0be4d1db8b88a6b3d68931d8faafcbb3ae34))
-* **app:** handle shifted reconnect shortcut ([93a26df](https://github.com/suiflex/rdb/commit/93a26dff65bdf2030ff349c4410fc5d6bfd10181))
-* **app:** keep active-line formatting on one line ([f0656e3](https://github.com/suiflex/rdb/commit/f0656e34bd16f81a2e6aa58b375baa87c9e07799))
-* **app:** register open shortcuts with native menu ([95e43ef](https://github.com/suiflex/rdb/commit/95e43ef7244d10479c9a4f4532a44754134dc48a))
-* **app:** remove redundant run selection button ([a64963d](https://github.com/suiflex/rdb/commit/a64963d765d0f4d325a4bcbcac6358335d842182))
-* **app:** render each connection's custom accent color ([004f985](https://github.com/suiflex/rdb/commit/004f985e5d4dd67296ed2d042d03313b6ff5a2f8))
-* **app:** restore query tab rename controls ([43768ba](https://github.com/suiflex/rdb/commit/43768baa759ba53da8e5e0d461ecd654b7d1971f))
-* **app:** route command backslash to active query ([2eb13ab](https://github.com/suiflex/rdb/commit/2eb13ab33505b75f7db368b3f7c8194cf29a40e0))
-* **app:** scroll result chips and drop the "Result" word ([68dc640](https://github.com/suiflex/rdb/commit/68dc640fc3bce647e991726235ad89feadf143ec))
-* **app:** use close icon in update dialog ([0c86540](https://github.com/suiflex/rdb/commit/0c86540c5f24eb6982e7e92b7b1fe5d5d5450be0))
-* **app:** use each connection's custom color for tab/result badges ([e27d840](https://github.com/suiflex/rdb/commit/e27d8405e9c32dfd8afe0f81904c5006cdc19d91))
+* **app:** hide console window on Windows ([24ccbbf](https://github.com/suiflex/rdb/commit/24ccbbfe8cb434b1deddf8883078f6a4e42253b8))
+* **app:** persist result filter across tab and query switches ([1c49eee](https://github.com/suiflex/rdb/commit/1c49eeec33c60a2255a471873fcd968e0e1da7b0))
+* **app:** size details value boxes to content with scroll ([b2bb088](https://github.com/suiflex/rdb/commit/b2bb088ffce68e888d7d73829a85aa863ea41f96))
+
+## RDB: [0.26.0](https://github.com/suiflex/rdb/compare/v0.25.2...v0.26.0) (2026-07-28)
+
+
+### App Features
+
+* **app:** add run/open/insert/copy actions to saved query rows ([91c768c](https://github.com/suiflex/rdb/commit/91c768c97efc25601cd6061784447052f3a173c6))
+* **app:** add save-to-queries action to history rows ([b186894](https://github.com/suiflex/rdb/commit/b1868941f9360eadede0e375deedb81c095ab399))
+* **app:** persist saved queries and support delete ([76d8c34](https://github.com/suiflex/rdb/commit/76d8c34b65404ccb7d9ee4d07968cf27601c04f9))
+* **app:** polish keyboard shortcuts dialog ([cecbc77](https://github.com/suiflex/rdb/commit/cecbc7729d697fc560011e314145162679d12e83))
+* **app:** redesign settings into tabbed sections ([d546c6f](https://github.com/suiflex/rdb/commit/d546c6fb786604a1aff81042402f28af822d8a80))
+* **app:** show actionable update prompt in settings ([9287c4a](https://github.com/suiflex/rdb/commit/9287c4aa31a727a59fd98199b78f91399b1e6a80))
+
+
+### Bug Fixes
+
+* **app:** even out keyboard shortcut key chips ([b29fa66](https://github.com/suiflex/rdb/commit/b29fa66b463049f8429d11492b2810fb0611550f))
+* **app:** list all six supported engines in About ([a915b5f](https://github.com/suiflex/rdb/commit/a915b5fde0c641fc0eaa721abe1f711c8d7697ec))
 
 ## RDB: [0.25.2](https://github.com/suiflex/rdb/compare/v0.25.1...v0.25.2) (2026-07-28)
 
