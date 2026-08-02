@@ -15,6 +15,44 @@ pub enum Engine {
     Cassandra,
 }
 
+/// Environment classification rendered as a colored pill next to the
+/// connection name. Independent of `local` (tunnel indicator) and `tags`
+/// (free-form chips) — picking `Local` here does not set `local = true`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum EnvTag {
+    #[default]
+    None,
+    Local,
+    Dev,
+    Staging,
+    Testing,
+    Production,
+}
+
+impl EnvTag {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            EnvTag::None => "None",
+            EnvTag::Local => "Local",
+            EnvTag::Dev => "Dev",
+            EnvTag::Staging => "Staging",
+            EnvTag::Testing => "Testing",
+            EnvTag::Production => "Production",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "Local" => EnvTag::Local,
+            "Dev" => EnvTag::Dev,
+            "Staging" => EnvTag::Staging,
+            "Testing" => EnvTag::Testing,
+            "Production" => EnvTag::Production,
+            _ => EnvTag::None,
+        }
+    }
+}
+
 /// A persisted connection. Only non-secret fields are stored. The password is
 /// NEVER a field here — it lives in the OS keychain (or encrypted file) and is
 /// located via `keyref`, then injected at connect time by `to_conn_config`.
@@ -56,6 +94,10 @@ pub struct SavedConnection {
     /// insertion order; drag-reorder rewrites it.
     #[serde(default)]
     pub order: i64,
+    /// Environment classification (local/dev/staging/testing/production),
+    /// rendered as a colored pill. See `EnvTag`.
+    #[serde(default)]
+    pub env_tag: EnvTag,
 }
 
 impl SavedConnection {
@@ -83,6 +125,7 @@ impl SavedConnection {
             params: None,
             favorite: false,
             order: 0,
+            env_tag: EnvTag::None,
         }
     }
 
@@ -122,6 +165,7 @@ mod tests {
             params: None,
             favorite: false,
             order: 0,
+            env_tag: EnvTag::Production,
         }
     }
 
@@ -134,6 +178,19 @@ mod tests {
         assert_eq!(back.engine, Engine::Postgres);
         assert_eq!(back.port, 5432);
         assert_eq!(back.sslmode, SslMode::Require);
+        assert_eq!(back.env_tag, EnvTag::Production);
+    }
+
+    #[test]
+    fn missing_env_tag_key_defaults_to_none() {
+        // Pre-existing connections.json files predate this field entirely.
+        let json = r#"{
+            "id": "old-id", "name": "Old", "engine": "Postgres",
+            "host": "localhost", "port": 5432, "user": "postgres",
+            "database": null
+        }"#;
+        let conn: SavedConnection = serde_json::from_str(json).unwrap();
+        assert_eq!(conn.env_tag, EnvTag::None);
     }
 
     #[test]

@@ -39,6 +39,9 @@ export struct ConnItem {
     count: int,
     // Starred connection: renders a badge and floats to the top of its group.
     favorite: bool,
+    // Environment tag pill (empty label => no pill rendered).
+    env-tag-label: string,
+    env-tag-color: color,
 }
 // One Host/Port/… row of the connection-detail card.
 export struct KvRow { k: string, v: string }

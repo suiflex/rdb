@@ -10,7 +10,7 @@ pub mod store;
 
 pub use conn_url::{parse_conn_url, ConnUrlError, ParsedUrl};
 pub use error::{ConnStoreError, Result};
-pub use model::{Engine, SavedConnection};
+pub use model::{Engine, EnvTag, SavedConnection};
 pub use secret::{EncryptedFileBackend, KeyringBackend, SecretBackend};
 pub use settings::{AppSettings, EditorPrefs, SettingsStore, ThemeMode, UiState};
 pub use store::ConnStore;

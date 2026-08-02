@@ -235,6 +235,8 @@ fn build_conn_items(
                 local: false,
                 count: buckets[g].len() as i32,
                 favorite: false,
+                env_tag_label: SharedString::default(),
+                env_tag_color: theme::accent_or_default(""),
             });
         }
         if !expanded {
@@ -267,6 +269,9 @@ fn build_conn_items(
                 local: s.local,
                 count: 0,
                 favorite: s.favorite,
+                env_tag_label: theme::env_tag_label(s.env_tag).into(),
+                env_tag_color: theme::env_tag_color(s.env_tag)
+                    .unwrap_or_else(|| theme::accent_or_default("")),
             });
         }
     }
@@ -4752,6 +4757,10 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             w.set_sel_sub(sub.into());
             w.set_sel_local(s.local);
+            w.set_sel_env_tag_label(theme::env_tag_label(s.env_tag).into());
+            w.set_sel_env_tag_color(
+                theme::env_tag_color(s.env_tag).unwrap_or_else(|| theme::accent_or_default("")),
+            );
             let ssl = match s.sslmode {
                 rdb_core::conn::SslMode::Disable => "disable",
                 rdb_core::conn::SslMode::Prefer => "prefer",
@@ -10379,6 +10388,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_sslmode(SharedString::from("Prefer"));
             w.set_f_params(SharedString::default());
             w.set_f_color(SharedString::from("#2c5fd8"));
+            w.set_f_env_tag(SharedString::from("None"));
             w.set_f_import_url(SharedString::default());
             w.set_form_error(SharedString::default());
             w.set_test_result(SharedString::default());
@@ -10426,6 +10436,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_color(SharedString::from(
                 sc.color.unwrap_or_else(|| "#2c5fd8".into()),
             ));
+            w.set_f_env_tag(SharedString::from(sc.env_tag.as_str()));
             w.set_f_import_url(SharedString::default());
             w.set_form_error(SharedString::default());
             w.set_test_result(SharedString::default());
@@ -10741,6 +10752,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
             };
             let color = Some(w.get_f_color().to_string());
+            let env_tag = rdb_connstore::EnvTag::parse(w.get_f_env_tag().as_ref());
             let params = {
                 let p = w.get_f_params().to_string();
                 if p.trim().is_empty() {
@@ -10765,6 +10777,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     sc.database = database;
                     sc.sslmode = sslmode;
                     sc.color = color;
+                    sc.env_tag = env_tag;
                     sc.params = params;
                     let cid = sc.id.clone();
                     st.add(sc)?;
@@ -10782,6 +10795,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     sc.database = database;
                     sc.sslmode = sslmode;
                     sc.color = color;
+                    sc.env_tag = env_tag;
                     sc.params = params;
                     st.update(sc)?;
                     id.clone()

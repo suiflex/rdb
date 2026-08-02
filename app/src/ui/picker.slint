@@ -24,6 +24,8 @@ export component ConnPicker inherits Rectangle {
     in property <bool> sel-has-custom-color;
     in property <string> sel-sub;      // "PostgreSQL · grup profin"
     in property <bool> sel-local;
+    in property <string> sel-env-tag-label;
+    in property <color> sel-env-tag-color;
     in property <[KvRow]> sel-rows;
     in property <[string]> sel-tags;
     in property <string> sel-footer;   // "Terakhir terhubung · 2 menit lalu · …"
@@ -247,6 +249,10 @@ export component ConnPicker inherits Rectangle {
                                     if item.local: VerticalLayout {
                                         alignment: center;
                                         OutlineChip { text: "LOCAL"; }
+                                    }
+                                    if item.env-tag-label != "": VerticalLayout {
+                                        alignment: center;
+                                        OutlineChip { text: item.env-tag-label; tint: item.env-tag-color; }
                                     }
                                     // Star toggle: always present (so its own
                                     // TouchArea keeps receiving clicks); shown when
@@ -524,6 +530,10 @@ export component ConnPicker inherits Rectangle {
                                 if root.sel-local: VerticalLayout {
                                     alignment: center;
                                     OutlineChip { text: "LOCAL"; }
+                                }
+                                if root.sel-env-tag-label != "": VerticalLayout {
+                                    alignment: center;
+                                    OutlineChip { text: root.sel-env-tag-label; tint: root.sel-env-tag-color; }
                                 }
                             }
                             Text {

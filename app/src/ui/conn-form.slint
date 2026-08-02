@@ -15,6 +15,15 @@ export global Swatches {
     ];
 }
 
+// Environment-tag colors, in lockstep with `theme::env_tag_color` (app/src/theme.rs)
+// and the label order below — keep both in sync by hand if either changes.
+export global EnvSwatches {
+    out property <[string]> names: ["None", "Local", "Dev", "Staging", "Testing", "Production"];
+    out property <[color]> colors: [
+        #94a3b8, #64748b, #239d5c, #d9962f, #a855f7, #e05a4e,
+    ];
+}
+
 component FormLabel inherits Text {
     width: 82px;
     color: Tokens.text-dim;
@@ -37,6 +46,7 @@ export component ConnForm inherits Rectangle {
     in-out property <string> f-sslmode;    // "Disable"|"Prefer"|"Require"
     in-out property <string> f-params;     // Mongo options query string or full URI
     in-out property <string> f-color;      // selected hex
+    in-out property <string> f-env-tag;    // "None"|"Local"|"Dev"|"Staging"|"Testing"|"Production"
     in-out property <string> f-import-url;  // pasted connection URL
     in property <string> form-error;
     in property <string> test-result;   // test-connection status line
@@ -114,6 +124,32 @@ export component ConnForm inherits Rectangle {
                         border-width: Swatches.hexes[i] == root.f-color ? 2px : 0px;
                         border-color: Tokens.text;
                         TouchArea { clicked => { root.f-color = Swatches.hexes[i]; } }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+
+            HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: "Environment"; }
+                HorizontalLayout {
+                    spacing: Tokens.sp1;
+                    for name[i] in EnvSwatches.names: Rectangle {
+                        height: 20px;
+                        width: label.preferred-width + 2 * Tokens.sp2;
+                        border-radius: self.height / 2;
+                        background: name == root.f-env-tag ? EnvSwatches.colors[i] : transparent;
+                        border-width: 1px;
+                        border-color: EnvSwatches.colors[i].with-alpha(0.55);
+                        label := Text {
+                            text: name;
+                            color: name == root.f-env-tag ? Tokens.card : EnvSwatches.colors[i];
+                            font-size: 9px;
+                            font-weight: 700;
+                            letter-spacing: 0.8px;
+                        }
+                        TouchArea { clicked => { root.f-env-tag = name; } }
                     }
                 }
                 Rectangle { horizontal-stretch: 1; }
