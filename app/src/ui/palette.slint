@@ -2,7 +2,7 @@
 // Open Connection (⌘O) pickers. One shared list-modal shell.
 // References: design/4-modal-open-database.png, design/5-modal-open-connection.png.
 import { Tokens } from "tokens.slint";
-import { DbBadge, PrimaryButton, SecondaryButton, FilterField } from "components.slint";
+import { DbBadge, OutlineChip, PrimaryButton, SecondaryButton, FilterField } from "components.slint";
 import { AppIcon } from "icons.slint";
 
 // `kind` picks the leading icon: "database" | "group" | engine badge keys
@@ -16,6 +16,9 @@ export struct PaletteItem {
     // Per-connection custom accent (connection rows only; ignored elsewhere).
     color: color,
     has-custom-color: bool,
+    // Environment tag pill (empty label => no pill rendered).
+    env-tag-label: string,
+    env-tag-color: color,
 }
 
 export component ListModal inherits Rectangle {
@@ -201,6 +204,10 @@ export component ListModal inherits Rectangle {
                                             color: Tokens.ok;
                                             font-size: Tokens.font-sm;
                                             vertical-alignment: center;
+                                        }
+                                        if it.env-tag-label != "": OutlineChip {
+                                            text: it.env-tag-label;
+                                            tint: it.env-tag-color;
                                         }
                                     }
                                     if two-line: Text {

@@ -2249,7 +2249,14 @@ fn restore_grid_state(w: &MainWindow, pane: usize, g: &GroupRuntime, sr: &Stored
 /// "section" header rows. `needle` (lowercase) filters both groups; empty
 /// shows everything. Empty groups drop their header.
 fn build_palette_items(
-    names: &[(String, &'static str, slint::Color, bool)],
+    names: &[(
+        String,
+        &'static str,
+        slint::Color,
+        bool,
+        SharedString,
+        slint::Color,
+    )],
     w: &MainWindow,
     needle: &str,
 ) -> Vec<PaletteItem> {
@@ -2260,15 +2267,17 @@ fn build_palette_items(
         local: false,
         color: theme::accent_or_default(""),
         has_custom_color: false,
+        env_tag_label: SharedString::default(),
+        env_tag_color: theme::accent_or_default(""),
     };
     let mut items: Vec<PaletteItem> = Vec::new();
-    let conns: Vec<&(String, &'static str, slint::Color, bool)> = names
+    let conns: Vec<_> = names
         .iter()
         .filter(|(n, ..)| needle.is_empty() || n.to_lowercase().contains(needle))
         .collect();
     if !conns.is_empty() {
         items.push(section("Connections"));
-        for (n, badge, color, has_custom_color) in conns {
+        for (n, badge, color, has_custom_color, env_tag_label, env_tag_color) in conns {
             items.push(PaletteItem {
                 label: n.clone().into(),
                 kind: (*badge).into(),
@@ -2276,6 +2285,8 @@ fn build_palette_items(
                 local: false,
                 color: *color,
                 has_custom_color: *has_custom_color,
+                env_tag_label: env_tag_label.clone(),
+                env_tag_color: *env_tag_color,
             });
         }
     }
@@ -2297,6 +2308,8 @@ fn build_palette_items(
                 local: false,
                 color: theme::accent_or_default(""),
                 has_custom_color: false,
+                env_tag_label: SharedString::default(),
+                env_tag_color: theme::accent_or_default(""),
             });
         }
     }
@@ -3439,6 +3452,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     local: false,
                     color: theme::accent_or_default(""),
                     has_custom_color: false,
+                    env_tag_label: SharedString::default(),
+                    env_tag_color: theme::accent_or_default(""),
                 })
                 .collect();
             *panes[pane].completion_ctx.borrow_mut() =
@@ -4207,6 +4222,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     local: false,
                     color: theme::accent_or_default(""),
                     has_custom_color: false,
+                    env_tag_label: SharedString::default(),
+                    env_tag_color: theme::accent_or_default(""),
                 })
                 .collect();
             if items.is_empty() {
@@ -4252,6 +4269,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     local: false,
                     color: theme::accent_or_default(""),
                     has_custom_color: false,
+                    env_tag_label: SharedString::default(),
+                    env_tag_color: theme::accent_or_default(""),
                 })
                 .collect();
             if items.is_empty() {
@@ -4694,6 +4713,8 @@ fn main() -> Result<(), slint::PlatformError> {
                         local: false,
                         color: theme::accent_or_default(""),
                         has_custom_color: false,
+                        env_tag_label: SharedString::default(),
+                        env_tag_color: theme::accent_or_default(""),
                     });
                     map.push(-1);
                 } else {
@@ -4704,6 +4725,8 @@ fn main() -> Result<(), slint::PlatformError> {
                         local: r.local,
                         color: r.color,
                         has_custom_color: r.has_custom_color,
+                        env_tag_label: r.env_tag_label,
+                        env_tag_color: r.env_tag_color,
                     });
                     map.push(r.index);
                 }
@@ -10124,7 +10147,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 let opening = !w.get_palette_open();
                 w.set_palette_open(opening);
                 if opening {
-                    let names: Vec<(String, &'static str, slint::Color, bool)> = store
+                    let names: Vec<(
+                        String,
+                        &'static str,
+                        slint::Color,
+                        bool,
+                        SharedString,
+                        slint::Color,
+                    )> = store
                         .borrow()
                         .list()
                         .iter()
@@ -10134,6 +10164,9 @@ fn main() -> Result<(), slint::PlatformError> {
                                 AnyDriver::badge(s.engine),
                                 theme::accent_or_default(s.color.as_deref().unwrap_or("")),
                                 s.color.is_some(),
+                                theme::env_tag_label(s.env_tag).into(),
+                                theme::env_tag_color(s.env_tag)
+                                    .unwrap_or_else(|| theme::accent_or_default("")),
                             )
                         })
                         .collect();
@@ -10150,7 +10183,14 @@ fn main() -> Result<(), slint::PlatformError> {
         let store = store.clone();
         window.on_palette_filter(move |q| {
             if let Some(w) = weak.upgrade() {
-                let names: Vec<(String, &'static str, slint::Color, bool)> = store
+                let names: Vec<(
+                    String,
+                    &'static str,
+                    slint::Color,
+                    bool,
+                    SharedString,
+                    slint::Color,
+                )> = store
                     .borrow()
                     .list()
                     .iter()
@@ -10160,6 +10200,9 @@ fn main() -> Result<(), slint::PlatformError> {
                             AnyDriver::badge(s.engine),
                             theme::accent_or_default(s.color.as_deref().unwrap_or("")),
                             s.color.is_some(),
+                            theme::env_tag_label(s.env_tag).into(),
+                            theme::env_tag_color(s.env_tag)
+                                .unwrap_or_else(|| theme::accent_or_default("")),
                         )
                     })
                     .collect();
