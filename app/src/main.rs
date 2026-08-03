@@ -6812,6 +6812,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     .set_accent(theme::accent_or_default(sc.color.as_deref().unwrap_or("")));
                 w.set_status_conn(SharedString::from(sc.name.clone()));
                 w.set_bc_conn(SharedString::from(sc.name.clone()));
+                w.set_active_env_tag_label(theme::env_tag_label(sc.env_tag).into());
+                w.set_active_env_tag_color(
+                    theme::env_tag_color(sc.env_tag)
+                        .unwrap_or_else(|| theme::accent_or_default("")),
+                );
                 w.set_bc_db(SharedString::from(
                     db_ovr
                         .clone()

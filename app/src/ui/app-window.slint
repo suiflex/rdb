@@ -3,7 +3,7 @@ export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
-    SearchCommandPill, BreadcrumbChip, DbBadge, GlyphButton, IconButton, PrimaryButton, SecondaryButton, SelectBox, TextButton, Toggle, ToggleRow, Tooltip, Shortcut
+    SearchCommandPill, BreadcrumbChip, DbBadge, GlyphButton, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SelectBox, TextButton, Toggle, ToggleRow, Tooltip, Shortcut
 } from "components.slint";
 export { Shortcut }
 import { NavCluster } from "nav-cluster.slint";
@@ -146,6 +146,11 @@ export component MainWindow inherits Window {
     // ----- window chrome -----
     // Breadcrumb parts (workspace titlebar); empty db/schema hide their chip.
     in property <string> bc-conn;
+    // Active connection's env tag (empty label => no pill), shown next to
+    // bc-conn in the workspace titlebar — mirrors sel-env-tag-* below, which
+    // is the picker's *selected* (not-yet-connected) row instead.
+    in property <string> active-env-tag-label;
+    in property <color> active-env-tag-color;
     in property <string> bc-db;
     in property <string> bc-schema;
     // True while the schema/table tree is being (re)fetched after a db/schema switch.
@@ -809,6 +814,10 @@ callback create-table-commit();
                             mono: true;
                             clicked => { root.open-conn-modal(); }
                         }
+                    }
+                    if root.active-env-tag-label != "": VerticalLayout {
+                        alignment: center;
+                        OutlineChip { text: root.active-env-tag-label; tint: root.active-env-tag-color; }
                     }
                     // Status word only when it needs attention; the healthy case
                     // is already conveyed by the green dot on the chip above.
