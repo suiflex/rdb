@@ -11149,6 +11149,14 @@ fn main() -> Result<(), slint::PlatformError> {
                     Some(g)
                 }
             };
+            // A freshly-typed group ("+ New group…") that only differs in case
+            // from an existing one joins it instead of spawning a duplicate.
+            let group = group.map(|g| {
+                existing_groups(&store.borrow())
+                    .into_iter()
+                    .find(|e| e.eq_ignore_ascii_case(&g))
+                    .unwrap_or(g)
+            });
             let params = {
                 let p = w.get_f_params().to_string();
                 if p.trim().is_empty() {
