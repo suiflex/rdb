@@ -41,11 +41,14 @@ jobs:
           gh release edit "${{ steps.release.outputs['app--tag_name'] }}" \
             --title "RDB ${{ steps.release.outputs['app--tag_name'] }}"
 
-      # Match the CHANGELOG to the release title. Target the exact version
-      # release-please just built the PR for, not "whichever heading comes
-      # first" — a stale/rebased PR branch can otherwise prefix the wrong
-      # block (this is what put 0.28.0's heading out of place).
-      - name: Prefix CHANGELOG heading with product name
+      # We keep CHANGELOG.md at the repo root, but release-please resolves
+      # `changelog-path` relative to its package dir and rejects `..`, so it
+      # writes app/CHANGELOG.md and this step folds that into the root file
+      # (prefixing the heading to match the release title) and drops the
+      # package copy. Targets the exact version release-please just built
+      # the PR for, not "whichever heading comes first" — a stale/rebased
+      # PR branch can otherwise prefix the wrong block.
+      - name: Fold CHANGELOG into the repo root
         if: ${{ steps.release.outputs.pr }}
         env:
           # Keep generated PR JSON out of the shell script body.
@@ -55,15 +58,14 @@ jobs:
           branch=$(printf '%s' "$RELEASE_PR" | jq -r '.headBranchName')
           git fetch origin "$branch"
           git checkout "$branch"
-          awk -v ver="$RELEASED_VERSION" \
-            '$0 ~ "^## \\[" ver "\\]" { sub(/^## \[/, "## RDB: ["); } { print }' \
-            CHANGELOG.md > CHANGELOG.md.tmp
-          mv CHANGELOG.md.tmp CHANGELOG.md
-          if git diff --quiet -- CHANGELOG.md; then
-            echo "CHANGELOG heading already prefixed"
+          python3 .github/scripts/fold_changelog.py
+          rm -f app/CHANGELOG.md
+          if git diff --quiet -- CHANGELOG.md app/CHANGELOG.md; then
+            echo "CHANGELOG already folded into the root"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "docs: prefix changelog heading with RDB"
+          git add -A CHANGELOG.md app/CHANGELOG.md
+          git commit -m "docs: fold changelog into the repo root"
           git push origin "$branch"
