@@ -183,8 +183,7 @@ fn fold_skip_line(lines: &[String], folded: &HashSet<usize>, line: usize, down: 
     l
 }
 
-/// Distinct, non-empty group names already in use, sorted — suggestion chips
-/// in the New/Edit dialog so a typo doesn't spawn a near-duplicate folder.
+/// Distinct, non-empty group names already in use, sorted.
 fn existing_groups(store: &rdb_connstore::ConnStore) -> Vec<String> {
     let mut groups: Vec<String> = store
         .list()
@@ -195,6 +194,15 @@ fn existing_groups(store: &rdb_connstore::ConnStore) -> Vec<String> {
     groups.sort();
     groups.dedup();
     groups
+}
+
+/// Options for the New/Edit dialog's Group dropdown: "None" + every
+/// distinct group already in use + a trailing "create new" entry.
+fn group_picker_options(store: &rdb_connstore::ConnStore) -> Vec<String> {
+    let mut opts = vec!["None".to_string()];
+    opts.extend(existing_groups(store));
+    opts.push("+ New group…".to_string());
+    opts
 }
 
 /// Build the grouped sidebar row model: a header row per group followed by its
@@ -5744,6 +5752,93 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ----- delete a group: its connections fall back to Ungrouped -----
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let collapsed = collapsed.clone();
+        let conn_filter = conn_filter.clone();
+        let settings = settings.clone();
+        window.on_group_delete(move |g| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let g = g.to_string();
+            {
+                let mut st = store.borrow_mut();
+                let ids: Vec<String> = st
+                    .list()
+                    .iter()
+                    .filter(|s| s.group.as_deref() == Some(g.as_str()))
+                    .map(|s| s.id.clone())
+                    .collect();
+                for id in ids {
+                    if let Some(mut sc) = st.get(&id).cloned() {
+                        sc.group = None;
+                        let _ = st.update(sc);
+                    }
+                }
+            }
+            collapsed.borrow_mut().remove(&g);
+            let groups: Vec<String> = collapsed.borrow().iter().cloned().collect();
+            let _ = settings
+                .borrow_mut()
+                .update(|s| s.ui_state.collapsed_groups = groups);
+            let items =
+                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
+            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+        });
+    }
+
+    // ----- rename a group: every member connection follows -----
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let collapsed = collapsed.clone();
+        let conn_filter = conn_filter.clone();
+        let settings = settings.clone();
+        window.on_group_rename(move |old, new| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let old = old.to_string();
+            let new = new.trim().to_string();
+            if new.is_empty() || new == old {
+                return;
+            }
+            {
+                let mut st = store.borrow_mut();
+                let ids: Vec<String> = st
+                    .list()
+                    .iter()
+                    .filter(|s| s.group.as_deref() == Some(old.as_str()))
+                    .map(|s| s.id.clone())
+                    .collect();
+                for id in ids {
+                    if let Some(mut sc) = st.get(&id).cloned() {
+                        sc.group = Some(new.clone());
+                        let _ = st.update(sc);
+                    }
+                }
+            }
+            // Carry the collapsed state over so renaming doesn't silently
+            // re-expand a group the user had folded shut.
+            {
+                let mut c = collapsed.borrow_mut();
+                if c.remove(&old) {
+                    c.insert(new.clone());
+                }
+            }
+            let groups: Vec<String> = collapsed.borrow().iter().cloned().collect();
+            let _ = settings
+                .borrow_mut()
+                .update(|s| s.ui_state.collapsed_groups = groups);
+            let items =
+                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
+            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+        });
+    }
+
     // ----- connection-picker search (filter the connection list) -----
     {
         let weak = window.as_weak();
@@ -10665,8 +10760,9 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_color(SharedString::from("#2c5fd8"));
             w.set_f_env_tag(SharedString::from("None"));
             w.set_f_group(SharedString::default());
-            w.set_existing_groups(ModelRc::from(Rc::new(VecModel::from(
-                existing_groups(&store.borrow())
+            w.set_f_group_display(SharedString::from("None"));
+            w.set_group_options(ModelRc::from(Rc::new(VecModel::from(
+                group_picker_options(&store.borrow())
                     .into_iter()
                     .map(SharedString::from)
                     .collect::<Vec<_>>(),
@@ -10719,9 +10815,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 sc.color.unwrap_or_else(|| "#2c5fd8".into()),
             ));
             w.set_f_env_tag(SharedString::from(sc.env_tag.as_str()));
+            w.set_f_group_display(SharedString::from(
+                sc.group.clone().unwrap_or_else(|| "None".into()),
+            ));
             w.set_f_group(SharedString::from(sc.group.unwrap_or_default()));
-            w.set_existing_groups(ModelRc::from(Rc::new(VecModel::from(
-                existing_groups(&st)
+            w.set_group_options(ModelRc::from(Rc::new(VecModel::from(
+                group_picker_options(&st)
                     .into_iter()
                     .map(SharedString::from)
                     .collect::<Vec<_>>(),

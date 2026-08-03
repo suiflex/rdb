@@ -207,6 +207,8 @@ callback table-toggle-null(int);
 callback table-toggle-pk(int);
 callback create-table-commit();
     callback toggle-group(string);
+    callback group-rename(string, string);
+    callback group-delete(string);
     callback toggle-favorite(int);          // star/unstar a saved connection
     callback reorder-conn(int, int);        // (dragged store index, row-step delta)
     callback open-table(string, string);   // (database, container)
@@ -582,7 +584,8 @@ callback create-table-commit();
     in-out property <string> f-color;
     in-out property <string> f-env-tag;
     in-out property <string> f-group;
-    in property <[string]> existing-groups;
+    in-out property <string> f-group-display;
+    in property <[string]> group-options;
     in-out property <string> f-import-url;
     in property <string> form-error;
     in property <string> test-result;
@@ -1048,6 +1051,8 @@ callback create-table-commit();
             add-clicked() => { root.open-add-form(); }
             edit-clicked(i) => { root.open-edit-form(i); }
             toggle-group(g) => { root.toggle-group(g); }
+            group-rename(o, n) => { root.group-rename(o, n); }
+            group-delete(g) => { root.group-delete(g); }
             toggle-favorite(i) => { root.toggle-favorite(i); }
             reorder-conn(i, d) => { root.reorder-conn(i, d); }
             filter(t) => { root.conn-filter(t); }
@@ -2300,7 +2305,8 @@ callback create-table-commit();
         f-color <=> root.f-color;
         f-env-tag <=> root.f-env-tag;
         f-group <=> root.f-group;
-        existing-groups: root.existing-groups;
+        f-group-display <=> root.f-group-display;
+        group-options: root.group-options;
         f-import-url <=> root.f-import-url;
         form-error: root.form-error;
         test-result: root.test-result;

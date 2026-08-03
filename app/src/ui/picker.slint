@@ -39,6 +39,10 @@ export component ConnPicker inherits Rectangle {
     // Export saved connections to ~/Downloads. Arg is the format: 0 = JSON, 1 = CSV.
     callback export-conns(int);
     callback toggle-group(string);
+    // Right-click a group header: rename (old, new) or delete it (its
+    // connections fall back to Ungrouped, nothing is destroyed).
+    callback group-rename(string, string);
+    callback group-delete(string);
     // Toggle the starred flag on a connection (arg is the store index).
     callback toggle-favorite(int);
     // Drag-reorder: (store index of dragged row, signed number of rows moved).
@@ -46,6 +50,13 @@ export component ConnPicker inherits Rectangle {
     callback filter(string);
     // Open an external link (Product Hunt / GitHub) in the system browser.
     callback open-url(string);
+
+    // Group header context menu (Rename/Delete) + its rename modal state.
+    property <string> group-menu-target: "";
+    property <length> group-menu-y: 0px;
+    property <bool> rename-modal-open: false;
+    property <string> rename-old: "";
+    property <string> rename-text: "";
 
     background: Tokens.canvas;
 
@@ -119,7 +130,21 @@ export component ConnPicker inherits Rectangle {
                             // --- group header row ---
                             if item.is-header: Rectangle {
                                 hdr-ta := TouchArea {
-                                    clicked => { root.toggle-group(item.name); }
+                                    // `item.group` is the raw-case key stored on
+                                    // SavedConnection; `item.name` is uppercased
+                                    // for display only — using it here would
+                                    // silently desync collapse state for any
+                                    // group name that isn't already all-caps.
+                                    clicked => { root.toggle-group(item.group); }
+                                    pointer-event(e) => {
+                                        if (e.kind == PointerEventKind.down
+                                            && e.button == PointerEventButton.right
+                                            && item.group != "Ungrouped") {
+                                            root.group-menu-target = item.group;
+                                            root.group-menu-y = self.absolute-position.y - root.absolute-position.y;
+                                            group-menu.show();
+                                        }
+                                    }
                                 }
                                 HorizontalLayout {
                                     spacing: Tokens.sp2;
@@ -639,6 +664,119 @@ export component ConnPicker inherits Rectangle {
                             color: Tokens.text-faint;
                             font-size: Tokens.font-sm;
                             vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    group-menu := PopupWindow {
+        x: 60px;
+        y: min(root.group-menu-y, root.height - 96px);
+        width: 140px;
+        Rectangle {
+            background: Tokens.card;
+            border-radius: Tokens.radius;
+            border-width: 1px;
+            border-color: Tokens.border-strong;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: Tokens.text.with-alpha(0.25);
+            VerticalLayout {
+                padding: 4px;
+                for label[action] in ["Rename", "Delete"]: Rectangle {
+                    height: 28px;
+                    border-radius: Tokens.radius;
+                    background: gmenu-ta.has-hover ? (action == 1 ? Tokens.error-tint : Tokens.accent-tint) : transparent;
+                    Text {
+                        x: Tokens.sp2;
+                        text: label;
+                        color: action == 1 ? Tokens.error : Tokens.text;
+                        font-size: Tokens.font-sm;
+                        vertical-alignment: center;
+                    }
+                    gmenu-ta := TouchArea {
+                        clicked => {
+                            if (action == 0) {
+                                root.rename-old = root.group-menu-target;
+                                root.rename-text = root.group-menu-target;
+                                root.rename-modal-open = true;
+                            } else {
+                                root.group-delete(root.group-menu-target);
+                            }
+                            group-menu.close();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- Rename group -----
+    Rectangle {
+        visible: root.rename-modal-open;
+        background: Tokens.veil;
+        TouchArea { clicked => { root.rename-modal-open = false; } }
+        changed visible => {
+            if (self.visible) { rti.focus(); }
+        }
+        Rectangle {
+            width: 340px;
+            x: (parent.width - self.width) / 2;
+            y: 140px;
+            height: rbox.preferred-height;
+            border-radius: Tokens.modal-radius;
+            background: Tokens.card;
+            border-width: 1px;
+            border-color: Tokens.border;
+            drop-shadow-blur: 42px;
+            drop-shadow-offset-y: 12px;
+            drop-shadow-color: #1C191426;
+            TouchArea {}
+            rbox := VerticalLayout {
+                padding: Tokens.sp4;
+                spacing: Tokens.sp3;
+                Text {
+                    text: "Rename group";
+                    color: Tokens.text;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+                Rectangle {
+                    height: 34px;
+                    border-radius: Tokens.radius;
+                    background: Tokens.canvas;
+                    border-width: 1px;
+                    border-color: Tokens.border;
+                    rti := TextInput {
+                        x: Tokens.sp2;
+                        width: parent.width - 2 * Tokens.sp2;
+                        vertical-alignment: center;
+                        text <=> root.rename-text;
+                        color: Tokens.text;
+                        font-size: Tokens.font-md;
+                        single-line: true;
+                        accepted => {
+                            root.group-rename(root.rename-old, root.rename-text);
+                            root.rename-modal-open = false;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    alignment: end;
+                    SecondaryButton {
+                        text: "Cancel";
+                        height: 30px;
+                        clicked => { root.rename-modal-open = false; }
+                    }
+                    PrimaryButton {
+                        text: "Rename";
+                        height: 30px;
+                        clicked => {
+                            root.group-rename(root.rename-old, root.rename-text);
+                            root.rename-modal-open = false;
                         }
                     }
                 }
