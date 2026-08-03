@@ -35,7 +35,7 @@ HEAD checks against GitHub release assets when offline.
 - **Release data** (`src/data/release.json`) is committed as a fallback and
   refreshed from the GitHub API with `npm run fetch-release`. Run it after
   cutting a release, commit the diff, and redeploy.
-- **Changelog and license pages** read `app/CHANGELOG.md` and `LICENSE` from
+- **Changelog and license pages** read `CHANGELOG.md` and `LICENSE` from
   the repo root at build time; they update themselves.
 
 ## Screenshots
