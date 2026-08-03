@@ -161,7 +161,14 @@ export component ConnPicker inherits Rectangle {
                                     width: parent.width;
                                     height: parent.height;
                                     spacing: Tokens.sp2;
-                                    alignment: start;
+                                    // No `alignment: start` here (deliberately) — that
+                                    // mode disables stretch factors entirely, which is
+                                    // exactly what silently broke the menu button
+                                    // pushing itself to the right edge. Default
+                                    // (stretch) leaves the Text children untouched
+                                    // (content-sized, so their stretch factor is 0)
+                                    // and lets the trailing spacer Rectangle absorb
+                                    // the remaining width instead.
                                     Text {
                                         text: item.expanded ? "▾" : "▸";
                                         color: Tokens.text-faint;
