@@ -300,6 +300,81 @@ fn build_conn_items(
     rows
 }
 
+/// Walk `rendered` (the same list `build_conn_items` produced) accumulating
+/// each row's on-screen height to find which one a drag's release point
+/// (`y`, pixels from the top of the list content) landed on, returning its
+/// group. Heights/spacing mirror `picker.slint`'s row layout (28px header /
+/// 40px row, 4px `Tokens.sp1` gaps) — if that layout changes, update both.
+fn row_group_at_y(rendered: &[ConnItem], y: i32) -> Option<String> {
+    const HEADER_H: i32 = 28;
+    const ROW_H: i32 = 40;
+    const GAP: i32 = 4;
+    let mut top = 0;
+    for item in rendered {
+        let h = if item.is_header { HEADER_H } else { ROW_H };
+        if y < top + h {
+            return Some(item.group.to_string());
+        }
+        top += h + GAP;
+    }
+    rendered.last().map(|item| item.group.to_string())
+}
+
+#[cfg(test)]
+mod row_group_at_y_tests {
+    use super::*;
+
+    fn header(group: &str) -> ConnItem {
+        ConnItem {
+            id: SharedString::default(),
+            name: group.into(),
+            engine: SharedString::default(),
+            color: Default::default(),
+            has_custom_color: false,
+            is_header: true,
+            expanded: true,
+            index: -1,
+            group: group.into(),
+            subline: SharedString::default(),
+            local: false,
+            count: 1,
+            favorite: false,
+            env_tag_label: SharedString::default(),
+            env_tag_color: Default::default(),
+        }
+    }
+
+    fn row(group: &str) -> ConnItem {
+        ConnItem {
+            is_header: false,
+            index: 0,
+            ..header(group)
+        }
+    }
+
+    #[test]
+    fn lands_on_the_row_under_the_release_point() {
+        // header(28) [0,28) | row(40) [32,72) | header(28) [76,104) | row(40) [108,148)
+        let rendered = vec![header("A"), row("A"), header("B"), row("B")];
+        assert_eq!(row_group_at_y(&rendered, 10), Some("A".into())); // on A's header
+        assert_eq!(row_group_at_y(&rendered, 50), Some("A".into())); // on A's row
+        assert_eq!(row_group_at_y(&rendered, 90), Some("B".into())); // on B's header
+        assert_eq!(row_group_at_y(&rendered, 130), Some("B".into())); // on B's row
+    }
+
+    #[test]
+    fn clamps_out_of_range_y_to_the_nearest_end() {
+        let rendered = vec![header("A"), row("A")];
+        assert_eq!(row_group_at_y(&rendered, -50), Some("A".into()));
+        assert_eq!(row_group_at_y(&rendered, 9999), Some("A".into()));
+    }
+
+    #[test]
+    fn empty_list_has_no_target() {
+        assert_eq!(row_group_at_y(&[], 0), None);
+    }
+}
+
 /// Top-level sidebar categories per engine (TablePlus-style). The label is also
 /// the toggle key, so `on_toggle_schema_node` can tell a category click from a
 /// table click. The first entry is the "primary" category that holds the
@@ -5881,34 +5956,71 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // ----- drag-reorder a connection within its group -----
+    // ----- drag-reorder within a group, or drop onto a different group -----
     {
         let weak = window.as_weak();
         let store = store.clone();
         let collapsed = collapsed.clone();
         let conn_filter = conn_filter.clone();
-        window.on_reorder_conn(move |from_idx, delta| {
+        window.on_reorder_conn(move |from_idx, delta, drop_y| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            let group_key = |c: &rdb_connstore::SavedConnection| {
+                c.group
+                    .as_deref()
+                    .filter(|g| !g.trim().is_empty())
+                    .unwrap_or(UNGROUPED)
+                    .to_string()
+            };
+
+            // Cross-group drop: the release point landed on a different
+            // group's header or row than the dragged connection's own group.
+            let rendered =
+                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
+            if let Some(target_group) = row_group_at_y(&rendered, drop_y) {
+                let from_id = {
+                    let s = store.borrow();
+                    let Some(from) = s.list().get(from_idx as usize) else {
+                        return;
+                    };
+                    if group_key(from) == target_group {
+                        None
+                    } else {
+                        Some(from.id.clone())
+                    }
+                };
+                if let Some(id) = from_id {
+                    let sc = store.borrow().get(&id).cloned();
+                    if let Some(mut sc) = sc {
+                        sc.group = if target_group == UNGROUPED {
+                            None
+                        } else {
+                            Some(target_group)
+                        };
+                        let _ = store.borrow_mut().update(sc);
+                    }
+                    let items = build_conn_items(
+                        &store.borrow(),
+                        &collapsed.borrow(),
+                        &conn_filter.borrow(),
+                    );
+                    w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+                    return;
+                }
+            }
+
+            // Same-group reorder: resolve the row-step delta against the
+            // dragged connection's own group, using the same (favorite desc,
+            // order asc) display order as the builder.
             if delta == 0 {
                 return;
             }
-            // Resolve the row-step delta against the dragged connection's group,
-            // using the same (favorite desc, order asc) display order as the
-            // builder, then map back to a store index for `reorder`.
             let (from_id, target_vec_idx) = {
                 let s = store.borrow();
                 let list = s.list();
                 let Some(from) = list.get(from_idx as usize) else {
                     return;
-                };
-                let group_key = |c: &rdb_connstore::SavedConnection| {
-                    c.group
-                        .as_deref()
-                        .filter(|g| !g.trim().is_empty())
-                        .unwrap_or(UNGROUPED)
-                        .to_string()
                 };
                 let g = group_key(from);
                 let mut members: Vec<usize> = list

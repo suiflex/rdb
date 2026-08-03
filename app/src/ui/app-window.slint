@@ -210,7 +210,7 @@ callback create-table-commit();
     callback group-rename(string, string);
     callback group-delete(string);
     callback toggle-favorite(int);          // star/unstar a saved connection
-    callback reorder-conn(int, int);        // (dragged store index, row-step delta)
+    callback reorder-conn(int, int, int);   // (dragged store index, row-step delta, drop-Y)
     callback open-table(string, string);   // (database, container)
     callback pin-table(string, string);    // double-click pins the object tab
     callback toggle-fields(string, string); // (database, table) — expand columns inline
@@ -1054,7 +1054,7 @@ callback create-table-commit();
             group-rename(o, n) => { root.group-rename(o, n); }
             group-delete(g) => { root.group-delete(g); }
             toggle-favorite(i) => { root.toggle-favorite(i); }
-            reorder-conn(i, d) => { root.reorder-conn(i, d); }
+            reorder-conn(i, d, y) => { root.reorder-conn(i, d, y); }
             filter(t) => { root.conn-filter(t); }
             export-conns(fmt) => { root.export-conns(fmt); }
             open-url(u) => { root.open-url(u); }

@@ -45,8 +45,10 @@ export component ConnPicker inherits Rectangle {
     callback group-delete(string);
     // Toggle the starred flag on a connection (arg is the store index).
     callback toggle-favorite(int);
-    // Drag-reorder: (store index of dragged row, signed number of rows moved).
-    callback reorder-conn(int, int);
+    // Drag-reorder/move: (store index of dragged row, signed row-step delta
+    // for a same-group reorder, release Y relative to the list content's top
+    // for cross-group drop detection).
+    callback reorder-conn(int, int, int);
     callback filter(string);
     // Open an external link (Product Hunt / GitHub) in the system browser.
     callback open-url(string);
@@ -118,7 +120,7 @@ export component ConnPicker inherits Rectangle {
                 // ----- grouped rows -----
                 ScrollView {
                     vertical-stretch: 1;
-                    VerticalLayout {
+                    list-content := VerticalLayout {
                         padding-left: Tokens.sp3;
                         padding-right: Tokens.sp3;
                         spacing: Tokens.sp1;
@@ -169,29 +171,38 @@ export component ConnPicker inherits Rectangle {
                                         font-size: Tokens.font-sm;
                                         vertical-alignment: center;
                                     }
-                                    Rectangle { horizontal-stretch: 1; }
-                                    // Visible Rename/Delete affordance — right-click
-                                    // does the same, but a hidden-until-hover "⋯" is
-                                    // the only discoverable path on a fresh install.
-                                    if item.group != "Ungrouped": Rectangle {
-                                        width: 20px;
-                                        height: 20px;
-                                        border-radius: Tokens.radius;
-                                        opacity: hdr-ta.has-hover || gmore-ta.has-hover ? 1.0 : 0.0;
-                                        background: gmore-ta.has-hover ? Tokens.card.with-alpha(0.5) : transparent;
-                                        Text {
-                                            text: "⋯";
-                                            color: Tokens.text-faint;
-                                            font-size: Tokens.font-sm;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
+                                }
+                                // Visible Rename/Delete affordance — right-click does
+                                // the same, but a hidden-until-hover button is the
+                                // only discoverable path on a fresh install. Absolute
+                                // position (not layout stretch) so it always lands at
+                                // the row's right edge regardless of header content
+                                // width. Three plain dots, not a Unicode glyph — the
+                                // app's bundled fonts don't cover "…"/"⋯" and it fell
+                                // back to a tofu box.
+                                if item.group != "Ungrouped": Rectangle {
+                                    x: parent.width - self.width - Tokens.sp2;
+                                    y: (parent.height - self.height) / 2;
+                                    width: 24px;
+                                    height: 20px;
+                                    border-radius: Tokens.radius;
+                                    opacity: hdr-ta.has-hover || gmore-ta.has-hover ? 1.0 : 0.0;
+                                    background: gmore-ta.has-hover ? Tokens.card.with-alpha(0.5) : transparent;
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        spacing: 2px;
+                                        for _dot in [0, 1, 2]: Rectangle {
+                                            width: 3px;
+                                            height: 3px;
+                                            border-radius: 1.5px;
+                                            background: Tokens.text-faint;
                                         }
-                                        gmore-ta := TouchArea {
-                                            clicked => {
-                                                root.group-menu-target = item.group;
-                                                root.group-menu-y = self.absolute-position.y - root.absolute-position.y;
-                                                group-menu.show();
-                                            }
+                                    }
+                                    gmore-ta := TouchArea {
+                                        clicked => {
+                                            root.group-menu-target = item.group;
+                                            root.group-menu-y = self.absolute-position.y - root.absolute-position.y;
+                                            group-menu.show();
                                         }
                                     }
                                 }
@@ -247,9 +258,17 @@ export component ConnPicker inherits Rectangle {
                                                 mouse-cursor: grab;
                                                 pointer-event(ev) => {
                                                     if ev.kind == PointerEventKind.up {
+                                                        // Row-step delta for a same-group reorder, plus the
+                                                        // release point's Y relative to the top of the (already
+                                                        // scrolled) list content — Rust maps that to whichever
+                                                        // row/header it landed on to detect a cross-group drop.
+                                                        // Both are in the same on-screen coordinate frame, so
+                                                        // scroll offset cancels out of the subtraction.
                                                         root.reorder-conn(
                                                             item.index,
-                                                            round((self.mouse-y - self.pressed-y) / 40px));
+                                                            round((self.mouse-y - self.pressed-y) / 40px),
+                                                            round((self.absolute-position.y + self.mouse-y
+                                                                - list-content.absolute-position.y) / 1px));
                                                     }
                                                 }
                                                 changed has-hover => {
