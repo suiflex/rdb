@@ -617,11 +617,18 @@ export component QueryPane inherits Rectangle {
                                             fill: item.has-custom-color ? item.color : Tokens.db-color(item.engine);
                                         }
                                     }
-                                    rl := Text {
-                                        text: item.label;
-                                        color: i == root.active-result ? Tokens.on-tint : Tokens.text-dim;
-                                        font-size: Tokens.font-sm;
-                                        vertical-alignment: center;
+                                    // Extra padding-top (vs. none on bottom) shifts the
+                                    // centered position down ~1px so the label reads
+                                    // level with the engine badge beside it.
+                                    VerticalLayout {
+                                        alignment: center;
+                                        padding-top: 2px;
+                                        rl := Text {
+                                            text: item.label;
+                                            color: i == root.active-result ? Tokens.on-tint : Tokens.text-dim;
+                                            font-size: Tokens.font-sm;
+                                            vertical-alignment: center;
+                                        }
                                     }
                                     Rectangle {
                                         width: 16px;

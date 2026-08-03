@@ -23,6 +23,34 @@ pub fn accent_or_default(s: &str) -> Color {
     parse_hex(s).unwrap_or_else(|| Color::from_rgb_u8(0x2c, 0x5f, 0xd8))
 }
 
+/// Fixed environment-tag -> color mapping (5 of the 8 `Swatches` hexes from
+/// conn-form.slint, kept identical there via `EnvSwatches` so the dialog
+/// picker and the sidebar pill agree). `EnvTag::None` renders no pill.
+pub fn env_tag_color(tag: rdb_connstore::EnvTag) -> Option<Color> {
+    use rdb_connstore::EnvTag::*;
+    match tag {
+        None => Option::None,
+        Local => parse_hex("#64748b"),
+        Dev => parse_hex("#239d5c"),
+        Staging => parse_hex("#d9962f"),
+        Testing => parse_hex("#a855f7"),
+        Production => parse_hex("#e05a4e"),
+    }
+}
+
+/// Pill label for an environment tag; empty string means "render no pill".
+pub fn env_tag_label(tag: rdb_connstore::EnvTag) -> &'static str {
+    use rdb_connstore::EnvTag::*;
+    match tag {
+        None => "",
+        Local => "LOCAL",
+        Dev => "DEV",
+        Staging => "STAGING",
+        Testing => "TESTING",
+        Production => "PRODUCTION",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

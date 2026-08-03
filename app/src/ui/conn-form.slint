@@ -15,12 +15,31 @@ export global Swatches {
     ];
 }
 
+// Environment-tag colors, in lockstep with `theme::env_tag_color` (app/src/theme.rs)
+// and the label order below — keep both in sync by hand if either changes.
+export global EnvSwatches {
+    out property <[string]> names: ["None", "Local", "Dev", "Staging", "Testing", "Production"];
+    out property <[color]> colors: [
+        #94a3b8, #64748b, #239d5c, #d9962f, #a855f7, #e05a4e,
+    ];
+}
+
 component FormLabel inherits Text {
     width: 82px;
     color: Tokens.text-dim;
     font-size: Tokens.font-sm;
     horizontal-alignment: right;
     vertical-alignment: center;
+}
+
+// Small caps divider heading, same idiom as the group headers in
+// picker.slint, so the dialog's sections read consistently with the rest
+// of the app rather than inventing a new label style.
+component SectionLabel inherits Text {
+    color: Tokens.text-faint;
+    font-size: Tokens.font-xs;
+    font-weight: 700;
+    letter-spacing: 0.8px;
 }
 
 export component ConnForm inherits Rectangle {
@@ -37,6 +56,13 @@ export component ConnForm inherits Rectangle {
     in-out property <string> f-sslmode;    // "Disable"|"Prefer"|"Require"
     in-out property <string> f-params;     // Mongo options query string or full URI
     in-out property <string> f-color;      // selected hex
+    in-out property <string> f-env-tag;    // "None"|"Local"|"Dev"|"Staging"|"Testing"|"Production"
+    in-out property <string> f-group;      // sidebar folder label; empty = ungrouped
+    in-out property <string> f-group-display; // text shown in the Group dropdown ("None" when f-group is empty)
+    in property <[string]> group-options;  // ["None", ...distinct groups, "+ New group…"]
+    // Live-derived (not manually toggled), so a stale true doesn't carry over
+    // from a previous dialog session — Rust always resets f-group-display on open.
+    property <bool> creating-new-group: root.f-group-display == "+ New group…";
     in-out property <string> f-import-url;  // pasted connection URL
     in property <string> form-error;
     in property <string> test-result;   // test-connection status line
@@ -87,6 +113,11 @@ export component ConnForm inherits Rectangle {
                 FormField { horizontal-stretch: 1; text <=> root.f-name; }
             }
 
+            Rectangle { height: Tokens.sp3; }
+            SectionLabel { text: "CONNECTION"; }
+            Rectangle { height: 1px; background: Tokens.border; }
+            Rectangle { height: Tokens.sp1; }
+
             HorizontalLayout {
                 height: 30px;
                 spacing: Tokens.sp2;
@@ -99,26 +130,6 @@ export component ConnForm inherits Rectangle {
                 }
             }
 
-            HorizontalLayout {
-                height: 30px;
-                spacing: Tokens.sp2;
-                FormLabel { text: "Color"; }
-                HorizontalLayout {
-                    alignment: center;
-                    spacing: Tokens.sp2;
-                    for col[i] in Swatches.colors: Rectangle {
-                        width: 22px;
-                        height: 22px;
-                        border-radius: 11px;
-                        background: col;
-                        border-width: Swatches.hexes[i] == root.f-color ? 2px : 0px;
-                        border-color: Tokens.text;
-                        TouchArea { clicked => { root.f-color = Swatches.hexes[i]; } }
-                    }
-                }
-                Rectangle { horizontal-stretch: 1; }
-            }
-
             import-row := HorizontalLayout {
                 height: 30px;
                 spacing: Tokens.sp2;
@@ -127,7 +138,12 @@ export component ConnForm inherits Rectangle {
                     horizontal-stretch: 1;
                     min-width: 0px;
                     text <=> root.f-import-url;
-                    placeholder: "postgresql://user:pass@host:5432/db?sslmode=require";
+                    placeholder: root.f-engine == "MySQL" ? "mysql://user:pass@host:3306/db"
+                        : root.f-engine == "Redis" ? "redis://user:pass@host:6379"
+                        : root.f-engine == "MongoDB" ? "mongodb://user:pass@host:27017/db"
+                        : root.f-engine == "Cassandra" ? "cassandra://user:pass@host:9042/keyspace"
+                        : root.f-engine == "SQLite" ? "sqlite:///path/to/database.db"
+                        : "postgresql://user:pass@host:5432/db?sslmode=require";
                     accepted => { root.import-url(); }
                 }
                 SecondaryButton {
@@ -215,6 +231,81 @@ export component ConnForm inherits Rectangle {
                     horizontal-stretch: 1;
                     text <=> root.f-params;
                     placeholder: "replicaSet=rs0&authSource=admin";
+                }
+            }
+
+            Rectangle { height: Tokens.sp3; }
+            SectionLabel { text: "APPEARANCE"; }
+            Rectangle { height: 1px; background: Tokens.border; }
+            Rectangle { height: Tokens.sp1; }
+
+            HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: "Color"; }
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: Tokens.sp2;
+                    for col[i] in Swatches.colors: Rectangle {
+                        width: 22px;
+                        height: 22px;
+                        border-radius: 11px;
+                        background: col;
+                        border-width: Swatches.hexes[i] == root.f-color ? 2px : 0px;
+                        border-color: Tokens.text;
+                        TouchArea { clicked => { root.f-color = Swatches.hexes[i]; } }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+
+            HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: "ENV"; }
+                HorizontalLayout {
+                    spacing: Tokens.sp1;
+                    for name[i] in EnvSwatches.names: Rectangle {
+                        height: 20px;
+                        width: label.preferred-width + 2 * Tokens.sp2;
+                        border-radius: self.height / 2;
+                        background: name == root.f-env-tag ? EnvSwatches.colors[i] : transparent;
+                        border-width: 1px;
+                        border-color: EnvSwatches.colors[i].with-alpha(0.55);
+                        label := Text {
+                            text: name;
+                            color: name == root.f-env-tag ? Tokens.card : EnvSwatches.colors[i];
+                            font-size: 9px;
+                            font-weight: 700;
+                            letter-spacing: 0.8px;
+                        }
+                        TouchArea { clicked => { root.f-env-tag = name; } }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+
+            HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: "Group"; }
+                SelectBox {
+                    horizontal-stretch: 1;
+                    model: root.group-options;
+                    current-value <=> root.f-group-display;
+                    selected(v) => {
+                        root.f-group = (v == "None" || v == "+ New group…") ? "" : v;
+                    }
+                }
+            }
+            if creating-new-group: HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: ""; }
+                FormField {
+                    horizontal-stretch: 1;
+                    text <=> root.f-group;
+                    placeholder: "New group name";
                 }
             }
 

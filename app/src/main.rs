@@ -183,6 +183,28 @@ fn fold_skip_line(lines: &[String], folded: &HashSet<usize>, line: usize, down: 
     l
 }
 
+/// Distinct, non-empty group names already in use, sorted.
+fn existing_groups(store: &rdb_connstore::ConnStore) -> Vec<String> {
+    let mut groups: Vec<String> = store
+        .list()
+        .iter()
+        .filter_map(|s| s.group.clone())
+        .filter(|g| !g.trim().is_empty())
+        .collect();
+    groups.sort();
+    groups.dedup();
+    groups
+}
+
+/// Options for the New/Edit dialog's Group dropdown: "None" + every
+/// distinct group already in use + a trailing "create new" entry.
+fn group_picker_options(store: &rdb_connstore::ConnStore) -> Vec<String> {
+    let mut opts = vec!["None".to_string()];
+    opts.extend(existing_groups(store));
+    opts.push("+ New group…".to_string());
+    opts
+}
+
 /// Build the grouped sidebar row model: a header row per group followed by its
 /// connection rows (unless the group is collapsed). `index` on each connection
 /// row is its position in the store list, so connect/edit callbacks stay correct
@@ -235,9 +257,16 @@ fn build_conn_items(
                 local: false,
                 count: buckets[g].len() as i32,
                 favorite: false,
+                env_tag_label: SharedString::default(),
+                env_tag_color: theme::accent_or_default(""),
+                is_group_end: false,
             });
         }
         if !expanded {
+            // Collapsed: the header is the only (and thus last) visible row.
+            if let Some(last) = rows.last_mut() {
+                last.is_group_end = true;
+            }
             continue;
         }
         // Favorites float to the top of their group, then explicit sort order.
@@ -267,10 +296,154 @@ fn build_conn_items(
                 local: s.local,
                 count: 0,
                 favorite: s.favorite,
+                env_tag_label: theme::env_tag_label(s.env_tag).into(),
+                env_tag_color: theme::env_tag_color(s.env_tag)
+                    .unwrap_or_else(|| theme::accent_or_default("")),
+                is_group_end: false,
             });
+        }
+        // Expanded: the last member row just pushed is the group's visible end.
+        if let Some(last) = rows.last_mut() {
+            last.is_group_end = true;
         }
     }
     rows
+}
+
+/// Flatten `build_conn_items`'s output into the ⌘O "Open Connection" modal's
+/// `PaletteItem` list plus a parallel index map (`-1` for a header row, the
+/// real store index for a connection row) — shared by the modal's open
+/// handler and the group-toggle handler so both stay in sync however the
+/// toggle was triggered.
+fn build_conn_palette_items(
+    store: &rdb_connstore::ConnStore,
+    collapsed: &HashSet<String>,
+    filter: &str,
+) -> (Vec<PaletteItem>, Vec<i32>) {
+    let rows = build_conn_items(store, collapsed, filter);
+    let mut items: Vec<PaletteItem> = Vec::new();
+    let mut map: Vec<i32> = Vec::new();
+    for r in rows {
+        if r.is_header {
+            items.push(PaletteItem {
+                label: r.group.to_lowercase().into(),
+                kind: "group".into(),
+                sub: SharedString::default(),
+                local: false,
+                color: theme::accent_or_default(""),
+                has_custom_color: false,
+                env_tag_label: SharedString::default(),
+                env_tag_color: theme::accent_or_default(""),
+                group: r.group,
+                expanded: r.expanded,
+                is_group_end: r.is_group_end,
+            });
+            map.push(-1);
+        } else {
+            items.push(PaletteItem {
+                label: r.name,
+                kind: r.engine,
+                sub: r.subline,
+                local: r.local,
+                color: r.color,
+                has_custom_color: r.has_custom_color,
+                env_tag_label: r.env_tag_label,
+                env_tag_color: r.env_tag_color,
+                group: r.group,
+                expanded: r.expanded,
+                is_group_end: r.is_group_end,
+            });
+            map.push(r.index);
+        }
+    }
+    (items, map)
+}
+
+/// Walk `rendered` (the same list `build_conn_items` produced) accumulating
+/// each row's on-screen height to find which one a drag's release point
+/// (`y`, pixels from the top of the list content) landed on, returning its
+/// group. Heights mirror `picker.slint`'s row layout: 28px header (+8px
+/// `Tokens.sp2` extra on every header but the first, for the gap between
+/// cards) / 40px row, no spacing between rows otherwise — if that layout
+/// changes, update both.
+fn row_group_at_y(rendered: &[ConnItem], y: i32) -> Option<String> {
+    const HEADER_H: i32 = 28;
+    const HEADER_GAP: i32 = 8;
+    const ROW_H: i32 = 40;
+    let mut top = 0;
+    for (i, item) in rendered.iter().enumerate() {
+        let h = if item.is_header {
+            if i > 0 {
+                HEADER_H + HEADER_GAP
+            } else {
+                HEADER_H
+            }
+        } else {
+            ROW_H
+        };
+        if y < top + h {
+            return Some(item.group.to_string());
+        }
+        top += h;
+    }
+    rendered.last().map(|item| item.group.to_string())
+}
+
+#[cfg(test)]
+mod row_group_at_y_tests {
+    use super::*;
+
+    fn header(group: &str) -> ConnItem {
+        ConnItem {
+            id: SharedString::default(),
+            name: group.into(),
+            engine: SharedString::default(),
+            color: Default::default(),
+            has_custom_color: false,
+            is_header: true,
+            expanded: true,
+            index: -1,
+            group: group.into(),
+            subline: SharedString::default(),
+            local: false,
+            count: 1,
+            favorite: false,
+            env_tag_label: SharedString::default(),
+            env_tag_color: Default::default(),
+            is_group_end: false,
+        }
+    }
+
+    fn row(group: &str) -> ConnItem {
+        ConnItem {
+            is_header: false,
+            index: 0,
+            ..header(group)
+        }
+    }
+
+    #[test]
+    fn lands_on_the_row_under_the_release_point() {
+        // header 0 (28, no gap) [0,28) | row (40) [28,68)
+        // header 1 (28+8 gap)   [68,104) | row (40) [104,144)
+        let rendered = vec![header("A"), row("A"), header("B"), row("B")];
+        assert_eq!(row_group_at_y(&rendered, 10), Some("A".into())); // on A's header
+        assert_eq!(row_group_at_y(&rendered, 50), Some("A".into())); // on A's row
+        assert_eq!(row_group_at_y(&rendered, 90), Some("B".into())); // on B's header
+        assert_eq!(row_group_at_y(&rendered, 130), Some("B".into())); // on B's row
+    }
+
+    #[test]
+    fn clamps_out_of_range_y_to_the_nearest_end() {
+        let rendered = vec![header("A"), row("A")];
+        assert_eq!(row_group_at_y(&rendered, -50), Some("A".into()));
+        assert_eq!(row_group_at_y(&rendered, 9999), Some("A".into()));
+    }
+
+    #[test]
+    fn empty_list_has_no_target() {
+        assert_eq!(row_group_at_y(&[], 0), None);
+    }
 }
 
 /// Top-level sidebar categories per engine (TablePlus-style). The label is also
@@ -360,6 +533,9 @@ fn schema_display_rows(
             } else {
                 container_count
             },
+            sub: SharedString::default(),
+            sub_color: Default::default(),
+            sub_has_custom_color: false,
         });
         if !cat_open {
             continue;
@@ -376,6 +552,9 @@ fn schema_display_rows(
                     expanded: false,
                     db: SharedString::default(),
                     count: 0,
+                    sub: SharedString::default(),
+                    sub_color: Default::default(),
+                    sub_has_custom_color: false,
                 });
             }
             continue;
@@ -395,6 +574,9 @@ fn schema_display_rows(
                     expanded: false,
                     db: SharedString::default(),
                     count: 0,
+                    sub: SharedString::default(),
+                    sub_color: Default::default(),
+                    sub_has_custom_color: false,
                 });
             } else if is_container {
                 if !matches(&n.label) {
@@ -409,6 +591,9 @@ fn schema_display_rows(
                     expanded: show_fields,
                     db: SharedString::default(),
                     count: 0,
+                    sub: SharedString::default(),
+                    sub_color: Default::default(),
+                    sub_has_custom_color: false,
                 });
             } else if n.kind != "function" {
                 // database row: categories replace it; reset field visibility
@@ -466,6 +651,9 @@ fn nested_display_rows(
             expanded: db_open,
             db: db.clone().into(),
             count: leaves.len() as i32,
+            sub: SharedString::default(),
+            sub_color: Default::default(),
+            sub_has_custom_color: false,
         });
         if !db_open {
             continue;
@@ -486,6 +674,9 @@ fn nested_display_rows(
                 expanded: false,
                 db: db.clone().into(),
                 count: 0,
+                sub: SharedString::default(),
+                sub_color: Default::default(),
+                sub_has_custom_color: false,
             });
             continue;
         }
@@ -497,6 +688,9 @@ fn nested_display_rows(
                 expanded: false,
                 db: db.clone().into(),
                 count: 0,
+                sub: SharedString::default(),
+                sub_color: Default::default(),
+                sub_has_custom_color: false,
             });
         }
     }
@@ -1180,19 +1374,57 @@ fn clip_get() -> Option<String> {
 /// Max recent queries kept, in memory and on disk.
 const RECENT_CAP: usize = 50;
 
+/// One run of a query, kept for the History sidebar tab.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+struct HistoryEntry {
+    sql: String,
+    /// Unix seconds; 0 means unknown (migrated from the pre-timestamp format).
+    ran_at: u64,
+    /// Driver badge key at run time (`AnyDriver::badge`, e.g. "postgres") —
+    /// tagging by engine reads better than by connection name, since many
+    /// connections share the same driver and the tag stays meaningful even
+    /// if the connection is later renamed or deleted.
+    #[serde(default)]
+    engine: Option<String>,
+    /// Connection's accent hex at run time (`#rrggbb`), for the History
+    /// badge — `None` means no custom color, fall back to the plain engine
+    /// color the same way connection rows elsewhere in the app do.
+    #[serde(default)]
+    color: Option<String>,
+}
+
+/// Parse persisted history JSON, falling back to the pre-timestamp
+/// plain-string-array format so existing `recent_queries.json` files keep
+/// loading (migrated entries get `ran_at: 0`).
+fn parse_recent(raw: &str) -> Vec<HistoryEntry> {
+    if let Ok(entries) = serde_json::from_str::<Vec<HistoryEntry>>(raw) {
+        return entries;
+    }
+    serde_json::from_str::<Vec<String>>(raw)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|sql| HistoryEntry {
+            sql,
+            ran_at: 0,
+            engine: None,
+            color: None,
+        })
+        .collect()
+}
+
 /// Load persisted recent-query history; empty on a missing/unreadable file.
-fn load_recent() -> Vec<String> {
+fn load_recent() -> Vec<HistoryEntry> {
     let Ok(path) = rdb_connstore::ConnStore::recent_queries_path() else {
         return Vec::new();
     };
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    parse_recent(&raw)
 }
 
 /// Persist the recent-query history (best-effort; I/O errors are ignored).
-fn save_recent(list: &[String]) {
+fn save_recent(list: &[HistoryEntry]) {
     let Ok(path) = rdb_connstore::ConnStore::recent_queries_path() else {
         return;
     };
@@ -1201,6 +1433,29 @@ fn save_recent(list: &[String]) {
     }
     if let Ok(json) = serde_json::to_string_pretty(list) {
         let _ = std::fs::write(path, json);
+    }
+}
+
+/// "Today" / "Yesterday" / "Mon D, YYYY" bucket label for a history entry,
+/// in local time. `ran_at == 0` (pre-migration entries) always bucket last.
+fn history_date_label(ran_at: u64, now: u64) -> String {
+    use chrono::TimeZone;
+    if ran_at == 0 {
+        return "Earlier".into();
+    }
+    let day = chrono::Local
+        .timestamp_opt(ran_at as i64, 0)
+        .single()
+        .map(|dt| dt.date_naive());
+    let today = chrono::Local
+        .timestamp_opt(now as i64, 0)
+        .single()
+        .map(|dt| dt.date_naive());
+    match (day, today) {
+        (Some(d), Some(t)) if d == t => "Today".into(),
+        (Some(d), Some(t)) if Some(d) == t.pred_opt() => "Yesterday".into(),
+        (Some(d), _) => d.format("%b %-d, %Y").to_string(),
+        _ => "Earlier".into(),
     }
 }
 
@@ -1311,19 +1566,50 @@ fn strip_sql_comments(text: &str) -> String {
 /// Record an executed query at the head of the history (dedupe, cap
 /// `cap`) and persist it, except in mock mode. Comment-only text is
 /// dropped and comments are stripped so history keeps only runnable SQL.
-fn record_recent(list: &RefCell<Vec<String>>, text: &str, cap: usize) {
+/// Re-running the same SQL updates its recorded time/engine and floats
+/// it back to the top rather than adding a second entry.
+fn record_recent(
+    list: &RefCell<Vec<HistoryEntry>>,
+    text: &str,
+    cap: usize,
+    engine: Option<String>,
+    color: Option<String>,
+) {
     let t = strip_sql_comments(text);
     let t = t.trim();
     if t.is_empty() {
         return;
     }
+    let ran_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let mut v = list.borrow_mut();
-    v.retain(|s| s != t);
-    v.insert(0, t.to_string());
+    v.retain(|e| e.sql != t);
+    v.insert(
+        0,
+        HistoryEntry {
+            sql: t.to_string(),
+            ran_at,
+            engine,
+            color,
+        },
+    );
     v.truncate(cap.max(1));
     if !mock::mock_mode() {
         save_recent(&v);
     }
+}
+
+/// Snapshot the currently-connected connection's accent hex, for stamping
+/// onto a new history entry. `None` if nothing is connected, it was
+/// deleted, or it never had a custom color.
+fn resolve_conn_color(
+    current_connection_id: &std::sync::Mutex<Option<String>>,
+    store: &RefCell<rdb_connstore::ConnStore>,
+) -> Option<String> {
+    let id = current_connection_id.lock().unwrap().clone()?;
+    store.borrow().get(&id).and_then(|sc| sc.color.clone())
 }
 
 fn recent_preview(text: &str) -> String {
@@ -1335,7 +1621,7 @@ fn recent_preview(text: &str) -> String {
     out
 }
 
-fn remove_recent(list: &RefCell<Vec<String>>, index: usize) -> bool {
+fn remove_recent(list: &RefCell<Vec<HistoryEntry>>, index: usize) -> bool {
     let mut list = list.borrow_mut();
     if index >= list.len() {
         return false;
@@ -1376,6 +1662,8 @@ mod record_recent_tests {
             &list,
             "-- \\ Check Perizinan\n-- mp.username ilike '%x%'",
             RECENT_CAP,
+            None,
+            None,
         );
         assert!(list.borrow().is_empty());
     }
@@ -1387,8 +1675,39 @@ mod record_recent_tests {
             &list,
             "-- pick emiten\nselect * from emiten; -- trailing",
             RECENT_CAP,
+            Some("postgres".into()),
+            Some("#e05a4e".into()),
         );
-        assert_eq!(list.borrow().as_slice(), ["select * from emiten;"]);
+        let entries = list.borrow();
+        assert_eq!(entries[0].sql, "select * from emiten;");
+        assert_eq!(entries[0].engine.as_deref(), Some("postgres"));
+        assert_eq!(entries[0].color.as_deref(), Some("#e05a4e"));
+    }
+
+    #[test]
+    fn history_date_label_buckets() {
+        let now = 1_800_000_000u64; // arbitrary fixed reference instant
+        assert_eq!(history_date_label(0, now), "Earlier");
+        assert_eq!(history_date_label(now, now), "Today");
+        assert_eq!(history_date_label(now - 86_400, now), "Yesterday");
+        assert!(!["Today", "Yesterday", "Earlier"]
+            .contains(&history_date_label(now - 20 * 86_400, now).as_str()));
+    }
+
+    #[test]
+    fn parse_recent_migrates_plain_string_array() {
+        let entries = parse_recent(r#"["select 1"]"#);
+        assert_eq!(entries[0].sql, "select 1");
+        assert_eq!(entries[0].ran_at, 0);
+        assert!(entries[0].engine.is_none());
+    }
+
+    #[test]
+    fn parse_recent_reads_current_format() {
+        let entries = parse_recent(r#"[{"sql":"select 2","ran_at":100,"engine":"mysql"}]"#);
+        assert_eq!(entries[0].sql, "select 2");
+        assert_eq!(entries[0].ran_at, 100);
+        assert_eq!(entries[0].engine.as_deref(), Some("mysql"));
     }
 
     #[test]
@@ -1402,9 +1721,15 @@ mod record_recent_tests {
 
     #[test]
     fn remove_recent_only_removes_a_valid_entry() {
-        let list = RefCell::new(vec!["first".into(), "second".into()]);
+        let entry = |sql: &str| HistoryEntry {
+            sql: sql.into(),
+            ran_at: 0,
+            engine: None,
+            color: None,
+        };
+        let list = RefCell::new(vec![entry("first"), entry("second")]);
         assert!(remove_recent(&list, 0));
-        assert_eq!(list.borrow().as_slice(), ["second"]);
+        assert_eq!(list.borrow()[0].sql, "second");
         assert!(!remove_recent(&list, 1));
     }
 }
@@ -2244,7 +2569,14 @@ fn restore_grid_state(w: &MainWindow, pane: usize, g: &GroupRuntime, sr: &Stored
 /// "section" header rows. `needle` (lowercase) filters both groups; empty
 /// shows everything. Empty groups drop their header.
 fn build_palette_items(
-    names: &[(String, &'static str, slint::Color, bool)],
+    names: &[(
+        String,
+        &'static str,
+        slint::Color,
+        bool,
+        SharedString,
+        slint::Color,
+    )],
     w: &MainWindow,
     needle: &str,
 ) -> Vec<PaletteItem> {
@@ -2255,15 +2587,20 @@ fn build_palette_items(
         local: false,
         color: theme::accent_or_default(""),
         has_custom_color: false,
+        env_tag_label: SharedString::default(),
+        env_tag_color: theme::accent_or_default(""),
+        group: SharedString::default(),
+        expanded: false,
+        is_group_end: false,
     };
     let mut items: Vec<PaletteItem> = Vec::new();
-    let conns: Vec<&(String, &'static str, slint::Color, bool)> = names
+    let conns: Vec<_> = names
         .iter()
         .filter(|(n, ..)| needle.is_empty() || n.to_lowercase().contains(needle))
         .collect();
     if !conns.is_empty() {
         items.push(section("Connections"));
-        for (n, badge, color, has_custom_color) in conns {
+        for (n, badge, color, has_custom_color, env_tag_label, env_tag_color) in conns {
             items.push(PaletteItem {
                 label: n.clone().into(),
                 kind: (*badge).into(),
@@ -2271,6 +2608,11 @@ fn build_palette_items(
                 local: false,
                 color: *color,
                 has_custom_color: *has_custom_color,
+                env_tag_label: env_tag_label.clone(),
+                env_tag_color: *env_tag_color,
+                group: SharedString::default(),
+                expanded: false,
+                is_group_end: false,
             });
         }
     }
@@ -2292,6 +2634,11 @@ fn build_palette_items(
                 local: false,
                 color: theme::accent_or_default(""),
                 has_custom_color: false,
+                env_tag_label: SharedString::default(),
+                env_tag_color: theme::accent_or_default(""),
+                group: SharedString::default(),
+                expanded: false,
+                is_group_end: false,
             });
         }
     }
@@ -3434,6 +3781,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     local: false,
                     color: theme::accent_or_default(""),
                     has_custom_color: false,
+                    env_tag_label: SharedString::default(),
+                    env_tag_color: theme::accent_or_default(""),
+                    group: SharedString::default(),
+                    expanded: false,
+                    is_group_end: false,
                 })
                 .collect();
             *panes[pane].completion_ctx.borrow_mut() =
@@ -3975,21 +4327,47 @@ fn main() -> Result<(), slint::PlatformError> {
         }));
     // Live history: filled as queries run; mock mode seeds a few for the
     // screenshot harness.
-    let recent_queries: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(if mock::mock_mode() {
-        vec![
-            "SELECT * FROM emiten LIMIT 100;".into(),
-            "INSERT INTO sectors (name) VALUES ('Technology');".into(),
-            "UPDATE emiten SET updated_at = now() WHERE code = '93344';".into(),
-        ]
-    } else {
-        let mut recent = load_recent();
-        recent.truncate(history_cap.get());
-        recent
-    }));
+    let recent_queries: Rc<RefCell<Vec<HistoryEntry>>> =
+        Rc::new(RefCell::new(if mock::mock_mode() {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            vec![
+                HistoryEntry {
+                    sql: "SELECT * FROM emiten LIMIT 100;".into(),
+                    ran_at: now,
+                    engine: Some("postgres".into()),
+                    color: None,
+                },
+                HistoryEntry {
+                    sql: "INSERT INTO sectors (name) VALUES ('Technology');".into(),
+                    ran_at: now,
+                    engine: Some("postgres".into()),
+                    color: None,
+                },
+                HistoryEntry {
+                    sql: "UPDATE emiten SET updated_at = now() WHERE code = '93344';".into(),
+                    ran_at: now,
+                    engine: Some("postgres".into()),
+                    color: None,
+                },
+            ]
+        } else {
+            let mut recent = load_recent();
+            recent.truncate(history_cap.get());
+            recent
+        }));
+    // Date-bucket headers in the History tab (e.g. "Today"/"Yesterday") that
+    // the user has folded. Kept separate from `collapsed_categories` (the
+    // Items-tree schema headers) so toggling one never touches the other.
+    let collapsed_history_groups: Rc<RefCell<HashSet<String>>> =
+        Rc::new(RefCell::new(HashSet::new()));
     let rebuild_query_tree = {
         let weak = window.as_weak();
         let saved = saved_queries.clone();
         let recent = recent_queries.clone();
+        let collapsed_history_groups = collapsed_history_groups.clone();
         move |active: &str| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -4007,6 +4385,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     expanded: true,
                     db: SharedString::default(),
                     count: saved.len() as i32,
+                    sub: SharedString::default(),
+                    sub_color: Default::default(),
+                    sub_has_custom_color: false,
                 });
                 for (i, (name, _)) in saved.iter().enumerate() {
                     rows.push(TreeNode {
@@ -4016,33 +4397,70 @@ fn main() -> Result<(), slint::PlatformError> {
                         expanded: name == active,
                         db: SharedString::default(),
                         count: i as i32,
+                        sub: SharedString::default(),
+                        sub_color: Default::default(),
+                        sub_has_custom_color: false,
                     });
                 }
             }
             // Queries (mode 1) is the curated Saved list only; History (mode 2)
-            // is the live run history — they no longer duplicate a "Recent" list.
+            // is the live run history, grouped by the date each query ran
+            // (entries are already newest-first, so same-label runs stay
+            // contiguous — no need to bucket out of order).
             if history_only {
                 let recent = recent.borrow();
-                rows.push(TreeNode {
-                    label: "History".into(),
-                    depth: 0,
-                    kind: "qcat".into(),
-                    expanded: true,
-                    db: SharedString::default(),
-                    count: recent.len() as i32,
-                });
-                for (i, q) in recent.iter().enumerate() {
-                    // Collapse whitespace to one line so a multi-line query does
-                    // not paint over the rows below; the row elides to its width.
-                    let label = recent_preview(q);
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let collapsed = collapsed_history_groups.borrow();
+                let mut order: Vec<String> = Vec::new();
+                let mut buckets: std::collections::HashMap<String, Vec<usize>> =
+                    std::collections::HashMap::new();
+                for (i, entry) in recent.iter().enumerate() {
+                    let label = history_date_label(entry.ran_at, now);
+                    if !buckets.contains_key(&label) {
+                        order.push(label.clone());
+                    }
+                    buckets.entry(label).or_default().push(i);
+                }
+                for label in &order {
+                    let idxs = &buckets[label];
+                    let is_open = !collapsed.contains(label);
                     rows.push(TreeNode {
-                        label: label.clone().into(),
-                        depth: 1,
-                        kind: "recent".into(),
-                        expanded: false,
-                        db: SharedString::from(label),
-                        count: i as i32,
+                        label: label.as_str().into(),
+                        depth: 0,
+                        kind: "qcat".into(),
+                        expanded: is_open,
+                        db: SharedString::default(),
+                        count: idxs.len() as i32,
+                        sub: SharedString::default(),
+                        sub_color: Default::default(),
+                        sub_has_custom_color: false,
                     });
+                    if !is_open {
+                        continue;
+                    }
+                    for &i in idxs {
+                        // Collapse whitespace to one line so a multi-line query
+                        // does not paint over the rows below; the row elides.
+                        let preview = recent_preview(&recent[i].sql);
+                        rows.push(TreeNode {
+                            label: preview.clone().into(),
+                            depth: 1,
+                            kind: "recent".into(),
+                            expanded: false,
+                            db: SharedString::from(preview),
+                            count: i as i32,
+                            sub: recent[i].engine.clone().unwrap_or_default().into(),
+                            sub_color: recent[i]
+                                .color
+                                .as_deref()
+                                .and_then(theme::parse_hex)
+                                .unwrap_or_default(),
+                            sub_has_custom_color: recent[i].color.is_some(),
+                        });
+                    }
                 }
             }
             w.set_query_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
@@ -4068,8 +4486,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 .map(|(n, s)| (n.clone(), s.clone()));
             let (title, text, is_saved) = if let Some((name, sql)) = saved_hit {
                 (name, sql, true)
-            } else if let Some(sql) = recent.borrow().get(idx.max(0) as usize) {
-                ("Query".to_string(), sql.clone(), false)
+            } else if let Some(entry) = recent.borrow().get(idx.max(0) as usize) {
+                ("Query".to_string(), entry.sql.clone(), false)
             } else {
                 return;
             };
@@ -4202,6 +4620,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     local: false,
                     color: theme::accent_or_default(""),
                     has_custom_color: false,
+                    env_tag_label: SharedString::default(),
+                    env_tag_color: theme::accent_or_default(""),
+                    group: SharedString::default(),
+                    expanded: false,
+                    is_group_end: false,
                 })
                 .collect();
             if items.is_empty() {
@@ -4247,6 +4670,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     local: false,
                     color: theme::accent_or_default(""),
                     has_custom_color: false,
+                    env_tag_label: SharedString::default(),
+                    env_tag_color: theme::accent_or_default(""),
+                    group: SharedString::default(),
+                    expanded: false,
+                    is_group_end: false,
                 })
                 .collect();
             if items.is_empty() {
@@ -4671,38 +5099,13 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let store = store.clone();
+        let collapsed = collapsed.clone();
         let conn_modal_map = conn_modal_map.clone();
         window.on_open_conn_modal(move || {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            // Flatten groups + connections (all groups expanded in the modal).
-            let rows = build_conn_items(&store.borrow(), &HashSet::new(), "");
-            let mut items: Vec<PaletteItem> = Vec::new();
-            let mut map: Vec<i32> = Vec::new();
-            for r in rows {
-                if r.is_header {
-                    items.push(PaletteItem {
-                        label: r.group.to_lowercase().into(),
-                        kind: "group".into(),
-                        sub: SharedString::default(),
-                        local: false,
-                        color: theme::accent_or_default(""),
-                        has_custom_color: false,
-                    });
-                    map.push(-1);
-                } else {
-                    items.push(PaletteItem {
-                        label: r.name,
-                        kind: r.engine,
-                        sub: r.subline,
-                        local: r.local,
-                        color: r.color,
-                        has_custom_color: r.has_custom_color,
-                    });
-                    map.push(r.index);
-                }
-            }
+            let (items, map) = build_conn_palette_items(&store.borrow(), &collapsed.borrow(), "");
             *conn_modal_map.borrow_mut() = map;
             w.set_conn_items(ModelRc::from(Rc::new(VecModel::from(items))));
             w.set_conn_modal_open(true);
@@ -4752,6 +5155,10 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             w.set_sel_sub(sub.into());
             w.set_sel_local(s.local);
+            w.set_sel_env_tag_label(theme::env_tag_label(s.env_tag).into());
+            w.set_sel_env_tag_color(
+                theme::env_tag_color(s.env_tag).unwrap_or_else(|| theme::accent_or_default("")),
+            );
             let ssl = match s.sslmode {
                 rdb_core::conn::SslMode::Disable => "disable",
                 rdb_core::conn::SslMode::Prefer => "prefer",
@@ -5462,6 +5869,12 @@ fn main() -> Result<(), slint::PlatformError> {
             save_active_tab(&w);
             save_p1_tab(&w);
             let source = if target == 1 { 0 } else { 1 };
+            // Whichever tab was active in each pane before this move, so a
+            // split (or moving one back) doesn't jump focus to the first tab
+            // in that pane — it only needs to change when the tab that just
+            // moved WAS the active one.
+            let prev_left = active_tab_id.lock().unwrap().clone();
+            let prev_right = active_group1_tab_id.lock().unwrap().clone();
             let moved_id = {
                 let mut tabs = tabs.lock().unwrap();
                 if source == 0 && tabs.iter().filter(|tab| tab.group == 0).count() == 1 {
@@ -5477,23 +5890,39 @@ fn main() -> Result<(), slint::PlatformError> {
                 tab.group = target;
                 tab.id.clone()
             };
-            let (left_index, right_index, left_id) = {
+            let (left_index, right_index, left_id, right_id) = {
                 let tabs = tabs.lock().unwrap();
-                let left_index = tabs.iter().position(|tab| tab.group == 0);
-                let left_id = left_index.map(|index| tabs[index].id.clone());
-                let right_index = tabs
-                    .iter()
-                    .filter(|tab| tab.group == 1)
-                    .position(|tab| tab.id == moved_id)
-                    .or_else(|| tabs.iter().filter(|tab| tab.group == 1).position(|_| true));
+                // The pane the tab just landed in follows it; the other pane
+                // keeps its previously-active tab if it's still there.
+                let left_id = if target == 0 {
+                    Some(moved_id.clone())
+                } else {
+                    prev_left.filter(|id| tabs.iter().any(|t| t.group == 0 && &t.id == id))
+                }
+                .or_else(|| tabs.iter().find(|t| t.group == 0).map(|t| t.id.clone()));
+                let right_id = if target == 1 {
+                    Some(moved_id.clone())
+                } else {
+                    prev_right.filter(|id| tabs.iter().any(|t| t.group == 1 && &t.id == id))
+                }
+                .or_else(|| tabs.iter().find(|t| t.group == 1).map(|t| t.id.clone()));
+                let left_index = left_id
+                    .as_ref()
+                    .and_then(|id| tabs.iter().position(|t| &t.id == id));
+                let right_index = right_id.as_ref().and_then(|id| {
+                    tabs.iter()
+                        .filter(|t| t.group == 1)
+                        .position(|t| &t.id == id)
+                });
                 set_workspace_tabs(&w, &tabs, left_id.as_deref());
-                (left_index, right_index, left_id)
+                (left_index, right_index, left_id, right_id)
             };
             *active_tab_id.lock().unwrap() = left_id;
             if let Some(index) = left_index {
                 restore_tab(&w, index);
             }
-            if let Some(index) = right_index {
+            if let (Some(id), Some(index)) = (right_id, right_index) {
+                *active_group1_tab_id.lock().unwrap() = Some(id);
                 restore_p1_tab(&w, index);
             } else {
                 *active_group1_tab_id.lock().unwrap() = None;
@@ -5509,6 +5938,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let collapsed = collapsed.clone();
         let conn_filter = conn_filter.clone();
         let settings = settings.clone();
+        let conn_modal_map = conn_modal_map.clone();
         window.on_toggle_group(move |g| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -5522,6 +5952,100 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             // Persist the new collapsed set (best-effort; a write failure must
             // not break the UI).
+            let groups: Vec<String> = collapsed.borrow().iter().cloned().collect();
+            let _ = settings
+                .borrow_mut()
+                .update(|s| s.ui_state.collapsed_groups = groups);
+            let items =
+                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
+            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+            // Keep the ⌘O modal in sync too, whichever surface triggered this.
+            if w.get_conn_modal_open() {
+                let (items, map) =
+                    build_conn_palette_items(&store.borrow(), &collapsed.borrow(), "");
+                *conn_modal_map.borrow_mut() = map;
+                w.set_conn_items(ModelRc::from(Rc::new(VecModel::from(items))));
+            }
+        });
+    }
+
+    // ----- delete a group: its connections fall back to Ungrouped -----
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let collapsed = collapsed.clone();
+        let conn_filter = conn_filter.clone();
+        let settings = settings.clone();
+        window.on_group_delete(move |g| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let g = g.to_string();
+            {
+                let mut st = store.borrow_mut();
+                let ids: Vec<String> = st
+                    .list()
+                    .iter()
+                    .filter(|s| s.group.as_deref() == Some(g.as_str()))
+                    .map(|s| s.id.clone())
+                    .collect();
+                for id in ids {
+                    if let Some(mut sc) = st.get(&id).cloned() {
+                        sc.group = None;
+                        let _ = st.update(sc);
+                    }
+                }
+            }
+            collapsed.borrow_mut().remove(&g);
+            let groups: Vec<String> = collapsed.borrow().iter().cloned().collect();
+            let _ = settings
+                .borrow_mut()
+                .update(|s| s.ui_state.collapsed_groups = groups);
+            let items =
+                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
+            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+        });
+    }
+
+    // ----- rename a group: every member connection follows -----
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let collapsed = collapsed.clone();
+        let conn_filter = conn_filter.clone();
+        let settings = settings.clone();
+        window.on_group_rename(move |old, new| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let old = old.to_string();
+            let new = new.trim().to_string();
+            if new.is_empty() || new == old {
+                return;
+            }
+            {
+                let mut st = store.borrow_mut();
+                let ids: Vec<String> = st
+                    .list()
+                    .iter()
+                    .filter(|s| s.group.as_deref() == Some(old.as_str()))
+                    .map(|s| s.id.clone())
+                    .collect();
+                for id in ids {
+                    if let Some(mut sc) = st.get(&id).cloned() {
+                        sc.group = Some(new.clone());
+                        let _ = st.update(sc);
+                    }
+                }
+            }
+            // Carry the collapsed state over so renaming doesn't silently
+            // re-expand a group the user had folded shut.
+            {
+                let mut c = collapsed.borrow_mut();
+                if c.remove(&old) {
+                    c.insert(new.clone());
+                }
+            }
             let groups: Vec<String> = collapsed.borrow().iter().cloned().collect();
             let _ = settings
                 .borrow_mut()
@@ -5574,34 +6098,71 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // ----- drag-reorder a connection within its group -----
+    // ----- drag-reorder within a group, or drop onto a different group -----
     {
         let weak = window.as_weak();
         let store = store.clone();
         let collapsed = collapsed.clone();
         let conn_filter = conn_filter.clone();
-        window.on_reorder_conn(move |from_idx, delta| {
+        window.on_reorder_conn(move |from_idx, delta, drop_y| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            let group_key = |c: &rdb_connstore::SavedConnection| {
+                c.group
+                    .as_deref()
+                    .filter(|g| !g.trim().is_empty())
+                    .unwrap_or(UNGROUPED)
+                    .to_string()
+            };
+
+            // Cross-group drop: the release point landed on a different
+            // group's header or row than the dragged connection's own group.
+            let rendered =
+                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
+            if let Some(target_group) = row_group_at_y(&rendered, drop_y) {
+                let from_id = {
+                    let s = store.borrow();
+                    let Some(from) = s.list().get(from_idx as usize) else {
+                        return;
+                    };
+                    if group_key(from) == target_group {
+                        None
+                    } else {
+                        Some(from.id.clone())
+                    }
+                };
+                if let Some(id) = from_id {
+                    let sc = store.borrow().get(&id).cloned();
+                    if let Some(mut sc) = sc {
+                        sc.group = if target_group == UNGROUPED {
+                            None
+                        } else {
+                            Some(target_group)
+                        };
+                        let _ = store.borrow_mut().update(sc);
+                    }
+                    let items = build_conn_items(
+                        &store.borrow(),
+                        &collapsed.borrow(),
+                        &conn_filter.borrow(),
+                    );
+                    w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+                    return;
+                }
+            }
+
+            // Same-group reorder: resolve the row-step delta against the
+            // dragged connection's own group, using the same (favorite desc,
+            // order asc) display order as the builder.
             if delta == 0 {
                 return;
             }
-            // Resolve the row-step delta against the dragged connection's group,
-            // using the same (favorite desc, order asc) display order as the
-            // builder, then map back to a store index for `reorder`.
             let (from_id, target_vec_idx) = {
                 let s = store.borrow();
                 let list = s.list();
                 let Some(from) = list.get(from_idx as usize) else {
                     return;
-                };
-                let group_key = |c: &rdb_connstore::SavedConnection| {
-                    c.group
-                        .as_deref()
-                        .filter(|g| !g.trim().is_empty())
-                        .unwrap_or(UNGROUPED)
-                        .to_string()
                 };
                 let g = group_key(from);
                 let mut members: Vec<usize> = list
@@ -6251,6 +6812,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     .set_accent(theme::accent_or_default(sc.color.as_deref().unwrap_or("")));
                 w.set_status_conn(SharedString::from(sc.name.clone()));
                 w.set_bc_conn(SharedString::from(sc.name.clone()));
+                w.set_active_env_tag_label(theme::env_tag_label(sc.env_tag).into());
+                w.set_active_env_tag_color(
+                    theme::env_tag_color(sc.env_tag)
+                        .unwrap_or_else(|| theme::accent_or_default("")),
+                );
                 w.set_bc_db(SharedString::from(
                     db_ovr
                         .clone()
@@ -7372,6 +7938,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let history_cap = history_cap.clone();
         let rebuild_query_tree = rebuild_query_tree.clone();
         let panes = panes.clone();
+        let store = store.clone();
+        let current_connection_id = current_connection_id.clone();
         window.on_run_query(move || {
             if let Some(w) = weak.upgrade() {
                 // ⌘⏎ / Run: the highlighted selection, else just the statement
@@ -7387,7 +7955,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 if text.is_empty() {
                     return;
                 }
-                record_recent(&recent_queries, &text, history_cap.get());
+                record_recent(
+                    &recent_queries,
+                    &text,
+                    history_cap.get(),
+                    cur_engine.borrow().map(AnyDriver::badge).map(String::from),
+                    resolve_conn_color(&current_connection_id, &store),
+                );
+                if w.get_sidebar_mode() == 2 {
+                    rebuild_query_tree("");
+                }
                 // A manual query result has no row identity — never editable.
                 // (The browse path re-enables editing after its PK fetch.)
                 if active_tab_kind(&w) != "table" {
@@ -7431,7 +8008,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let Some(text) = recent_queries.borrow().get(idx.max(0) as usize).cloned() else {
+            let Some(text) = recent_queries
+                .borrow()
+                .get(idx.max(0) as usize)
+                .map(|e| e.sql.clone())
+            else {
                 return;
             };
             if text.trim().is_empty() {
@@ -7471,13 +8052,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 0 => w.invoke_insert_query(idx as i32),
                 1 => w.invoke_rerun_query(idx as i32),
                 2 => {
-                    if let Some(query) = recent_queries.borrow().get(idx) {
-                        clip_set(query);
+                    if let Some(entry) = recent_queries.borrow().get(idx) {
+                        clip_set(&entry.sql);
                     }
                 }
                 3 => {
                     // Promote a history entry into the curated Saved list.
-                    let Some(sql) = recent_queries.borrow().get(idx).cloned() else {
+                    let Some(sql) = recent_queries.borrow().get(idx).map(|e| e.sql.clone()) else {
                         return;
                     };
                     let name = derive_query_name(&sql, &saved_queries.borrow());
@@ -7510,7 +8091,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let Some(text) = recent_queries.borrow().get(idx.max(0) as usize).cloned() else {
+            let Some(text) = recent_queries
+                .borrow()
+                .get(idx.max(0) as usize)
+                .map(|e| e.sql.clone())
+            else {
                 return;
             };
             {
@@ -7659,6 +8244,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let recent_queries = recent_queries.clone();
         let history_cap = history_cap.clone();
+        let rebuild_query_tree = rebuild_query_tree.clone();
+        let store = store.clone();
+        let current_connection_id = current_connection_id.clone();
         let run_p1 = move || {
             let text = {
                 let ed = panes[1].ed_state.borrow();
@@ -7670,7 +8258,16 @@ fn main() -> Result<(), slint::PlatformError> {
             if text.is_empty() {
                 return;
             }
-            record_recent(&recent_queries, &text, history_cap.get());
+            record_recent(
+                &recent_queries,
+                &text,
+                history_cap.get(),
+                cur_engine.borrow().map(AnyDriver::badge).map(String::from),
+                resolve_conn_color(&current_connection_id, &store),
+            );
+            if weak.upgrade().is_some_and(|w| w.get_sidebar_mode() == 2) {
+                rebuild_query_tree("");
+            }
             let stream = weak
                 .upgrade()
                 .map(|w| {
@@ -8239,7 +8836,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if !w.get_sql_capable() {
                 return;
             }
-            let text = panes[0].ed_state.borrow().current_line().to_string();
+            let text = panes[0].ed_state.borrow().current_statement();
             let trimmed = text.trim();
             if trimmed.is_empty() {
                 return;
@@ -8265,7 +8862,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if !w.get_sql_capable() {
                 return;
             }
-            let text = panes[1].ed_state.borrow().current_line().to_string();
+            let text = panes[1].ed_state.borrow().current_statement();
             let trimmed = text.trim();
             if trimmed.is_empty() {
                 return;
@@ -8289,11 +8886,12 @@ fn main() -> Result<(), slint::PlatformError> {
         window.on_format_sql(move || {
             let changed = {
                 let mut ed = panes[0].ed_state.borrow_mut();
-                if ed.current_line().trim().is_empty() {
+                let stmt = ed.current_statement();
+                if stmt.trim().is_empty() {
                     false
                 } else {
-                    let formatted = sql_format::format_line(ed.current_line());
-                    ed.replace_current_line(&formatted);
+                    let formatted = sql_format::format(&stmt);
+                    ed.replace_current_statement(&formatted);
                     true
                 }
             };
@@ -8308,11 +8906,12 @@ fn main() -> Result<(), slint::PlatformError> {
         window.on_p1_format_sql(move || {
             let changed = {
                 let mut ed = panes[1].ed_state.borrow_mut();
-                if ed.current_line().trim().is_empty() {
+                let stmt = ed.current_statement();
+                if stmt.trim().is_empty() {
                     false
                 } else {
-                    let formatted = sql_format::format_line(ed.current_line());
-                    ed.replace_current_line(&formatted);
+                    let formatted = sql_format::format(&stmt);
+                    ed.replace_current_statement(&formatted);
                     true
                 }
             };
@@ -8899,12 +9498,28 @@ fn main() -> Result<(), slint::PlatformError> {
         let current = current.clone();
         let rt = rt.clone();
         let sidebar_filter = sidebar_filter.clone();
+        let collapsed_history_groups = collapsed_history_groups.clone();
+        let rebuild_query_tree = rebuild_query_tree.clone();
         window.on_toggle_schema_node(move |label| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let engine = *cur_engine.borrow();
             let label = label.to_string();
+
+            // History tab's date-bucket headers are a separate tree
+            // (`query_tree`, not the Items `schema_tree`) with their own
+            // collapse set, so they're handled here before anything else.
+            if w.get_sidebar_mode() == 2 {
+                let mut c = collapsed_history_groups.borrow_mut();
+                if !c.remove(&label) {
+                    c.insert(label);
+                }
+                drop(c);
+                rebuild_query_tree("");
+                return;
+            }
+
+            let engine = *cur_engine.borrow();
 
             // Mongo/Redis/Cassandra: database (or keyspace) headers open an
             // opt-in set (default closed) and load their leaves (collections /
@@ -9162,6 +9777,10 @@ fn main() -> Result<(), slint::PlatformError> {
         let run_sql = run_sql.clone();
         let recent_queries = recent_queries.clone();
         let history_cap = history_cap.clone();
+        let cur_engine = cur_engine.clone();
+        let rebuild_query_tree = rebuild_query_tree.clone();
+        let store = store.clone();
+        let current_connection_id = current_connection_id.clone();
         let run_new_tab: Rc<dyn Fn(usize)> = Rc::new(move |pane| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -9184,7 +9803,16 @@ fn main() -> Result<(), slint::PlatformError> {
             if pane == 0 {
                 w.set_grid_read_only(true);
             }
-            record_recent(&recent_queries, &stmt, history_cap.get());
+            record_recent(
+                &recent_queries,
+                &stmt,
+                history_cap.get(),
+                cur_engine.borrow().map(AnyDriver::badge).map(String::from),
+                resolve_conn_color(&current_connection_id, &store),
+            );
+            if w.get_sidebar_mode() == 2 {
+                rebuild_query_tree("");
+            }
             run_sql(pane, stmt);
         });
         let weak = window.as_weak();
@@ -10115,7 +10743,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 let opening = !w.get_palette_open();
                 w.set_palette_open(opening);
                 if opening {
-                    let names: Vec<(String, &'static str, slint::Color, bool)> = store
+                    let names: Vec<(
+                        String,
+                        &'static str,
+                        slint::Color,
+                        bool,
+                        SharedString,
+                        slint::Color,
+                    )> = store
                         .borrow()
                         .list()
                         .iter()
@@ -10125,6 +10760,9 @@ fn main() -> Result<(), slint::PlatformError> {
                                 AnyDriver::badge(s.engine),
                                 theme::accent_or_default(s.color.as_deref().unwrap_or("")),
                                 s.color.is_some(),
+                                theme::env_tag_label(s.env_tag).into(),
+                                theme::env_tag_color(s.env_tag)
+                                    .unwrap_or_else(|| theme::accent_or_default("")),
                             )
                         })
                         .collect();
@@ -10141,7 +10779,14 @@ fn main() -> Result<(), slint::PlatformError> {
         let store = store.clone();
         window.on_palette_filter(move |q| {
             if let Some(w) = weak.upgrade() {
-                let names: Vec<(String, &'static str, slint::Color, bool)> = store
+                let names: Vec<(
+                    String,
+                    &'static str,
+                    slint::Color,
+                    bool,
+                    SharedString,
+                    slint::Color,
+                )> = store
                     .borrow()
                     .list()
                     .iter()
@@ -10151,6 +10796,9 @@ fn main() -> Result<(), slint::PlatformError> {
                             AnyDriver::badge(s.engine),
                             theme::accent_or_default(s.color.as_deref().unwrap_or("")),
                             s.color.is_some(),
+                            theme::env_tag_label(s.env_tag).into(),
+                            theme::env_tag_color(s.env_tag)
+                                .unwrap_or_else(|| theme::accent_or_default("")),
                         )
                     })
                     .collect();
@@ -10361,6 +11009,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // open add form
     {
         let weak = window.as_weak();
+        let store = store.clone();
         let editing_id = editing_id.clone();
         window.on_open_add_form(move || {
             let Some(w) = weak.upgrade() else {
@@ -10379,6 +11028,15 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_sslmode(SharedString::from("Prefer"));
             w.set_f_params(SharedString::default());
             w.set_f_color(SharedString::from("#2c5fd8"));
+            w.set_f_env_tag(SharedString::from("None"));
+            w.set_f_group(SharedString::default());
+            w.set_f_group_display(SharedString::from("None"));
+            w.set_group_options(ModelRc::from(Rc::new(VecModel::from(
+                group_picker_options(&store.borrow())
+                    .into_iter()
+                    .map(SharedString::from)
+                    .collect::<Vec<_>>(),
+            ))));
             w.set_f_import_url(SharedString::default());
             w.set_form_error(SharedString::default());
             w.set_test_result(SharedString::default());
@@ -10426,6 +11084,17 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_color(SharedString::from(
                 sc.color.unwrap_or_else(|| "#2c5fd8".into()),
             ));
+            w.set_f_env_tag(SharedString::from(sc.env_tag.as_str()));
+            w.set_f_group_display(SharedString::from(
+                sc.group.clone().unwrap_or_else(|| "None".into()),
+            ));
+            w.set_f_group(SharedString::from(sc.group.unwrap_or_default()));
+            w.set_group_options(ModelRc::from(Rc::new(VecModel::from(
+                group_picker_options(&st)
+                    .into_iter()
+                    .map(SharedString::from)
+                    .collect::<Vec<_>>(),
+            ))));
             w.set_f_import_url(SharedString::default());
             w.set_form_error(SharedString::default());
             w.set_test_result(SharedString::default());
@@ -10741,6 +11410,23 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
             };
             let color = Some(w.get_f_color().to_string());
+            let env_tag = rdb_connstore::EnvTag::parse(w.get_f_env_tag().as_ref());
+            let group = {
+                let g = w.get_f_group().to_string().trim().to_string();
+                if g.is_empty() {
+                    None
+                } else {
+                    Some(g)
+                }
+            };
+            // A freshly-typed group ("+ New group…") that only differs in case
+            // from an existing one joins it instead of spawning a duplicate.
+            let group = group.map(|g| {
+                existing_groups(&store.borrow())
+                    .into_iter()
+                    .find(|e| e.eq_ignore_ascii_case(&g))
+                    .unwrap_or(g)
+            });
             let params = {
                 let p = w.get_f_params().to_string();
                 if p.trim().is_empty() {
@@ -10765,6 +11451,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     sc.database = database;
                     sc.sslmode = sslmode;
                     sc.color = color;
+                    sc.env_tag = env_tag;
+                    sc.group = group.clone();
                     sc.params = params;
                     let cid = sc.id.clone();
                     st.add(sc)?;
@@ -10782,6 +11470,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     sc.database = database;
                     sc.sslmode = sslmode;
                     sc.color = color;
+                    sc.env_tag = env_tag;
+                    sc.group = group.clone();
                     sc.params = params;
                     st.update(sc)?;
                     id.clone()

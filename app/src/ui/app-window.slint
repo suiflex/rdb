@@ -3,7 +3,7 @@ export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
-    SearchCommandPill, BreadcrumbChip, DbBadge, GlyphButton, IconButton, PrimaryButton, SecondaryButton, SelectBox, TextButton, Toggle, ToggleRow, Tooltip, Shortcut
+    SearchCommandPill, BreadcrumbChip, DbBadge, GlyphButton, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SelectBox, TextButton, Toggle, ToggleRow, Tooltip, Shortcut
 } from "components.slint";
 export { Shortcut }
 import { NavCluster } from "nav-cluster.slint";
@@ -146,6 +146,11 @@ export component MainWindow inherits Window {
     // ----- window chrome -----
     // Breadcrumb parts (workspace titlebar); empty db/schema hide their chip.
     in property <string> bc-conn;
+    // Active connection's env tag (empty label => no pill), shown next to
+    // bc-conn in the workspace titlebar — mirrors sel-env-tag-* below, which
+    // is the picker's *selected* (not-yet-connected) row instead.
+    in property <string> active-env-tag-label;
+    in property <color> active-env-tag-color;
     in property <string> bc-db;
     in property <string> bc-schema;
     // True while the schema/table tree is being (re)fetched after a db/schema switch.
@@ -207,8 +212,10 @@ callback table-toggle-null(int);
 callback table-toggle-pk(int);
 callback create-table-commit();
     callback toggle-group(string);
+    callback group-rename(string, string);
+    callback group-delete(string);
     callback toggle-favorite(int);          // star/unstar a saved connection
-    callback reorder-conn(int, int);        // (dragged store index, row-step delta)
+    callback reorder-conn(int, int, int);   // (dragged store index, row-step delta, drop-Y)
     callback open-table(string, string);   // (database, container)
     callback pin-table(string, string);    // double-click pins the object tab
     callback toggle-fields(string, string); // (database, table) — expand columns inline
@@ -234,6 +241,8 @@ callback create-table-commit();
     in property <bool> sel-has-custom-color;
     in property <string> sel-sub;
     in property <bool> sel-local;
+    in property <string> sel-env-tag-label;
+    in property <color> sel-env-tag-color;
     in property <[KvRow]> sel-rows;
     in property <[string]> sel-tags;
     in property <string> sel-footer;
@@ -578,6 +587,10 @@ callback create-table-commit();
     in-out property <string> f-sslmode;
     in-out property <string> f-params;
     in-out property <string> f-color;
+    in-out property <string> f-env-tag;
+    in-out property <string> f-group;
+    in-out property <string> f-group-display;
+    in property <[string]> group-options;
     in-out property <string> f-import-url;
     in property <string> form-error;
     in property <string> test-result;
@@ -801,6 +814,10 @@ callback create-table-commit();
                             mono: true;
                             clicked => { root.open-conn-modal(); }
                         }
+                    }
+                    if root.active-env-tag-label != "": VerticalLayout {
+                        alignment: center;
+                        OutlineChip { text: root.active-env-tag-label; tint: root.active-env-tag-color; }
                     }
                     // Status word only when it needs attention; the healthy case
                     // is already conveyed by the green dot on the chip above.
@@ -1031,6 +1048,8 @@ callback create-table-commit();
             sel-has-custom-color: root.sel-has-custom-color;
             sel-sub: root.sel-sub;
             sel-local: root.sel-local;
+            sel-env-tag-label: root.sel-env-tag-label;
+            sel-env-tag-color: root.sel-env-tag-color;
             sel-rows: root.sel-rows;
             sel-tags: root.sel-tags;
             sel-footer: root.sel-footer;
@@ -1041,8 +1060,10 @@ callback create-table-commit();
             add-clicked() => { root.open-add-form(); }
             edit-clicked(i) => { root.open-edit-form(i); }
             toggle-group(g) => { root.toggle-group(g); }
+            group-rename(o, n) => { root.group-rename(o, n); }
+            group-delete(g) => { root.group-delete(g); }
             toggle-favorite(i) => { root.toggle-favorite(i); }
-            reorder-conn(i, d) => { root.reorder-conn(i, d); }
+            reorder-conn(i, d, y) => { root.reorder-conn(i, d, y); }
             filter(t) => { root.conn-filter(t); }
             export-conns(fmt) => { root.export-conns(fmt); }
             open-url(u) => { root.open-url(u); }
@@ -1223,6 +1244,16 @@ callback create-table-commit();
                                                 root.rename-text = tab.title;
                                                 root.rename-modal-open = true;
                                             }
+                                            changed has-hover => {
+                                                if (self.has-hover) {
+                                                    Tooltip.text = "Rename";
+                                                    Tooltip.x = self.absolute-position.x + self.width / 2;
+                                                    Tooltip.y = self.absolute-position.y + self.height + 4px;
+                                                    Tooltip.shown = true;
+                                                } else if Tooltip.text == "Rename" {
+                                                    Tooltip.shown = false;
+                                                }
+                                            }
                                         }
                                         AppIcon {
                                             name: "pencil";
@@ -1237,7 +1268,19 @@ callback create-table-commit();
                                         border-radius: 4px;
                                         background: move-ta.has-hover ? Tokens.accent-tint : transparent;
                                         visible: i == root.active-tab || tab-ta.has-hover;
-                                        move-ta := TouchArea { clicked => { root.move-tab-group(i, 1); } }
+                                        move-ta := TouchArea {
+                                            clicked => { root.move-tab-group(i, 1); }
+                                            changed has-hover => {
+                                                if (self.has-hover) {
+                                                    Tooltip.text = "Split to other pane";
+                                                    Tooltip.x = self.absolute-position.x + self.width / 2;
+                                                    Tooltip.y = self.absolute-position.y + self.height + 4px;
+                                                    Tooltip.shown = true;
+                                                } else if Tooltip.text == "Split to other pane" {
+                                                    Tooltip.shown = false;
+                                                }
+                                            }
+                                        }
                                         AppIcon {
                                             name: "columns";
                                             size: 11px;
@@ -1373,6 +1416,16 @@ callback create-table-commit();
                                                 root.rename-text = tab.title;
                                                 root.rename-modal-open = true;
                                             }
+                                            changed has-hover => {
+                                                if (self.has-hover) {
+                                                    Tooltip.text = "Rename";
+                                                    Tooltip.x = self.absolute-position.x + self.width / 2;
+                                                    Tooltip.y = self.absolute-position.y + self.height + 4px;
+                                                    Tooltip.shown = true;
+                                                } else if Tooltip.text == "Rename" {
+                                                    Tooltip.shown = false;
+                                                }
+                                            }
                                         }
                                         AppIcon {
                                             name: "pencil";
@@ -1387,7 +1440,19 @@ callback create-table-commit();
                                         border-radius: 4px;
                                         background: p1-move-ta.has-hover ? Tokens.accent-tint : transparent;
                                         visible: i == root.p1-active-tab || p1-tab-ta.has-hover;
-                                        p1-move-ta := TouchArea { clicked => { root.move-tab-group(i, 0); } }
+                                        p1-move-ta := TouchArea {
+                                            clicked => { root.move-tab-group(i, 0); }
+                                            changed has-hover => {
+                                                if (self.has-hover) {
+                                                    Tooltip.text = "Split to other pane";
+                                                    Tooltip.x = self.absolute-position.x + self.width / 2;
+                                                    Tooltip.y = self.absolute-position.y + self.height + 4px;
+                                                    Tooltip.shown = true;
+                                                } else if Tooltip.text == "Split to other pane" {
+                                                    Tooltip.shown = false;
+                                                }
+                                            }
+                                        }
                                         AppIcon {
                                             name: "columns";
                                             size: 11px;
@@ -2272,6 +2337,9 @@ callback create-table-commit();
         new-item => {
             root.open-add-form();
         }
+        toggle-group(g) => {
+            root.toggle-group(g);
+        }
     }
 
     // ----- connection form overlay (drawn on top of palette layer) -----
@@ -2291,6 +2359,10 @@ callback create-table-commit();
         f-sslmode <=> root.f-sslmode;
         f-params <=> root.f-params;
         f-color <=> root.f-color;
+        f-env-tag <=> root.f-env-tag;
+        f-group <=> root.f-group;
+        f-group-display <=> root.f-group-display;
+        group-options: root.group-options;
         f-import-url <=> root.f-import-url;
         form-error: root.form-error;
         test-result: root.test-result;

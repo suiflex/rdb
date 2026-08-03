@@ -178,19 +178,24 @@ jobs:
             exit 0
           fi
           branch="chore/website-release-${{ github.ref_name }}"
+          pr_number="$(gh pr list --base develop --head "$branch" --state open --json number --jq '.[0].number // ""')"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$branch"
+          git checkout -B "$branch"
           git add website/src/data/release.json
           git commit -m "docs: update website release data for ${{ github.ref_name }}"
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
-          git push -u origin "$branch"
-          gh pr create --base develop --head "$branch" \
-            --title "docs: update website release data for ${{ github.ref_name }}" \
-            --body "Automated release-data refresh for ${{ github.ref_name }}."
+          git fetch origin "+refs/heads/$branch:refs/remotes/origin/$branch" || true
+          git push --force-with-lease origin "$branch"
+          if [ -z "$pr_number" ]; then
+            pr_url="$(gh pr create --base develop --head "$branch" \
+              --title "docs: update website release data for ${{ github.ref_name }}" \
+              --body "Automated release-data refresh for ${{ github.ref_name }}.")"
+            pr_number="${pr_url##*/}"
+          fi
           # Merge once GitHub has computed mergeability (no auto-merge on this repo).
           for i in 1 2 3 4 5 6; do
-            if gh pr merge "$branch" --squash --delete-branch; then
+            if gh pr merge "$pr_number" --squash --delete-branch; then
               exit 0
             fi
             echo "merge not ready yet, retrying…"; sleep 5

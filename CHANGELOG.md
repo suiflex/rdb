@@ -1,47 +1,5 @@
 # Changelog
 
-## RDB: [0.26.0](https://github.com/suiflex/rdb/compare/v0.25.2...v0.26.0) (2026-07-28)
-
-
-### App Features
-
-* **app:** add run/open/insert/copy actions to saved query rows ([91c768c](https://github.com/suiflex/rdb/commit/91c768c97efc25601cd6061784447052f3a173c6))
-* **app:** add save-to-queries action to history rows ([b186894](https://github.com/suiflex/rdb/commit/b1868941f9360eadede0e375deedb81c095ab399))
-* **app:** persist saved queries and support delete ([76d8c34](https://github.com/suiflex/rdb/commit/76d8c34b65404ccb7d9ee4d07968cf27601c04f9))
-* **app:** polish keyboard shortcuts dialog ([cecbc77](https://github.com/suiflex/rdb/commit/cecbc7729d697fc560011e314145162679d12e83))
-* **app:** redesign settings into tabbed sections ([d546c6f](https://github.com/suiflex/rdb/commit/d546c6fb786604a1aff81042402f28af822d8a80))
-* **app:** show actionable update prompt in settings ([9287c4a](https://github.com/suiflex/rdb/commit/9287c4aa31a727a59fd98199b78f91399b1e6a80))
-
-
-### Bug Fixes
-
-* **app:** even out keyboard shortcut key chips ([b29fa66](https://github.com/suiflex/rdb/commit/b29fa66b463049f8429d11492b2810fb0611550f))
-* **app:** list all six supported engines in About ([a915b5f](https://github.com/suiflex/rdb/commit/a915b5fde0c641fc0eaa721abe1f711c8d7697ec))
-
-## RDB: [0.27.0](https://github.com/suiflex/rdb/compare/v0.26.0...v0.27.0) (2026-07-29)
-
-
-### App Features
-
-* **app:** add reconnect shortcut (Cmd+Shift+R) ([00c2b68](https://github.com/suiflex/rdb/commit/00c2b68565d8fa839f9c810ce8a647a323e11e55))
-* **app:** group command palette results GitHub-style ([0f3151b](https://github.com/suiflex/rdb/commit/0f3151b21c6fe28d38c07e25ea4ff27a729c7bcf))
-* **app:** run selected statements into separate result tabs ([6d674b1](https://github.com/suiflex/rdb/commit/6d674b1ed2bc2b3bb7671a423b424304ba00a5a6))
-* **app:** widen header search pill toward corner clusters ([fb678b9](https://github.com/suiflex/rdb/commit/fb678b97dcd07123aace63ff5ba1e5a4aeb10756))
-
-
-### Bug Fixes
-
-* **app:** hide console window on Windows ([24ccbbf](https://github.com/suiflex/rdb/commit/24ccbbfe8cb434b1deddf8883078f6a4e42253b8))
-* **app:** persist result filter across tab and query switches ([1c49eee](https://github.com/suiflex/rdb/commit/1c49eeec33c60a2255a471873fcd968e0e1da7b0))
-* **app:** size details value boxes to content with scroll ([b2bb088](https://github.com/suiflex/rdb/commit/b2bb088ffce68e888d7d73829a85aa863ea41f96))
-
-## RDB: [0.29.0](https://github.com/suiflex/rdb/compare/v0.28.0...v0.29.0) (2026-07-31)
-
-
-### App Features
-
-* **app:** v0.29.0 prep — split-pane, editor, tabs, mongo fixes ([#164](https://github.com/suiflex/rdb/issues/164)) ([be408f6](https://github.com/suiflex/rdb/commit/be408f6690a8af9334e759e1af5462b286d01367))
-
 ## RDB: [0.30.0](https://github.com/suiflex/rdb/compare/v0.29.0...v0.30.0) (2026-08-01)
 
 
@@ -71,7 +29,14 @@
 * **app:** use close icon in update dialog ([0c86540](https://github.com/suiflex/rdb/commit/0c86540c5f24eb6982e7e92b7b1fe5d5d5450be0))
 * **app:** use each connection's custom color for tab/result badges ([e27d840](https://github.com/suiflex/rdb/commit/e27d8405e9c32dfd8afe0f81904c5006cdc19d91))
 
-## [0.28.0](https://github.com/suiflex/rdb/compare/v0.27.0...v0.28.0) (2026-07-30)
+## RDB: [0.29.0](https://github.com/suiflex/rdb/compare/v0.28.0...v0.29.0) (2026-07-31)
+
+
+### App Features
+
+* **app:** v0.29.0 prep — split-pane, editor, tabs, mongo fixes ([#164](https://github.com/suiflex/rdb/issues/164)) ([be408f6](https://github.com/suiflex/rdb/commit/be408f6690a8af9334e759e1af5462b286d01367))
+
+## RDB: [0.28.0](https://github.com/suiflex/rdb/compare/v0.27.0...v0.28.0) (2026-07-30)
 
 
 ### App Features
@@ -99,21 +64,56 @@
 * **app:** stop the filter field growing with its text ([0b685b2](https://github.com/suiflex/rdb/commit/0b685b23ea273bafe89bd82493e623c2ae6f162b))
 * **app:** vertically center the New Connection footer button ([aaf3cc4](https://github.com/suiflex/rdb/commit/aaf3cc4a21d79852dfb1a5f276ea3f52659de792))
 
-## [0.25.2](https://github.com/suiflex/rdb/compare/v0.25.1...v0.25.2) (2026-07-28)
+## RDB: [0.27.0](https://github.com/suiflex/rdb/compare/v0.26.0...v0.27.0) (2026-07-29)
+
+
+### App Features
+
+* **app:** add reconnect shortcut (Cmd+Shift+R) ([00c2b68](https://github.com/suiflex/rdb/commit/00c2b68565d8fa839f9c810ce8a647a323e11e55))
+* **app:** group command palette results GitHub-style ([0f3151b](https://github.com/suiflex/rdb/commit/0f3151b21c6fe28d38c07e25ea4ff27a729c7bcf))
+* **app:** run selected statements into separate result tabs ([6d674b1](https://github.com/suiflex/rdb/commit/6d674b1ed2bc2b3bb7671a423b424304ba00a5a6))
+* **app:** widen header search pill toward corner clusters ([fb678b9](https://github.com/suiflex/rdb/commit/fb678b97dcd07123aace63ff5ba1e5a4aeb10756))
+
+
+### Bug Fixes
+
+* **app:** hide console window on Windows ([24ccbbf](https://github.com/suiflex/rdb/commit/24ccbbfe8cb434b1deddf8883078f6a4e42253b8))
+* **app:** persist result filter across tab and query switches ([1c49eee](https://github.com/suiflex/rdb/commit/1c49eeec33c60a2255a471873fcd968e0e1da7b0))
+* **app:** size details value boxes to content with scroll ([b2bb088](https://github.com/suiflex/rdb/commit/b2bb088ffce68e888d7d73829a85aa863ea41f96))
+
+## RDB: [0.26.0](https://github.com/suiflex/rdb/compare/v0.25.2...v0.26.0) (2026-07-28)
+
+
+### App Features
+
+* **app:** add run/open/insert/copy actions to saved query rows ([91c768c](https://github.com/suiflex/rdb/commit/91c768c97efc25601cd6061784447052f3a173c6))
+* **app:** add save-to-queries action to history rows ([b186894](https://github.com/suiflex/rdb/commit/b1868941f9360eadede0e375deedb81c095ab399))
+* **app:** persist saved queries and support delete ([76d8c34](https://github.com/suiflex/rdb/commit/76d8c34b65404ccb7d9ee4d07968cf27601c04f9))
+* **app:** polish keyboard shortcuts dialog ([cecbc77](https://github.com/suiflex/rdb/commit/cecbc7729d697fc560011e314145162679d12e83))
+* **app:** redesign settings into tabbed sections ([d546c6f](https://github.com/suiflex/rdb/commit/d546c6fb786604a1aff81042402f28af822d8a80))
+* **app:** show actionable update prompt in settings ([9287c4a](https://github.com/suiflex/rdb/commit/9287c4aa31a727a59fd98199b78f91399b1e6a80))
+
+
+### Bug Fixes
+
+* **app:** even out keyboard shortcut key chips ([b29fa66](https://github.com/suiflex/rdb/commit/b29fa66b463049f8429d11492b2810fb0611550f))
+* **app:** list all six supported engines in About ([a915b5f](https://github.com/suiflex/rdb/commit/a915b5fde0c641fc0eaa721abe1f711c8d7697ec))
+
+## RDB: [0.25.2](https://github.com/suiflex/rdb/compare/v0.25.1...v0.25.2) (2026-07-28)
 
 
 ### Bug Fixes
 
 * **app:** improve editor history and result tabs ([#146](https://github.com/suiflex/rdb/issues/146)) ([fe181e5](https://github.com/suiflex/rdb/commit/fe181e5489d377d3f83d6d87d6277b4e9ec5c36d))
 
-## [0.25.1](https://github.com/suiflex/rdb/compare/v0.25.0...v0.25.1) (2026-07-28)
+## RDB: [0.25.1](https://github.com/suiflex/rdb/compare/v0.25.0...v0.25.1) (2026-07-28)
 
 
 ### Bug Fixes
 
 * **app:** connection-switch data loss, result-tab state, autocomplete, editor, JSON ([#143](https://github.com/suiflex/rdb/issues/143)) ([88e4653](https://github.com/suiflex/rdb/commit/88e4653020d93efb07bf89e1988f9273df724009))
 
-## [0.25.0](https://github.com/suiflex/rdb/compare/v0.24.0...v0.25.0) (2026-07-27)
+## RDB: [0.25.0](https://github.com/suiflex/rdb/compare/v0.24.0...v0.25.0) (2026-07-27)
 
 
 ### App Features
@@ -125,7 +125,7 @@
 
 * **app:** query-pane limit, autocomplete, and result-grid UX ([#139](https://github.com/suiflex/rdb/issues/139)) ([154b123](https://github.com/suiflex/rdb/commit/154b123c5acdf1070d71daa6c03a19a7adc1116f))
 
-## [0.24.0](https://github.com/suiflex/rdb/compare/v0.23.0...v0.24.0) (2026-07-26)
+## RDB: [0.24.0](https://github.com/suiflex/rdb/compare/v0.23.0...v0.24.0) (2026-07-26)
 
 
 ### App Features
@@ -146,7 +146,7 @@
 * **app:** stop long Mongo tree values from overflowing rows ([4a0075d](https://github.com/suiflex/rdb/commit/4a0075d8636b1f254a714f7303a42910ab0c7ee8))
 * **app:** use ASCII plus in the New Connection button ([a9e13e5](https://github.com/suiflex/rdb/commit/a9e13e51a59990ead1af98466d24fccc77988f2c))
 
-## [0.23.0](https://github.com/suiflex/rdb/compare/v0.22.0...v0.23.0) (2026-07-24)
+## RDB: [0.23.0](https://github.com/suiflex/rdb/compare/v0.22.0...v0.23.0) (2026-07-24)
 
 
 ### Features
@@ -179,7 +179,7 @@
 * **ui:** custom-virtualize the grid for smooth two-axis scrolling ([ca517f6](https://github.com/suiflex/rdb/commit/ca517f6408f9c7a89387ceeb3a82880d81a569f9))
 * **ui:** virtualize grid rows again for smooth scrolling ([fb0a124](https://github.com/suiflex/rdb/commit/fb0a12412313a4258c03e60142f225c3e1984986))
 
-## [0.22.0](https://github.com/suiflex/rdb/compare/v0.21.0...v0.22.0) (2026-07-23)
+## RDB: [0.22.0](https://github.com/suiflex/rdb/compare/v0.21.0...v0.22.0) (2026-07-23)
 
 
 ### Features
@@ -197,7 +197,7 @@
 * reflect live connection health in the status footer ([d4489f8](https://github.com/suiflex/rdb/commit/d4489f81decedc7197f90ca4bee2a7016efbb873))
 * SQL editor UX batch — cancel, autocomplete, folding, cell copy ([#127](https://github.com/suiflex/rdb/issues/127)) ([8d4d51e](https://github.com/suiflex/rdb/commit/8d4d51eccbec519fcfce050edf8cd0fbbb6a5201))
 
-## [0.21.0](https://github.com/suiflex/rdb/compare/v0.20.0...v0.21.0) (2026-07-22)
+## RDB: [0.21.0](https://github.com/suiflex/rdb/compare/v0.20.0...v0.21.0) (2026-07-22)
 
 
 ### Features
@@ -222,7 +222,7 @@
 * **ui:** show that a saved connection already has a password ([095d8f0](https://github.com/suiflex/rdb/commit/095d8f0ca18dfde1db5382360c8fe8932c292e9c))
 * **ui:** stop query-tab clicks misfiring as drags ([0cc96d6](https://github.com/suiflex/rdb/commit/0cc96d63bece5b2cc64beab044f399d70940d70e))
 
-## [0.20.0](https://github.com/suiflex/rdb/compare/v0.19.0...v0.20.0) (2026-07-21)
+## RDB: [0.20.0](https://github.com/suiflex/rdb/compare/v0.19.0...v0.20.0) (2026-07-21)
 
 
 ### Features
@@ -239,7 +239,7 @@
 * **ui:** replace tab move glyph with columns icon ([32f301d](https://github.com/suiflex/rdb/commit/32f301df2ab5419f0b98ca11036e7dbf0fe48adc))
 * **ui:** use columns icon for right-pane tab move button ([4830bb5](https://github.com/suiflex/rdb/commit/4830bb5078fdb1712acbc5854908c6e00f9660ea))
 
-## [0.19.0](https://github.com/suiflex/rdb/compare/v0.18.0...v0.19.0) (2026-07-20)
+## RDB: [0.19.0](https://github.com/suiflex/rdb/compare/v0.18.0...v0.19.0) (2026-07-20)
 
 
 ### Features
@@ -285,7 +285,7 @@
 * **app:** wire split pane grid interactions ([50134f8](https://github.com/suiflex/rdb/commit/50134f8ea8a8fa2ad45852d0861fb00e90388ca2))
 * **ui:** remove legacy pane split controls ([f349a44](https://github.com/suiflex/rdb/commit/f349a44ccf77786df79087b7b065320efef24921))
 
-## [0.18.0](https://github.com/suiflex/rdb/compare/v0.17.0...v0.18.0) (2026-07-18)
+## RDB: [0.18.0](https://github.com/suiflex/rdb/compare/v0.17.0...v0.18.0) (2026-07-18)
 
 
 ### Features
@@ -316,7 +316,7 @@
 * **ui:** latch sidebar rail to stop drag flicker ([98c8fa7](https://github.com/suiflex/rdb/commit/98c8fa757f463dac3e0d0bd807df3b16bd1500a7))
 * **ui:** show Export menu by removing popup height cycle ([1e8d1e3](https://github.com/suiflex/rdb/commit/1e8d1e33070b6f4b3a184aea00c4d1d35d0b9e3a))
 
-## [0.17.0](https://github.com/suiflex/rdb/compare/v0.16.0...v0.17.0) (2026-07-16)
+## RDB: [0.17.0](https://github.com/suiflex/rdb/compare/v0.16.0...v0.17.0) (2026-07-16)
 
 
 ### Features
@@ -329,7 +329,7 @@
 * **picker:** tint connection row card per engine color ([c8c523c](https://github.com/suiflex/rdb/commit/c8c523c52a2191350a8d9b9bb7af064d726e0784))
 * **ui:** add Tooltip global + shared overlay layer ([ccbe616](https://github.com/suiflex/rdb/commit/ccbe61675d9914f31ac8ec28376461d360e842bd))
 
-## [0.16.0](https://github.com/suiflex/rdb/compare/v0.15.0...v0.16.0) (2026-07-16)
+## RDB: [0.16.0](https://github.com/suiflex/rdb/compare/v0.15.0...v0.16.0) (2026-07-16)
 
 
 ### Features
@@ -342,7 +342,7 @@
 * **grid:** cap manual SELECT rows and virtualize the result grid ([43f06e0](https://github.com/suiflex/rdb/commit/43f06e0778f8aa426d8200d3481e841606c7977d))
 * **grid:** fix SELECT * freeze — row cap, virtualized grid, streaming No-limit ([9fce5b5](https://github.com/suiflex/rdb/commit/9fce5b55f1cc5f73247550d4bf947c91071c9e60))
 
-## [0.15.0](https://github.com/suiflex/rdb/compare/v0.14.0...v0.15.0) (2026-07-15)
+## RDB: [0.15.0](https://github.com/suiflex/rdb/compare/v0.14.0...v0.15.0) (2026-07-15)
 
 
 ### Features
@@ -356,7 +356,7 @@
 * **ui:** remove redundant footer Export buttons ([4c567a4](https://github.com/suiflex/rdb/commit/4c567a4242b858fcb5a21cfe3a6287053be6e371))
 * **ui:** stop tooltips from swallowing button clicks ([6c4c819](https://github.com/suiflex/rdb/commit/6c4c819b05b0bcf01feeee87e25d0bce06b908e4))
 
-## [0.14.0](https://github.com/suiflex/rdb/compare/v0.13.0...v0.14.0) (2026-07-15)
+## RDB: [0.14.0](https://github.com/suiflex/rdb/compare/v0.13.0...v0.14.0) (2026-07-15)
 
 
 ### Features
@@ -391,7 +391,7 @@
 * **ui:** draw two rows in the rows icon, not three ([bb95d97](https://github.com/suiflex/rdb/commit/bb95d97365260b4ea50b37c145dbcf014d49809e))
 * **ui:** log only user queries in the SQL console ([1ea6fd3](https://github.com/suiflex/rdb/commit/1ea6fd38c09766e570b8b874ea928263072c510c))
 
-## [0.13.0](https://github.com/suiflex/rdb/compare/v0.12.0...v0.13.0) (2026-07-14)
+## RDB: [0.13.0](https://github.com/suiflex/rdb/compare/v0.12.0...v0.13.0) (2026-07-14)
 
 
 ### Features
@@ -399,7 +399,7 @@
 * **ui:** add TablePlus-style workspace tabs ([55987a1](https://github.com/suiflex/rdb/commit/55987a11305b4e0b2ba419b848e45e779954911b))
 * **ui:** add TablePlus-style workspace tabs ([7c98c15](https://github.com/suiflex/rdb/commit/7c98c15e2763991200876c1c99128bf9badfb582))
 
-## [0.12.0](https://github.com/suiflex/rdb/compare/v0.11.0...v0.12.0) (2026-07-13)
+## RDB: [0.12.0](https://github.com/suiflex/rdb/compare/v0.11.0...v0.12.0) (2026-07-13)
 
 
 ### Features
@@ -439,7 +439,7 @@
 
 * **app:** cap Mongo document tree scalar previews ([65270e7](https://github.com/suiflex/rdb/commit/65270e7effb20612101f08fd494009d9763e05c6))
 
-## [0.11.0](https://github.com/suiflex/rdb/compare/v0.10.0...v0.11.0) (2026-07-12)
+## RDB: [0.11.0](https://github.com/suiflex/rdb/compare/v0.10.0...v0.11.0) (2026-07-12)
 
 
 ### Features
@@ -455,7 +455,7 @@
 * **ui:** label the disconnect button with a hover tooltip ([95e73f3](https://github.com/suiflex/rdb/commit/95e73f344db599ed5bf7663b90b4013346f7497d))
 * **ui:** right-align the Limit stepper ([2f6a693](https://github.com/suiflex/rdb/commit/2f6a693d4b8f98f62734358d086961312d84b140))
 
-## [0.10.0](https://github.com/suiflex/rdb/compare/v0.9.0...v0.10.0) (2026-07-11)
+## RDB: [0.10.0](https://github.com/suiflex/rdb/compare/v0.9.0...v0.10.0) (2026-07-11)
 
 
 ### Features
@@ -485,7 +485,7 @@
 * **ui:** even spacing across toolbar action icons ([627e063](https://github.com/suiflex/rdb/commit/627e063ef6afc327452c682f26ed6126a773258c))
 * **ui:** keep Limit label next to its stepper buttons ([39624dd](https://github.com/suiflex/rdb/commit/39624ddcc3ad7192a1222e8d9201e3b7410860ba))
 
-## [0.9.0](https://github.com/suiflex/rdb/compare/v0.8.0...v0.9.0) (2026-07-10)
+## RDB: [0.9.0](https://github.com/suiflex/rdb/compare/v0.8.0...v0.9.0) (2026-07-10)
 
 
 ### Features
@@ -510,7 +510,7 @@
 * **app:** keep query editor visible and typeable when empty ([e3f5fb8](https://github.com/suiflex/rdb/commit/e3f5fb8f454c9b92ec15267ffe77caf0ef8c7cca))
 * **app:** render engine hint as placeholder, not seeded buffer text ([fefac4e](https://github.com/suiflex/rdb/commit/fefac4eb12b360255a71cd134b3ae56f47d19186))
 
-## [0.8.0](https://github.com/suiflex/rdb/compare/v0.7.0...v0.8.0) (2026-07-09)
+## RDB: [0.8.0](https://github.com/suiflex/rdb/compare/v0.7.0...v0.8.0) (2026-07-09)
 
 
 ### Features
@@ -534,7 +534,7 @@
 * **app:** sticky result header and live per-column filtering ([1787838](https://github.com/suiflex/rdb/commit/178783894f4029de829f0bca58962dd4090ece25))
 * **app:** useless borrows in formatting call in emiten mock ([70bcff0](https://github.com/suiflex/rdb/commit/70bcff0a0b9b302ed56690dd344a2e0ffd37a412))
 
-## [0.7.0](https://github.com/suiflex/rdb/compare/v0.6.0...v0.7.0) (2026-07-09)
+## RDB: [0.7.0](https://github.com/suiflex/rdb/compare/v0.6.0...v0.7.0) (2026-07-09)
 
 
 ### Features
@@ -550,7 +550,7 @@
 * **app:** search icon, ⌘⏎ run, Postgres JSON cells, tab close/new ([4e91b9a](https://github.com/suiflex/rdb/commit/4e91b9aa8be4afc32beb27d3ef3e4343d491f7a2))
 * **app:** use search SVG icon in search and filter fields ([ffa30d4](https://github.com/suiflex/rdb/commit/ffa30d45de70ad5448f474a261f5aaf9618471e9))
 
-## [0.6.0](https://github.com/suiflex/rdb/compare/v0.5.0...v0.6.0) (2026-07-08)
+## RDB: [0.6.0](https://github.com/suiflex/rdb/compare/v0.5.0...v0.6.0) (2026-07-08)
 
 
 ### Features
@@ -579,7 +579,7 @@
 * **app:** replace blank ComboBox with a custom SelectBox ([5c8a40f](https://github.com/suiflex/rdb/commit/5c8a40f6989cd1d2e55bcead97997bfbbb6d9b3e))
 * **app:** use SVG icons for header history and theme toggle ([1bbd0d8](https://github.com/suiflex/rdb/commit/1bbd0d86d0b0e2b533ce850f821652b686458566))
 
-## [0.5.0](https://github.com/suiflex/rdb/compare/v0.4.0...v0.5.0) (2026-07-04)
+## RDB: [0.5.0](https://github.com/suiflex/rdb/compare/v0.4.0...v0.5.0) (2026-07-04)
 
 
 ### Features
@@ -607,7 +607,7 @@
 * **ui:** sidebar plus button opens a new query tab ([1035b79](https://github.com/suiflex/rdb/commit/1035b79cda9df95e42a2a73df9edb4661bf3c4a3))
 * **ui:** titlebar aux buttons do what they say ([fd54fa2](https://github.com/suiflex/rdb/commit/fd54fa20efd5fdddab937b8deff0b956b3ed5cae))
 
-## [0.4.0](https://github.com/suiflex/rdb/compare/v0.3.0...v0.4.0) (2026-07-03)
+## RDB: [0.4.0](https://github.com/suiflex/rdb/compare/v0.3.0...v0.4.0) (2026-07-03)
 
 
 ### Features
@@ -627,7 +627,7 @@
 * **mongo:** write path via _id + skip pagination on find ([2b3a8af](https://github.com/suiflex/rdb/commit/2b3a8afddf916a27186b4f41ba707a31c1abf4ec))
 * real-PostgreSQL end-to-end + driver type decoding + CI gate green ([ef08ba1](https://github.com/suiflex/rdb/commit/ef08ba1007a95773f989d7c1025d3c5030f9b1c3))
 
-## [0.3.0](https://github.com/suiflex/rdb/compare/v0.2.0...v0.3.0) (2026-07-01)
+## RDB: [0.3.0](https://github.com/suiflex/rdb/compare/v0.2.0...v0.3.0) (2026-07-01)
 
 
 ### Features
@@ -640,7 +640,7 @@
 * **mongo:** correct sidebar tree and data preview ([14a3e5e](https://github.com/suiflex/rdb/commit/14a3e5e15e30800d9c4b97fa6e04e56dc3655343))
 * **ui:** show loading/empty placeholder for mongo databases ([d390b24](https://github.com/suiflex/rdb/commit/d390b248eb176c4c1de3faf535d8e98f5ca8978d))
 
-## [0.2.0](https://github.com/suiflex/rdb/compare/v0.1.0...v0.2.0) (2026-06-22)
+## RDB: [0.2.0](https://github.com/suiflex/rdb/compare/v0.1.0...v0.2.0) (2026-06-22)
 
 
 ### Features

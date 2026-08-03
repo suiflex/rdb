@@ -9,7 +9,14 @@ export struct GridCell { text: string, is-null: bool, state: int }
 // empty for SQL/Redis where the category path is used instead.
 // `count` is the number of (filter-matching) containers under a header row;
 // 0 hides the badge. Non-header rows always carry 0.
-export struct TreeNode { label: string, depth: int, kind: string, expanded: bool, db: string, count: int }
+// `sub` is a small driver badge; only "recent" (History) rows use it, keyed
+// like `DbBadge.engine` ("postgres"|"mysql"|...). Empty for every other kind.
+// `sub-color`/`sub-has-custom-color` mirror `ConnItem`'s color/has-custom-color
+// pair — the connection's own accent, so the badge matches everywhere else.
+export struct TreeNode {
+    label: string, depth: int, kind: string, expanded: bool, db: string, count: int, sub: string,
+    sub-color: color, sub-has-custom-color: bool,
+}
 // One row of the collapsible Mongo document (JSON) tree. `path` is the stable
 // collapse key; `expandable` shows a fold caret, `expanded` its state.
 export struct DocRow { depth: int, key: string, preview: string, full: string, expandable: bool, expanded: bool, path: string }
@@ -39,6 +46,13 @@ export struct ConnItem {
     count: int,
     // Starred connection: renders a badge and floats to the top of its group.
     favorite: bool,
+    // Environment tag pill (empty label => no pill rendered).
+    env-tag-label: string,
+    env-tag-color: color,
+    // True on the last row of a group's currently-visible block (last member
+    // if expanded, otherwise the header itself) — rounds the card's bottom
+    // corners so consecutive groups read as separate cards.
+    is-group-end: bool,
 }
 // One Host/Port/… row of the connection-detail card.
 export struct KvRow { k: string, v: string }

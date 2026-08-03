@@ -98,11 +98,6 @@ pub fn format(sql: &str) -> String {
     out.trim().to_string()
 }
 
-/// Format one physical editor line without introducing new editor lines.
-pub fn format_line(sql: &str) -> String {
-    format(sql).replace('\n', " ")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,10 +127,10 @@ mod tests {
     }
 
     #[test]
-    fn format_line_keeps_a_query_on_one_physical_line() {
+    fn formats_a_full_multi_statement_selection() {
         assert_eq!(
-            format_line("select * from users where active = true"),
-            "SELECT * FROM users WHERE active = true"
+            format("select a from t where a=1;"),
+            "SELECT a\nFROM t\nWHERE a=1;"
         );
     }
 }

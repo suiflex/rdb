@@ -660,22 +660,13 @@ impl EditorState {
         self.col = self.lines[self.line].chars().count();
     }
 
-    /// Current line text — the "Run Selection" fallback unit.
-    pub fn current_line(&self) -> &str {
-        &self.lines[self.line]
-    }
-
-    /// Replace only the physical line under the caret and keep the caret in it.
-    pub fn replace_current_line(&mut self, text: &str) {
-        self.lines[self.line] = text.to_string();
-        self.col = self.col.min(text.chars().count());
-        self.sel = None;
-    }
-
-    /// Statement under the cursor: the `;`-delimited segment containing the
-    /// cursor, ignoring semicolons inside single-quoted literals. Falls back
-    /// to the current line when the segment is empty.
-    pub fn current_statement(&self) -> String {
+    /// Char-offset range (into `self.text()`) of the `;`-delimited segment
+    /// containing the cursor, ignoring semicolons inside single-quoted
+    /// literals and `-- line comments`. Falls back to the current physical
+    /// line's own range when that segment is blank. Shared by
+    /// `current_statement` (trims + reads) and `replace_current_statement`
+    /// (splices) so the two can never disagree on what "the statement" is.
+    fn statement_bounds(&self) -> (usize, usize) {
         let text = self.text();
         let chars: Vec<char> = text.chars().collect();
         // cursor position as a char offset into the joined text
@@ -724,12 +715,58 @@ impl EditorState {
             .or_else(|| segments.last().copied())
             .unwrap_or((0, chars.len()));
         let stmt: String = chars[s..e].iter().collect();
-        let stmt = stmt.trim();
-        if stmt.is_empty() {
-            self.current_line().trim().to_string()
-        } else {
-            stmt.to_string()
+        if !stmt.trim().is_empty() {
+            return (s, e);
         }
+        // Blank segment (e.g. cursor sits in trailing whitespace after the
+        // last statement) — fall back to the current line's own range.
+        let mut line_start = 0;
+        for l in &self.lines[..self.line] {
+            line_start += l.chars().count() + 1;
+        }
+        let line_end = line_start + self.lines[self.line].chars().count();
+        (line_start, line_end)
+    }
+
+    /// Statement under the cursor: the `;`-delimited segment containing the
+    /// cursor, ignoring semicolons inside single-quoted literals. Falls back
+    /// to the current line when the segment is empty.
+    pub fn current_statement(&self) -> String {
+        let (s, e) = self.statement_bounds();
+        let text = self.text();
+        let chars: Vec<char> = text.chars().collect();
+        chars[s..e].iter().collect::<String>().trim().to_string()
+    }
+
+    /// Replace the `;`-delimited statement under the cursor with `text`,
+    /// preserving every other statement and surrounding whitespace.
+    /// Rebuilds `self.lines` from the spliced full text; the caret is
+    /// clamped into the new bounds rather than precisely tracked.
+    pub fn replace_current_statement(&mut self, text: &str) {
+        let (s, e) = self.statement_bounds();
+        let full = self.text();
+        let chars: Vec<char> = full.chars().collect();
+        // `[s, e)` is the raw segment, including any leading/trailing
+        // whitespace (e.g. the newline right after the previous statement's
+        // `;`) that isn't actually part of this statement — splice only the
+        // trimmed inner range so that separator whitespace survives.
+        let inner_start = s + chars[s..e].iter().take_while(|c| c.is_whitespace()).count();
+        let inner_end = e - chars[s..e]
+            .iter()
+            .rev()
+            .take_while(|c| c.is_whitespace())
+            .count();
+        let inner_end = inner_end.max(inner_start);
+        let before: String = chars[..inner_start].iter().collect();
+        let after: String = chars[inner_end..].iter().collect();
+        let new_full = format!("{before}{text}{after}");
+        self.lines = new_full.split('\n').map(str::to_string).collect();
+        if self.lines.is_empty() {
+            self.lines.push(String::new());
+        }
+        self.line = self.line.min(self.lines.len() - 1);
+        self.col = self.col.min(self.lines[self.line].chars().count());
+        self.sel = None;
     }
 }
 
@@ -1001,13 +1038,12 @@ mod tests {
     }
 
     #[test]
-    fn replace_current_line_preserves_other_lines() {
-        let mut ed = EditorState::from_text("select 1\nselect 2\nselect 3");
+    fn replace_current_statement_preserves_other_statements() {
+        let mut ed = EditorState::from_text("select 1;\nselect 2;\nselect 3;");
         ed.line = 1;
         ed.col = 8;
-        ed.replace_current_line("SELECT 2");
-        assert_eq!(ed.text(), "select 1\nSELECT 2\nselect 3");
-        assert_eq!((ed.line, ed.col), (1, 8));
+        ed.replace_current_statement("SELECT 2;");
+        assert_eq!(ed.text(), "select 1;\nSELECT 2;\nselect 3;");
     }
 
     // ----- selection -----

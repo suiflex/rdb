@@ -5,6 +5,7 @@
   "packages": {
     "app": {
       "package-name": "rdb",
+      "changelog-path": "../CHANGELOG.md",
       "extra-files": [
         {
           "type": "json",

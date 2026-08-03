@@ -41,22 +41,25 @@ jobs:
           gh release edit "${{ steps.release.outputs['app--tag_name'] }}" \
             --title "RDB ${{ steps.release.outputs['app--tag_name'] }}"
 
-      # Match the CHANGELOG to the release title. release-please regenerates
-      # only the newest block on each run, so prefixing the top-most heading on
-      # the release-PR branch is idempotent and leaves older headings untouched.
+      # Match the CHANGELOG to the release title. Target the exact version
+      # release-please just built the PR for, not "whichever heading comes
+      # first" — a stale/rebased PR branch can otherwise prefix the wrong
+      # block (this is what put 0.28.0's heading out of place).
       - name: Prefix CHANGELOG heading with product name
         if: ${{ steps.release.outputs.pr }}
         env:
           # Keep generated PR JSON out of the shell script body.
           RELEASE_PR: ${{ steps.release.outputs.pr }}
+          RELEASED_VERSION: ${{ steps.release.outputs['app--version'] }}
         run: |
           branch=$(printf '%s' "$RELEASE_PR" | jq -r '.headBranchName')
           git fetch origin "$branch"
           git checkout "$branch"
-          awk '!done && /^## \[/ { sub(/^## \[/, "## RDB: ["); done=1 } { print }' \
-            app/CHANGELOG.md > app/CHANGELOG.md.tmp
-          mv app/CHANGELOG.md.tmp app/CHANGELOG.md
-          if git diff --quiet -- app/CHANGELOG.md; then
+          awk -v ver="$RELEASED_VERSION" \
+            '$0 ~ "^## \\[" ver "\\]" { sub(/^## \[/, "## RDB: ["); } { print }' \
+            CHANGELOG.md > CHANGELOG.md.tmp
+          mv CHANGELOG.md.tmp CHANGELOG.md
+          if git diff --quiet -- CHANGELOG.md; then
             echo "CHANGELOG heading already prefixed"
             exit 0
           fi

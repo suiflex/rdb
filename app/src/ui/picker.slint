@@ -24,6 +24,8 @@ export component ConnPicker inherits Rectangle {
     in property <bool> sel-has-custom-color;
     in property <string> sel-sub;      // "PostgreSQL · grup profin"
     in property <bool> sel-local;
+    in property <string> sel-env-tag-label;
+    in property <color> sel-env-tag-color;
     in property <[KvRow]> sel-rows;
     in property <[string]> sel-tags;
     in property <string> sel-footer;   // "Terakhir terhubung · 2 menit lalu · …"
@@ -37,13 +39,27 @@ export component ConnPicker inherits Rectangle {
     // Export saved connections to ~/Downloads. Arg is the format: 0 = JSON, 1 = CSV.
     callback export-conns(int);
     callback toggle-group(string);
+    // Right-click a group header: rename (old, new) or delete it (its
+    // connections fall back to Ungrouped, nothing is destroyed).
+    callback group-rename(string, string);
+    callback group-delete(string);
     // Toggle the starred flag on a connection (arg is the store index).
     callback toggle-favorite(int);
-    // Drag-reorder: (store index of dragged row, signed number of rows moved).
-    callback reorder-conn(int, int);
+    // Drag-reorder/move: (store index of dragged row, signed row-step delta
+    // for a same-group reorder, release Y relative to the list content's top
+    // for cross-group drop detection).
+    callback reorder-conn(int, int, int);
     callback filter(string);
     // Open an external link (Product Hunt / GitHub) in the system browser.
     callback open-url(string);
+
+    // Group header context menu (Rename/Delete) + its rename modal state.
+    property <string> group-menu-target: "";
+    property <length> group-menu-x: 0px;
+    property <length> group-menu-y: 0px;
+    property <bool> rename-modal-open: false;
+    property <string> rename-old: "";
+    property <string> rename-text: "";
 
     background: Tokens.canvas;
 
@@ -54,7 +70,7 @@ export component ConnPicker inherits Rectangle {
         // Canvas gutter around the card so the sidebar reads as a floating
         // panel (rounded, bordered, drop-shadow) instead of a flush column.
         Rectangle {
-            width: 372px;
+            width: 560px;
             background: Tokens.canvas;
 
             card := Rectangle {
@@ -105,42 +121,162 @@ export component ConnPicker inherits Rectangle {
                 // ----- grouped rows -----
                 ScrollView {
                     vertical-stretch: 1;
-                    VerticalLayout {
+                    list-content := VerticalLayout {
                         padding-left: Tokens.sp3;
                         padding-right: Tokens.sp3;
-                        spacing: Tokens.sp1;
+                        // No uniform spacing here — that's what left a visible
+                        // gap between every row, including within one card
+                        // (header to its first member, member to member). The
+                        // only gap wanted is *between* cards, which the header
+                        // row's own extra height (added above, `i > 0`) already
+                        // provides.
+                        spacing: 0px;
                         alignment: start;
 
                         for item[i] in root.connections: Rectangle {
-                            height: item.is-header ? 28px : 40px;
+                            // Headers (except the very first) carry a little
+                            // extra height above their real 28px content so a
+                            // gap opens up before each new group's card; the
+                            // inner content Rectangle anchors to the bottom of
+                            // that extra space rather than filling it. Row
+                            // items carry the card background directly on this
+                            // outer shell instead (no gap to work around), so
+                            // the existing selected/hover Rectangle underneath
+                            // stays untouched and just composites over it.
+                            height: item.is-header ? (i > 0 ? 28px + Tokens.sp2 : 28px) : 40px;
+                            background: item.is-header ? transparent : Tokens.card;
+                            border-top-left-radius: !item.is-header && i == 0 ? Tokens.radius-lg : 0px;
+                            border-top-right-radius: !item.is-header && i == 0 ? Tokens.radius-lg : 0px;
+                            border-bottom-left-radius: !item.is-header && item.is-group-end ? Tokens.radius-lg : 0px;
+                            border-bottom-right-radius: !item.is-header && item.is-group-end ? Tokens.radius-lg : 0px;
 
                             // --- group header row ---
                             if item.is-header: Rectangle {
+                                y: parent.height - 28px;
+                                height: 28px;
+                                background: Tokens.card;
+                                border-top-left-radius: Tokens.radius-lg;
+                                border-top-right-radius: Tokens.radius-lg;
+                                border-bottom-left-radius: item.is-group-end ? Tokens.radius-lg : 0px;
+                                border-bottom-right-radius: item.is-group-end ? Tokens.radius-lg : 0px;
                                 hdr-ta := TouchArea {
-                                    clicked => { root.toggle-group(item.name); }
+                                    // `item.group` is the raw-case key stored on
+                                    // SavedConnection; `item.name` is uppercased
+                                    // for display only — using it here would
+                                    // silently desync collapse state for any
+                                    // group name that isn't already all-caps.
+                                    clicked => { root.toggle-group(item.group); }
+                                    pointer-event(e) => {
+                                        if (e.kind == PointerEventKind.down
+                                            && e.button == PointerEventButton.right
+                                            && item.group != "Ungrouped") {
+                                            root.group-menu-target = item.group;
+                                            root.group-menu-x = self.absolute-position.x - root.absolute-position.x;
+                                            root.group-menu-y = self.absolute-position.y - root.absolute-position.y;
+                                            group-menu.show();
+                                        }
+                                    }
                                 }
                                 HorizontalLayout {
+                                    // Explicit fill so the trailing stretch spacer
+                                    // below has real room to push the menu button to
+                                    // the true right edge, and so the button — laid
+                                    // out through the same container as the label
+                                    // text — shares its vertical centering exactly
+                                    // instead of drifting from a separately computed
+                                    // position.
+                                    width: parent.width;
+                                    height: parent.height;
                                     spacing: Tokens.sp2;
-                                    alignment: start;
-                                    Text {
-                                        text: item.expanded ? "▾" : "▸";
-                                        color: Tokens.text-faint;
-                                        font-size: 9px;
-                                        vertical-alignment: center;
+                                    // No `alignment: start` here (deliberately) — that
+                                    // mode disables stretch factors entirely, which is
+                                    // exactly what silently broke the menu button
+                                    // pushing itself to the right edge. Default
+                                    // (stretch) leaves the Text children untouched
+                                    // (content-sized, so their stretch factor is 0)
+                                    // and lets the trailing spacer Rectangle absorb
+                                    // the remaining width instead.
+                                    // Same circular caret badge the ⌘O "Open
+                                    // Connection" modal uses for its group rows
+                                    // (palette.slint), rotated instead of swapping
+                                    // glyphs, so both surfaces read identically.
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 16px;
+                                            height: 16px;
+                                            border-radius: 8px;
+                                            border-width: 1.5px;
+                                            border-color: Tokens.warn;
+                                            AppIcon {
+                                                name: "caret";
+                                                size: 8px;
+                                                color: Tokens.warn;
+                                                transform-rotation: item.expanded ? 0deg : -90deg;
+                                            }
+                                        }
                                     }
-                                    Text {
-                                        text: item.name;
-                                        color: Tokens.text-dim;
-                                        font-size: Tokens.font-xs;
-                                        font-weight: 700;
-                                        letter-spacing: 0.8px;
-                                        vertical-alignment: center;
+                                    // All-caps text has no descenders, so its visible
+                                    // glyphs sit slightly above the true vertical center
+                                    // of the line box — the extra padding-top (vs. none
+                                    // on bottom) shifts the centered position down ~1px
+                                    // to read level with the caret badge / "⋯" button.
+                                    VerticalLayout {
+                                        alignment: center;
+                                        padding-top: 2px;
+                                        Text {
+                                            text: item.name;
+                                            color: Tokens.text-dim;
+                                            font-size: Tokens.font-xs;
+                                            font-weight: 700;
+                                            letter-spacing: 0.8px;
+                                            vertical-alignment: center;
+                                        }
                                     }
-                                    Text {
-                                        text: item.count;
-                                        color: Tokens.text-faint;
-                                        font-size: Tokens.font-sm;
-                                        vertical-alignment: center;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        padding-top: 2px;
+                                        Text {
+                                            text: item.count;
+                                            color: Tokens.text-faint;
+                                            font-size: Tokens.font-sm;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    Rectangle { horizontal-stretch: 1; }
+                                    // Visible Rename/Delete affordance — right-click
+                                    // does the same, but a hidden-until-hover button
+                                    // is the only discoverable path on a fresh
+                                    // install. Three plain dots, not a Unicode
+                                    // glyph — the app's bundled fonts don't cover
+                                    // "…"/"⋯" and it fell back to a tofu box.
+                                    if item.group != "Ungrouped": VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 24px;
+                                            height: 20px;
+                                            border-radius: Tokens.radius;
+                                            opacity: hdr-ta.has-hover || gmore-ta.has-hover ? 1.0 : 0.0;
+                                            background: gmore-ta.has-hover ? Tokens.card.with-alpha(0.5) : transparent;
+                                            HorizontalLayout {
+                                                alignment: center;
+                                                spacing: 2px;
+                                                for _dot in [0, 1, 2]: Rectangle {
+                                                    width: 3px;
+                                                    height: 3px;
+                                                    border-radius: 1.5px;
+                                                    background: Tokens.text-faint;
+                                                }
+                                            }
+                                            gmore-ta := TouchArea {
+                                                clicked => {
+                                                    root.group-menu-target = item.group;
+                                                    root.group-menu-x = self.absolute-position.x - root.absolute-position.x;
+                                                    root.group-menu-y = self.absolute-position.y - root.absolute-position.y;
+                                                    group-menu.show();
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -195,9 +331,17 @@ export component ConnPicker inherits Rectangle {
                                                 mouse-cursor: grab;
                                                 pointer-event(ev) => {
                                                     if ev.kind == PointerEventKind.up {
+                                                        // Row-step delta for a same-group reorder, plus the
+                                                        // release point's Y relative to the top of the (already
+                                                        // scrolled) list content — Rust maps that to whichever
+                                                        // row/header it landed on to detect a cross-group drop.
+                                                        // Both are in the same on-screen coordinate frame, so
+                                                        // scroll offset cancels out of the subtraction.
                                                         root.reorder-conn(
                                                             item.index,
-                                                            round((self.mouse-y - self.pressed-y) / 40px));
+                                                            round((self.mouse-y - self.pressed-y) / 40px),
+                                                            round((self.absolute-position.y + self.mouse-y
+                                                                - list-content.absolute-position.y) / 1px));
                                                     }
                                                 }
                                                 changed has-hover => {
@@ -247,6 +391,10 @@ export component ConnPicker inherits Rectangle {
                                     if item.local: VerticalLayout {
                                         alignment: center;
                                         OutlineChip { text: "LOCAL"; }
+                                    }
+                                    if item.env-tag-label != "": VerticalLayout {
+                                        alignment: center;
+                                        OutlineChip { text: item.env-tag-label; tint: item.env-tag-color; }
                                     }
                                     // Star toggle: always present (so its own
                                     // TouchArea keeps receiving clicks); shown when
@@ -499,6 +647,7 @@ export component ConnPicker inherits Rectangle {
                     spacing: Tokens.sp6;
                     alignment: start;
                     vertical-stretch: 1;
+                    max-width: 560px;
 
                     // ----- header row -----
                     HorizontalLayout {
@@ -524,6 +673,10 @@ export component ConnPicker inherits Rectangle {
                                 if root.sel-local: VerticalLayout {
                                     alignment: center;
                                     OutlineChip { text: "LOCAL"; }
+                                }
+                                if root.sel-env-tag-label != "": VerticalLayout {
+                                    alignment: center;
+                                    OutlineChip { text: root.sel-env-tag-label; tint: root.sel-env-tag-color; }
                                 }
                             }
                             Text {
@@ -628,6 +781,122 @@ export component ConnPicker inherits Rectangle {
                             color: Tokens.text-faint;
                             font-size: Tokens.font-sm;
                             vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    group-menu := PopupWindow {
+        // Anchored to the "⋯" button's actual position (was hardcoded to
+        // 60px — the reason the menu opened in an unrelated spot). Clamp so
+        // it stays on screen if the button sits near the panel's edge.
+        x: min(root.group-menu-x, root.width - 148px);
+        y: min(root.group-menu-y, root.height - 96px);
+        width: 140px;
+        Rectangle {
+            background: Tokens.card;
+            border-radius: Tokens.radius;
+            border-width: 1px;
+            border-color: Tokens.border-strong;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: Tokens.text.with-alpha(0.25);
+            VerticalLayout {
+                padding: 4px;
+                for label[action] in ["Rename", "Delete"]: Rectangle {
+                    height: 28px;
+                    border-radius: Tokens.radius;
+                    background: gmenu-ta.has-hover ? (action == 1 ? Tokens.error-tint : Tokens.accent-tint) : transparent;
+                    Text {
+                        x: Tokens.sp2;
+                        text: label;
+                        color: action == 1 ? Tokens.error : Tokens.text;
+                        font-size: Tokens.font-sm;
+                        vertical-alignment: center;
+                    }
+                    gmenu-ta := TouchArea {
+                        clicked => {
+                            if (action == 0) {
+                                root.rename-old = root.group-menu-target;
+                                root.rename-text = root.group-menu-target;
+                                root.rename-modal-open = true;
+                            } else {
+                                root.group-delete(root.group-menu-target);
+                            }
+                            group-menu.close();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- Rename group -----
+    Rectangle {
+        visible: root.rename-modal-open;
+        background: Tokens.veil;
+        TouchArea { clicked => { root.rename-modal-open = false; } }
+        changed visible => {
+            if (self.visible) { rti.focus(); }
+        }
+        Rectangle {
+            width: 340px;
+            x: (parent.width - self.width) / 2;
+            y: 140px;
+            height: rbox.preferred-height;
+            border-radius: Tokens.modal-radius;
+            background: Tokens.card;
+            border-width: 1px;
+            border-color: Tokens.border;
+            drop-shadow-blur: 42px;
+            drop-shadow-offset-y: 12px;
+            drop-shadow-color: #1C191426;
+            TouchArea {}
+            rbox := VerticalLayout {
+                padding: Tokens.sp4;
+                spacing: Tokens.sp3;
+                Text {
+                    text: "Rename group";
+                    color: Tokens.text;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+                Rectangle {
+                    height: 34px;
+                    border-radius: Tokens.radius;
+                    background: Tokens.canvas;
+                    border-width: 1px;
+                    border-color: Tokens.border;
+                    rti := TextInput {
+                        x: Tokens.sp2;
+                        width: parent.width - 2 * Tokens.sp2;
+                        vertical-alignment: center;
+                        text <=> root.rename-text;
+                        color: Tokens.text;
+                        font-size: Tokens.font-md;
+                        single-line: true;
+                        accepted => {
+                            root.group-rename(root.rename-old, root.rename-text);
+                            root.rename-modal-open = false;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    alignment: end;
+                    SecondaryButton {
+                        text: "Cancel";
+                        height: 30px;
+                        clicked => { root.rename-modal-open = false; }
+                    }
+                    PrimaryButton {
+                        text: "Rename";
+                        height: 30px;
+                        clicked => {
+                            root.group-rename(root.rename-old, root.rename-text);
+                            root.rename-modal-open = false;
                         }
                     }
                 }
