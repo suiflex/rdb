@@ -4,10 +4,10 @@ import Base from "../layouts/Base.astro";
 import { REPO_LINKS } from "../config";
 
 /**
- * The website lives inside the rdb monorepo, so the app changelog
- * (maintained by release-please) is read directly at build time.
+ * The website lives inside the rdb monorepo, so the root changelog
+ * is read directly at build time.
  */
-const raw = readFileSync(new URL("../../../app/CHANGELOG.md", import.meta.url), "utf-8");
+const raw = readFileSync(new URL("../../../CHANGELOG.md", import.meta.url), "utf-8");
 
 interface Release {
   version: string;
@@ -81,7 +81,7 @@ for (const block of blocks.slice(0, 5)) {
     <p class="text-sm text-fg-3">
       Older releases are listed in the
       <a
-        href="https://github.com/suiflex/rdb/blob/develop/app/CHANGELOG.md"
+        href="https://github.com/suiflex/rdb/blob/develop/CHANGELOG.md"
         rel="noopener"
         class="underline decoration-line underline-offset-4 hover:text-fg">full changelog</a
       >.
