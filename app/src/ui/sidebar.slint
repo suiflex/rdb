@@ -318,7 +318,11 @@ export component Sidebar inherits Rectangle {
                             width: 16px;
                             VerticalLayout {
                                 alignment: center;
-                                DbBadge { engine: node.sub; size: 14px; }
+                                DbBadge {
+                                    engine: node.sub;
+                                    size: 14px;
+                                    fill: node.sub-has-custom-color ? node.sub-color : Tokens.db-color(node.sub);
+                                }
                             }
                         }
 

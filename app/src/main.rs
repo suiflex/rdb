@@ -534,6 +534,8 @@ fn schema_display_rows(
                 container_count
             },
             sub: SharedString::default(),
+            sub_color: Default::default(),
+            sub_has_custom_color: false,
         });
         if !cat_open {
             continue;
@@ -551,6 +553,8 @@ fn schema_display_rows(
                     db: SharedString::default(),
                     count: 0,
                     sub: SharedString::default(),
+                    sub_color: Default::default(),
+                    sub_has_custom_color: false,
                 });
             }
             continue;
@@ -571,6 +575,8 @@ fn schema_display_rows(
                     db: SharedString::default(),
                     count: 0,
                     sub: SharedString::default(),
+                    sub_color: Default::default(),
+                    sub_has_custom_color: false,
                 });
             } else if is_container {
                 if !matches(&n.label) {
@@ -586,6 +592,8 @@ fn schema_display_rows(
                     db: SharedString::default(),
                     count: 0,
                     sub: SharedString::default(),
+                    sub_color: Default::default(),
+                    sub_has_custom_color: false,
                 });
             } else if n.kind != "function" {
                 // database row: categories replace it; reset field visibility
@@ -644,6 +652,8 @@ fn nested_display_rows(
             db: db.clone().into(),
             count: leaves.len() as i32,
             sub: SharedString::default(),
+            sub_color: Default::default(),
+            sub_has_custom_color: false,
         });
         if !db_open {
             continue;
@@ -665,6 +675,8 @@ fn nested_display_rows(
                 db: db.clone().into(),
                 count: 0,
                 sub: SharedString::default(),
+                sub_color: Default::default(),
+                sub_has_custom_color: false,
             });
             continue;
         }
@@ -677,6 +689,8 @@ fn nested_display_rows(
                 db: db.clone().into(),
                 count: 0,
                 sub: SharedString::default(),
+                sub_color: Default::default(),
+                sub_has_custom_color: false,
             });
         }
     }
@@ -1372,6 +1386,11 @@ struct HistoryEntry {
     /// if the connection is later renamed or deleted.
     #[serde(default)]
     engine: Option<String>,
+    /// Connection's accent hex at run time (`#rrggbb`), for the History
+    /// badge — `None` means no custom color, fall back to the plain engine
+    /// color the same way connection rows elsewhere in the app do.
+    #[serde(default)]
+    color: Option<String>,
 }
 
 /// Parse persisted history JSON, falling back to the pre-timestamp
@@ -1388,6 +1407,7 @@ fn parse_recent(raw: &str) -> Vec<HistoryEntry> {
             sql,
             ran_at: 0,
             engine: None,
+            color: None,
         })
         .collect()
 }
@@ -1553,6 +1573,7 @@ fn record_recent(
     text: &str,
     cap: usize,
     engine: Option<String>,
+    color: Option<String>,
 ) {
     let t = strip_sql_comments(text);
     let t = t.trim();
@@ -1571,12 +1592,24 @@ fn record_recent(
             sql: t.to_string(),
             ran_at,
             engine,
+            color,
         },
     );
     v.truncate(cap.max(1));
     if !mock::mock_mode() {
         save_recent(&v);
     }
+}
+
+/// Snapshot the currently-connected connection's accent hex, for stamping
+/// onto a new history entry. `None` if nothing is connected, it was
+/// deleted, or it never had a custom color.
+fn resolve_conn_color(
+    current_connection_id: &std::sync::Mutex<Option<String>>,
+    store: &RefCell<rdb_connstore::ConnStore>,
+) -> Option<String> {
+    let id = current_connection_id.lock().unwrap().clone()?;
+    store.borrow().get(&id).and_then(|sc| sc.color.clone())
 }
 
 fn recent_preview(text: &str) -> String {
@@ -1630,6 +1663,7 @@ mod record_recent_tests {
             "-- \\ Check Perizinan\n-- mp.username ilike '%x%'",
             RECENT_CAP,
             None,
+            None,
         );
         assert!(list.borrow().is_empty());
     }
@@ -1642,10 +1676,12 @@ mod record_recent_tests {
             "-- pick emiten\nselect * from emiten; -- trailing",
             RECENT_CAP,
             Some("postgres".into()),
+            Some("#e05a4e".into()),
         );
         let entries = list.borrow();
         assert_eq!(entries[0].sql, "select * from emiten;");
         assert_eq!(entries[0].engine.as_deref(), Some("postgres"));
+        assert_eq!(entries[0].color.as_deref(), Some("#e05a4e"));
     }
 
     #[test]
@@ -1689,6 +1725,7 @@ mod record_recent_tests {
             sql: sql.into(),
             ran_at: 0,
             engine: None,
+            color: None,
         };
         let list = RefCell::new(vec![entry("first"), entry("second")]);
         assert!(remove_recent(&list, 0));
@@ -4301,16 +4338,19 @@ fn main() -> Result<(), slint::PlatformError> {
                     sql: "SELECT * FROM emiten LIMIT 100;".into(),
                     ran_at: now,
                     engine: Some("postgres".into()),
+                    color: None,
                 },
                 HistoryEntry {
                     sql: "INSERT INTO sectors (name) VALUES ('Technology');".into(),
                     ran_at: now,
                     engine: Some("postgres".into()),
+                    color: None,
                 },
                 HistoryEntry {
                     sql: "UPDATE emiten SET updated_at = now() WHERE code = '93344';".into(),
                     ran_at: now,
                     engine: Some("postgres".into()),
+                    color: None,
                 },
             ]
         } else {
@@ -4346,6 +4386,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     db: SharedString::default(),
                     count: saved.len() as i32,
                     sub: SharedString::default(),
+                    sub_color: Default::default(),
+                    sub_has_custom_color: false,
                 });
                 for (i, (name, _)) in saved.iter().enumerate() {
                     rows.push(TreeNode {
@@ -4356,6 +4398,8 @@ fn main() -> Result<(), slint::PlatformError> {
                         db: SharedString::default(),
                         count: i as i32,
                         sub: SharedString::default(),
+                        sub_color: Default::default(),
+                        sub_has_custom_color: false,
                     });
                 }
             }
@@ -4391,6 +4435,8 @@ fn main() -> Result<(), slint::PlatformError> {
                         db: SharedString::default(),
                         count: idxs.len() as i32,
                         sub: SharedString::default(),
+                        sub_color: Default::default(),
+                        sub_has_custom_color: false,
                     });
                     if !is_open {
                         continue;
@@ -4407,6 +4453,12 @@ fn main() -> Result<(), slint::PlatformError> {
                             db: SharedString::from(preview),
                             count: i as i32,
                             sub: recent[i].engine.clone().unwrap_or_default().into(),
+                            sub_color: recent[i]
+                                .color
+                                .as_deref()
+                                .and_then(theme::parse_hex)
+                                .unwrap_or_default(),
+                            sub_has_custom_color: recent[i].color.is_some(),
                         });
                     }
                 }
@@ -7859,6 +7911,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let history_cap = history_cap.clone();
         let rebuild_query_tree = rebuild_query_tree.clone();
         let panes = panes.clone();
+        let store = store.clone();
+        let current_connection_id = current_connection_id.clone();
         window.on_run_query(move || {
             if let Some(w) = weak.upgrade() {
                 // ⌘⏎ / Run: the highlighted selection, else just the statement
@@ -7879,6 +7933,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     &text,
                     history_cap.get(),
                     cur_engine.borrow().map(AnyDriver::badge).map(String::from),
+                    resolve_conn_color(&current_connection_id, &store),
                 );
                 if w.get_sidebar_mode() == 2 {
                     rebuild_query_tree("");
@@ -8163,6 +8218,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let recent_queries = recent_queries.clone();
         let history_cap = history_cap.clone();
         let rebuild_query_tree = rebuild_query_tree.clone();
+        let store = store.clone();
+        let current_connection_id = current_connection_id.clone();
         let run_p1 = move || {
             let text = {
                 let ed = panes[1].ed_state.borrow();
@@ -8179,6 +8236,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 &text,
                 history_cap.get(),
                 cur_engine.borrow().map(AnyDriver::badge).map(String::from),
+                resolve_conn_color(&current_connection_id, &store),
             );
             if weak.upgrade().is_some_and(|w| w.get_sidebar_mode() == 2) {
                 rebuild_query_tree("");
@@ -9692,6 +9750,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let history_cap = history_cap.clone();
         let cur_engine = cur_engine.clone();
         let rebuild_query_tree = rebuild_query_tree.clone();
+        let store = store.clone();
+        let current_connection_id = current_connection_id.clone();
         let run_new_tab: Rc<dyn Fn(usize)> = Rc::new(move |pane| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -9719,6 +9779,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 &stmt,
                 history_cap.get(),
                 cur_engine.borrow().map(AnyDriver::badge).map(String::from),
+                resolve_conn_color(&current_connection_id, &store),
             );
             if w.get_sidebar_mode() == 2 {
                 rebuild_query_tree("");
