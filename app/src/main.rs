@@ -8831,7 +8831,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if !w.get_sql_capable() {
                 return;
             }
-            let text = panes[0].ed_state.borrow().current_line().to_string();
+            let text = panes[0].ed_state.borrow().current_statement();
             let trimmed = text.trim();
             if trimmed.is_empty() {
                 return;
@@ -8857,7 +8857,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if !w.get_sql_capable() {
                 return;
             }
-            let text = panes[1].ed_state.borrow().current_line().to_string();
+            let text = panes[1].ed_state.borrow().current_statement();
             let trimmed = text.trim();
             if trimmed.is_empty() {
                 return;
@@ -8881,11 +8881,12 @@ fn main() -> Result<(), slint::PlatformError> {
         window.on_format_sql(move || {
             let changed = {
                 let mut ed = panes[0].ed_state.borrow_mut();
-                if ed.current_line().trim().is_empty() {
+                let stmt = ed.current_statement();
+                if stmt.trim().is_empty() {
                     false
                 } else {
-                    let formatted = sql_format::format_line(ed.current_line());
-                    ed.replace_current_line(&formatted);
+                    let formatted = sql_format::format(&stmt);
+                    ed.replace_current_statement(&formatted);
                     true
                 }
             };
@@ -8900,11 +8901,12 @@ fn main() -> Result<(), slint::PlatformError> {
         window.on_p1_format_sql(move || {
             let changed = {
                 let mut ed = panes[1].ed_state.borrow_mut();
-                if ed.current_line().trim().is_empty() {
+                let stmt = ed.current_statement();
+                if stmt.trim().is_empty() {
                     false
                 } else {
-                    let formatted = sql_format::format_line(ed.current_line());
-                    ed.replace_current_line(&formatted);
+                    let formatted = sql_format::format(&stmt);
+                    ed.replace_current_statement(&formatted);
                     true
                 }
             };
