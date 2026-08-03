@@ -2284,6 +2284,9 @@ callback create-table-commit();
         new-item => {
             root.open-add-form();
         }
+        toggle-group(g) => {
+            root.toggle-group(g);
+        }
     }
 
     // ----- connection form overlay (drawn on top of palette layer) -----

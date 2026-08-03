@@ -19,6 +19,12 @@ export struct PaletteItem {
     // Environment tag pill (empty label => no pill rendered).
     env-tag-label: string,
     env-tag-color: color,
+    // Group rows only: raw-case group key (for toggling) and current
+    // expand state (drives the caret rotation).
+    group: string,
+    expanded: bool,
+    // Last row of a group's visible block — rounds the card's bottom corners.
+    is-group-end: bool,
 }
 
 export component ListModal inherits Rectangle {
@@ -33,6 +39,8 @@ export component ListModal inherits Rectangle {
     callback choose(int);
     callback new-item();
     callback dismiss();
+    // Collapse/expand a group row (arg is its raw-case group key).
+    callback toggle-group(string);
 
     visible: root.open;
     background: Tokens.veil;
@@ -96,15 +104,31 @@ export component ListModal inherits Rectangle {
                             // Non-selectable group header (GitHub-style sections).
                             property <bool> is-section: it.kind == "section";
                             property <bool> is-group: it.kind == "group";
+                            // Only true for rows from the ⌘O "Open Connection"
+                            // modal (the only place `PaletteItem.group` is ever
+                            // populated) — leaves every other `ListModal` user
+                            // (⌘K palette, ⌘⇧O database picker, schema switcher)
+                            // unaffected.
+                            property <bool> in-conn-group: is-group || it.group != "";
                             property <bool> two-line: it.sub != "";
                             height: is-section ? 28px : two-line ? 44px : 34px;
-                            border-radius: Tokens.radius;
+                            border-top-left-radius: is-group ? Tokens.radius-lg : Tokens.radius;
+                            border-top-right-radius: is-group ? Tokens.radius-lg : Tokens.radius;
+                            border-bottom-left-radius: it.is-group-end ? Tokens.radius-lg : Tokens.radius;
+                            border-bottom-right-radius: it.is-group-end ? Tokens.radius-lg : Tokens.radius;
                             background: is-section ? transparent
                                 : i == root.selected ? Tokens.chrome
-                                : it-ta.has-hover ? Tokens.canvas : transparent;
+                                : it-ta.has-hover ? Tokens.canvas
+                                : in-conn-group ? Tokens.card : transparent;
                             it-ta := TouchArea {
-                                clicked => { if (!is-section) { root.selected = i; } }
-                                double-clicked => { if (!is-section) { root.choose(i); } }
+                                clicked => {
+                                    if (is-group) {
+                                        root.toggle-group(it.group);
+                                    } else if (!is-section) {
+                                        root.selected = i;
+                                    }
+                                }
+                                double-clicked => { if (!is-section && !is-group) { root.choose(i); } }
                             }
                             // Section header: small dim caps, no icon.
                             if is-section: HorizontalLayout {
@@ -164,6 +188,7 @@ export component ListModal inherits Rectangle {
                                             name: "caret";
                                             size: 10px;
                                             color: Tokens.warn;
+                                            transform-rotation: it.expanded ? 0deg : -90deg;
                                         }
                                     }
                                     if it.kind == "function": AppIcon {

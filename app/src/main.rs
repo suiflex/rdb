@@ -259,9 +259,14 @@ fn build_conn_items(
                 favorite: false,
                 env_tag_label: SharedString::default(),
                 env_tag_color: theme::accent_or_default(""),
+                is_group_end: false,
             });
         }
         if !expanded {
+            // Collapsed: the header is the only (and thus last) visible row.
+            if let Some(last) = rows.last_mut() {
+                last.is_group_end = true;
+            }
             continue;
         }
         // Favorites float to the top of their group, then explicit sort order.
@@ -294,10 +299,64 @@ fn build_conn_items(
                 env_tag_label: theme::env_tag_label(s.env_tag).into(),
                 env_tag_color: theme::env_tag_color(s.env_tag)
                     .unwrap_or_else(|| theme::accent_or_default("")),
+                is_group_end: false,
             });
+        }
+        // Expanded: the last member row just pushed is the group's visible end.
+        if let Some(last) = rows.last_mut() {
+            last.is_group_end = true;
         }
     }
     rows
+}
+
+/// Flatten `build_conn_items`'s output into the ⌘O "Open Connection" modal's
+/// `PaletteItem` list plus a parallel index map (`-1` for a header row, the
+/// real store index for a connection row) — shared by the modal's open
+/// handler and the group-toggle handler so both stay in sync however the
+/// toggle was triggered.
+fn build_conn_palette_items(
+    store: &rdb_connstore::ConnStore,
+    collapsed: &HashSet<String>,
+    filter: &str,
+) -> (Vec<PaletteItem>, Vec<i32>) {
+    let rows = build_conn_items(store, collapsed, filter);
+    let mut items: Vec<PaletteItem> = Vec::new();
+    let mut map: Vec<i32> = Vec::new();
+    for r in rows {
+        if r.is_header {
+            items.push(PaletteItem {
+                label: r.group.to_lowercase().into(),
+                kind: "group".into(),
+                sub: SharedString::default(),
+                local: false,
+                color: theme::accent_or_default(""),
+                has_custom_color: false,
+                env_tag_label: SharedString::default(),
+                env_tag_color: theme::accent_or_default(""),
+                group: r.group,
+                expanded: r.expanded,
+                is_group_end: r.is_group_end,
+            });
+            map.push(-1);
+        } else {
+            items.push(PaletteItem {
+                label: r.name,
+                kind: r.engine,
+                sub: r.subline,
+                local: r.local,
+                color: r.color,
+                has_custom_color: r.has_custom_color,
+                env_tag_label: r.env_tag_label,
+                env_tag_color: r.env_tag_color,
+                group: r.group,
+                expanded: r.expanded,
+                is_group_end: r.is_group_end,
+            });
+            map.push(r.index);
+        }
+    }
+    (items, map)
 }
 
 /// Walk `rendered` (the same list `build_conn_items` produced) accumulating
@@ -341,6 +400,7 @@ mod row_group_at_y_tests {
             favorite: false,
             env_tag_label: SharedString::default(),
             env_tag_color: Default::default(),
+            is_group_end: false,
         }
     }
 
@@ -2481,6 +2541,9 @@ fn build_palette_items(
         has_custom_color: false,
         env_tag_label: SharedString::default(),
         env_tag_color: theme::accent_or_default(""),
+        group: SharedString::default(),
+        expanded: false,
+        is_group_end: false,
     };
     let mut items: Vec<PaletteItem> = Vec::new();
     let conns: Vec<_> = names
@@ -2499,6 +2562,9 @@ fn build_palette_items(
                 has_custom_color: *has_custom_color,
                 env_tag_label: env_tag_label.clone(),
                 env_tag_color: *env_tag_color,
+                group: SharedString::default(),
+                expanded: false,
+                is_group_end: false,
             });
         }
     }
@@ -2522,6 +2588,9 @@ fn build_palette_items(
                 has_custom_color: false,
                 env_tag_label: SharedString::default(),
                 env_tag_color: theme::accent_or_default(""),
+                group: SharedString::default(),
+                expanded: false,
+                is_group_end: false,
             });
         }
     }
@@ -3666,6 +3735,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     has_custom_color: false,
                     env_tag_label: SharedString::default(),
                     env_tag_color: theme::accent_or_default(""),
+                    group: SharedString::default(),
+                    expanded: false,
+                    is_group_end: false,
                 })
                 .collect();
             *panes[pane].completion_ctx.borrow_mut() =
@@ -4487,6 +4559,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     has_custom_color: false,
                     env_tag_label: SharedString::default(),
                     env_tag_color: theme::accent_or_default(""),
+                    group: SharedString::default(),
+                    expanded: false,
+                    is_group_end: false,
                 })
                 .collect();
             if items.is_empty() {
@@ -4534,6 +4609,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     has_custom_color: false,
                     env_tag_label: SharedString::default(),
                     env_tag_color: theme::accent_or_default(""),
+                    group: SharedString::default(),
+                    expanded: false,
+                    is_group_end: false,
                 })
                 .collect();
             if items.is_empty() {
@@ -4958,42 +5036,13 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let store = store.clone();
+        let collapsed = collapsed.clone();
         let conn_modal_map = conn_modal_map.clone();
         window.on_open_conn_modal(move || {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            // Flatten groups + connections (all groups expanded in the modal).
-            let rows = build_conn_items(&store.borrow(), &HashSet::new(), "");
-            let mut items: Vec<PaletteItem> = Vec::new();
-            let mut map: Vec<i32> = Vec::new();
-            for r in rows {
-                if r.is_header {
-                    items.push(PaletteItem {
-                        label: r.group.to_lowercase().into(),
-                        kind: "group".into(),
-                        sub: SharedString::default(),
-                        local: false,
-                        color: theme::accent_or_default(""),
-                        has_custom_color: false,
-                        env_tag_label: SharedString::default(),
-                        env_tag_color: theme::accent_or_default(""),
-                    });
-                    map.push(-1);
-                } else {
-                    items.push(PaletteItem {
-                        label: r.name,
-                        kind: r.engine,
-                        sub: r.subline,
-                        local: r.local,
-                        color: r.color,
-                        has_custom_color: r.has_custom_color,
-                        env_tag_label: r.env_tag_label,
-                        env_tag_color: r.env_tag_color,
-                    });
-                    map.push(r.index);
-                }
-            }
+            let (items, map) = build_conn_palette_items(&store.borrow(), &collapsed.borrow(), "");
             *conn_modal_map.borrow_mut() = map;
             w.set_conn_items(ModelRc::from(Rc::new(VecModel::from(items))));
             w.set_conn_modal_open(true);
@@ -5804,6 +5853,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let collapsed = collapsed.clone();
         let conn_filter = conn_filter.clone();
         let settings = settings.clone();
+        let conn_modal_map = conn_modal_map.clone();
         window.on_toggle_group(move |g| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -5824,6 +5874,13 @@ fn main() -> Result<(), slint::PlatformError> {
             let items =
                 build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
             w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+            // Keep the ⌘O modal in sync too, whichever surface triggered this.
+            if w.get_conn_modal_open() {
+                let (items, map) =
+                    build_conn_palette_items(&store.borrow(), &collapsed.borrow(), "");
+                *conn_modal_map.borrow_mut() = map;
+                w.set_conn_items(ModelRc::from(Rc::new(VecModel::from(items))));
+            }
         });
     }
 

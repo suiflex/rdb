@@ -128,10 +128,31 @@ export component ConnPicker inherits Rectangle {
                         alignment: start;
 
                         for item[i] in root.connections: Rectangle {
-                            height: item.is-header ? 28px : 40px;
+                            // Headers (except the very first) carry a little
+                            // extra height above their real 28px content so a
+                            // gap opens up before each new group's card; the
+                            // inner content Rectangle anchors to the bottom of
+                            // that extra space rather than filling it. Row
+                            // items carry the card background directly on this
+                            // outer shell instead (no gap to work around), so
+                            // the existing selected/hover Rectangle underneath
+                            // stays untouched and just composites over it.
+                            height: item.is-header ? (i > 0 ? 28px + Tokens.sp2 : 28px) : 40px;
+                            background: item.is-header ? transparent : Tokens.card;
+                            border-top-left-radius: !item.is-header && i == 0 ? Tokens.radius-lg : 0px;
+                            border-top-right-radius: !item.is-header && i == 0 ? Tokens.radius-lg : 0px;
+                            border-bottom-left-radius: !item.is-header && item.is-group-end ? Tokens.radius-lg : 0px;
+                            border-bottom-right-radius: !item.is-header && item.is-group-end ? Tokens.radius-lg : 0px;
 
                             // --- group header row ---
                             if item.is-header: Rectangle {
+                                y: parent.height - 28px;
+                                height: 28px;
+                                background: Tokens.card;
+                                border-top-left-radius: Tokens.radius-lg;
+                                border-top-right-radius: Tokens.radius-lg;
+                                border-bottom-left-radius: item.is-group-end ? Tokens.radius-lg : 0px;
+                                border-bottom-right-radius: item.is-group-end ? Tokens.radius-lg : 0px;
                                 hdr-ta := TouchArea {
                                     // `item.group` is the raw-case key stored on
                                     // SavedConnection; `item.name` is uppercased
@@ -169,11 +190,25 @@ export component ConnPicker inherits Rectangle {
                                     // (content-sized, so their stretch factor is 0)
                                     // and lets the trailing spacer Rectangle absorb
                                     // the remaining width instead.
-                                    Text {
-                                        text: item.expanded ? "▾" : "▸";
-                                        color: Tokens.text-faint;
-                                        font-size: 9px;
-                                        vertical-alignment: center;
+                                    // Same circular caret badge the ⌘O "Open
+                                    // Connection" modal uses for its group rows
+                                    // (palette.slint), rotated instead of swapping
+                                    // glyphs, so both surfaces read identically.
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 16px;
+                                            height: 16px;
+                                            border-radius: 8px;
+                                            border-width: 1.5px;
+                                            border-color: Tokens.warn;
+                                            AppIcon {
+                                                name: "caret";
+                                                size: 8px;
+                                                color: Tokens.warn;
+                                                transform-rotation: item.expanded ? 0deg : -90deg;
+                                            }
+                                        }
                                     }
                                     Text {
                                         text: item.name;

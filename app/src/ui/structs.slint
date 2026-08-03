@@ -44,6 +44,10 @@ export struct ConnItem {
     // Environment tag pill (empty label => no pill rendered).
     env-tag-label: string,
     env-tag-color: color,
+    // True on the last row of a group's currently-visible block (last member
+    // if expanded, otherwise the header itself) — rounds the card's bottom
+    // corners so consecutive groups read as separate cards.
+    is-group-end: bool,
 }
 // One Host/Port/… row of the connection-detail card.
 export struct KvRow { k: string, v: string }
