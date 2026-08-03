@@ -750,16 +750,12 @@ impl EditorState {
         // whitespace (e.g. the newline right after the previous statement's
         // `;`) that isn't actually part of this statement — splice only the
         // trimmed inner range so that separator whitespace survives.
-        let inner_start = s + chars[s..e]
+        let inner_start = s + chars[s..e].iter().take_while(|c| c.is_whitespace()).count();
+        let inner_end = e - chars[s..e]
             .iter()
+            .rev()
             .take_while(|c| c.is_whitespace())
             .count();
-        let inner_end = e
-            - chars[s..e]
-                .iter()
-                .rev()
-                .take_while(|c| c.is_whitespace())
-                .count();
         let inner_end = inner_end.max(inner_start);
         let before: String = chars[..inner_start].iter().collect();
         let after: String = chars[inner_end..].iter().collect();
