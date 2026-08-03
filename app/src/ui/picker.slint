@@ -216,19 +216,32 @@ export component ConnPicker inherits Rectangle {
                                             }
                                         }
                                     }
-                                    Text {
-                                        text: item.name;
-                                        color: Tokens.text-dim;
-                                        font-size: Tokens.font-xs;
-                                        font-weight: 700;
-                                        letter-spacing: 0.8px;
-                                        vertical-alignment: center;
+                                    // All-caps text has no descenders, so its visible
+                                    // glyphs sit slightly above the true vertical center
+                                    // of the line box — the extra padding-top (vs. none
+                                    // on bottom) shifts the centered position down ~1px
+                                    // to read level with the caret badge / "⋯" button.
+                                    VerticalLayout {
+                                        alignment: center;
+                                        padding-top: 2px;
+                                        Text {
+                                            text: item.name;
+                                            color: Tokens.text-dim;
+                                            font-size: Tokens.font-xs;
+                                            font-weight: 700;
+                                            letter-spacing: 0.8px;
+                                            vertical-alignment: center;
+                                        }
                                     }
-                                    Text {
-                                        text: item.count;
-                                        color: Tokens.text-faint;
-                                        font-size: Tokens.font-sm;
-                                        vertical-alignment: center;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        padding-top: 2px;
+                                        Text {
+                                            text: item.count;
+                                            color: Tokens.text-faint;
+                                            font-size: Tokens.font-sm;
+                                            vertical-alignment: center;
+                                        }
                                     }
                                     Rectangle { horizontal-stretch: 1; }
                                     // Visible Rename/Delete affordance — right-click
