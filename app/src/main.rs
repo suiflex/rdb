@@ -5869,6 +5869,12 @@ fn main() -> Result<(), slint::PlatformError> {
             save_active_tab(&w);
             save_p1_tab(&w);
             let source = if target == 1 { 0 } else { 1 };
+            // Whichever tab was active in each pane before this move, so a
+            // split (or moving one back) doesn't jump focus to the first tab
+            // in that pane — it only needs to change when the tab that just
+            // moved WAS the active one.
+            let prev_left = active_tab_id.lock().unwrap().clone();
+            let prev_right = active_group1_tab_id.lock().unwrap().clone();
             let moved_id = {
                 let mut tabs = tabs.lock().unwrap();
                 if source == 0 && tabs.iter().filter(|tab| tab.group == 0).count() == 1 {
@@ -5884,23 +5890,39 @@ fn main() -> Result<(), slint::PlatformError> {
                 tab.group = target;
                 tab.id.clone()
             };
-            let (left_index, right_index, left_id) = {
+            let (left_index, right_index, left_id, right_id) = {
                 let tabs = tabs.lock().unwrap();
-                let left_index = tabs.iter().position(|tab| tab.group == 0);
-                let left_id = left_index.map(|index| tabs[index].id.clone());
-                let right_index = tabs
-                    .iter()
-                    .filter(|tab| tab.group == 1)
-                    .position(|tab| tab.id == moved_id)
-                    .or_else(|| tabs.iter().filter(|tab| tab.group == 1).position(|_| true));
+                // The pane the tab just landed in follows it; the other pane
+                // keeps its previously-active tab if it's still there.
+                let left_id = if target == 0 {
+                    Some(moved_id.clone())
+                } else {
+                    prev_left.filter(|id| tabs.iter().any(|t| t.group == 0 && &t.id == id))
+                }
+                .or_else(|| tabs.iter().find(|t| t.group == 0).map(|t| t.id.clone()));
+                let right_id = if target == 1 {
+                    Some(moved_id.clone())
+                } else {
+                    prev_right.filter(|id| tabs.iter().any(|t| t.group == 1 && &t.id == id))
+                }
+                .or_else(|| tabs.iter().find(|t| t.group == 1).map(|t| t.id.clone()));
+                let left_index = left_id
+                    .as_ref()
+                    .and_then(|id| tabs.iter().position(|t| &t.id == id));
+                let right_index = right_id.as_ref().and_then(|id| {
+                    tabs.iter()
+                        .filter(|t| t.group == 1)
+                        .position(|t| &t.id == id)
+                });
                 set_workspace_tabs(&w, &tabs, left_id.as_deref());
-                (left_index, right_index, left_id)
+                (left_index, right_index, left_id, right_id)
             };
             *active_tab_id.lock().unwrap() = left_id;
             if let Some(index) = left_index {
                 restore_tab(&w, index);
             }
-            if let Some(index) = right_index {
+            if let (Some(id), Some(index)) = (right_id, right_index) {
+                *active_group1_tab_id.lock().unwrap() = Some(id);
                 restore_p1_tab(&w, index);
             } else {
                 *active_group1_tab_id.lock().unwrap() = None;
