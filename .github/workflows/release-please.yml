@@ -49,19 +49,32 @@ jobs:
       # so it holds exactly the section being released — that's what the
       # version is taken from, rather than the root file where a rebased
       # branch could leave an unrelated block on top.
+      #
+      # Deliberately NOT gated on `steps.release.outputs.pr`: that output only
+      # appears on runs where release-please actually rewrote the PR, so a run
+      # that reported "PR #N remained the same" (e.g. a commit outside the
+      # `app` package path) would skip the fold and strand a release PR with
+      # the changelog still under app/. Look the PR up by its label instead,
+      # so every push re-checks and heals a PR left behind by an earlier
+      # failure.
       - name: Fold CHANGELOG into the repo root
-        if: ${{ steps.release.outputs.pr }}
         env:
-          # Keep generated PR JSON out of the shell script body. The version
-          # is read off the generated changelog rather than an action output:
-          # the `app--*` outputs are only populated when a release is created,
-          # not on this (release-PR) path, where they're all empty.
-          RELEASE_PR: ${{ steps.release.outputs.pr }}
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
         run: |
-          branch=$(printf '%s' "$RELEASE_PR" | jq -r '.headBranchName')
+          branch=$(gh pr list --state open --label "autorelease: pending" \
+            --json headRefName --jq '.[0].headRefName')
+          if [ -z "$branch" ]; then
+            echo "no open release PR; nothing to fold"
+            exit 0
+          fi
+          # Copy the script out before switching branches: the release branch
+          # is only rebuilt when release-please rewrites it, so it can carry an
+          # older copy of this script than the commit that triggered this run.
+          script=$(mktemp)
+          cp .github/scripts/fold_changelog.py "$script"
           git fetch origin "$branch"
           git checkout "$branch"
-          python3 .github/scripts/fold_changelog.py
+          python3 "$script"
           rm -f app/CHANGELOG.md
           if git diff --quiet -- CHANGELOG.md app/CHANGELOG.md; then
             echo "CHANGELOG already folded into the root"
