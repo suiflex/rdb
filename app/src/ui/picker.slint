@@ -169,6 +169,31 @@ export component ConnPicker inherits Rectangle {
                                         font-size: Tokens.font-sm;
                                         vertical-alignment: center;
                                     }
+                                    Rectangle { horizontal-stretch: 1; }
+                                    // Visible Rename/Delete affordance — right-click
+                                    // does the same, but a hidden-until-hover "⋯" is
+                                    // the only discoverable path on a fresh install.
+                                    if item.group != "Ungrouped": Rectangle {
+                                        width: 20px;
+                                        height: 20px;
+                                        border-radius: Tokens.radius;
+                                        opacity: hdr-ta.has-hover || gmore-ta.has-hover ? 1.0 : 0.0;
+                                        background: gmore-ta.has-hover ? Tokens.card.with-alpha(0.5) : transparent;
+                                        Text {
+                                            text: "⋯";
+                                            color: Tokens.text-faint;
+                                            font-size: Tokens.font-sm;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                        gmore-ta := TouchArea {
+                                            clicked => {
+                                                root.group-menu-target = item.group;
+                                                root.group-menu-y = self.absolute-position.y - root.absolute-position.y;
+                                                group-menu.show();
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
