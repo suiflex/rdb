@@ -124,7 +124,13 @@ export component ConnPicker inherits Rectangle {
                     list-content := VerticalLayout {
                         padding-left: Tokens.sp3;
                         padding-right: Tokens.sp3;
-                        spacing: Tokens.sp1;
+                        // No uniform spacing here — that's what left a visible
+                        // gap between every row, including within one card
+                        // (header to its first member, member to member). The
+                        // only gap wanted is *between* cards, which the header
+                        // row's own extra height (added above, `i > 0`) already
+                        // provides.
+                        spacing: 0px;
                         alignment: start;
 
                         for item[i] in root.connections: Rectangle {

@@ -362,19 +362,29 @@ fn build_conn_palette_items(
 /// Walk `rendered` (the same list `build_conn_items` produced) accumulating
 /// each row's on-screen height to find which one a drag's release point
 /// (`y`, pixels from the top of the list content) landed on, returning its
-/// group. Heights/spacing mirror `picker.slint`'s row layout (28px header /
-/// 40px row, 4px `Tokens.sp1` gaps) — if that layout changes, update both.
+/// group. Heights mirror `picker.slint`'s row layout: 28px header (+8px
+/// `Tokens.sp2` extra on every header but the first, for the gap between
+/// cards) / 40px row, no spacing between rows otherwise — if that layout
+/// changes, update both.
 fn row_group_at_y(rendered: &[ConnItem], y: i32) -> Option<String> {
     const HEADER_H: i32 = 28;
+    const HEADER_GAP: i32 = 8;
     const ROW_H: i32 = 40;
-    const GAP: i32 = 4;
     let mut top = 0;
-    for item in rendered {
-        let h = if item.is_header { HEADER_H } else { ROW_H };
+    for (i, item) in rendered.iter().enumerate() {
+        let h = if item.is_header {
+            if i > 0 {
+                HEADER_H + HEADER_GAP
+            } else {
+                HEADER_H
+            }
+        } else {
+            ROW_H
+        };
         if y < top + h {
             return Some(item.group.to_string());
         }
-        top += h + GAP;
+        top += h;
     }
     rendered.last().map(|item| item.group.to_string())
 }
@@ -414,7 +424,8 @@ mod row_group_at_y_tests {
 
     #[test]
     fn lands_on_the_row_under_the_release_point() {
-        // header(28) [0,28) | row(40) [32,72) | header(28) [76,104) | row(40) [108,148)
+        // header 0 (28, no gap) [0,28) | row (40) [28,68)
+        // header 1 (28+8 gap)   [68,104) | row (40) [104,144)
         let rendered = vec![header("A"), row("A"), header("B"), row("B")];
         assert_eq!(row_group_at_y(&rendered, 10), Some("A".into())); // on A's header
         assert_eq!(row_group_at_y(&rendered, 50), Some("A".into())); // on A's row
