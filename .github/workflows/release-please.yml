@@ -45,15 +45,18 @@ jobs:
       # `changelog-path` relative to its package dir and rejects `..`, so it
       # writes app/CHANGELOG.md and this step folds that into the root file
       # (prefixing the heading to match the release title) and drops the
-      # package copy. Targets the exact version release-please just built
-      # the PR for, not "whichever heading comes first" — a stale/rebased
-      # PR branch can otherwise prefix the wrong block.
+      # package copy. app/CHANGELOG.md is rewritten from scratch every run,
+      # so it holds exactly the section being released — that's what the
+      # version is taken from, rather than the root file where a rebased
+      # branch could leave an unrelated block on top.
       - name: Fold CHANGELOG into the repo root
         if: ${{ steps.release.outputs.pr }}
         env:
-          # Keep generated PR JSON out of the shell script body.
+          # Keep generated PR JSON out of the shell script body. The version
+          # is read off the generated changelog rather than an action output:
+          # the `app--*` outputs are only populated when a release is created,
+          # not on this (release-PR) path, where they're all empty.
           RELEASE_PR: ${{ steps.release.outputs.pr }}
-          RELEASED_VERSION: ${{ steps.release.outputs['app--version'] }}
         run: |
           branch=$(printf '%s' "$RELEASE_PR" | jq -r '.headBranchName')
           git fetch origin "$branch"

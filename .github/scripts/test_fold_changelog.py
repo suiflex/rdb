@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Self-check for fold-changelog.py. Run: python3 test_fold_changelog.py"""
 
-from fold_changelog import fold
+from fold_changelog import fold, parse_version
 
 ROOT = """# Changelog
 
@@ -54,6 +54,23 @@ def test_is_idempotent():
     once = fold(GENERATED, ROOT, "0.31.0", "RDB")
     twice = fold(GENERATED, once, "0.31.0", "RDB")
     assert once == twice
+
+
+def test_derives_the_version_when_none_is_given():
+    # The action's version output is empty on the release-PR path, so the
+    # real workflow always takes this branch.
+    assert parse_version("## [0.31.0](https://example.com/x) (2026-08-03)") == "0.31.0"
+    out = fold(GENERATED, ROOT)
+    assert out.startswith("# Changelog\n\n## RDB: [0.31.0]"), out[:80]
+    assert out == fold(GENERATED, ROOT, "0.31.0", "RDB")
+
+
+def test_rejects_a_source_with_no_version_heading():
+    try:
+        fold("# Changelog\n\nnot a release section at all\n", ROOT)
+    except SystemExit:
+        return
+    raise AssertionError("expected a missing version heading to be rejected")
 
 
 def test_rejects_a_section_for_the_wrong_version():

@@ -39,10 +39,26 @@ def strip_top_heading(text):
     return "".join(lines)
 
 
-def fold(src_text, dst_text, version, product):
+def parse_version(section):
+    """Read the released version off the generated section's heading.
+
+    The action's `app--version` output is only populated when a release is
+    created, not when the release PR is opened, so it can't be used here.
+    The generated file is rewritten from scratch every run and holds exactly
+    one section, making its first heading the released version.
+    """
+    match = re.match(r"## (?:.+: )?\[([^\]]+)\]", section)
+    if not match:
+        raise SystemExit("generated changelog has no version heading")
+    return match.group(1)
+
+
+def fold(src_text, dst_text, version=None, product="RDB"):
     section = strip_top_heading(src_text).strip("\n")
     if not section:
-        raise SystemExit(f"no changelog section found for {version}")
+        raise SystemExit("generated changelog is empty")
+
+    version = version or parse_version(section)
 
     # Target the exact released version, not "whichever heading is first" —
     # a rebased release branch can otherwise carry an unrelated block on top.
@@ -74,7 +90,6 @@ def fold(src_text, dst_text, version, product):
 
 
 def main():
-    version = os.environ["RELEASED_VERSION"]
     product = os.environ.get("PRODUCT_NAME", "RDB")
     src = sys.argv[1] if len(sys.argv) > 1 else "app/CHANGELOG.md"
     dst = sys.argv[2] if len(sys.argv) > 2 else "CHANGELOG.md"
@@ -88,9 +103,10 @@ def main():
     with open(dst, encoding="utf-8") as fh:
         dst_text = fh.read()
 
+    folded = fold(src_text, dst_text, product=product)
     with open(dst, "w", encoding="utf-8") as fh:
-        fh.write(fold(src_text, dst_text, version, product))
-    print(f"folded {version} into {dst}")
+        fh.write(folded)
+    print(f"folded {parse_version(strip_top_heading(src_text).strip())} into {dst}")
 
 
 if __name__ == "__main__":
