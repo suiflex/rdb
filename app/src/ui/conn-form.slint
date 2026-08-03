@@ -47,6 +47,8 @@ export component ConnForm inherits Rectangle {
     in-out property <string> f-params;     // Mongo options query string or full URI
     in-out property <string> f-color;      // selected hex
     in-out property <string> f-env-tag;    // "None"|"Local"|"Dev"|"Staging"|"Testing"|"Production"
+    in-out property <string> f-group;      // sidebar folder label; empty = ungrouped
+    in property <[string]> existing-groups; // distinct group names already in use, for suggestion chips
     in-out property <string> f-import-url;  // pasted connection URL
     in property <string> form-error;
     in property <string> test-result;   // test-connection status line
@@ -150,6 +152,42 @@ export component ConnForm inherits Rectangle {
                             letter-spacing: 0.8px;
                         }
                         TouchArea { clicked => { root.f-env-tag = name; } }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+
+            HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: "Group"; }
+                FormField {
+                    horizontal-stretch: 1;
+                    text <=> root.f-group;
+                    placeholder: "e.g. Production";
+                }
+            }
+            // Existing group names as one-click suggestions, so a typo doesn't
+            // spawn a near-duplicate folder ("Production" vs "production").
+            if root.existing-groups.length > 0: HorizontalLayout {
+                height: 22px;
+                spacing: Tokens.sp2;
+                FormLabel { text: ""; }
+                HorizontalLayout {
+                    spacing: Tokens.sp1;
+                    for g in root.existing-groups: Rectangle {
+                        height: 20px;
+                        width: glabel.preferred-width + 2 * Tokens.sp2;
+                        border-radius: self.height / 2;
+                        background: g == root.f-group ? Tokens.accent : transparent;
+                        border-width: 1px;
+                        border-color: Tokens.border;
+                        glabel := Text {
+                            text: g;
+                            color: g == root.f-group ? Tokens.card : Tokens.text-dim;
+                            font-size: 10px;
+                        }
+                        TouchArea { clicked => { root.f-group = g; } }
                     }
                 }
                 Rectangle { horizontal-stretch: 1; }

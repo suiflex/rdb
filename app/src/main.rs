@@ -183,6 +183,20 @@ fn fold_skip_line(lines: &[String], folded: &HashSet<usize>, line: usize, down: 
     l
 }
 
+/// Distinct, non-empty group names already in use, sorted — suggestion chips
+/// in the New/Edit dialog so a typo doesn't spawn a near-duplicate folder.
+fn existing_groups(store: &rdb_connstore::ConnStore) -> Vec<String> {
+    let mut groups: Vec<String> = store
+        .list()
+        .iter()
+        .filter_map(|s| s.group.clone())
+        .filter(|g| !g.trim().is_empty())
+        .collect();
+    groups.sort();
+    groups.dedup();
+    groups
+}
+
 /// Build the grouped sidebar row model: a header row per group followed by its
 /// connection rows (unless the group is collapsed). `index` on each connection
 /// row is its position in the store list, so connect/edit callbacks stay correct
@@ -10630,6 +10644,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // open add form
     {
         let weak = window.as_weak();
+        let store = store.clone();
         let editing_id = editing_id.clone();
         window.on_open_add_form(move || {
             let Some(w) = weak.upgrade() else {
@@ -10649,6 +10664,13 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_params(SharedString::default());
             w.set_f_color(SharedString::from("#2c5fd8"));
             w.set_f_env_tag(SharedString::from("None"));
+            w.set_f_group(SharedString::default());
+            w.set_existing_groups(ModelRc::from(Rc::new(VecModel::from(
+                existing_groups(&store.borrow())
+                    .into_iter()
+                    .map(SharedString::from)
+                    .collect::<Vec<_>>(),
+            ))));
             w.set_f_import_url(SharedString::default());
             w.set_form_error(SharedString::default());
             w.set_test_result(SharedString::default());
@@ -10697,6 +10719,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 sc.color.unwrap_or_else(|| "#2c5fd8".into()),
             ));
             w.set_f_env_tag(SharedString::from(sc.env_tag.as_str()));
+            w.set_f_group(SharedString::from(sc.group.unwrap_or_default()));
+            w.set_existing_groups(ModelRc::from(Rc::new(VecModel::from(
+                existing_groups(&st)
+                    .into_iter()
+                    .map(SharedString::from)
+                    .collect::<Vec<_>>(),
+            ))));
             w.set_f_import_url(SharedString::default());
             w.set_form_error(SharedString::default());
             w.set_test_result(SharedString::default());
@@ -11013,6 +11042,14 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             let color = Some(w.get_f_color().to_string());
             let env_tag = rdb_connstore::EnvTag::parse(w.get_f_env_tag().as_ref());
+            let group = {
+                let g = w.get_f_group().to_string().trim().to_string();
+                if g.is_empty() {
+                    None
+                } else {
+                    Some(g)
+                }
+            };
             let params = {
                 let p = w.get_f_params().to_string();
                 if p.trim().is_empty() {
@@ -11038,6 +11075,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     sc.sslmode = sslmode;
                     sc.color = color;
                     sc.env_tag = env_tag;
+                    sc.group = group.clone();
                     sc.params = params;
                     let cid = sc.id.clone();
                     st.add(sc)?;
@@ -11056,6 +11094,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     sc.sslmode = sslmode;
                     sc.color = color;
                     sc.env_tag = env_tag;
+                    sc.group = group.clone();
                     sc.params = params;
                     st.update(sc)?;
                     id.clone()
