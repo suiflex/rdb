@@ -1235,6 +1235,16 @@ callback create-table-commit();
                                                 root.rename-text = tab.title;
                                                 root.rename-modal-open = true;
                                             }
+                                            changed has-hover => {
+                                                if (self.has-hover) {
+                                                    Tooltip.text = "Rename";
+                                                    Tooltip.x = self.absolute-position.x + self.width / 2;
+                                                    Tooltip.y = self.absolute-position.y + self.height + 4px;
+                                                    Tooltip.shown = true;
+                                                } else if Tooltip.text == "Rename" {
+                                                    Tooltip.shown = false;
+                                                }
+                                            }
                                         }
                                         AppIcon {
                                             name: "pencil";
@@ -1249,7 +1259,19 @@ callback create-table-commit();
                                         border-radius: 4px;
                                         background: move-ta.has-hover ? Tokens.accent-tint : transparent;
                                         visible: i == root.active-tab || tab-ta.has-hover;
-                                        move-ta := TouchArea { clicked => { root.move-tab-group(i, 1); } }
+                                        move-ta := TouchArea {
+                                            clicked => { root.move-tab-group(i, 1); }
+                                            changed has-hover => {
+                                                if (self.has-hover) {
+                                                    Tooltip.text = "Split to other pane";
+                                                    Tooltip.x = self.absolute-position.x + self.width / 2;
+                                                    Tooltip.y = self.absolute-position.y + self.height + 4px;
+                                                    Tooltip.shown = true;
+                                                } else if Tooltip.text == "Split to other pane" {
+                                                    Tooltip.shown = false;
+                                                }
+                                            }
+                                        }
                                         AppIcon {
                                             name: "columns";
                                             size: 11px;
@@ -1385,6 +1407,16 @@ callback create-table-commit();
                                                 root.rename-text = tab.title;
                                                 root.rename-modal-open = true;
                                             }
+                                            changed has-hover => {
+                                                if (self.has-hover) {
+                                                    Tooltip.text = "Rename";
+                                                    Tooltip.x = self.absolute-position.x + self.width / 2;
+                                                    Tooltip.y = self.absolute-position.y + self.height + 4px;
+                                                    Tooltip.shown = true;
+                                                } else if Tooltip.text == "Rename" {
+                                                    Tooltip.shown = false;
+                                                }
+                                            }
                                         }
                                         AppIcon {
                                             name: "pencil";
@@ -1399,7 +1431,19 @@ callback create-table-commit();
                                         border-radius: 4px;
                                         background: p1-move-ta.has-hover ? Tokens.accent-tint : transparent;
                                         visible: i == root.p1-active-tab || p1-tab-ta.has-hover;
-                                        p1-move-ta := TouchArea { clicked => { root.move-tab-group(i, 0); } }
+                                        p1-move-ta := TouchArea {
+                                            clicked => { root.move-tab-group(i, 0); }
+                                            changed has-hover => {
+                                                if (self.has-hover) {
+                                                    Tooltip.text = "Split to other pane";
+                                                    Tooltip.x = self.absolute-position.x + self.width / 2;
+                                                    Tooltip.y = self.absolute-position.y + self.height + 4px;
+                                                    Tooltip.shown = true;
+                                                } else if Tooltip.text == "Split to other pane" {
+                                                    Tooltip.shown = false;
+                                                }
+                                            }
+                                        }
                                         AppIcon {
                                             name: "columns";
                                             size: 11px;
