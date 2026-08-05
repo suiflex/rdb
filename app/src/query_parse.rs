@@ -44,6 +44,13 @@ pub fn parse_query(engine: Engine, text: &str) -> Result<Query, String> {
 /// `TableRef.schema` (Postgres) or `.database` (MySQL/Sqlite), falling back
 /// to the active connection's selection when the query didn't qualify it.
 pub fn single_table_name(sql: &str) -> Option<(Option<String>, String)> {
+    // Run always sends the whole `;`-delimited statement under the cursor, and
+    // that span deliberately includes any commented-out lines above it (a `;`
+    // inside a `--` line doesn't cut a statement). Without stripping them the
+    // text starts with `--`, never `select`, and a commented-out `join` would
+    // reject an otherwise clean query. Every engine reaching here (Postgres,
+    // MySQL, SQLite) uses `--`, so one prefix covers all three.
+    let sql = strip_comment_lines(Engine::Postgres, sql);
     let trimmed = sql.trim().trim_end_matches(';').trim();
     let lower = trimmed.to_lowercase();
     if !lower.starts_with("select") {
@@ -599,6 +606,26 @@ mod tests {
             single_table_name("SELECT * FROM \"public\".\"Users\";"),
             Some((Some("public".into()), "Users".into()))
         );
+    }
+
+    #[test]
+    fn single_table_select_ignores_commented_out_lines() {
+        // Run sends the whole statement span, commented-out lines included.
+        assert_eq!(
+            single_table_name(
+                "-- update oss_rba_perizinan.t_permohonan_izin\n\
+                 -- set status_respon = '50'\n\
+                 -- where id_permohonan_izin = 'I-1';\n\
+                 select * from oss_rba_common.step_config ;"
+            ),
+            Some((Some("oss_rba_common".into()), "step_config".into()))
+        );
+        // A reject keyword that only appears inside a comment doesn't count.
+        assert_eq!(
+            single_table_name("-- select * from a join b\nselect * from users"),
+            Some((None, "users".into()))
+        );
+        assert_eq!(single_table_name("-- select * from users"), None);
     }
 
     #[test]
