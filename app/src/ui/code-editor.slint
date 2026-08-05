@@ -53,9 +53,12 @@ export component CodeEditor inherits Rectangle {
     changed scroll-request => {
         edit-scroll.viewport-y = clamp(
             edit-scroll.viewport-y,
+            // caret one line clear of the top edge — the smaller bound, since
+            // viewport-y grows towards 0 as the content scrolls back up
+            root.line-h - Tokens.sp2 - root.cursor-visual-row * root.line-h,
+            // …and one line clear of the bottom edge
             edit-scroll.visible-height - Tokens.sp2
-                - root.cursor-visual-row * root.line-h - 2 * root.line-h,
-            root.line-h - Tokens.sp2 - root.cursor-visual-row * root.line-h);
+                - root.cursor-visual-row * root.line-h - 2 * root.line-h);
     }
 
     probe := Text {
