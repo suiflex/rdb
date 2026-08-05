@@ -2751,6 +2751,16 @@ fn set_p_find_status(w: &MainWindow, pane: usize, s: SharedString) {
         w.set_p1_find_status(s);
     }
 }
+/// Nudge the editor to scroll the cursor into view (e.g. after a find jump).
+/// A plain counter bump, not a bound value — see `scroll-request` in
+/// code-editor.slint for why it has to be one-shot.
+fn bump_p_scroll_request(w: &MainWindow, pane: usize) {
+    if pane == 0 {
+        w.set_scroll_request(w.get_scroll_request().wrapping_add(1));
+    } else {
+        w.set_p1_scroll_request(w.get_p1_scroll_request().wrapping_add(1));
+    }
+}
 fn get_p_cursor(w: &MainWindow, pane: usize) -> (usize, usize) {
     if pane == 0 {
         (w.get_cursor_line() as usize, w.get_cursor_col() as usize)
@@ -4196,6 +4206,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     .borrow_mut()
                     .set_selection((l, s), (l, e));
                 sync_editor(pane);
+                bump_p_scroll_request(w, pane);
                 set_p_find_status(
                     w,
                     pane,

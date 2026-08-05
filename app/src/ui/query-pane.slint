@@ -64,6 +64,9 @@ export component QueryPane inherits Rectangle {
     in property <int> cursor-line;
     in property <int> cursor-visual-row;
     in property <int> cursor-col;
+    // Bumped when the cursor jumps off-screen (find match) so the editor
+    // viewport follows it.
+    in property <int> scroll-request;
     callback toggle-fold(int);
     callback editor-key(string, bool, bool, bool) -> bool;
     callback editor-press(int, int);
@@ -532,6 +535,7 @@ export component QueryPane inherits Rectangle {
                     cursor-line: root.cursor-line;
                     cursor-visual-row: root.cursor-visual-row;
                     cursor-col: root.cursor-col;
+                    scroll-request: root.scroll-request;
                     completion-items: root.completion-items;
                     completion-visible: root.completion-visible;
                     completion-selected: root.completion-selected;

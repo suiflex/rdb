@@ -34,6 +34,11 @@ export component CodeEditor inherits Rectangle {
     in property <bool> completion-visible;
     in property <int> completion-selected;
     callback completion-choose(int);
+    // Bumped by the host whenever the cursor jumps somewhere that isn't
+    // necessarily on screen (e.g. a find match) so the viewport follows it.
+    // Not bound continuously — that would fight the user's own wheel/drag
+    // scrolling on `edit-scroll`.
+    in property <int> scroll-request: 0;
 
     property <length> line-h: 21px;
     property <length> gutter-w: 40px;
@@ -41,6 +46,13 @@ export component CodeEditor inherits Rectangle {
     property <length> charw: probe.preferred-width / 10;
 
     background: Tokens.canvas;
+
+    changed scroll-request => {
+        edit-scroll.viewport-y = -clamp(
+            -edit-scroll.viewport-y,
+            root.cursor-visual-row * root.line-h + root.line-h - edit-scroll.visible-height,
+            root.cursor-visual-row * root.line-h);
+    }
 
     probe := Text {
         text: "0000000000";
