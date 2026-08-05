@@ -2383,6 +2383,13 @@ fn set_p_read_only(w: &MainWindow, pane: usize, read_only: bool) {
         w.set_p1_grid_read_only(read_only);
     }
 }
+fn get_p_read_only(w: &MainWindow, pane: usize) -> bool {
+    if pane == 0 {
+        w.get_grid_read_only()
+    } else {
+        w.get_p1_grid_read_only()
+    }
+}
 fn set_p_index_rows(w: &MainWindow, pane: usize, rows: ModelRc<IndexRow>) {
     if pane == 0 {
         w.set_index_rows(rows);
@@ -7642,7 +7649,7 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             set_p_query_running(&w, pane, true);
             set_p_streaming(&w, pane, true);
-            w.set_grid_read_only(true);
+            set_p_read_only(&w, pane, true);
             clear_grid(&w, pane);
             set_p_result_status(&w, pane, SharedString::from("streaming…"));
             set_p_results_meta(&w, pane, SharedString::default());
@@ -8542,7 +8549,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            if w.get_grid_read_only() || row < 0 || col < 0 {
+            if w.get_p1_grid_read_only() || row < 0 || col < 0 {
                 return;
             }
             let base = panes[1]
@@ -8878,7 +8885,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if trimmed.is_empty() {
                 return;
             }
-            w.set_grid_read_only(true);
+            w.set_p1_grid_read_only(true);
             run_sql(
                 1,
                 if trimmed.to_uppercase().starts_with("EXPLAIN") {
@@ -9811,9 +9818,7 @@ fn main() -> Result<(), slint::PlatformError> {
             panes[pane]
                 .result_new_tab
                 .store(true, std::sync::atomic::Ordering::SeqCst);
-            if pane == 0 {
-                w.set_grid_read_only(true);
-            }
+            set_p_read_only(&w, pane, true);
             record_recent(
                 &recent_queries,
                 &stmt,
