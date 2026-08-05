@@ -47,11 +47,15 @@ export component CodeEditor inherits Rectangle {
 
     background: Tokens.canvas;
 
+    // Land the match a full line short of the edge on both sides (not flush
+    // against it) so it doesn't read as clipped, and account for the
+    // VerticalLayout's own padding-top so the math matches the caret's.
     changed scroll-request => {
-        edit-scroll.viewport-y = -clamp(
-            -edit-scroll.viewport-y,
-            root.cursor-visual-row * root.line-h + root.line-h - edit-scroll.visible-height,
-            root.cursor-visual-row * root.line-h);
+        edit-scroll.viewport-y = clamp(
+            edit-scroll.viewport-y,
+            edit-scroll.visible-height - Tokens.sp2
+                - root.cursor-visual-row * root.line-h - 2 * root.line-h,
+            root.line-h - Tokens.sp2 - root.cursor-visual-row * root.line-h);
     }
 
     probe := Text {
