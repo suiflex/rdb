@@ -66,6 +66,12 @@ export component MainWindow inherits Window {
                 activated => { root.open-db-modal(); }
             }
             MenuItem {
+                title: "Switch Schema…";
+                shortcut: @keys(Control + Shift + S);
+                enabled: root.connected;
+                activated => { root.select-schema(root.schema-name); }
+            }
+            MenuItem {
                 title: "Save Changes";
                 // Slint maps Control to the platform primary modifier:
                 // Command on macOS, Control on Windows/Linux.
@@ -115,16 +121,25 @@ export component MainWindow inherits Window {
             title: "View";
             MenuItem {
                 title: "Toggle Sidebar";
+                shortcut: @keys(Control + B);
                 enabled: root.connected;
                 activated => { root.sidebar-rail = !root.sidebar-rail; }
             }
             MenuItem {
                 title: "Toggle Details";
+                shortcut: @keys(Control + Shift + B);
                 enabled: root.connected;
                 activated => { root.detail-visible = !root.detail-visible; }
             }
             MenuItem {
+                title: "Toggle Results";
+                shortcut: @keys(Control + J);
+                enabled: root.connected;
+                activated => { root.results-collapsed = !root.results-collapsed; }
+            }
+            MenuItem {
                 title: "Toggle SQL Console";
+                shortcut: @keys(Control + Shift + J);
                 enabled: root.connected;
                 activated => { root.console-open = !root.console-open; }
             }
@@ -674,8 +689,31 @@ callback create-table-commit();
                     root.run-new-tab();
                     return accept;
                 }
+                // ⇧ first: the plain-key branches below match lowercase only, so
+                // a shifted key would otherwise fall through to nothing.
+                if ((e.text == "s" || e.text == "S") && e.modifiers.shift) {
+                    if (root.connected) { root.select-schema(root.schema-name); }
+                    return accept;
+                }
                 if (e.text == "s") {
                     if (root.split && root.active-pane == 1) { root.p1-commit-edits(); } else { root.commit-edits(); }
+                    return accept;
+                }
+                // panel toggles: sidebar/details on B, results/console on J
+                if (e.text == "b" || e.text == "B") {
+                    if (e.modifiers.shift) {
+                        root.detail-visible = !root.detail-visible;
+                    } else {
+                        root.sidebar-rail = !root.sidebar-rail;
+                    }
+                    return accept;
+                }
+                if (e.text == "j" || e.text == "J") {
+                    if (e.modifiers.shift) {
+                        root.console-open = !root.console-open;
+                    } else {
+                        root.results-collapsed = !root.results-collapsed;
+                    }
                     return accept;
                 }
                 if ((e.text == "r" || e.text == "R") && e.modifiers.shift) {
@@ -821,6 +859,8 @@ callback create-table-commit();
                                 : root.conn-status == "connecting" ? Tokens.warn
                                 : Tokens.ok;
                             mono: true;
+                            tooltip: "Switch connection  " + Shortcut.primary
+                                + Shortcut.separator + "O";
                             clicked => { root.open-conn-modal(); }
                         }
                     }
@@ -898,7 +938,8 @@ callback create-table-commit();
                             text: root.bc-schema;
                             caret: true;
                             mono: true;
-                            tooltip: "Switch schema";
+                            tooltip: "Switch schema  " + Shortcut.primary + Shortcut.separator
+                                + Shortcut.shift + Shortcut.separator + "S";
                             clicked => { root.select-schema(root.schema-name); }
                         }
                     }
@@ -951,7 +992,7 @@ callback create-table-commit();
                         alignment: center;
                         IconButton {
                             icon: "columns";
-                            tooltip: "Toggle sidebar";
+                            tooltip: "Toggle sidebar  " + Shortcut.primary + Shortcut.separator + "B";
                             // Collapse to the icon rail rather than fully hiding it.
                             active: !root.sidebar-rail;
                             clicked => { root.sidebar-rail = !root.sidebar-rail; }
@@ -964,7 +1005,8 @@ callback create-table-commit();
                             // Details panel moves to the left edge when the sidebar
                             // is on the right, so mirror the icon to match.
                             icon: root.sidebar-right ? "panel-left" : "panel-right";
-                            tooltip: "Toggle details panel";
+                            tooltip: "Toggle details panel  " + Shortcut.primary + Shortcut.separator
+                                + Shortcut.shift + Shortcut.separator + "B";
                             active: root.detail-visible;
                             clicked => { root.detail-visible = !root.detail-visible; }
                         }
@@ -974,7 +1016,7 @@ callback create-table-commit();
                         alignment: center;
                         IconButton {
                             icon: "panel-right";
-                            tooltip: "Toggle sidebar";
+                            tooltip: "Toggle sidebar  " + Shortcut.primary + Shortcut.separator + "B";
                             active: !root.sidebar-rail;
                             clicked => { root.sidebar-rail = !root.sidebar-rail; }
                         }
@@ -984,7 +1026,7 @@ callback create-table-commit();
                         alignment: center;
                         IconButton {
                             icon: "rows";
-                            tooltip: "Toggle results";
+                            tooltip: "Toggle results  " + Shortcut.primary + Shortcut.separator + "J";
                             active: !root.results-collapsed;
                             clicked => { root.results-collapsed = !root.results-collapsed; }
                         }
@@ -1036,7 +1078,8 @@ callback create-table-commit();
                         alignment: center;
                         IconButton {
                             icon: "terminal";
-                            tooltip: "Toggle SQL console";
+                            tooltip: "Toggle SQL console  " + Shortcut.primary + Shortcut.separator
+                                + Shortcut.shift + Shortcut.separator + "J";
                             active: root.console-open;
                             clicked => { root.console-open = !root.console-open; }
                         }
@@ -2828,9 +2871,14 @@ callback create-table-commit();
                     { k: Shortcut.primary + Shortcut.separator + Shortcut.shift + Shortcut.separator + "R", a: "Reconnect" },
                     { k: Shortcut.primary + Shortcut.separator + "+ / " + Shortcut.primary + Shortcut.separator + "-", a: "Zoom in / out" },
                     { k: Shortcut.primary + Shortcut.separator + "F", a: "Find" },
-                    { k: Shortcut.primary + Shortcut.separator + "O", a: "Open connection" },
-                    { k: Shortcut.primary + Shortcut.separator + Shortcut.shift + Shortcut.separator + "O", a: "Open database" },
+                    { k: Shortcut.primary + Shortcut.separator + "O", a: "Switch connection" },
+                    { k: Shortcut.primary + Shortcut.separator + Shortcut.shift + Shortcut.separator + "O", a: "Switch database" },
+                    { k: Shortcut.primary + Shortcut.separator + Shortcut.shift + Shortcut.separator + "S", a: "Switch schema" },
                     { k: Shortcut.primary + Shortcut.separator + "P", a: "Filter sidebar" },
+                    { k: Shortcut.primary + Shortcut.separator + "B", a: "Toggle sidebar" },
+                    { k: Shortcut.primary + Shortcut.separator + Shortcut.shift + Shortcut.separator + "B", a: "Toggle details panel" },
+                    { k: Shortcut.primary + Shortcut.separator + "J", a: "Toggle results" },
+                    { k: Shortcut.primary + Shortcut.separator + Shortcut.shift + Shortcut.separator + "J", a: "Toggle SQL console" },
                     { k: "J / K", a: "Grid: next / previous row" },
                     { k: Shortcut.backspace + " / Del", a: "Grid: mark row for deletion" },
                     { k: "Esc", a: "Close dialog" },
