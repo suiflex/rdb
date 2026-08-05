@@ -7397,14 +7397,21 @@ fn main() -> Result<(), slint::PlatformError> {
                                 | rdb_connstore::Engine::MySql
                                 | rdb_connstore::Engine::Sqlite
                         ) {
-                            if let Some(name) = crate::query_parse::single_table_name(&sql) {
+                            if let Some((qualifier, name)) =
+                                crate::query_parse::single_table_name(&sql)
+                            {
+                                // The query's own `schema.table`/`db.table` prefix wins
+                                // when it named one explicitly; otherwise fall back to
+                                // the connection's active schema/database selection.
+                                let qualifier = qualifier
+                                    .or_else(|| (!cur_db.is_empty()).then(|| cur_db.clone()));
                                 let table = rdb_core::write::TableRef {
-                                    database: (!matches!(engine, rdb_connstore::Engine::Postgres)
-                                        && !cur_db.is_empty())
-                                    .then(|| cur_db.clone()),
-                                    schema: (matches!(engine, rdb_connstore::Engine::Postgres)
-                                        && !cur_db.is_empty())
-                                    .then(|| cur_db.clone()),
+                                    database: (!matches!(engine, rdb_connstore::Engine::Postgres))
+                                        .then(|| qualifier.clone())
+                                        .flatten(),
+                                    schema: matches!(engine, rdb_connstore::Engine::Postgres)
+                                        .then(|| qualifier.clone())
+                                        .flatten(),
                                     name,
                                 };
                                 match driver.primary_key(&table).await {

@@ -33,14 +33,17 @@ pub fn parse_query(engine: Engine, text: &str) -> Result<Query, String> {
 }
 
 /// Best-effort recognition of a plain, single-table `SELECT ... FROM t
-/// [WHERE ...]` — no join/union/aggregation/dotted identifier — so its
-/// result grid can be offered for inline cell editing. There's no SQL
-/// parser in this workspace, so this is a conservative text heuristic:
-/// anything ambiguous returns `None` and the result just stays read-only,
-/// same as before this existed. Returns the bare table name (schema/db
-/// qualification is applied by the caller from the active connection,
-/// matching how the table-browse path builds its `TableRef`).
-pub fn single_table_name(sql: &str) -> Option<String> {
+/// [WHERE ...]` (optionally schema/db-qualified: `schema.table`) — no
+/// join/union/aggregation/multi-table FROM — so its result grid can be
+/// offered for inline cell editing. There's no SQL parser in this
+/// workspace, so this is a conservative text heuristic: anything ambiguous
+/// returns `None` and the result just stays read-only, same as before this
+/// existed. Returns `(qualifier, table)` — `qualifier` is the part before
+/// the dot when the query names it explicitly (e.g. `"oss_rba_common"` for
+/// `oss_rba_common.step_journal`), left for the caller to apply as
+/// `TableRef.schema` (Postgres) or `.database` (MySQL/Sqlite), falling back
+/// to the active connection's selection when the query didn't qualify it.
+pub fn single_table_name(sql: &str) -> Option<(Option<String>, String)> {
     let trimmed = sql.trim().trim_end_matches(';').trim();
     let lower = trimmed.to_lowercase();
     if !lower.starts_with("select") {
@@ -64,11 +67,27 @@ pub fn single_table_name(sql: &str) -> Option<String> {
     let ident = after_from[..end].trim();
     let rest = after_from[end..].trim_start();
     // A comma right after means a multi-table `FROM a, b` — bail.
-    if ident.is_empty() || rest.starts_with(',') || ident.contains('.') {
+    if ident.is_empty() || rest.starts_with(',') {
         return None;
     }
-    let name = ident.trim_matches(|c| c == '"' || c == '`' || c == '\'');
-    (!name.is_empty()).then(|| name.to_string())
+    fn unquote(s: &str) -> &str {
+        s.trim_matches(|c| c == '"' || c == '`' || c == '\'')
+    }
+    let (qualifier, name) = match ident.split_once('.') {
+        Some((q, n)) => {
+            // `db.schema.table` (3-part) still has a dot in `n` — too
+            // ambiguous to guess which part is which, so bail.
+            if n.contains('.') {
+                return None;
+            }
+            (Some(unquote(q).to_string()), unquote(n))
+        }
+        None => (None, unquote(ident)),
+    };
+    if name.is_empty() || qualifier.as_deref().is_some_and(str::is_empty) {
+        return None;
+    }
+    Some((qualifier, name.to_string()))
 }
 
 /// Editor placeholder/hint per engine (shown in the UI).
@@ -558,15 +577,27 @@ mod tests {
     fn single_table_select_extracts_bare_table() {
         assert_eq!(
             single_table_name("select * from users where id = 1"),
-            Some("users".into())
+            Some((None, "users".into()))
         );
         assert_eq!(
             single_table_name("SELECT id, name FROM \"Users\";"),
-            Some("Users".into())
+            Some((None, "Users".into()))
         );
         assert_eq!(
             single_table_name("  select id from orders order by id limit 10  "),
-            Some("orders".into())
+            Some((None, "orders".into()))
+        );
+    }
+
+    #[test]
+    fn single_table_select_extracts_schema_qualified_table() {
+        assert_eq!(
+            single_table_name("select * from oss_rba_common.step_journal where x = 1"),
+            Some((Some("oss_rba_common".into()), "step_journal".into()))
+        );
+        assert_eq!(
+            single_table_name("SELECT * FROM \"public\".\"Users\";"),
+            Some((Some("public".into()), "Users".into()))
         );
     }
 
@@ -583,7 +614,7 @@ mod tests {
         );
         assert_eq!(single_table_name("select count(*) from users"), None);
         assert_eq!(single_table_name("select distinct name from users"), None);
-        assert_eq!(single_table_name("select * from public.users"), None);
+        assert_eq!(single_table_name("select * from db.schema.users"), None);
         assert_eq!(single_table_name("select * from (select 1) t"), None);
         assert_eq!(single_table_name("insert into users values (1)"), None);
     }
