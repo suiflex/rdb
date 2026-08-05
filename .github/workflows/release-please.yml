@@ -50,19 +50,21 @@ jobs:
       # version is taken from, rather than the root file where a rebased
       # branch could leave an unrelated block on top.
       #
-      # Deliberately NOT gated on `steps.release.outputs.pr`: that output only
-      # appears on runs where release-please actually rewrote the PR, so a run
-      # that reported "PR #N remained the same" (e.g. a commit outside the
-      # `app` package path) would skip the fold and strand a release PR with
-      # the changelog still under app/. Look the PR up by its label instead,
-      # so every push re-checks and heals a PR left behind by an earlier
-      # failure.
+      # Use the action output when it created or updated a PR. The label is
+      # applied just before this step and may not yet be visible to search,
+      # which previously let a successful run leave app/CHANGELOG.md behind.
+      # Fall back to the label for a pre-existing PR that this run did not
+      # rewrite, so later pushes still heal an earlier failed fold.
       - name: Fold CHANGELOG into the repo root
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
         run: |
-          branch=$(gh pr list --state open --label "autorelease: pending" \
-            --json headRefName --jq '.[0].headRefName')
+          branch=$(jq -r '.headBranchName // empty' <<<"$RELEASE_PR")
+          if [ -z "$branch" ]; then
+            branch=$(gh pr list --state open --label "autorelease: pending" \
+              --json headRefName --jq '.[0].headRefName')
+          fi
           if [ -z "$branch" ]; then
             echo "no open release PR; nothing to fold"
             exit 0
