@@ -277,11 +277,10 @@ fn columns_of(nodes: &[VmTreeNode], owner: &str) -> Vec<Candidate> {
 
 /// Columns of every table named by a `FROM`/`JOIN` in the current statement, so
 /// a `WHERE`/`SELECT` completion offers the real columns in scope — including
-/// cross-schema tables the active-schema `all_columns` would miss. Scoped to the
-/// current statement (text after the last `;`) so a prior statement's tables
-/// don't leak in.
-fn from_table_columns(before_cursor: &str, nodes: &[VmTreeNode]) -> Vec<Candidate> {
-    let stmt = before_cursor.rsplit(';').next().unwrap_or(before_cursor);
+/// cross-schema tables the active-schema `all_columns` would miss. `stmt` is the
+/// whole statement under the cursor, not just the text before it: the `FROM` is
+/// usually already written when the user goes back to replace the `SELECT *`.
+fn from_table_columns(stmt: &str, nodes: &[VmTreeNode]) -> Vec<Candidate> {
     let words: Vec<&str> = stmt
         .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '.'))
         .filter(|w| !w.is_empty())
@@ -313,8 +312,12 @@ fn last_keyword(line: &str) -> Option<String> {
 /// Suggest completions for the text before the cursor. Returns the char length
 /// of the partial word to replace on accept, plus the (prefix-filtered, capped)
 /// candidates. An empty list means "no popup".
+/// `stmt` is the whole statement under the cursor (text on both sides of it);
+/// it resolves `FROM`/`JOIN` tables and aliases that the user hasn't typed
+/// *yet* at this point but has already written further along the statement.
 pub fn suggest(
     before_cursor: &str,
+    stmt: &str,
     nodes: &[VmTreeNode],
     active_schema: &str,
     mongo: bool,
@@ -335,7 +338,7 @@ pub fn suggest(
         // dot is a schema/database, offer that schema's tables instead.
         // Explicit `schema.` uses the whole tree so other schemas stay reachable.
         let owner_word = trailing_word(before_dot);
-        let owner = resolve_alias(before_cursor, owner_word);
+        let owner = resolve_alias(stmt, owner_word);
         let cols = columns_of(nodes, &owner);
         if !cols.is_empty() {
             cols
@@ -379,7 +382,7 @@ pub fn suggest(
                 // Columns of the statement's own FROM/JOIN tables come first (they
                 // are what's actually in scope, cross-schema included), then the
                 // active-schema columns/tables and keywords as a fallback.
-                let mut c = from_table_columns(before_cursor, nodes);
+                let mut c = from_table_columns(stmt, nodes);
                 c.extend(all_columns(scope));
                 c.extend(tables(scope));
                 c.extend(keywords());
@@ -410,6 +413,19 @@ pub fn suggest(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The common case: nothing typed past the cursor yet, so the statement
+    /// and the before-cursor text are the same. Tests that care about text
+    /// *after* the cursor call `suggest` directly.
+    fn sug(
+        before: &str,
+        nodes: &[VmTreeNode],
+        active_schema: &str,
+        mongo: bool,
+    ) -> (usize, Vec<Candidate>) {
+        suggest(before, before, nodes, active_schema, mongo)
+    }
+
     fn nodes() -> Vec<VmTreeNode> {
         let mk = |l: &str, k: &str| VmTreeNode {
             label: l.into(),
@@ -427,15 +443,15 @@ mod tests {
 
     #[test]
     fn empty_and_whitespace_context_suppress_popup() {
-        assert!(suggest("", &nodes(), "public", false).1.is_empty());
-        assert!(suggest("   ", &nodes(), "public", false).1.is_empty());
+        assert!(sug("", &nodes(), "public", false).1.is_empty());
+        assert!(sug("   ", &nodes(), "public", false).1.is_empty());
         // trailing space after a keyword: wait for the user to start typing
-        assert!(suggest("select ", &nodes(), "public", false).1.is_empty());
+        assert!(sug("select ", &nodes(), "public", false).1.is_empty());
     }
 
     #[test]
     fn from_prefix_suggests_matching_table() {
-        let (n, c) = suggest("select * from ste", &nodes(), "public", false);
+        let (n, c) = sug("select * from ste", &nodes(), "public", false);
         assert_eq!(n, 3);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -445,7 +461,7 @@ mod tests {
 
     #[test]
     fn dot_suggests_that_tables_columns() {
-        let (n, c) = suggest(
+        let (n, c) = sug(
             "select * from step_config where step_config.",
             &nodes(),
             "public",
@@ -467,7 +483,7 @@ mod tests {
             label: "log_inbound".into(),
             kind: "collection".into(),
         });
-        let (n, c) = suggest("db.log", &ns, "public", true);
+        let (n, c) = sug("db.log", &ns, "public", true);
         assert_eq!(n, 3);
         assert!(c.iter().any(|x| x.label == "log_inbound"));
     }
@@ -480,7 +496,7 @@ mod tests {
             label: "log_inbound".into(),
             kind: "collection".into(),
         });
-        let (_, c) = suggest("db.log_inbound.fi", &ns, "public", true);
+        let (_, c) = sug("db.log_inbound.fi", &ns, "public", true);
         assert!(c.iter().any(|x| x.label == "find"));
         assert!(c.iter().any(|x| x.label == "findOne"));
     }
@@ -494,7 +510,7 @@ mod tests {
             label: "log_inbound".into(),
             kind: "collection".into(),
         });
-        let (_, c) = suggest("d", &ns, "public", true);
+        let (_, c) = sug("d", &ns, "public", true);
         assert!(c.iter().any(|x| x.label == "db"));
         assert!(!c.iter().any(|x| x.label == "DELETE"));
     }
@@ -521,7 +537,7 @@ mod tests {
                 kind: "field".into(),
             },
         ];
-        let (_, c) = suggest("select teknis", &n, "public", false);
+        let (_, c) = sug("select teknis", &n, "public", false);
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"flag_teknis"));
         // `teknis_id` is a real prefix → ranks ahead of the mid-word match.
@@ -546,7 +562,7 @@ mod tests {
             mk("journal_id", "field"),
         ];
         // Active schema is public; the query reads oss_rba_common.step_journal.
-        let (_, c) = suggest(
+        let (_, c) = sug(
             "select * from oss_rba_common.step_journal where step",
             &two,
             "public",
@@ -554,19 +570,67 @@ mod tests {
         );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"step_id"));
-        // A prior statement's tables must not leak past a `;`.
+        // A prior statement's tables can't leak in: the caller scopes `stmt` to
+        // the statement under the cursor (`EditorState::current_statement`).
         let (_, c2) = suggest(
             "select * from users;\nselect * from oss_rba_common.step_journal where step",
+            "select * from oss_rba_common.step_journal where step",
             &two,
             "public",
             false,
         );
         assert!(c2.iter().any(|x| x.label == "step_id"));
+        assert!(!c2.iter().any(|x| x.label == "id"));
+    }
+
+    /// Going back to replace the `*` in an already-written
+    /// `select * from schema.table`: the FROM is *after* the cursor, so the
+    /// columns only resolve if the whole statement is consulted.
+    #[test]
+    fn select_offers_columns_from_a_from_after_the_cursor() {
+        let mk = |l: &str, k: &str| VmTreeNode {
+            label: l.into(),
+            kind: k.into(),
+        };
+        let two = vec![
+            mk("public", "database"),
+            mk("users", "table"),
+            mk("id", "field"),
+            mk("oss_rba_common", "database"),
+            mk("step_config", "table"),
+            mk("config_id", "field"),
+            mk("taint", "field"),
+        ];
+        let (n, c) = suggest(
+            "select con",
+            "select con from oss_rba_common.step_config",
+            &two,
+            "public",
+            false,
+        );
+        assert_eq!(n, 3);
+        assert_eq!(c.first().map(|x| x.label.as_str()), Some("config_id"));
+    }
+
+    /// Same blind spot for an alias declared further along the statement.
+    #[test]
+    fn alias_dot_resolves_an_alias_declared_after_the_cursor() {
+        let (_, c) = suggest(
+            "select a.",
+            "select a. from step_config a",
+            &nodes(),
+            "public",
+            false,
+        );
+        assert_eq!(
+            c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
+            ["config_id", "name"]
+        );
     }
 
     #[test]
     fn bare_word_completes_keyword() {
-        let (n, c) = suggest("sele", &nodes(), "public", false);
+        let (n, c) = sug("sele", &nodes(), "public", false);
         assert_eq!(n, 4);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -577,14 +641,14 @@ mod tests {
     #[test]
     fn select_context_offers_columns() {
         // Type-triggered: a prefix is required before the popup appears.
-        let (_, c) = suggest("select n", &nodes(), "public", false);
+        let (_, c) = sug("select n", &nodes(), "public", false);
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"name"));
     }
 
     #[test]
     fn alias_dot_resolves_to_table_columns() {
-        let (_, c) = suggest(
+        let (_, c) = sug(
             "select * from step_config sc where sc.",
             &nodes(),
             "public",
@@ -601,13 +665,13 @@ mod tests {
     #[test]
     fn schema_qualified_alias_join_resolves_columns() {
         let a = "select * from public.step_config a left join public.users b on a.";
-        let (_, c) = suggest(a, &nodes(), "public", false);
+        let (_, c) = sug(a, &nodes(), "public", false);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["config_id", "name"]
         );
         let b = "select * from public.step_config a left join public.users b on b.";
-        let (_, c) = suggest(b, &nodes(), "public", false);
+        let (_, c) = sug(b, &nodes(), "public", false);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["id"]
@@ -619,7 +683,7 @@ mod tests {
     #[test]
     fn multiline_join_alias_resolves_columns() {
         let sql = "select * from public.step_config a\nleft join public.users b on a.";
-        let (_, c) = suggest(sql, &nodes(), "public", false);
+        let (_, c) = sug(sql, &nodes(), "public", false);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["config_id", "name"]
@@ -628,14 +692,14 @@ mod tests {
 
     #[test]
     fn star_context_offers_from_keyword() {
-        let (_, c) = suggest("select * f", &nodes(), "public", false);
+        let (_, c) = sug("select * f", &nodes(), "public", false);
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"FROM"));
     }
 
     #[test]
     fn schema_dot_suggests_its_tables() {
-        let (n, c) = suggest("select * from public.", &nodes(), "public", false);
+        let (n, c) = sug("select * from public.", &nodes(), "public", false);
         assert_eq!(n, 0);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -655,7 +719,7 @@ mod tests {
                 kind: "field".into(),
             },
         ];
-        let (_, c) = suggest("select * from users where users.", &typed, "public", false);
+        let (_, c) = sug("select * from users where users.", &typed, "public", false);
         assert_eq!(c[0].label, "id");
     }
 
@@ -675,12 +739,12 @@ mod tests {
             mk("oid", "field"),
         ];
         // Type-triggered: a prefix ("t") is required before the popup appears.
-        let (_, c) = suggest("select * from t", &two, "public", false);
+        let (_, c) = sug("select * from t", &two, "public", false);
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"t_users"));
         assert!(!labels.contains(&"t_orders"));
 
-        let (_, c) = suggest("select * from t", &two, "other", false);
+        let (_, c) = sug("select * from t", &two, "other", false);
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"t_orders"));
         assert!(!labels.contains(&"t_users"));
@@ -706,7 +770,7 @@ mod tests {
     #[test]
     fn from_offers_schema_names() {
         // Type-triggered: "a" narrows to the analytics schema name.
-        let (_, c) = suggest("select * from a", &two_schema_nodes(), "public", false);
+        let (_, c) = sug("select * from a", &two_schema_nodes(), "public", false);
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"analytics"));
     }
@@ -715,7 +779,7 @@ mod tests {
     /// active (all schemas live in the completion tree).
     #[test]
     fn dot_lists_non_active_schema_tables() {
-        let (n, c) = suggest(
+        let (n, c) = sug(
             "select * from analytics.",
             &two_schema_nodes(),
             "public",
