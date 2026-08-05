@@ -32,6 +32,71 @@ pub fn parse_query(engine: Engine, text: &str) -> Result<Query, String> {
     }
 }
 
+/// Best-effort recognition of a plain, single-table `SELECT ... FROM t
+/// [WHERE ...]` (optionally schema/db-qualified: `schema.table`) — no
+/// join/union/aggregation/multi-table FROM — so its result grid can be
+/// offered for inline cell editing. There's no SQL parser in this
+/// workspace, so this is a conservative text heuristic: anything ambiguous
+/// returns `None` and the result just stays read-only, same as before this
+/// existed. Returns `(qualifier, table)` — `qualifier` is the part before
+/// the dot when the query names it explicitly (e.g. `"oss_rba_common"` for
+/// `oss_rba_common.step_journal`), left for the caller to apply as
+/// `TableRef.schema` (Postgres) or `.database` (MySQL/Sqlite), falling back
+/// to the active connection's selection when the query didn't qualify it.
+pub fn single_table_name(sql: &str) -> Option<(Option<String>, String)> {
+    // Run always sends the whole `;`-delimited statement under the cursor, and
+    // that span deliberately includes any commented-out lines above it (a `;`
+    // inside a `--` line doesn't cut a statement). Without stripping them the
+    // text starts with `--`, never `select`, and a commented-out `join` would
+    // reject an otherwise clean query. Every engine reaching here (Postgres,
+    // MySQL, SQLite) uses `--`, so one prefix covers all three.
+    let sql = strip_comment_lines(Engine::Postgres, sql);
+    let trimmed = sql.trim().trim_end_matches(';').trim();
+    let lower = trimmed.to_lowercase();
+    if !lower.starts_with("select") {
+        return None;
+    }
+    for kw in [" join ", " union ", " group by", " having", "distinct"] {
+        if lower.contains(kw) {
+            return None;
+        }
+    }
+    for agg in ["count(", "sum(", "avg(", "min(", "max("] {
+        if lower.contains(agg) {
+            return None;
+        }
+    }
+    let from_idx = lower.find(" from ")?;
+    let after_from = trimmed[from_idx + 6..].trim_start();
+    let end = after_from
+        .find(|c: char| c.is_whitespace() || c == ',' || c == '(' || c == ';')
+        .unwrap_or(after_from.len());
+    let ident = after_from[..end].trim();
+    let rest = after_from[end..].trim_start();
+    // A comma right after means a multi-table `FROM a, b` — bail.
+    if ident.is_empty() || rest.starts_with(',') {
+        return None;
+    }
+    fn unquote(s: &str) -> &str {
+        s.trim_matches(|c| c == '"' || c == '`' || c == '\'')
+    }
+    let (qualifier, name) = match ident.split_once('.') {
+        Some((q, n)) => {
+            // `db.schema.table` (3-part) still has a dot in `n` — too
+            // ambiguous to guess which part is which, so bail.
+            if n.contains('.') {
+                return None;
+            }
+            (Some(unquote(q).to_string()), unquote(n))
+        }
+        None => (None, unquote(ident)),
+    };
+    if name.is_empty() || qualifier.as_deref().is_some_and(str::is_empty) {
+        return None;
+    }
+    Some((qualifier, name.to_string()))
+}
+
 /// Editor placeholder/hint per engine (shown in the UI).
 pub fn editor_hint(engine: Engine) -> &'static str {
     match engine {
@@ -513,6 +578,72 @@ mod tests {
             Query::Mongo(op) => assert_eq!(op.collection, "c"),
             _ => panic!("expected Mongo"),
         }
+    }
+
+    #[test]
+    fn single_table_select_extracts_bare_table() {
+        assert_eq!(
+            single_table_name("select * from users where id = 1"),
+            Some((None, "users".into()))
+        );
+        assert_eq!(
+            single_table_name("SELECT id, name FROM \"Users\";"),
+            Some((None, "Users".into()))
+        );
+        assert_eq!(
+            single_table_name("  select id from orders order by id limit 10  "),
+            Some((None, "orders".into()))
+        );
+    }
+
+    #[test]
+    fn single_table_select_extracts_schema_qualified_table() {
+        assert_eq!(
+            single_table_name("select * from oss_rba_common.step_journal where x = 1"),
+            Some((Some("oss_rba_common".into()), "step_journal".into()))
+        );
+        assert_eq!(
+            single_table_name("SELECT * FROM \"public\".\"Users\";"),
+            Some((Some("public".into()), "Users".into()))
+        );
+    }
+
+    #[test]
+    fn single_table_select_ignores_commented_out_lines() {
+        // Run sends the whole statement span, commented-out lines included.
+        assert_eq!(
+            single_table_name(
+                "-- update oss_rba_perizinan.t_permohonan_izin\n\
+                 -- set status_respon = '50'\n\
+                 -- where id_permohonan_izin = 'I-1';\n\
+                 select * from oss_rba_common.step_config ;"
+            ),
+            Some((Some("oss_rba_common".into()), "step_config".into()))
+        );
+        // A reject keyword that only appears inside a comment doesn't count.
+        assert_eq!(
+            single_table_name("-- select * from a join b\nselect * from users"),
+            Some((None, "users".into()))
+        );
+        assert_eq!(single_table_name("-- select * from users"), None);
+    }
+
+    #[test]
+    fn single_table_select_rejects_ambiguous_queries() {
+        assert_eq!(
+            single_table_name("select * from a join b on a.id = b.a_id"),
+            None
+        );
+        assert_eq!(single_table_name("select * from a, b"), None);
+        assert_eq!(
+            single_table_name("select * from a union select * from b"),
+            None
+        );
+        assert_eq!(single_table_name("select count(*) from users"), None);
+        assert_eq!(single_table_name("select distinct name from users"), None);
+        assert_eq!(single_table_name("select * from db.schema.users"), None);
+        assert_eq!(single_table_name("select * from (select 1) t"), None);
+        assert_eq!(single_table_name("insert into users values (1)"), None);
     }
 
     #[test]

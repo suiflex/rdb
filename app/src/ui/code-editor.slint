@@ -34,6 +34,11 @@ export component CodeEditor inherits Rectangle {
     in property <bool> completion-visible;
     in property <int> completion-selected;
     callback completion-choose(int);
+    // Bumped by the host whenever the cursor jumps somewhere that isn't
+    // necessarily on screen (e.g. a find match) so the viewport follows it.
+    // Not bound continuously — that would fight the user's own wheel/drag
+    // scrolling on `edit-scroll`.
+    in property <int> scroll-request: 0;
 
     property <length> line-h: 21px;
     property <length> gutter-w: 40px;
@@ -41,6 +46,20 @@ export component CodeEditor inherits Rectangle {
     property <length> charw: probe.preferred-width / 10;
 
     background: Tokens.canvas;
+
+    // Land the match a full line short of the edge on both sides (not flush
+    // against it) so it doesn't read as clipped, and account for the
+    // VerticalLayout's own padding-top so the math matches the caret's.
+    changed scroll-request => {
+        edit-scroll.viewport-y = clamp(
+            edit-scroll.viewport-y,
+            // caret one line clear of the top edge — the smaller bound, since
+            // viewport-y grows towards 0 as the content scrolls back up
+            root.line-h - Tokens.sp2 - root.cursor-visual-row * root.line-h,
+            // …and one line clear of the bottom edge
+            edit-scroll.visible-height - Tokens.sp2
+                - root.cursor-visual-row * root.line-h - 2 * root.line-h);
+    }
 
     probe := Text {
         text: "0000000000";

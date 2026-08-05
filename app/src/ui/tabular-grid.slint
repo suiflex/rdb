@@ -300,16 +300,25 @@ export component TabularGrid inherits Rectangle {
                     if r == root.editing-row && c == root.editing-col && !root.read-only: Rectangle {
                         property <bool> compact-editor: root.is-boolean(root.columns[c].type-name)
                             || root.is-date(root.columns[c].type-name);
+                        // ponytail: ~7px per glyph at Tokens.font-sm in the mono
+                        // face — an estimate, not a measurement, so the editor can
+                        // size itself to the value without a layout round-trip.
+                        // Bump the constant if short values start wrapping.
+                        property <length> text-w: cell.text.character-count * 7px + 2 * Tokens.sp2;
+                        // Never narrower than the cell, never wider than the value
+                        // needs, still capped so a huge JSON blob can't span the pane.
                         property <length> editor-w: self.compact-editor ? parent.width
-                            : max(parent.width, min(520px, root.width - 2 * Tokens.sp2));
+                            : max(parent.width, min(self.text-w, min(520px, root.width - 2 * Tokens.sp2)));
                         property <length> visible-x: parent.x + flick.viewport-x;
                         z: 100;
                         x: self.compact-editor ? 0px
                             : max(-self.visible-x, min(0px, root.width - self.visible-x - self.editor-w));
                         width: self.editor-w;
-                        // Rows are fixed height now, so a multi-line editor floats
-                        // taller over the rows below (z:100) instead of growing one.
-                        height: self.compact-editor ? parent.height : 96px;
+                        // A value that fits on one line stays exactly row-height, so
+                        // it doesn't cover the rows below. Rows are fixed height, so
+                        // a longer value floats taller over them (z:100) instead.
+                        height: self.compact-editor || self.text-w <= self.editor-w
+                            ? parent.height : 96px;
                         background: Tokens.card;
                         border-width: 2px;
                         // Read-only view is a value inspector, not a pending

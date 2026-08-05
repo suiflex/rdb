@@ -77,6 +77,7 @@ export component WorkArea inherits Rectangle {
     in property <int> cursor-line;
     in property <int> cursor-visual-row;
     in property <int> cursor-col;
+    in property <int> scroll-request;
     // SQL autocomplete popup (passed down to the SQL CodeEditor)
     in property <[PaletteItem]> completion-items;
     in property <bool> completion-visible;
@@ -137,6 +138,7 @@ export component WorkArea inherits Rectangle {
     in property <int> p1-cursor-line;
     in property <int> p1-cursor-visual-row;
     in property <int> p1-cursor-col;
+    in property <int> p1-scroll-request;
     in-out property <bool> p1-editor-collapsed;
     in-out property <length> p1-editor-h: 340px;
     in property <[PaletteItem]> p1-completion-items;
@@ -179,6 +181,9 @@ export component WorkArea inherits Rectangle {
     in property <int> p1-editing-col: -1;
     in-out property <string> p1-editing-value;
     in property <int> p1-scroll-grid-tick;
+    in property <int> p1-pending-count;
+    callback p1-commit-edits();
+    callback p1-discard-edits();
     in-out property <int> p1-doc-view;
     in property <[DocRow]> p1-doc-tree;
     in property <[StructField]> p1-structure-columns;
@@ -410,6 +415,7 @@ export component WorkArea inherits Rectangle {
             cursor-line: root.cursor-line;
             cursor-visual-row: root.cursor-visual-row;
             cursor-col: root.cursor-col;
+            scroll-request: root.scroll-request;
             toggle-fold(l) => { root.toggle-fold(l); }
             editor-key(t, cmd, alt, shift) => { root.editor-key(t, cmd, alt, shift) }
             editor-press(l, c) => { root.editor-press(l, c); }
@@ -542,6 +548,7 @@ export component WorkArea inherits Rectangle {
                 cursor-line: root.p1-cursor-line;
                 cursor-visual-row: root.p1-cursor-visual-row;
                 cursor-col: root.p1-cursor-col;
+                scroll-request: root.p1-scroll-request;
                 toggle-fold(l) => { root.p1-toggle-fold(l); }
                 editor-key(t, cmd, alt, shift) => { root.p1-editor-key(t, cmd, alt, shift) }
                 editor-press(l, c) => { root.p1-editor-press(l, c); }
@@ -598,7 +605,12 @@ export component WorkArea inherits Rectangle {
         }
 
         // ================= pending-edits strip =================
-        if root.pending-count > 0: Rectangle {
+        // A split's right pane can carry its own pending edits (a query result
+        // turned editable, see p1-pending-count) alongside the left pane's, so
+        // this always reports whichever pane the user is focused in.
+        property <int> active-pending-count: root.split && root.active-pane == 1
+            ? root.p1-pending-count : root.pending-count;
+        if active-pending-count > 0: Rectangle {
             height: 30px;
             background: Tokens.warn-tint;
             HorizontalLayout {
@@ -606,17 +618,35 @@ export component WorkArea inherits Rectangle {
                 padding-right: Tokens.sp2;
                 spacing: Tokens.sp2;
                 Text {
-                    text: root.pending-count + " pending change" + (root.pending-count == 1 ? "" : "s");
+                    text: active-pending-count + " pending change" + (active-pending-count == 1 ? "" : "s");
                     color: Tokens.warn;
                     font-size: Tokens.font-sm;
                     font-weight: 600;
                     vertical-alignment: center;
                 }
                 Rectangle { horizontal-stretch: 1; }
-                TextButton { text: "Discard"; clicked => { root.discard-edits(); } }
                 VerticalLayout {
                     alignment: center;
-                    PrimaryButton { text: "Commit  " + Shortcut.primary + Shortcut.separator + "S"; height: 22px; clicked => { root.commit-edits(); } }
+                    SecondaryButton {
+                        text: "Discard";
+                        tooltip: "Throw away every pending edit in this grid";
+                        height: 22px;
+                        clicked => {
+                            if (root.split && root.active-pane == 1) { root.p1-discard-edits(); } else { root.discard-edits(); }
+                        }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    PrimaryButton {
+                        text: "Commit  " + Shortcut.primary + Shortcut.separator + "S";
+                        tooltip: "Write the pending edits to the database  "
+                            + Shortcut.primary + Shortcut.separator + "S";
+                        height: 22px;
+                        clicked => {
+                            if (root.split && root.active-pane == 1) { root.p1-commit-edits(); } else { root.commit-edits(); }
+                        }
+                    }
                 }
             }
         }

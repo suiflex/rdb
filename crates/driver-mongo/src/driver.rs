@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mongodb::bson::{doc, Document};
-use mongodb::options::ClientOptions;
+use mongodb::options::{ClientOptions, ServerMonitoringMode};
 use mongodb::{Client, Collection};
 
 use rdb_core::conn::{ConnConfig, SslMode};
@@ -113,6 +113,14 @@ impl Driver for MongoDriver {
         // server-selection hang.
         options.server_selection_timeout = Some(Duration::from_secs(8));
         options.connect_timeout = Some(Duration::from_secs(8));
+        // The driver's default streaming (awaitable isMaster) SDAM monitor
+        // keeps a long-poll socket open per server and re-arms it in a tight
+        // loop; on Windows that socket churn shows up as sustained >10% CPU
+        // even while idle. A desktop client doesn't need sub-second topology
+        // change detection, so fall back to plain interval polling and widen
+        // the interval well past the driver's 10s default.
+        options.server_monitoring_mode = Some(ServerMonitoringMode::Poll);
+        options.heartbeat_freq = Some(Duration::from_secs(30));
         let client =
             Client::with_options(options).map_err(|e| RdbError::Connection(e.to_string()))?;
         let default_db = cfg.database.clone().unwrap_or_else(|| "admin".to_string());
