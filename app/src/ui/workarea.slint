@@ -625,10 +625,14 @@ export component WorkArea inherits Rectangle {
                     vertical-alignment: center;
                 }
                 Rectangle { horizontal-stretch: 1; }
-                TextButton {
-                    text: "Discard";
-                    clicked => {
-                        if (root.split && root.active-pane == 1) { root.p1-discard-edits(); } else { root.discard-edits(); }
+                VerticalLayout {
+                    alignment: center;
+                    SecondaryButton {
+                        text: "Discard";
+                        height: 22px;
+                        clicked => {
+                            if (root.split && root.active-pane == 1) { root.p1-discard-edits(); } else { root.discard-edits(); }
+                        }
                     }
                 }
                 VerticalLayout {
