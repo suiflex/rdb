@@ -7757,6 +7757,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 let target_id = target_id.clone();
                 let query_connection_id = query_connection_id.clone();
                 let query_badge = query_badge.clone();
+                let sql_for_pk = sql.clone();
+                let current_for_pk = current.clone();
+                let rt_for_pk = rt.clone();
                 timer.start(
                     slint::TimerMode::Repeated,
                     std::time::Duration::from_millis(50),
@@ -7818,6 +7821,8 @@ fn main() -> Result<(), slint::PlatformError> {
                                 }
                                 Ok(StreamMsg::Done { capped, elapsed_ms }) => {
                                     let g = accum.borrow().clone();
+                                    let col_names: Vec<String> =
+                                        g.columns.iter().map(|c| c.name.clone()).collect();
                                     let n = g.rows.len();
                                     let meta = format!(
                                         "{n} rows{} · {elapsed_ms} ms",
@@ -7836,7 +7841,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                         color: query_badge.color,
                                         has_custom_color: query_badge.has_custom_color,
                                     };
-                                    let (tab_results, tab_active) = {
+                                    let (tab_results, tab_active, is_browse) = {
                                         let mut tabs = workspace_tabs.lock().unwrap();
                                         let Some(tab) = tabs.iter_mut().find(|t| t.id == target_id)
                                         else {
@@ -7850,7 +7855,11 @@ fn main() -> Result<(), slint::PlatformError> {
                                             sr.clone(),
                                             new_tab,
                                         );
-                                        (tab.results.clone(), tab.active_result)
+                                        (
+                                            tab.results.clone(),
+                                            tab.active_result,
+                                            tab.kind == "table",
+                                        )
                                     };
                                     let active_id = if pane == 1 {
                                         &active_group1_tab_id
@@ -7883,6 +7892,81 @@ fn main() -> Result<(), slint::PlatformError> {
                                         );
                                         set_p_query_running(&w, pane, false);
                                         set_p_streaming(&w, pane, false);
+                                        // A bare `SELECT` with no LIMIT streams instead of
+                                        // going through run_sql, so it needs its own PK
+                                        // lookup to flip from view-only to editable — see
+                                        // the equivalent block in run_sql for the full
+                                        // rationale (single_table_name heuristic).
+                                        if !is_browse {
+                                            let cur_db = w.get_schema_name().to_string();
+                                            let sql_for_pk = sql_for_pk.clone();
+                                            let current_for_pk = current_for_pk.clone();
+                                            let col_names = col_names.clone();
+                                            let edit_buf = edit_buf.clone();
+                                            let weak_pk = weak.clone();
+                                            rt_for_pk.spawn(async move {
+                                                let picked = {
+                                                    let guard = current_for_pk.lock().await;
+                                                    guard.as_ref().map(|(e, d)| (*e, d.clone()))
+                                                };
+                                                let Some((engine, driver)) = picked else {
+                                                    return;
+                                                };
+                                                if !matches!(
+                                                    engine,
+                                                    rdb_connstore::Engine::Postgres
+                                                        | rdb_connstore::Engine::MySql
+                                                        | rdb_connstore::Engine::Sqlite
+                                                ) {
+                                                    return;
+                                                }
+                                                let Some((qualifier, name)) =
+                                                    crate::query_parse::single_table_name(
+                                                        &sql_for_pk,
+                                                    )
+                                                else {
+                                                    return;
+                                                };
+                                                let qualifier = qualifier.or_else(|| {
+                                                    (!cur_db.is_empty()).then(|| cur_db.clone())
+                                                });
+                                                let table = rdb_core::write::TableRef {
+                                                    database: (!matches!(
+                                                        engine,
+                                                        rdb_connstore::Engine::Postgres
+                                                    ))
+                                                    .then(|| qualifier.clone())
+                                                    .flatten(),
+                                                    schema: matches!(
+                                                        engine,
+                                                        rdb_connstore::Engine::Postgres
+                                                    )
+                                                    .then(|| qualifier.clone())
+                                                    .flatten(),
+                                                    name,
+                                                };
+                                                let Ok(pk) = driver.primary_key(&table).await
+                                                else {
+                                                    return;
+                                                };
+                                                if pk.is_empty()
+                                                    || !pk.iter().all(|k| col_names.contains(k))
+                                                {
+                                                    return;
+                                                }
+                                                let _ = slint::invoke_from_event_loop(move || {
+                                                    let Some(w) = weak_pk.upgrade() else {
+                                                        return;
+                                                    };
+                                                    {
+                                                        let mut b = edit_buf.lock().unwrap();
+                                                        b.table = Some(table);
+                                                        b.pk_cols = pk;
+                                                    }
+                                                    set_p_read_only(&w, pane, false);
+                                                });
+                                            });
+                                        }
                                     }
                                     if let Some(t) = stream_timer_stop.borrow().as_ref() {
                                         t.stop();
