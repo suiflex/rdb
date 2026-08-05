@@ -177,11 +177,23 @@ fn resolve_alias(stmt: &str, owner: &str) -> String {
     owner.to_string()
 }
 
-/// True when `word` (already lowercased) matches `label` as a prefix or at the
-/// start of any `_`-delimited segment, so typing `teknis` finds `flag_teknis`.
-fn subword_match(label: &str, word: &str) -> bool {
+/// How well `word` (already lowercased) matches `label`, lowest is best:
+/// 0 = literal prefix, 1 = prefix of a `_`-delimited segment (`teknis` finds
+/// `flag_teknis`), 2 = prefix once the underscores are squashed out of both
+/// (`schemaoi` finds `schema_oi`). `None` when it doesn't match at all.
+/// Doubles as the sort key so a fuzzier tier can't outrank a literal one.
+fn match_rank(label: &str, word: &str) -> Option<u8> {
     let l = label.to_lowercase();
-    l.starts_with(word) || l.split('_').any(|seg| seg.starts_with(word))
+    if l.starts_with(word) {
+        return Some(0);
+    }
+    if l.split('_').any(|seg| seg.starts_with(word)) {
+        return Some(1);
+    }
+    if l.replace('_', "").starts_with(&word.replace('_', "")) {
+        return Some(2);
+    }
+    None
 }
 
 /// The trailing run of identifier chars at the end of `s` (ASCII identifier).
@@ -398,10 +410,11 @@ pub fn suggest(
     };
     let wl = word.to_lowercase();
     if !wl.is_empty() {
-        cands.retain(|c| subword_match(&c.label, &wl));
-        // Prefix matches rank above mid-word (`_`-segment) matches so the most
-        // literal completion stays on top; stable within each group.
-        cands.sort_by_key(|c| !c.label.to_lowercase().starts_with(&wl));
+        cands.retain(|c| match_rank(&c.label, &wl).is_some());
+        // Literal prefixes rank above `_`-segment matches, which rank above
+        // underscore-squashed ones, so the most literal completion stays on
+        // top; the sort is stable, so order within a tier is unchanged.
+        cands.sort_by_key(|c| match_rank(&c.label, &wl).unwrap_or(u8::MAX));
     }
     // dedup by label (a column name may appear across tables), keep first.
     let mut seen = std::collections::HashSet::new();
@@ -625,6 +638,50 @@ mod tests {
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["config_id", "name"]
+        );
+    }
+
+    #[test]
+    fn matching_ignores_missing_underscores() {
+        let mk = |l: &str, k: &str| VmTreeNode {
+            label: l.into(),
+            kind: k.into(),
+        };
+        let n = vec![
+            mk("oss_rba_common", "database"),
+            mk("step_config", "table"),
+            mk("config_id", "field"),
+        ];
+        // Schema name typed without its underscores.
+        let (_, c) = sug("select * from ossrbacommon", &n, "oss_rba_common", false);
+        assert!(c.iter().any(|x| x.label == "oss_rba_common"));
+        // Not schemas only — tables and columns too.
+        let (_, c) = sug("select * from stepconfig", &n, "oss_rba_common", false);
+        assert!(c.iter().any(|x| x.label == "step_config"));
+        let (_, c) = sug(
+            "select * from step_config where configid",
+            &n,
+            "oss_rba_common",
+            false,
+        );
+        assert!(c.iter().any(|x| x.label == "config_id"));
+    }
+
+    #[test]
+    fn literal_prefix_outranks_an_underscore_squashed_match() {
+        let mk = |l: &str, k: &str| VmTreeNode {
+            label: l.into(),
+            kind: k.into(),
+        };
+        let n = vec![
+            mk("public", "database"),
+            mk("stepconfig", "table"),
+            mk("step_config", "table"),
+        ];
+        let (_, c) = sug("select * from stepc", &n, "public", false);
+        assert_eq!(
+            c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
+            ["stepconfig", "step_config"]
         );
     }
 
