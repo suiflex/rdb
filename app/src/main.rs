@@ -2151,7 +2151,15 @@ const STREAM_SOFT_CAP: usize = 200_000;
 enum StreamMsg {
     Meta(Vec<model::VmColumn>),
     Batch(Vec<rdb_core::result::Row>),
-    Done { capped: bool, elapsed_ms: u64 },
+    Done {
+        capped: bool,
+        elapsed_ms: u64,
+        // Computed inside the same producer/consumer task, before Done is
+        // sent, so it lands atomically with the rest of the result — no
+        // window where the grid looks interactive but table/pk_cols hasn't
+        // caught up yet (see the run_stream race this replaced).
+        pk_hint: Option<(rdb_core::write::TableRef, Vec<String>)>,
+    },
     Err(String),
 }
 
@@ -3705,6 +3713,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_p1_cursor_visual_row(cursor_visual_row);
                 w.set_p1_cursor_col(ed.col as i32);
             }
+            // Keep the caret in view on every edit/cursor move, not just a
+            // find jump — typing off the bottom of the viewport otherwise
+            // left the new text scrolled out of sight.
+            bump_p_scroll_request(&w, pane);
         }
     };
     #[allow(clippy::type_complexity)]
@@ -7760,9 +7772,6 @@ fn main() -> Result<(), slint::PlatformError> {
                 let target_id = target_id.clone();
                 let query_connection_id = query_connection_id.clone();
                 let query_badge = query_badge.clone();
-                let sql_for_pk = sql.clone();
-                let current_for_pk = current.clone();
-                let rt_for_pk = rt.clone();
                 timer.start(
                     slint::TimerMode::Repeated,
                     std::time::Duration::from_millis(50),
@@ -7822,10 +7831,12 @@ fn main() -> Result<(), slint::PlatformError> {
                                         );
                                     }
                                 }
-                                Ok(StreamMsg::Done { capped, elapsed_ms }) => {
+                                Ok(StreamMsg::Done {
+                                    capped,
+                                    elapsed_ms,
+                                    pk_hint,
+                                }) => {
                                     let g = accum.borrow().clone();
-                                    let col_names: Vec<String> =
-                                        g.columns.iter().map(|c| c.name.clone()).collect();
                                     let n = g.rows.len();
                                     let meta = format!(
                                         "{n} rows{} · {elapsed_ms} ms",
@@ -7896,79 +7907,23 @@ fn main() -> Result<(), slint::PlatformError> {
                                         set_p_query_running(&w, pane, false);
                                         set_p_streaming(&w, pane, false);
                                         // A bare `SELECT` with no LIMIT streams instead of
-                                        // going through run_sql, so it needs its own PK
-                                        // lookup to flip from view-only to editable — see
-                                        // the equivalent block in run_sql for the full
-                                        // rationale (single_table_name heuristic).
+                                        // going through run_sql, so it needs the same PK
+                                        // lookup to go from view-only to editable. pk_hint
+                                        // was computed inside the producer/consumer task
+                                        // before Done was sent, so applying it here lands
+                                        // atomically with present_view — no window where
+                                        // the grid looks interactive but table/pk_cols
+                                        // hasn't caught up (see the run_stream race this
+                                        // replaced).
                                         if !is_browse {
-                                            let cur_db = w.get_schema_name().to_string();
-                                            let sql_for_pk = sql_for_pk.clone();
-                                            let current_for_pk = current_for_pk.clone();
-                                            let col_names = col_names.clone();
-                                            let edit_buf = edit_buf.clone();
-                                            let weak_pk = weak.clone();
-                                            rt_for_pk.spawn(async move {
-                                                let picked = {
-                                                    let guard = current_for_pk.lock().await;
-                                                    guard.as_ref().map(|(e, d)| (*e, d.clone()))
-                                                };
-                                                let Some((engine, driver)) = picked else {
-                                                    return;
-                                                };
-                                                if !matches!(
-                                                    engine,
-                                                    rdb_connstore::Engine::Postgres
-                                                        | rdb_connstore::Engine::MySql
-                                                        | rdb_connstore::Engine::Sqlite
-                                                ) {
-                                                    return;
-                                                }
-                                                let Some((qualifier, name)) =
-                                                    crate::query_parse::single_table_name(
-                                                        &sql_for_pk,
-                                                    )
-                                                else {
-                                                    return;
-                                                };
-                                                let qualifier = qualifier.or_else(|| {
-                                                    (!cur_db.is_empty()).then(|| cur_db.clone())
-                                                });
-                                                let table = rdb_core::write::TableRef {
-                                                    database: (!matches!(
-                                                        engine,
-                                                        rdb_connstore::Engine::Postgres
-                                                    ))
-                                                    .then(|| qualifier.clone())
-                                                    .flatten(),
-                                                    schema: matches!(
-                                                        engine,
-                                                        rdb_connstore::Engine::Postgres
-                                                    )
-                                                    .then(|| qualifier.clone())
-                                                    .flatten(),
-                                                    name,
-                                                };
-                                                let Ok(pk) = driver.primary_key(&table).await
-                                                else {
-                                                    return;
-                                                };
-                                                if pk.is_empty()
-                                                    || !pk.iter().all(|k| col_names.contains(k))
-                                                {
-                                                    return;
-                                                }
-                                                let _ = slint::invoke_from_event_loop(move || {
-                                                    let Some(w) = weak_pk.upgrade() else {
-                                                        return;
-                                                    };
-                                                    {
-                                                        let mut b = edit_buf.lock().unwrap();
-                                                        b.table = Some(table);
-                                                        b.pk_cols = pk;
-                                                    }
-                                                    set_p_read_only(&w, pane, false);
-                                                });
-                                            });
+                                            if let Some((table, pk)) = pk_hint {
+                                                let mut b = edit_buf.lock().unwrap();
+                                                b.table = Some(table);
+                                                b.pk_cols = pk;
+                                            }
+                                            let editable =
+                                                !edit_buf.lock().unwrap().pk_cols.is_empty();
+                                            set_p_read_only(&w, pane, !editable);
                                         }
                                     }
                                     if let Some(t) = stream_timer_stop.borrow().as_ref() {
@@ -8025,14 +7980,16 @@ fn main() -> Result<(), slint::PlatformError> {
             // mongodb/pg client is internally pooled), so the whole stream runs
             // without holding the lock; Cancel or a new run stops it at the next
             // batch.
+            let sql_for_pk = sql.clone();
             let q = rdb_core::query::Query::Sql(sql);
             let current = current.clone();
             rt.spawn(async move {
                 let t0 = std::time::Instant::now();
-                let driver = {
+                let picked = {
                     let guard = current.lock().await;
-                    guard.as_ref().map(|(_, d)| d.clone())
+                    guard.as_ref().map(|(e, d)| (*e, d.clone()))
                 };
+                let driver = picked.as_ref().map(|(_, d)| d.clone());
                 let (ctx, mut crx) = tokio::sync::mpsc::channel::<rdb_core::result::StreamItem>(4);
                 let cancel_prod = cancel.clone();
                 let producer = async move {
@@ -8049,6 +8006,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 };
                 let ui_tx2 = ui_tx.clone();
                 let cancel_cons = cancel.clone();
+                let mut col_names: Vec<String> = Vec::new();
                 let consumer = async move {
                     let mut total = 0usize;
                     let mut capped = false;
@@ -8062,6 +8020,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                         type_name: c.type_name.clone(),
                                     })
                                     .collect();
+                                col_names = vmcols.iter().map(|c| c.name.clone()).collect();
                                 if ui_tx2.send(StreamMsg::Meta(vmcols)).is_err() {
                                     cancel_cons.store(true, std::sync::atomic::Ordering::SeqCst);
                                     break;
@@ -8080,13 +8039,68 @@ fn main() -> Result<(), slint::PlatformError> {
                             }
                         }
                     }
-                    capped
+                    (capped, col_names)
                 };
-                let (pres, capped) = tokio::join!(producer, consumer);
+                let (pres, (capped, col_names)) = tokio::join!(producer, consumer);
                 let elapsed_ms = t0.elapsed().as_millis().max(1) as u64;
                 match pres {
                     Ok(()) => {
-                        let _ = ui_tx.send(StreamMsg::Done { capped, elapsed_ms });
+                        // Same heuristic-then-primary_key lookup as run_sql, done here
+                        // (inside the same task, before Done ships) so it lands
+                        // atomically with the result — see the StreamMsg::Done doc
+                        // comment for why this replaced a separately spawned task.
+                        let pk_hint: Option<(rdb_core::write::TableRef, Vec<String>)> =
+                            if let Some((engine, driver)) = picked.as_ref() {
+                                if matches!(
+                                    engine,
+                                    rdb_connstore::Engine::Postgres
+                                        | rdb_connstore::Engine::MySql
+                                        | rdb_connstore::Engine::Sqlite
+                                ) {
+                                    if let Some((qualifier, name)) =
+                                        crate::query_parse::single_table_name(&sql_for_pk)
+                                    {
+                                        let qualifier = qualifier.or_else(|| {
+                                            (!cur_db.is_empty()).then(|| cur_db.clone())
+                                        });
+                                        let table = rdb_core::write::TableRef {
+                                            database: (!matches!(
+                                                engine,
+                                                rdb_connstore::Engine::Postgres
+                                            ))
+                                            .then(|| qualifier.clone())
+                                            .flatten(),
+                                            schema: matches!(
+                                                engine,
+                                                rdb_connstore::Engine::Postgres
+                                            )
+                                            .then(|| qualifier.clone())
+                                            .flatten(),
+                                            name,
+                                        };
+                                        match driver.primary_key(&table).await {
+                                            Ok(pk)
+                                                if !pk.is_empty()
+                                                    && pk.iter().all(|k| col_names.contains(k)) =>
+                                            {
+                                                Some((table, pk))
+                                            }
+                                            _ => None,
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            };
+                        let _ = ui_tx.send(StreamMsg::Done {
+                            capped,
+                            elapsed_ms,
+                            pk_hint,
+                        });
                     }
                     Err(e) => {
                         let _ = ui_tx.send(StreamMsg::Err(e.to_string()));
