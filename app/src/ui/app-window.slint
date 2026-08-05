@@ -70,8 +70,12 @@ export component MainWindow inherits Window {
                 // Slint maps Control to the platform primary modifier:
                 // Command on macOS, Control on Windows/Linux.
                 shortcut: @keys(Control + S);
-                enabled: root.connected && (root.pending-count > 0 || root.editing-row >= 0);
-                activated => { root.commit-edits(); }
+                enabled: root.connected && (root.split && root.active-pane == 1
+                    ? (root.p1-pending-count > 0 || root.p1-editing-row >= 0)
+                    : (root.pending-count > 0 || root.editing-row >= 0));
+                activated => {
+                    if (root.split && root.active-pane == 1) { root.p1-commit-edits(); } else { root.commit-edits(); }
+                }
             }
             MenuSeparator {}
             MenuItem {
@@ -512,6 +516,9 @@ callback create-table-commit();
     callback p1-editor-press(int, int);
     callback p1-editor-drag(int, int);
     callback p1-editor-select-word(int, int);
+    in property <int> p1-pending-count;
+    callback p1-commit-edits();
+    callback p1-discard-edits();
     callback p1-completion-choose(int);
     callback p1-select-result-tab(int);
     callback p1-close-result-tab(int);
@@ -668,7 +675,7 @@ callback create-table-commit();
                     return accept;
                 }
                 if (e.text == "s") {
-                    root.commit-edits();
+                    if (root.split && root.active-pane == 1) { root.p1-commit-edits(); } else { root.commit-edits(); }
                     return accept;
                 }
                 if ((e.text == "r" || e.text == "R") && e.modifiers.shift) {
@@ -1698,6 +1705,7 @@ callback create-table-commit();
                         can-prev: root.can-prev;
                         can-next: root.can-next;
                         pending-count: root.pending-count;
+                        p1-pending-count: root.p1-pending-count;
                         read-only: root.grid-read-only;
                         query-running: root.query-running;
                         streaming: root.streaming;
@@ -1776,6 +1784,12 @@ callback create-table-commit();
                         }
                         commit-edits() => {
                             root.commit-edits();
+                        }
+                        p1-commit-edits() => {
+                            root.p1-commit-edits();
+                        }
+                        p1-discard-edits() => {
+                            root.p1-discard-edits();
                         }
                         discard-edits() => {
                             root.discard-edits();

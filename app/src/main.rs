@@ -2383,11 +2383,11 @@ fn set_p_read_only(w: &MainWindow, pane: usize, read_only: bool) {
         w.set_p1_grid_read_only(read_only);
     }
 }
-fn get_p_read_only(w: &MainWindow, pane: usize) -> bool {
+fn set_p_pending_count(w: &MainWindow, pane: usize, n: i32) {
     if pane == 0 {
-        w.get_grid_read_only()
+        w.set_pending_count(n);
     } else {
-        w.get_p1_grid_read_only()
+        w.set_p1_pending_count(n);
     }
 }
 fn set_p_index_rows(w: &MainWindow, pane: usize, rows: ModelRc<IndexRow>) {
@@ -3239,9 +3239,7 @@ fn present_view(
         b.table = st.table.clone();
         b.pk_cols = st.pk_cols.clone();
     }
-    if pane == 0 {
-        w.set_pending_count(0);
-    }
+    set_p_pending_count(w, pane, 0);
     set_p_editing(w, pane, -1, -1);
     set_p_status_error(w, pane, false);
     w.set_status_latency(SharedString::from(latency));
@@ -7383,6 +7381,52 @@ fn main() -> Result<(), slint::PlatformError> {
                 let model_ms = model_started.elapsed().as_millis() as u64;
                 let elapsed_ms = started.elapsed().as_millis().max(1) as u64;
                 let err = outcome.err();
+                // A hand-typed `SELECT ... FROM t` result has no row identity by
+                // default. When it's an unambiguous single-table select (no
+                // join/union/aggregate — see single_table_name) and the table's
+                // PK columns come back in the result, treat it the same as a
+                // browsed table: editable, PK-aware. Anything ambiguous just
+                // stays read-only, same as before this existed.
+                let pk_hint: Option<(rdb_core::write::TableRef, Vec<String>)> =
+                    if let (Some((engine, driver)), Some(model::ResultView::Table(g))) =
+                        (picked.as_ref(), view.as_ref())
+                    {
+                        if matches!(
+                            engine,
+                            rdb_connstore::Engine::Postgres
+                                | rdb_connstore::Engine::MySql
+                                | rdb_connstore::Engine::Sqlite
+                        ) {
+                            if let Some(name) = crate::query_parse::single_table_name(&sql) {
+                                let table = rdb_core::write::TableRef {
+                                    database: (!matches!(engine, rdb_connstore::Engine::Postgres)
+                                        && !cur_db.is_empty())
+                                    .then(|| cur_db.clone()),
+                                    schema: (matches!(engine, rdb_connstore::Engine::Postgres)
+                                        && !cur_db.is_empty())
+                                    .then(|| cur_db.clone()),
+                                    name,
+                                };
+                                match driver.primary_key(&table).await {
+                                    Ok(pk)
+                                        if !pk.is_empty()
+                                            && pk.iter().all(|k| {
+                                                g.columns.iter().any(|c| &c.name == k)
+                                            }) =>
+                                    {
+                                        Some((table, pk))
+                                    }
+                                    _ => None,
+                                }
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
                         sync_query_console(&w, &query_console);
@@ -7553,6 +7597,19 @@ fn main() -> Result<(), slint::PlatformError> {
                                     &edit_buf,
                                     &browse,
                                 );
+                                // present_view seeds edit_buf from `browse`, which
+                                // only carries a table for the table-browse path.
+                                // For a hand-typed single-table SELECT, apply the
+                                // PK hint computed above instead so the grid can
+                                // go from view-only to editable.
+                                if !is_browse {
+                                    if let Some((table, pk)) = pk_hint {
+                                        edit_buf.lock().unwrap().table = Some(table);
+                                        edit_buf.lock().unwrap().pk_cols = pk;
+                                    }
+                                    let editable = !edit_buf.lock().unwrap().pk_cols.is_empty();
+                                    set_p_read_only(&w, pane, !editable);
+                                }
                             }
                             (None, Some(e)) => {
                                 if let Some(tab) = workspace_tabs
@@ -8559,12 +8616,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 .as_ref()
                 .map(|grid| grid.rows.len())
                 .unwrap_or(0);
-            panes[1].edit_buf.lock().unwrap().set_cell(
-                base,
-                row as usize,
-                col as usize,
-                text.to_string(),
-            );
+            let pending = {
+                let mut buf = panes[1].edit_buf.lock().unwrap();
+                buf.set_cell(base, row as usize, col as usize, text.to_string());
+                buf.pending_count() as i32
+            };
+            set_p_pending_count(&w, 1, pending);
             let count = w.get_p1_col_count();
             if count > 0 {
                 let index = (row * count + col) as usize;
@@ -8592,17 +8649,22 @@ fn main() -> Result<(), slint::PlatformError> {
                 .as_ref()
                 .map(|grid| grid.rows.len())
                 .unwrap_or(0);
-            panes[1].edit_buf.lock().unwrap().set_cell(
-                base,
-                row.max(0) as usize,
-                col.max(0) as usize,
-                text.to_string(),
-            );
+            let pending = {
+                let mut buf = panes[1].edit_buf.lock().unwrap();
+                buf.set_cell(
+                    base,
+                    row.max(0) as usize,
+                    col.max(0) as usize,
+                    text.to_string(),
+                );
+                buf.pending_count() as i32
+            };
             set_p_editing(&w, 1, -1, -1);
             if let Some(grid) = panes[1].displayed_grid.lock().unwrap().as_ref() {
                 let edits = panes[1].edit_buf.lock().unwrap();
                 paint_grid_with_edits(&w, 1, grid, &edits);
             }
+            set_p_pending_count(&w, 1, pending);
         });
     }
     {
@@ -8763,6 +8825,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // Filtering renumbers rows, so pending edits keyed by row index would
             // land on the wrong rows — drop them.
             panes[1].edit_buf.lock().unwrap().clear();
+            set_p_pending_count(&w, 1, 0);
             set_p_editing(&w, 1, -1, -1);
             let filtered = compute_view(
                 &view, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
@@ -10743,6 +10806,130 @@ fn main() -> Result<(), slint::PlatformError> {
                             // Keep the buffer so nothing typed is lost.
                             w.set_status_error(true);
                             w.set_result_status(SharedString::from(format!("error: {e}")));
+                        }
+                    }
+                });
+            });
+        });
+    }
+
+    // ----- right (split) pane: discard/commit, mirrors the left pane above -----
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        window.on_p1_discard_edits(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            panes[1].edit_buf.lock().unwrap().clear();
+            set_p_pending_count(&w, 1, 0);
+            set_p_editing(&w, 1, -1, -1);
+            set_p_status_error(&w, 1, false);
+            if let Some(grid) = panes[1].displayed_grid.lock().unwrap().as_ref() {
+                let edits = panes[1].edit_buf.lock().unwrap();
+                paint_grid_with_edits(&w, 1, grid, &edits);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        let current = current.clone();
+        let rt = rt.clone();
+        let cur_engine = cur_engine.clone();
+        let query_console = query_console.clone();
+        window.on_p1_commit_edits(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if w.get_p1_editing_row() >= 0 && w.get_p1_editing_col() >= 0 {
+                let base = panes[1]
+                    .displayed_grid
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .map(|g| g.rows.len())
+                    .unwrap_or(0);
+                panes[1].edit_buf.lock().unwrap().set_cell(
+                    base,
+                    w.get_p1_editing_row() as usize,
+                    w.get_p1_editing_col() as usize,
+                    w.get_p1_editing_value().to_string(),
+                );
+                set_p_editing(&w, 1, -1, -1);
+                if let Some(grid) = panes[1].displayed_grid.lock().unwrap().as_ref() {
+                    let edits = panes[1].edit_buf.lock().unwrap();
+                    paint_grid_with_edits(&w, 1, grid, &edits);
+                }
+            }
+            let ops = {
+                let buf = panes[1].edit_buf.lock().unwrap();
+                if buf.is_empty() {
+                    return;
+                }
+                let dg = panes[1].displayed_grid.lock().unwrap();
+                let Some(g) = dg.as_ref() else {
+                    return;
+                };
+                buf.to_ops(g)
+            };
+            let ops = match ops {
+                Ok(ops) if !ops.is_empty() => ops,
+                Ok(_) => return,
+                Err(msg) => {
+                    set_p_status_error(&w, 1, true);
+                    set_p_result_status(&w, 1, SharedString::from(format!("error: {msg}")));
+                    return;
+                }
+            };
+            let weak2 = weak.clone();
+            let current = current.clone();
+            let commit_buf = panes[1].edit_buf.clone();
+            if let Some(engine) = *cur_engine.borrow() {
+                for statement in dispatch::write_statements(engine, &ops) {
+                    append_query_console(&query_console, statement);
+                }
+                sync_query_console(&w, &query_console);
+            }
+            let query_console = query_console.clone();
+            set_p_status_error(&w, 1, false);
+            set_p_result_status(&w, 1, SharedString::from("saving…"));
+            rt.spawn(async move {
+                let driver = {
+                    let guard = current.lock().await;
+                    guard.as_ref().map(|(_, d)| d.clone())
+                };
+                let outcome = match driver {
+                    Some(driver) => driver.commit(&ops).await,
+                    None => Err(rdb_core::error::RdbError::Connection(
+                        "not connected".into(),
+                    )),
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(w) = weak2.upgrade() else {
+                        return;
+                    };
+                    sync_query_console(&w, &query_console);
+                    match outcome {
+                        Ok(n) => {
+                            // Written: drop the buffer BEFORE the refresh so
+                            // the pending-edits guard lets the refetch through.
+                            // A no-op for a raw-query edit (browse.table is
+                            // None there) — same as the left pane.
+                            commit_buf.lock().unwrap().clear();
+                            set_p_pending_count(&w, 1, 0);
+                            set_p_status_error(&w, 1, false);
+                            set_p_result_status(
+                                &w,
+                                1,
+                                SharedString::from(format!("{n} rows written")),
+                            );
+                            w.invoke_p1_refresh_page();
+                        }
+                        Err(e) => {
+                            // Keep the buffer so nothing typed is lost.
+                            set_p_status_error(&w, 1, true);
+                            set_p_result_status(&w, 1, SharedString::from(format!("error: {e}")));
                         }
                     }
                 });

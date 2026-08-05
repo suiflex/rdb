@@ -32,6 +32,45 @@ pub fn parse_query(engine: Engine, text: &str) -> Result<Query, String> {
     }
 }
 
+/// Best-effort recognition of a plain, single-table `SELECT ... FROM t
+/// [WHERE ...]` — no join/union/aggregation/dotted identifier — so its
+/// result grid can be offered for inline cell editing. There's no SQL
+/// parser in this workspace, so this is a conservative text heuristic:
+/// anything ambiguous returns `None` and the result just stays read-only,
+/// same as before this existed. Returns the bare table name (schema/db
+/// qualification is applied by the caller from the active connection,
+/// matching how the table-browse path builds its `TableRef`).
+pub fn single_table_name(sql: &str) -> Option<String> {
+    let trimmed = sql.trim().trim_end_matches(';').trim();
+    let lower = trimmed.to_lowercase();
+    if !lower.starts_with("select") {
+        return None;
+    }
+    for kw in [" join ", " union ", " group by", " having", "distinct"] {
+        if lower.contains(kw) {
+            return None;
+        }
+    }
+    for agg in ["count(", "sum(", "avg(", "min(", "max("] {
+        if lower.contains(agg) {
+            return None;
+        }
+    }
+    let from_idx = lower.find(" from ")?;
+    let after_from = trimmed[from_idx + 6..].trim_start();
+    let end = after_from
+        .find(|c: char| c.is_whitespace() || c == ',' || c == '(' || c == ';')
+        .unwrap_or(after_from.len());
+    let ident = after_from[..end].trim();
+    let rest = after_from[end..].trim_start();
+    // A comma right after means a multi-table `FROM a, b` — bail.
+    if ident.is_empty() || rest.starts_with(',') || ident.contains('.') {
+        return None;
+    }
+    let name = ident.trim_matches(|c| c == '"' || c == '`' || c == '\'');
+    (!name.is_empty()).then(|| name.to_string())
+}
+
 /// Editor placeholder/hint per engine (shown in the UI).
 pub fn editor_hint(engine: Engine) -> &'static str {
     match engine {
@@ -513,6 +552,40 @@ mod tests {
             Query::Mongo(op) => assert_eq!(op.collection, "c"),
             _ => panic!("expected Mongo"),
         }
+    }
+
+    #[test]
+    fn single_table_select_extracts_bare_table() {
+        assert_eq!(
+            single_table_name("select * from users where id = 1"),
+            Some("users".into())
+        );
+        assert_eq!(
+            single_table_name("SELECT id, name FROM \"Users\";"),
+            Some("Users".into())
+        );
+        assert_eq!(
+            single_table_name("  select id from orders order by id limit 10  "),
+            Some("orders".into())
+        );
+    }
+
+    #[test]
+    fn single_table_select_rejects_ambiguous_queries() {
+        assert_eq!(
+            single_table_name("select * from a join b on a.id = b.a_id"),
+            None
+        );
+        assert_eq!(single_table_name("select * from a, b"), None);
+        assert_eq!(
+            single_table_name("select * from a union select * from b"),
+            None
+        );
+        assert_eq!(single_table_name("select count(*) from users"), None);
+        assert_eq!(single_table_name("select distinct name from users"), None);
+        assert_eq!(single_table_name("select * from public.users"), None);
+        assert_eq!(single_table_name("select * from (select 1) t"), None);
+        assert_eq!(single_table_name("insert into users values (1)"), None);
     }
 
     #[test]
