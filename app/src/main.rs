@@ -7315,7 +7315,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 // is what the grid shows (TablePlus semantics). Redis/Mongo
                 // take the whole text as a single command.
                 let mut split_views: Vec<model::ResultView> = Vec::new();
-                let (outcome, n_stmts) = match picked.as_ref() {
+                let (outcome, n_stmts, last_stmt) = match picked.as_ref() {
                     Some((engine, driver)) => {
                         let stmts = if matches!(
                             engine,
@@ -7378,13 +7378,14 @@ fn main() -> Result<(), slint::PlatformError> {
                                 }
                             }
                         }
-                        (out, n)
+                        (out, n, stmts.last().cloned())
                     }
                     None => (
                         Err(rdb_core::error::RdbError::Connection(
                             "not connected".into(),
                         )),
                         1,
+                        None,
                     ),
                 };
                 let driver_ms = driver_started.elapsed().as_millis() as u64;
@@ -7399,53 +7400,55 @@ fn main() -> Result<(), slint::PlatformError> {
                 // PK columns come back in the result, treat it the same as a
                 // browsed table: editable, PK-aware. Anything ambiguous just
                 // stays read-only, same as before this existed.
-                let pk_hint: Option<(rdb_core::write::TableRef, Vec<String>)> =
-                    if let (Some((engine, driver)), Some(model::ResultView::Table(g))) =
-                        (picked.as_ref(), view.as_ref())
-                    {
-                        if matches!(
-                            engine,
-                            rdb_connstore::Engine::Postgres
-                                | rdb_connstore::Engine::MySql
-                                | rdb_connstore::Engine::Sqlite
-                        ) {
-                            if let Some((qualifier, name)) =
-                                crate::query_parse::single_table_name(&sql)
-                            {
-                                // The query's own `schema.table`/`db.table` prefix wins
-                                // when it named one explicitly; otherwise fall back to
-                                // the connection's active schema/database selection.
-                                let qualifier = qualifier
-                                    .or_else(|| (!cur_db.is_empty()).then(|| cur_db.clone()));
-                                let table = rdb_core::write::TableRef {
-                                    database: (!matches!(engine, rdb_connstore::Engine::Postgres))
-                                        .then(|| qualifier.clone())
-                                        .flatten(),
-                                    schema: matches!(engine, rdb_connstore::Engine::Postgres)
-                                        .then(|| qualifier.clone())
-                                        .flatten(),
-                                    name,
-                                };
-                                match driver.primary_key(&table).await {
-                                    Ok(pk)
-                                        if !pk.is_empty()
-                                            && pk.iter().all(|k| {
-                                                g.columns.iter().any(|c| &c.name == k)
-                                            }) =>
-                                    {
-                                        Some((table, pk))
-                                    }
-                                    _ => None,
+                let pk_hint: Option<(rdb_core::write::TableRef, Vec<String>)> = if let (
+                    Some((engine, driver)),
+                    Some(model::ResultView::Table(g)),
+                    Some(stmt),
+                ) =
+                    (picked.as_ref(), view.as_ref(), last_stmt.as_deref())
+                {
+                    if matches!(
+                        engine,
+                        rdb_connstore::Engine::Postgres
+                            | rdb_connstore::Engine::MySql
+                            | rdb_connstore::Engine::Sqlite
+                    ) {
+                        if let Some((qualifier, name)) = crate::query_parse::single_table_name(stmt)
+                        {
+                            // The query's own `schema.table`/`db.table` prefix wins
+                            // when it named one explicitly; otherwise fall back to
+                            // the connection's active schema/database selection.
+                            let qualifier =
+                                qualifier.or_else(|| (!cur_db.is_empty()).then(|| cur_db.clone()));
+                            let table = rdb_core::write::TableRef {
+                                database: (!matches!(engine, rdb_connstore::Engine::Postgres))
+                                    .then(|| qualifier.clone())
+                                    .flatten(),
+                                schema: matches!(engine, rdb_connstore::Engine::Postgres)
+                                    .then(|| qualifier.clone())
+                                    .flatten(),
+                                name,
+                            };
+                            match driver.primary_key(&table).await {
+                                Ok(pk)
+                                    if !pk.is_empty()
+                                        && pk
+                                            .iter()
+                                            .all(|k| g.columns.iter().any(|c| &c.name == k)) =>
+                                {
+                                    Some((table, pk))
                                 }
-                            } else {
-                                None
+                                _ => None,
                             }
                         } else {
                             None
                         }
                     } else {
                         None
-                    };
+                    }
+                } else {
+                    None
+                };
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
                         sync_query_console(&w, &query_console);
