@@ -517,7 +517,21 @@ export component QueryPane inherits Rectangle {
                         }
                         VerticalLayout {
                             alignment: center;
-                            SecondaryButton { text: "✕"; height: 26px; clicked => { root.find-close(); } }
+                            Rectangle {
+                                width: 26px;
+                                height: 26px;
+                                border-radius: Tokens.radius;
+                                background: close-ta.has-hover ? Tokens.chrome : transparent;
+                                animate background { duration: Tokens.fade; }
+                                close-ta := TouchArea {
+                                    clicked => { root.find-close(); }
+                                }
+                                AppIcon {
+                                    name: "close";
+                                    size: 12px;
+                                    color: close-ta.has-hover ? Tokens.text : Tokens.text-dim;
+                                }
+                            }
                         }
                     }
                 }
