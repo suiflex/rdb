@@ -7671,6 +7671,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            // Read on the UI thread now — the producer/consumer task below
+            // runs off it and can't touch `w`.
+            let cur_db = w.get_schema_name().to_string();
             let results = panes[pane].results.clone();
             let active_result = panes[pane].active_result.clone();
             let displayed_grid = panes[pane].displayed_grid.clone();
