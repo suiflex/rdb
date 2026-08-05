@@ -3,7 +3,7 @@ export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
-    SearchCommandPill, BreadcrumbChip, DbBadge, GlyphButton, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SelectBox, TextButton, Toggle, ToggleRow, Tooltip, Shortcut
+    SearchCommandPill, BreadcrumbChip, DbBadge, GlyphButton, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SelectBox, TextButton, Toggle, ToggleRow, Tooltip, TooltipArea, Shortcut
 } from "components.slint";
 export { Shortcut }
 import { NavCluster } from "nav-cluster.slint";
@@ -844,6 +844,8 @@ callback create-table-commit();
                         alignment: center;
                         SecondaryButton {
                             text: "↻ Reconnect";
+                            tooltip: "Reconnect to this database  " + Shortcut.primary
+                                + Shortcut.separator + Shortcut.shift + Shortcut.separator + "R";
                             height: 24px;
                             clicked => { root.reconnect(); }
                         }
@@ -873,6 +875,12 @@ callback create-table-commit();
                             text: root.bc-db;
                             mono: true;
                             caret: root.db-list.length > 0;
+                            // Only a picker when the engine enumerated more than
+                            // one database — don't promise a shortcut otherwise.
+                            tooltip: root.db-list.length > 0
+                                ? "Switch database  " + Shortcut.primary + Shortcut.separator
+                                    + Shortcut.shift + Shortcut.separator + "O"
+                                : "";
                             clicked => {
                                 if (root.db-list.length > 0) { root.open-db-modal(); }
                             }
@@ -890,6 +898,7 @@ callback create-table-commit();
                             text: root.bc-schema;
                             caret: true;
                             mono: true;
+                            tooltip: "Switch schema";
                             clicked => { root.select-schema(root.schema-name); }
                         }
                     }
@@ -1304,7 +1313,9 @@ callback create-table-commit();
                                         border-radius: 4px;
                                         background: close-ta.has-hover ? Tokens.error : transparent;
                                         visible: i == root.active-tab || tab-ta.has-hover;
-                                        close-ta := TouchArea {
+                                        close-ta := TooltipArea {
+                                            tip: "Close tab  " + Shortcut.primary
+                                                + Shortcut.separator + "W";
                                             clicked => {
                                                 root.close-tab(i);
                                             }
@@ -1325,7 +1336,11 @@ callback create-table-commit();
                                     border-radius: Tokens.radius;
                                     background: add-ta.has-hover ? Tokens.accent-tint : transparent;
                                     Text { text: "+"; color: add-ta.has-hover ? Tokens.accent : Tokens.text-dim; horizontal-alignment: center; vertical-alignment: center; font-size: 16px; }
-                                    add-ta := TouchArea { clicked => { root.new-tab-in-group(0); } }
+                                    add-ta := TooltipArea {
+                                        tip: "New query tab  " + Shortcut.primary
+                                            + Shortcut.separator + "T";
+                                        clicked => { root.new-tab-in-group(0); }
+                                    }
                                 }
                                 Rectangle { horizontal-stretch: 1; }
                             }
@@ -1475,7 +1490,9 @@ callback create-table-commit();
                                         border-radius: 4px;
                                         background: p1-close-ta.has-hover ? Tokens.error : transparent;
                                         visible: i == root.p1-active-tab || p1-tab-ta.has-hover;
-                                        p1-close-ta := TouchArea {
+                                        p1-close-ta := TooltipArea {
+                                            tip: "Close tab  " + Shortcut.primary
+                                                + Shortcut.separator + "W";
                                             clicked => { root.close-p1-tab(i); }
                                         }
                                         AppIcon {
@@ -1493,7 +1510,11 @@ callback create-table-commit();
                                     border-radius: Tokens.radius;
                                     background: p1-add-ta.has-hover ? Tokens.accent-tint : transparent;
                                     Text { text: "+"; color: p1-add-ta.has-hover ? Tokens.accent : Tokens.text-dim; horizontal-alignment: center; vertical-alignment: center; font-size: 16px; }
-                                    p1-add-ta := TouchArea { clicked => { root.new-tab-in-group(1); } }
+                                    p1-add-ta := TooltipArea {
+                                        tip: "New query tab  " + Shortcut.primary
+                                            + Shortcut.separator + "T";
+                                        clicked => { root.new-tab-in-group(1); }
+                                    }
                                 }
                                 Rectangle { horizontal-stretch: 1; }
                             }

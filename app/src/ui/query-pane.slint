@@ -9,7 +9,7 @@ import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow, DocRow, Re
 import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "palette.slint";
-import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton, FilterField, UnderlineSegment, DbBadge, Tooltip, Shortcut } from "components.slint";
+import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton, FilterField, UnderlineSegment, DbBadge, Tooltip, TooltipArea, Shortcut } from "components.slint";
 import { ScrollView, TextEdit, ComboBox } from "std-widgets.slint";
 import { AppIcon } from "icons.slint";
 
@@ -183,7 +183,8 @@ export component QueryPane inherits Rectangle {
                             font-size: Tokens.font-sm;
                             font-weight: 500;
                         }
-                        filter-ta := TouchArea {
+                        filter-ta := TooltipArea {
+                            tip: "Filter rows  " + Shortcut.primary + Shortcut.separator + "F";
                             clicked => { root.filter-open = !root.filter-open; }
                         }
                     }
@@ -213,6 +214,9 @@ export component QueryPane inherits Rectangle {
                     alignment: center;
                     TextButton {
                         text: root.browse-editor-open ? "Query ▾" : "Query ▸";
+                        tooltip: root.browse-editor-open
+                            ? "Hide the SQL editor for this table"
+                            : "Show the SQL editor for this table";
                         clicked => { root.browse-editor-open = !root.browse-editor-open; }
                     }
                 }
@@ -235,16 +239,26 @@ export component QueryPane inherits Rectangle {
                 }
                 VerticalLayout {
                     alignment: center;
-                    TextButton { text: "Copy"; clicked => { root.copy-results(); } }
+                    TextButton {
+                        text: "Copy";
+                        tooltip: "Copy every loaded row to the clipboard as TSV";
+                        clicked => { root.copy-results(); }
+                    }
                 }
                 VerticalLayout {
                     alignment: center;
-                    ExportButton { export(i) => { root.export-results(i); } }
+                    ExportButton {
+                        tooltip: "Export the rows to a file — CSV, JSON, TSV, SQL or Markdown";
+                        export(i) => { root.export-results(i); }
+                    }
                 }
                 VerticalLayout {
                     alignment: center;
                     TextButton {
                         text: root.sql-view-mode == 2 ? "Data" : "Chart";
+                        tooltip: root.sql-view-mode == 2
+                            ? "Back to the data grid"
+                            : "Chart the numeric columns of this result";
                         clicked => { root.sql-view-mode = root.sql-view-mode == 2 ? 0 : 2; }
                     }
                 }
@@ -252,6 +266,7 @@ export component QueryPane inherits Rectangle {
                     alignment: center;
                     SecondaryButton {
                         text: "+ Row";
+                        tooltip: "Add an empty row — commit to write it";
                         enabled: !root.read-only;
                         clicked => { root.add-row(); }
                     }
@@ -260,6 +275,8 @@ export component QueryPane inherits Rectangle {
                     alignment: center;
                     SecondaryButton {
                         text: "− Row";
+                        tooltip: "Mark the selected row for deletion  "
+                            + Shortcut.backspace + " / Del";
                         enabled: !root.read-only;
                         clicked => { root.mark-delete(); }
                     }
@@ -284,7 +301,11 @@ export component QueryPane inherits Rectangle {
                             size: 14px;
                             color: Tokens.text-dim;
                         }
-                        refresh-ta := TouchArea { clicked => { root.refresh-page(); } }
+                        refresh-ta := TooltipArea {
+                            tip: "Refresh this page of rows  " + Shortcut.primary
+                                + Shortcut.separator + "R";
+                            clicked => { root.refresh-page(); }
+                        }
                     }
                 }
             }
@@ -581,11 +602,31 @@ export component QueryPane inherits Rectangle {
                         vertical-alignment: center;
                     }
                     Rectangle { horizontal-stretch: 1; }
-                    TextButton { text: root.editor-collapsed ? "Editor ▸" : "Editor ▾"; clicked => { root.editor-collapsed = !root.editor-collapsed; } }
-                    if !root.browse-mode: TextButton { text: root.filter-open ? "Filter ▲" : "Filter ▼"; clicked => { root.filter-open = !root.filter-open; } }
-                    TextButton { text: "Copy"; clicked => { root.copy-results(); } }
-                    ExportButton { export(i) => { root.export-results(i); } }
-                    TextButton { text: "Chart"; clicked => { root.sql-view-mode = 2; } }
+                    TextButton {
+                        text: root.editor-collapsed ? "Editor ▸" : "Editor ▾";
+                        tooltip: root.editor-collapsed
+                            ? "Show the SQL editor" : "Collapse the SQL editor";
+                        clicked => { root.editor-collapsed = !root.editor-collapsed; }
+                    }
+                    if !root.browse-mode: TextButton {
+                        text: root.filter-open ? "Filter ▲" : "Filter ▼";
+                        tooltip: "Toggle the per-column filter row";
+                        clicked => { root.filter-open = !root.filter-open; }
+                    }
+                    TextButton {
+                        text: "Copy";
+                        tooltip: "Copy every loaded row to the clipboard as TSV";
+                        clicked => { root.copy-results(); }
+                    }
+                    ExportButton {
+                        tooltip: "Export the rows to a file — CSV, JSON, TSV, SQL or Markdown";
+                        export(i) => { root.export-results(i); }
+                    }
+                    TextButton {
+                        text: "Chart";
+                        tooltip: "Chart the numeric columns of this result";
+                        clicked => { root.sql-view-mode = 2; }
+                    }
                 }
                 // result tabs — appear once ⌘\ has spawned a second result.
                 // Wrapped in a ScrollView since the row can outgrow the panel

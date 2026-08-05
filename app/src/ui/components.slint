@@ -69,6 +69,23 @@ export global Shortcut {
     in-out property <string> backspace: "⌫";
 }
 
+// TouchArea that reports its own hover to the shared Tooltip overlay, for the
+// bare Rectangle + TouchArea controls (tab chips, toolbar chips) that aren't
+// one of the button components below.
+export component TooltipArea inherits TouchArea {
+    in property <string> tip;
+    changed has-hover => {
+        if self.has-hover && root.tip != "" {
+            Tooltip.text = root.tip;
+            Tooltip.x = self.absolute-position.x + self.width / 2;
+            Tooltip.y = self.absolute-position.y + self.height + 4px;
+            Tooltip.shown = true;
+        } else if Tooltip.text == root.tip {
+            Tooltip.shown = false;
+        }
+    }
+}
+
 // Dropdown select: shows the current value + a ▾ caret so it reads as a
 // picker even when closed, then a click opens a themed option list. Replaces
 // std-widgets ComboBox, which rendered as a blank borderless box in this theme.
@@ -286,6 +303,7 @@ export component DangerButton inherits Rectangle {
 export component TextButton inherits Rectangle {
     in property <string> text;
     in property <bool> active: false;
+    in property <string> tooltip;            // optional hover label
     callback clicked;
     height: Tokens.button-h;
     width: label.preferred-width + 2 * Tokens.sp2;
@@ -298,13 +316,17 @@ export component TextButton inherits Rectangle {
         font-size: Tokens.font-sm;
         font-weight: 500;
     }
-    ta := TouchArea { clicked => { root.clicked(); } }
+    ta := TooltipArea {
+        tip: root.tooltip;
+        clicked => { root.clicked(); }
+    }
 }
 
 // Export dropdown: sized/styled exactly like TextButton so it aligns and
 // spaces with the other toolbar buttons, but opens a format menu. `export(i)`
 // reports the chosen row index into the option list below.
 export component ExportButton inherits Rectangle {
+    in property <string> tooltip;            // optional hover label
     callback export(int);
     height: Tokens.button-h;
     width: label.preferred-width + 2 * Tokens.sp2;
@@ -360,7 +382,10 @@ export component ExportButton inherits Rectangle {
             }
         }
     }
-    ta := TouchArea { clicked => { menu.show(); } }
+    ta := TooltipArea {
+        tip: root.tooltip;
+        clicked => { menu.show(); }
+    }
 }
 
 // Form text input (conn form): Tokens-styled card box, optional password mode.
@@ -456,6 +481,7 @@ export component BreadcrumbChip inherits Rectangle {
     in property <color> dot-color: Tokens.ok;
     in property <bool> caret: false;
     in property <bool> mono: false;
+    in property <string> tooltip;            // optional hover label
     callback clicked;
     height: Tokens.button-h + 2px;
     width: content.preferred-width + 2 * Tokens.sp3;
@@ -491,7 +517,10 @@ export component BreadcrumbChip inherits Rectangle {
             vertical-alignment: center;
         }
     }
-    ta := TouchArea { clicked => { root.clicked(); } }
+    ta := TooltipArea {
+        tip: root.tooltip;
+        clicked => { root.clicked(); }
+    }
 }
 
 // Underline segment control (Data/Structure/Indexes · Data/Message/Chart).

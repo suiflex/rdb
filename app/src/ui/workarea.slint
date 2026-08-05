@@ -629,6 +629,7 @@ export component WorkArea inherits Rectangle {
                     alignment: center;
                     SecondaryButton {
                         text: "Discard";
+                        tooltip: "Throw away every pending edit in this grid";
                         height: 22px;
                         clicked => {
                             if (root.split && root.active-pane == 1) { root.p1-discard-edits(); } else { root.discard-edits(); }
@@ -639,6 +640,8 @@ export component WorkArea inherits Rectangle {
                     alignment: center;
                     PrimaryButton {
                         text: "Commit  " + Shortcut.primary + Shortcut.separator + "S";
+                        tooltip: "Write the pending edits to the database  "
+                            + Shortcut.primary + Shortcut.separator + "S";
                         height: 22px;
                         clicked => {
                             if (root.split && root.active-pane == 1) { root.p1-commit-edits(); } else { root.commit-edits(); }
