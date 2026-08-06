@@ -4068,7 +4068,25 @@ fn main() -> Result<(), slint::PlatformError> {
                     match (it.next(), it.next()) {
                         (Some(c), None) => match c {
                             '\u{8}' => {
+                                // Delete both sides of an empty pair in one
+                                // keystroke, mirroring the auto-close below.
+                                let before = ed.col.checked_sub(1).and_then(|c| {
+                                    ed.lines[ed.line].chars().nth(c)
+                                });
+                                let after = ed.lines[ed.line].chars().nth(ed.col);
+                                let is_empty_pair = ed.selection().is_none()
+                                    && matches!(
+                                        (before, after),
+                                        (Some('('), Some(')'))
+                                            | (Some('['), Some(']'))
+                                            | (Some('{'), Some('}'))
+                                            | (Some('"'), Some('"'))
+                                            | (Some('\''), Some('\''))
+                                    );
                                 ed.backspace();
+                                if is_empty_pair {
+                                    ed.delete();
+                                }
                                 true
                             }
                             '\u{7f}' => {
@@ -4111,6 +4129,26 @@ fn main() -> Result<(), slint::PlatformError> {
                             }
                             '\u{f72b}' => {
                                 ed.end();
+                                true
+                            }
+                            // Skip over an already-typed closer/quote instead
+                            // of inserting a duplicate.
+                            c @ (')' | ']' | '}' | '"' | '\'')
+                                if ed.selection().is_none()
+                                    && ed.lines[ed.line].chars().nth(ed.col) == Some(c) =>
+                            {
+                                ed.move_cursor(0, 1);
+                                true
+                            }
+                            c @ ('(' | '[' | '{' | '"' | '\'') => {
+                                let closer = match c {
+                                    '(' => ')',
+                                    '[' => ']',
+                                    '{' => '}',
+                                    other => other, // quotes close themselves
+                                };
+                                ed.insert(&format!("{c}{closer}"));
+                                ed.move_cursor(0, -1);
                                 true
                             }
                             c if !c.is_control() => {
