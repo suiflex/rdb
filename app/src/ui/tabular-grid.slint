@@ -304,7 +304,10 @@ export component TabularGrid inherits Rectangle {
                         // face — an estimate, not a measurement, so the editor can
                         // size itself to the value without a layout round-trip.
                         // Bump the constant if short values start wrapping.
-                        property <length> text-w: cell.text.character-count * 7px + 2 * Tokens.sp2;
+                        // Tracks the live in-progress text (root.editing-value),
+                        // not the last-committed cell.text, so the box keeps
+                        // growing as the user types instead of clipping input.
+                        property <length> text-w: root.editing-value.character-count * 7px + 2 * Tokens.sp2;
                         // Never narrower than the cell, never wider than the value
                         // needs, still capped so a huge JSON blob can't span the pane.
                         property <length> editor-w: self.compact-editor ? parent.width
