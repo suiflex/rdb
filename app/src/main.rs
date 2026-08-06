@@ -4070,9 +4070,10 @@ fn main() -> Result<(), slint::PlatformError> {
                             '\u{8}' => {
                                 // Delete both sides of an empty pair in one
                                 // keystroke, mirroring the auto-close below.
-                                let before = ed.col.checked_sub(1).and_then(|c| {
-                                    ed.lines[ed.line].chars().nth(c)
-                                });
+                                let before = ed
+                                    .col
+                                    .checked_sub(1)
+                                    .and_then(|c| ed.lines[ed.line].chars().nth(c));
                                 let after = ed.lines[ed.line].chars().nth(ed.col);
                                 let is_empty_pair = ed.selection().is_none()
                                     && matches!(
