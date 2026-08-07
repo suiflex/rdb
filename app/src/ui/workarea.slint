@@ -51,6 +51,9 @@ export component WorkArea inherits Rectangle {
     in property <string> conn-status;
     in-out property <int> selected-row: 0;
     in-out property <int> selected-col: -1;
+    in property <int> range-anchor-row: -1;
+    callback row-press(int, bool);
+    callback row-drag(int);
     in property <int> editing-row: -1;
     in property <int> editing-col: -1;
     in-out property <bool> show-structure: false;
@@ -177,6 +180,9 @@ export component WorkArea inherits Rectangle {
     in property <[string]> p1-detail-pretty;
     in-out property <int> p1-selected-row;
     in-out property <int> p1-selected-col: -1;
+    in property <int> p1-range-anchor-row: -1;
+    callback p1-row-press(int, bool);
+    callback p1-row-drag(int);
     in property <int> p1-editing-row: -1;
     in property <int> p1-editing-col: -1;
     in-out property <string> p1-editing-value;
@@ -448,6 +454,7 @@ export component WorkArea inherits Rectangle {
             detail-pretty: root.grid-detail-pretty;
             selected-row <=> root.selected-row;
             selected-col <=> root.selected-col;
+            range-anchor-row: root.range-anchor-row;
             editing-row: root.editing-row;
             editing-col: root.editing-col;
             editing-value <=> root.editing-value;
@@ -457,6 +464,8 @@ export component WorkArea inherits Rectangle {
             set-col-filter(i, t) => { root.set-col-filter(i, t); }
             resize-col(i, d) => { root.resize-col(i, d); }
             select-cell(r, c) => { root.select-cell(r, c); }
+            row-press(r, shift) => { root.row-press(r, shift); }
+            row-drag(r) => { root.row-drag(r); }
             edit-cell(r, c) => { root.edit-cell(r, c); }
             cell-edited(r, c, t) => { root.cell-edited(r, c, t); }
             cell-advance(r, c, t, fwd) => { root.cell-advance(r, c, t, fwd); }
@@ -581,6 +590,7 @@ export component WorkArea inherits Rectangle {
                 detail-pretty: root.p1-detail-pretty;
                 selected-row <=> root.p1-selected-row;
                 selected-col <=> root.p1-selected-col;
+                range-anchor-row: root.p1-range-anchor-row;
                 editing-row: root.p1-editing-row;
                 editing-col: root.p1-editing-col;
                 editing-value <=> root.p1-editing-value;
@@ -590,6 +600,8 @@ export component WorkArea inherits Rectangle {
                 set-col-filter(i, t) => { root.p1-set-col-filter(i, t); }
                 resize-col(i, d) => { root.p1-resize-col(i, d); }
                 select-cell(r, c) => { root.p1-select-cell(r, c); }
+                row-press(r, shift) => { root.p1-row-press(r, shift); }
+                row-drag(r) => { root.p1-row-drag(r); }
                 edit-cell(r, c) => { root.p1-edit-cell(r, c); }
                 cell-edited(r, c, t) => { root.p1-cell-edited(r, c, t); }
                 cell-advance(r, c, t, fwd) => { root.p1-cell-advance(r, c, t, fwd); }

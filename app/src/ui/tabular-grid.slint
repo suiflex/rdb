@@ -23,6 +23,12 @@ export component TabularGrid inherits Rectangle {
     callback set-col-filter(int, string);   // (display col, raw filter text)
     in-out property <int> selected-row: 0;
     in-out property <int> selected-col: -1;
+    // Row where the current drag/shift-click range started, -1 = no range
+    // active. Rust owns the value (mirrors selected-row); a range is drawn
+    // whenever this differs from selected-row.
+    in property <int> range-anchor-row: -1;
+    callback row-press(int, bool);          // (row, shift-held) → mouse/touch down on a cell
+    callback row-drag(int);                 // row currently under the pointer while dragging
     // inline edit overlay: row/col currently being edited, -1 = none
     in property <int> editing-row: -1;
     in property <int> editing-col: -1;
@@ -223,9 +229,13 @@ export component TabularGrid inherits Rectangle {
             height: Tokens.grid-row-h;
             property <bool> row-deleted: root.cells[r * root.col-count].state == 2;
             property <bool> row-inserted: root.cells[r * root.col-count].state == 3;
+            property <bool> in-range: root.range-anchor-row >= 0
+                && r >= min(root.range-anchor-row, root.selected-row)
+                && r <= max(root.range-anchor-row, root.selected-row);
             background: row-deleted ? Tokens.error-tint
                 : row-inserted ? Tokens.ok-tint
                 : r == root.selected-row ? Tokens.accent-tint.with-alpha(0.55)
+                : in-range ? Tokens.accent-tint.with-alpha(0.3)
                 : row-ta.has-hover ? Tokens.chrome.with-alpha(0.6)
                 : transparent;
             // Empty: the Flickables own the wheel now; this only tracks hover.
@@ -258,10 +268,27 @@ export component TabularGrid inherits Rectangle {
                     clip: !(r == root.editing-row && c == root.editing-col);
                     background: transparent;
                     cell-ta := TouchArea {
+                        // Row under the pointer, even once the drag has moved past
+                        // this cell's own row bounds (mouse-y then falls outside
+                        // 0..grid-row-h) — same idea as the header drag/resize math
+                        // above, just row-indexed instead of pixel-indexed.
+                        property <int> drag-row: clamp(
+                            r + floor(self.mouse-y / Tokens.grid-row-h),
+                            0, root.row-count - 1);
                         clicked => { root.select-cell(r, c); }
                         // Stash the value so the read-only inspector card can show
                         // it directly (editable grids reopen the inline overlay).
                         double-clicked => { root.editing-value = cell.text; root.edit-cell(r, c); }
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down) {
+                                root.row-press(r, e.modifiers.shift);
+                            }
+                        }
+                        moved => {
+                            if (self.pressed) {
+                                root.row-drag(self.drag-row);
+                            }
+                        }
                     }
                     if !is-bar: Text {
                         vertical-alignment: center;

@@ -295,6 +295,9 @@ callback create-table-commit();
     in property <string> result-status;
     in-out property <int> selected-row: 0;
     in-out property <int> selected-col: -1;
+    in-out property <int> range-anchor-row: -1;
+    callback row-press(int, bool);
+    callback row-drag(int);
     in property <int> editing-row: -1;
     in property <int> editing-col: -1;
     in-out property <string> editing-value;
@@ -489,6 +492,9 @@ callback create-table-commit();
     in property <[string]> p1-grid-col-filters;
     in-out property <int> p1-selected-row;
     in-out property <int> p1-selected-col: -1;
+    in-out property <int> p1-range-anchor-row: -1;
+    callback p1-row-press(int, bool);
+    callback p1-row-drag(int);
     in property <int> p1-editing-row: -1;
     in property <int> p1-editing-col: -1;
     in-out property <string> p1-editing-value;
@@ -1621,6 +1627,9 @@ callback create-table-commit();
                         p1-detail-pretty: root.p1-detail-pretty;
                         p1-selected-row <=> root.p1-selected-row;
                         p1-selected-col <=> root.p1-selected-col;
+                        p1-range-anchor-row <=> root.p1-range-anchor-row;
+                        p1-row-press(r, shift) => { root.p1-row-press(r, shift); }
+                        p1-row-drag(r) => { root.p1-row-drag(r); }
                         p1-editing-row: root.p1-editing-row;
                         p1-editing-col: root.p1-editing-col;
                         p1-editing-value <=> root.p1-editing-value;
@@ -1755,6 +1764,9 @@ callback create-table-commit();
                         find-close() => { root.find-close(); }
                         selected-row: root.selected-row;
                         selected-col: root.selected-col;
+                        range-anchor-row: root.range-anchor-row;
+                        row-press(r, shift) => { root.row-press(r, shift); }
+                        row-drag(r) => { root.row-drag(r); }
                         editing-row: root.editing-row;
                         editing-col: root.editing-col;
                         editing-value <=> root.editing-value;
