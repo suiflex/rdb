@@ -2470,6 +2470,43 @@ fn set_p_selected_row(w: &MainWindow, pane: usize, row: i32) {
         w.set_p1_selected_row(row);
     }
 }
+fn set_p_range_anchor(w: &MainWindow, pane: usize, row: i32) {
+    if pane == 0 {
+        w.set_range_anchor_row(row);
+    } else {
+        w.set_p1_range_anchor_row(row);
+    }
+}
+fn set_p_range_anchor_col(w: &MainWindow, pane: usize, col: i32) {
+    if pane == 0 {
+        w.set_range_anchor_col(col);
+    } else {
+        w.set_p1_range_anchor_col(col);
+    }
+}
+/// Slice `grid` down to the pane's finalized drag/shift-click range, if any
+/// is active and still in bounds; otherwise return the grid unchanged. A
+/// range is always exactly one column wide (the column the drag started
+/// in) — see the `range-anchor-col` doc comment in tabular-grid.slint.
+fn range_sliced_grid(
+    grid: &model::GridModel,
+    pane: usize,
+) -> (model::GridModel, Option<(usize, usize, usize)>) {
+    let range = SELECTED_RANGE.with(|s| s.borrow()[pane]);
+    match range {
+        Some((start, end, col)) if end < grid.rows.len() && col < grid.columns.len() => (
+            model::GridModel {
+                columns: vec![grid.columns[col].clone()],
+                rows: grid.rows[start..=end]
+                    .iter()
+                    .map(|row| vec![row[col].clone()])
+                    .collect(),
+            },
+            Some((start, end, col)),
+        ),
+        _ => (grid.clone(), None),
+    }
+}
 /// Per-column indented JSON for one grid row, empty where the value isn't JSON.
 /// Feeds the Details panel so a JSON cell reads as formatted text there too.
 fn detail_pretty_row(g: &model::GridModel, row: usize) -> Vec<SharedString> {
@@ -2580,9 +2617,24 @@ fn restore_grid_state(w: &MainWindow, pane: usize, g: &GroupRuntime, sr: &Stored
     *g.displayed_grid.lock().unwrap() = view_grid(&filtered);
     apply_result(w, pane, filtered);
 }
+/// What activating (choose/double-click) a non-section palette row does.
+/// Index-aligned with the `Vec<PaletteItem>` `build_palette_items` returns —
+/// section header rows get `None`.
+#[derive(Debug, Clone)]
+enum PaletteAction {
+    None,
+    Connect(usize),
+    OpenTable(SharedString, SharedString),
+    OpenFunction(SharedString),
+    OpenSavedQuery(String, usize),
+    OpenRecent(usize),
+}
+
 /// Build the ⌘K palette model, grouped GitHub-style under non-selectable
 /// "section" header rows. `needle` (lowercase) filters both groups; empty
-/// shows everything. Empty groups drop their header.
+/// shows everything. Empty groups drop their header. Returns the flat item
+/// list alongside an index-aligned action list `on_palette_choose` dispatches
+/// on.
 fn build_palette_items(
     names: &[(
         String,
@@ -2593,8 +2645,10 @@ fn build_palette_items(
         slint::Color,
     )],
     w: &MainWindow,
+    saved_queries: &[(String, String)],
+    recent_queries: &[HistoryEntry],
     needle: &str,
-) -> Vec<PaletteItem> {
+) -> (Vec<PaletteItem>, Vec<PaletteAction>) {
     let section = |t: &str| PaletteItem {
         label: t.into(),
         kind: "section".into(),
@@ -2609,13 +2663,16 @@ fn build_palette_items(
         is_group_end: false,
     };
     let mut items: Vec<PaletteItem> = Vec::new();
+    let mut actions: Vec<PaletteAction> = Vec::new();
     let conns: Vec<_> = names
         .iter()
-        .filter(|(n, ..)| needle.is_empty() || n.to_lowercase().contains(needle))
+        .enumerate()
+        .filter(|(_, (n, ..))| needle.is_empty() || n.to_lowercase().contains(needle))
         .collect();
     if !conns.is_empty() {
         items.push(section("Connections"));
-        for (n, badge, color, has_custom_color, env_tag_label, env_tag_color) in conns {
+        actions.push(PaletteAction::None);
+        for (idx, (n, badge, color, has_custom_color, env_tag_label, env_tag_color)) in conns {
             items.push(PaletteItem {
                 label: n.clone().into(),
                 kind: (*badge).into(),
@@ -2629,21 +2686,26 @@ fn build_palette_items(
                 expanded: false,
                 is_group_end: false,
             });
+            actions.push(PaletteAction::Connect(idx));
         }
     }
-    let tables: Vec<SharedString> = w
-        .get_schema_tree()
-        .iter()
-        .filter(|n| {
-            n.kind == "table" && (needle.is_empty() || n.label.to_lowercase().contains(needle))
-        })
-        .map(|n| n.label.clone())
-        .collect();
+    let schema_tree = w.get_schema_tree();
+    let by_kind = |kind: &'static str| -> Vec<(SharedString, SharedString)> {
+        schema_tree
+            .iter()
+            .filter(|n| {
+                n.kind == kind && (needle.is_empty() || n.label.to_lowercase().contains(needle))
+            })
+            .map(|n| (n.db.clone(), n.label.clone()))
+            .collect()
+    };
+    let tables = by_kind("table");
     if !tables.is_empty() {
         items.push(section("Tables"));
-        for label in tables {
+        actions.push(PaletteAction::None);
+        for (db, label) in tables {
             items.push(PaletteItem {
-                label,
+                label: label.clone(),
                 kind: "table".into(),
                 sub: SharedString::default(),
                 local: false,
@@ -2655,9 +2717,102 @@ fn build_palette_items(
                 expanded: false,
                 is_group_end: false,
             });
+            actions.push(PaletteAction::OpenTable(db, label));
         }
     }
-    items
+    let views = by_kind("view");
+    if !views.is_empty() {
+        items.push(section("Views"));
+        actions.push(PaletteAction::None);
+        for (db, label) in views {
+            items.push(PaletteItem {
+                label: label.clone(),
+                kind: "view".into(),
+                sub: SharedString::default(),
+                local: false,
+                color: theme::accent_or_default(""),
+                has_custom_color: false,
+                env_tag_label: SharedString::default(),
+                env_tag_color: theme::accent_or_default(""),
+                group: SharedString::default(),
+                expanded: false,
+                is_group_end: false,
+            });
+            actions.push(PaletteAction::OpenTable(db, label));
+        }
+    }
+    let functions = by_kind("function");
+    if !functions.is_empty() {
+        items.push(section("Functions"));
+        actions.push(PaletteAction::None);
+        for (_db, label) in functions {
+            items.push(PaletteItem {
+                label: label.clone(),
+                kind: "function".into(),
+                sub: SharedString::default(),
+                local: false,
+                color: theme::accent_or_default(""),
+                has_custom_color: false,
+                env_tag_label: SharedString::default(),
+                env_tag_color: theme::accent_or_default(""),
+                group: SharedString::default(),
+                expanded: false,
+                is_group_end: false,
+            });
+            actions.push(PaletteAction::OpenFunction(label));
+        }
+    }
+    let saved: Vec<_> = saved_queries
+        .iter()
+        .enumerate()
+        .filter(|(_, (n, _))| needle.is_empty() || n.to_lowercase().contains(needle))
+        .collect();
+    if !saved.is_empty() {
+        items.push(section("Saved Queries"));
+        actions.push(PaletteAction::None);
+        for (idx, (name, sql)) in saved {
+            items.push(PaletteItem {
+                label: name.clone().into(),
+                kind: "command".into(),
+                sub: recent_preview(sql).into(),
+                local: false,
+                color: theme::accent_or_default(""),
+                has_custom_color: false,
+                env_tag_label: SharedString::default(),
+                env_tag_color: theme::accent_or_default(""),
+                group: SharedString::default(),
+                expanded: false,
+                is_group_end: false,
+            });
+            actions.push(PaletteAction::OpenSavedQuery(name.clone(), idx));
+        }
+    }
+    let recent: Vec<_> = recent_queries
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| needle.is_empty() || e.sql.to_lowercase().contains(needle))
+        .collect();
+    if !recent.is_empty() {
+        items.push(section("Recent History"));
+        actions.push(PaletteAction::None);
+        for (idx, entry) in recent {
+            items.push(PaletteItem {
+                label: recent_preview(&entry.sql).into(),
+                kind: "command".into(),
+                sub: entry.engine.clone().unwrap_or_default().into(),
+                local: false,
+                color: theme::accent_or_default(""),
+                has_custom_color: false,
+                env_tag_label: SharedString::default(),
+                env_tag_color: theme::accent_or_default(""),
+                group: SharedString::default(),
+                expanded: false,
+                is_group_end: false,
+            });
+            actions.push(PaletteAction::OpenRecent(idx));
+        }
+    }
+    (items, actions)
 }
 fn set_p_editing(w: &MainWindow, pane: usize, row: i32, col: i32) {
     if pane == 0 {
@@ -3101,6 +3256,17 @@ thread_local! {
     /// thread_local suffices; no cross-tab persistence is needed.
     static DOC_TREES: std::cell::RefCell<[(Vec<model::DocNode>, HashSet<String>); 2]> =
         std::cell::RefCell::new(Default::default());
+    /// Finalized (start, end) row range from the last drag/shift-click in the
+    /// results grid, per pane. `None` once a plain click lands with no range,
+    /// or once a fresh result is presented — Copy falls back to the full grid
+    /// then.
+    static SELECTED_RANGE: std::cell::RefCell<[Option<(usize, usize, usize)>; 2]> =
+        std::cell::RefCell::new(Default::default());
+    /// What each row of the currently displayed ⌘K palette list does when
+    /// chosen, rebuilt alongside `palette_items` every open/filter — see
+    /// `build_palette_items`.
+    static PALETTE_ACTIONS: std::cell::RefCell<Vec<PaletteAction>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Compute the visible JSON-tree rows for the current collapse state and push
@@ -3279,6 +3445,9 @@ fn present_view(
     // Details gate `(selected-row + 1) * col-count <= cells.length` then evaluates
     // false — so the panel silently vanishes even while its toggle is on.
     set_p_selected_row(w, pane, 0);
+    set_p_range_anchor(w, pane, -1);
+    set_p_range_anchor_col(w, pane, -1);
+    SELECTED_RANGE.with(|s| s.borrow_mut()[pane] = None);
     // Seed the Details JSON preview for the first row of the new result.
     if let Some(g) = displayed_grid.lock().unwrap().as_ref() {
         refresh_detail_pretty(w, pane, g, 0);
@@ -7362,6 +7531,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 // is what the grid shows (TablePlus semantics). Redis/Mongo
                 // take the whole text as a single command.
                 let mut split_views: Vec<model::ResultView> = Vec::new();
+                let mut split_verbs: Vec<Option<&'static str>> = Vec::new();
                 let (outcome, n_stmts, last_stmt) = match picked.as_ref() {
                     Some((engine, driver)) => {
                         let stmts = if matches!(
@@ -7422,6 +7592,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             if split {
                                 if let Ok(rs) = &out {
                                     split_views.push(model::to_result_view(rs));
+                                    split_verbs.push(model::sql_verb(&s));
                                 }
                             }
                         }
@@ -7440,6 +7611,21 @@ fn main() -> Result<(), slint::PlatformError> {
                 let view = outcome.as_ref().ok().map(model::to_result_view);
                 let model_ms = model_started.elapsed().as_millis() as u64;
                 let elapsed_ms = started.elapsed().as_millis().max(1) as u64;
+                // Only a genuine `Ok(rs)` reaches here — the "error: ..." Affected
+                // variant used elsewhere for failures is built on a separate path
+                // that never calls `to_result_view`, so any Affected we see below
+                // is always a real "N rows affected" from a successful mutation.
+                let view = view.map(|v| match v {
+                    model::ResultView::Affected(status) => {
+                        let verb = last_stmt.as_deref().and_then(model::sql_verb);
+                        model::ResultView::Affected(model::format_affected(
+                            &status,
+                            verb,
+                            &format!("{elapsed_ms} ms"),
+                        ))
+                    }
+                    other => other,
+                });
                 let err = outcome.err();
                 // A hand-typed `SELECT ... FROM t` result has no row identity by
                 // default. When it's an unambiguous single-table select (no
@@ -7515,7 +7701,8 @@ fn main() -> Result<(), slint::PlatformError> {
                                 if split && split_views.len() >= 2 {
                                     let stored: Vec<StoredResult> = split_views
                                         .iter()
-                                        .map(|vw| {
+                                        .zip(split_verbs.iter())
+                                        .map(|(vw, verb)| {
                                             let rows = match vw {
                                                 model::ResultView::Table(g) => g.rows.len(),
                                                 model::ResultView::Documents(d) => {
@@ -7524,8 +7711,20 @@ fn main() -> Result<(), slint::PlatformError> {
                                                 model::ResultView::Affected(_) => 0,
                                             }
                                                 as u64;
+                                            let vw = match vw {
+                                                model::ResultView::Affected(status) => {
+                                                    model::ResultView::Affected(
+                                                        model::format_affected(
+                                                            status,
+                                                            *verb,
+                                                            &format!("{elapsed_ms} ms"),
+                                                        ),
+                                                    )
+                                                }
+                                                other => other.clone(),
+                                            };
                                             StoredResult {
-                                                view: vw.clone(),
+                                                view: vw,
                                                 meta: query_timing_meta(
                                                     rows, 1, elapsed_ms, queue_ms, driver_ms,
                                                     model_ms,
@@ -8551,11 +8750,20 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(grid) = displayed_grid.lock().unwrap().clone() else {
                 return;
             };
+            let (to_copy, range) = range_sliced_grid(&grid, 0);
             use copypasta::ClipboardProvider;
             let msg = match copypasta::ClipboardContext::new()
-                .and_then(|mut cb| cb.set_contents(export::to_tsv(&grid)))
+                .and_then(|mut cb| cb.set_contents(export::to_tsv(&to_copy)))
             {
-                Ok(()) => format!("copied {} rows", grid.rows.len()),
+                Ok(()) => match range {
+                    Some((start, end, col)) => format!(
+                        "copied {} of {} rows, column {}",
+                        end - start + 1,
+                        grid.rows.len(),
+                        grid.columns[col].name
+                    ),
+                    None => format!("copied {} rows", grid.rows.len()),
+                },
                 Err(e) => format!("copy failed: {e}"),
             };
             w.set_results_meta(SharedString::from(msg));
@@ -8722,6 +8930,40 @@ fn main() -> Result<(), slint::PlatformError> {
                 if let Some(g) = panes[1].displayed_grid.lock().unwrap().as_ref() {
                     refresh_detail_pretty(&w, 1, g, row);
                 }
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_p1_row_press(move |row, col, shift| {
+            if let Some(w) = weak.upgrade() {
+                if !shift || w.get_p1_range_anchor_row() < 0 {
+                    set_p_range_anchor(&w, 1, row);
+                    set_p_range_anchor_col(&w, 1, col);
+                }
+                set_p_selected_row(&w, 1, row);
+                w.set_p1_selected_col(col);
+                SELECTED_RANGE.with(|s| s.borrow_mut()[1] = None);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_p1_row_drag(move |row| {
+            if let Some(w) = weak.upgrade() {
+                set_p_selected_row(&w, 1, row);
+                let anchor = w.get_p1_range_anchor_row();
+                let anchor_col = w.get_p1_range_anchor_col();
+                SELECTED_RANGE.with(|s| {
+                    s.borrow_mut()[1] =
+                        (anchor >= 0 && anchor != row && anchor_col >= 0).then(|| {
+                            (
+                                anchor.min(row) as usize,
+                                anchor.max(row) as usize,
+                                anchor_col as usize,
+                            )
+                        });
+                });
             }
         });
     }
@@ -9003,11 +9245,20 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(grid) = panes[1].displayed_grid.lock().unwrap().clone() else {
                 return;
             };
+            let (to_copy, range) = range_sliced_grid(&grid, 1);
             use copypasta::ClipboardProvider;
             let msg = match copypasta::ClipboardContext::new()
-                .and_then(|mut cb| cb.set_contents(export::to_tsv(&grid)))
+                .and_then(|mut cb| cb.set_contents(export::to_tsv(&to_copy)))
             {
-                Ok(()) => format!("copied {} rows", grid.rows.len()),
+                Ok(()) => match range {
+                    Some((start, end, col)) => format!(
+                        "copied {} of {} rows, column {}",
+                        end - start + 1,
+                        grid.rows.len(),
+                        grid.columns[col].name
+                    ),
+                    None => format!("copied {} rows", grid.rows.len()),
+                },
                 Err(e) => format!("copy failed: {e}"),
             };
             set_p_results_meta(&w, 1, SharedString::from(msg));
@@ -10571,6 +10822,40 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         });
     }
+    {
+        let weak = window.as_weak();
+        window.on_row_press(move |row, col, shift| {
+            if let Some(w) = weak.upgrade() {
+                if !shift || w.get_range_anchor_row() < 0 {
+                    set_p_range_anchor(&w, 0, row);
+                    set_p_range_anchor_col(&w, 0, col);
+                }
+                set_p_selected_row(&w, 0, row);
+                w.set_selected_col(col);
+                SELECTED_RANGE.with(|s| s.borrow_mut()[0] = None);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_row_drag(move |row| {
+            if let Some(w) = weak.upgrade() {
+                set_p_selected_row(&w, 0, row);
+                let anchor = w.get_range_anchor_row();
+                let anchor_col = w.get_range_anchor_col();
+                SELECTED_RANGE.with(|s| {
+                    s.borrow_mut()[0] =
+                        (anchor >= 0 && anchor != row && anchor_col >= 0).then(|| {
+                            (
+                                anchor.min(row) as usize,
+                                anchor.max(row) as usize,
+                                anchor_col as usize,
+                            )
+                        });
+                });
+            }
+        });
+    }
 
     // Repaint the grid with the buffer's pending edits overlaid, and refresh
     // the footer badge. UI-thread helper shared by every edit handler.
@@ -11099,6 +11384,8 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let store = store.clone();
+        let saved_queries = saved_queries.clone();
+        let recent_queries = recent_queries.clone();
         window.on_toggle_palette(move || {
             if let Some(w) = weak.upgrade() {
                 let opening = !w.get_palette_open();
@@ -11127,8 +11414,15 @@ fn main() -> Result<(), slint::PlatformError> {
                             )
                         })
                         .collect();
-                    let items = build_palette_items(&names, &w, "");
+                    let (items, actions) = build_palette_items(
+                        &names,
+                        &w,
+                        &saved_queries.borrow(),
+                        &recent_queries.borrow(),
+                        "",
+                    );
                     w.set_palette_items(ModelRc::from(Rc::new(VecModel::from(items))));
+                    PALETTE_ACTIONS.with(|s| *s.borrow_mut() = actions);
                 }
             }
         });
@@ -11138,6 +11432,8 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let store = store.clone();
+        let saved_queries = saved_queries.clone();
+        let recent_queries = recent_queries.clone();
         window.on_palette_filter(move |q| {
             if let Some(w) = weak.upgrade() {
                 let names: Vec<(
@@ -11163,18 +11459,40 @@ fn main() -> Result<(), slint::PlatformError> {
                         )
                     })
                     .collect();
-                let items = build_palette_items(&names, &w, &q.to_lowercase());
+                let (items, actions) = build_palette_items(
+                    &names,
+                    &w,
+                    &saved_queries.borrow(),
+                    &recent_queries.borrow(),
+                    &q.to_lowercase(),
+                );
                 w.set_palette_items(ModelRc::from(Rc::new(VecModel::from(items))));
+                PALETTE_ACTIONS.with(|s| *s.borrow_mut() = actions);
             }
         });
     }
 
-    // ----- palette choose (MVP: just closes) -----
+    // ----- palette choose -----
     {
         let weak = window.as_weak();
-        window.on_palette_choose(move |_idx| {
+        window.on_palette_choose(move |idx| {
             if let Some(w) = weak.upgrade() {
                 w.set_palette_open(false);
+                let action = PALETTE_ACTIONS
+                    .with(|s| s.borrow().get(idx.max(0) as usize).cloned())
+                    .unwrap_or(PaletteAction::None);
+                match action {
+                    PaletteAction::None => {}
+                    PaletteAction::Connect(i) => w.invoke_connect_clicked(i as i32),
+                    PaletteAction::OpenTable(db, label) => w.invoke_open_table(db, label),
+                    PaletteAction::OpenFunction(name) => w.invoke_open_function(name),
+                    PaletteAction::OpenSavedQuery(name, idx) => {
+                        w.invoke_open_query(SharedString::from(name), idx as i32)
+                    }
+                    PaletteAction::OpenRecent(idx) => {
+                        w.invoke_open_query(SharedString::default(), idx as i32)
+                    }
+                }
             }
         });
     }

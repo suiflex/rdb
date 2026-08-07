@@ -193,9 +193,11 @@ jobs:
               --body "Automated release-data refresh for ${{ github.ref_name }}.")"
             pr_number="${pr_url##*/}"
           fi
-          # Merge once GitHub has computed mergeability (no auto-merge on this repo).
+          # Merge once GitHub has computed mergeability (no auto-merge on this
+          # repo). Plain merge commit, not --squash: this repo's ruleset has
+          # squash merges disabled entirely (allow_squash_merge: false).
           for i in 1 2 3 4 5 6; do
-            if gh pr merge "$pr_number" --squash --delete-branch; then
+            if gh pr merge "$pr_number" --merge --delete-branch; then
               exit 0
             fi
             echo "merge not ready yet, retrying…"; sleep 5

@@ -295,6 +295,10 @@ callback create-table-commit();
     in property <string> result-status;
     in-out property <int> selected-row: 0;
     in-out property <int> selected-col: -1;
+    in-out property <int> range-anchor-row: -1;
+    in-out property <int> range-anchor-col: -1;
+    callback row-press(int, int, bool);
+    callback row-drag(int);
     in property <int> editing-row: -1;
     in property <int> editing-col: -1;
     in-out property <string> editing-value;
@@ -489,6 +493,10 @@ callback create-table-commit();
     in property <[string]> p1-grid-col-filters;
     in-out property <int> p1-selected-row;
     in-out property <int> p1-selected-col: -1;
+    in-out property <int> p1-range-anchor-row: -1;
+    in-out property <int> p1-range-anchor-col: -1;
+    callback p1-row-press(int, int, bool);
+    callback p1-row-drag(int);
     in property <int> p1-editing-row: -1;
     in property <int> p1-editing-col: -1;
     in-out property <string> p1-editing-value;
@@ -786,7 +794,17 @@ callback create-table-commit();
                     if (root.active-pane == 1) { root.select-p1-tab(8); } else { root.select-tab(8); }
                     return accept;
                 }
+                if (e.text == "c") {
+                    if (root.active-pane == 1) { root.p1-copy-results(); } else { root.copy-results(); }
+                    return accept;
+                }
             }
+            // Plain j/k (vim-style row nav) vs Cmd/Ctrl+K (palette) don't
+            // collide: every branch in the ctrl/meta block above returns
+            // accept, so ⌘K is consumed before falling through here. Keep
+            // that early-return-before-fallthrough order if this handler
+            // grows — reordering the two blocks would make ⌘K also move
+            // the row selection.
             if (e.text == "j") {
                 root.move-row(1);
                 return accept;
@@ -1621,6 +1639,10 @@ callback create-table-commit();
                         p1-detail-pretty: root.p1-detail-pretty;
                         p1-selected-row <=> root.p1-selected-row;
                         p1-selected-col <=> root.p1-selected-col;
+                        p1-range-anchor-row <=> root.p1-range-anchor-row;
+                        p1-range-anchor-col <=> root.p1-range-anchor-col;
+                        p1-row-press(r, c, shift) => { root.p1-row-press(r, c, shift); }
+                        p1-row-drag(r) => { root.p1-row-drag(r); }
                         p1-editing-row: root.p1-editing-row;
                         p1-editing-col: root.p1-editing-col;
                         p1-editing-value <=> root.p1-editing-value;
@@ -1755,6 +1777,10 @@ callback create-table-commit();
                         find-close() => { root.find-close(); }
                         selected-row: root.selected-row;
                         selected-col: root.selected-col;
+                        range-anchor-row: root.range-anchor-row;
+                        range-anchor-col: root.range-anchor-col;
+                        row-press(r, c, shift) => { root.row-press(r, c, shift); }
+                        row-drag(r) => { root.row-drag(r); }
                         editing-row: root.editing-row;
                         editing-col: root.editing-col;
                         editing-value <=> root.editing-value;
