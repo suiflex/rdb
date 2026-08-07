@@ -2605,9 +2605,24 @@ fn restore_grid_state(w: &MainWindow, pane: usize, g: &GroupRuntime, sr: &Stored
     *g.displayed_grid.lock().unwrap() = view_grid(&filtered);
     apply_result(w, pane, filtered);
 }
+/// What activating (choose/double-click) a non-section palette row does.
+/// Index-aligned with the `Vec<PaletteItem>` `build_palette_items` returns —
+/// section header rows get `None`.
+#[derive(Debug, Clone)]
+enum PaletteAction {
+    None,
+    Connect(usize),
+    OpenTable(SharedString, SharedString),
+    OpenFunction(SharedString),
+    OpenSavedQuery(String, usize),
+    OpenRecent(usize),
+}
+
 /// Build the ⌘K palette model, grouped GitHub-style under non-selectable
 /// "section" header rows. `needle` (lowercase) filters both groups; empty
-/// shows everything. Empty groups drop their header.
+/// shows everything. Empty groups drop their header. Returns the flat item
+/// list alongside an index-aligned action list `on_palette_choose` dispatches
+/// on.
 fn build_palette_items(
     names: &[(
         String,
@@ -2618,8 +2633,10 @@ fn build_palette_items(
         slint::Color,
     )],
     w: &MainWindow,
+    saved_queries: &[(String, String)],
+    recent_queries: &[HistoryEntry],
     needle: &str,
-) -> Vec<PaletteItem> {
+) -> (Vec<PaletteItem>, Vec<PaletteAction>) {
     let section = |t: &str| PaletteItem {
         label: t.into(),
         kind: "section".into(),
@@ -2634,13 +2651,16 @@ fn build_palette_items(
         is_group_end: false,
     };
     let mut items: Vec<PaletteItem> = Vec::new();
+    let mut actions: Vec<PaletteAction> = Vec::new();
     let conns: Vec<_> = names
         .iter()
-        .filter(|(n, ..)| needle.is_empty() || n.to_lowercase().contains(needle))
+        .enumerate()
+        .filter(|(_, (n, ..))| needle.is_empty() || n.to_lowercase().contains(needle))
         .collect();
     if !conns.is_empty() {
         items.push(section("Connections"));
-        for (n, badge, color, has_custom_color, env_tag_label, env_tag_color) in conns {
+        actions.push(PaletteAction::None);
+        for (idx, (n, badge, color, has_custom_color, env_tag_label, env_tag_color)) in conns {
             items.push(PaletteItem {
                 label: n.clone().into(),
                 kind: (*badge).into(),
@@ -2654,21 +2674,26 @@ fn build_palette_items(
                 expanded: false,
                 is_group_end: false,
             });
+            actions.push(PaletteAction::Connect(idx));
         }
     }
-    let tables: Vec<SharedString> = w
-        .get_schema_tree()
-        .iter()
-        .filter(|n| {
-            n.kind == "table" && (needle.is_empty() || n.label.to_lowercase().contains(needle))
-        })
-        .map(|n| n.label.clone())
-        .collect();
+    let schema_tree = w.get_schema_tree();
+    let by_kind = |kind: &'static str| -> Vec<(SharedString, SharedString)> {
+        schema_tree
+            .iter()
+            .filter(|n| {
+                n.kind == kind && (needle.is_empty() || n.label.to_lowercase().contains(needle))
+            })
+            .map(|n| (n.db.clone(), n.label.clone()))
+            .collect()
+    };
+    let tables = by_kind("table");
     if !tables.is_empty() {
         items.push(section("Tables"));
-        for label in tables {
+        actions.push(PaletteAction::None);
+        for (db, label) in tables {
             items.push(PaletteItem {
-                label,
+                label: label.clone(),
                 kind: "table".into(),
                 sub: SharedString::default(),
                 local: false,
@@ -2680,9 +2705,102 @@ fn build_palette_items(
                 expanded: false,
                 is_group_end: false,
             });
+            actions.push(PaletteAction::OpenTable(db, label));
         }
     }
-    items
+    let views = by_kind("view");
+    if !views.is_empty() {
+        items.push(section("Views"));
+        actions.push(PaletteAction::None);
+        for (db, label) in views {
+            items.push(PaletteItem {
+                label: label.clone(),
+                kind: "view".into(),
+                sub: SharedString::default(),
+                local: false,
+                color: theme::accent_or_default(""),
+                has_custom_color: false,
+                env_tag_label: SharedString::default(),
+                env_tag_color: theme::accent_or_default(""),
+                group: SharedString::default(),
+                expanded: false,
+                is_group_end: false,
+            });
+            actions.push(PaletteAction::OpenTable(db, label));
+        }
+    }
+    let functions = by_kind("function");
+    if !functions.is_empty() {
+        items.push(section("Functions"));
+        actions.push(PaletteAction::None);
+        for (_db, label) in functions {
+            items.push(PaletteItem {
+                label: label.clone(),
+                kind: "function".into(),
+                sub: SharedString::default(),
+                local: false,
+                color: theme::accent_or_default(""),
+                has_custom_color: false,
+                env_tag_label: SharedString::default(),
+                env_tag_color: theme::accent_or_default(""),
+                group: SharedString::default(),
+                expanded: false,
+                is_group_end: false,
+            });
+            actions.push(PaletteAction::OpenFunction(label));
+        }
+    }
+    let saved: Vec<_> = saved_queries
+        .iter()
+        .enumerate()
+        .filter(|(_, (n, _))| needle.is_empty() || n.to_lowercase().contains(needle))
+        .collect();
+    if !saved.is_empty() {
+        items.push(section("Saved Queries"));
+        actions.push(PaletteAction::None);
+        for (idx, (name, sql)) in saved {
+            items.push(PaletteItem {
+                label: name.clone().into(),
+                kind: "command".into(),
+                sub: recent_preview(sql).into(),
+                local: false,
+                color: theme::accent_or_default(""),
+                has_custom_color: false,
+                env_tag_label: SharedString::default(),
+                env_tag_color: theme::accent_or_default(""),
+                group: SharedString::default(),
+                expanded: false,
+                is_group_end: false,
+            });
+            actions.push(PaletteAction::OpenSavedQuery(name.clone(), idx));
+        }
+    }
+    let recent: Vec<_> = recent_queries
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| needle.is_empty() || e.sql.to_lowercase().contains(needle))
+        .collect();
+    if !recent.is_empty() {
+        items.push(section("Recent History"));
+        actions.push(PaletteAction::None);
+        for (idx, entry) in recent {
+            items.push(PaletteItem {
+                label: recent_preview(&entry.sql).into(),
+                kind: "command".into(),
+                sub: entry.engine.clone().unwrap_or_default().into(),
+                local: false,
+                color: theme::accent_or_default(""),
+                has_custom_color: false,
+                env_tag_label: SharedString::default(),
+                env_tag_color: theme::accent_or_default(""),
+                group: SharedString::default(),
+                expanded: false,
+                is_group_end: false,
+            });
+            actions.push(PaletteAction::OpenRecent(idx));
+        }
+    }
+    (items, actions)
 }
 fn set_p_editing(w: &MainWindow, pane: usize, row: i32, col: i32) {
     if pane == 0 {
@@ -3132,6 +3250,11 @@ thread_local! {
     /// then.
     static SELECTED_RANGE: std::cell::RefCell<[Option<(usize, usize)>; 2]> =
         std::cell::RefCell::new(Default::default());
+    /// What each row of the currently displayed ⌘K palette list does when
+    /// chosen, rebuilt alongside `palette_items` every open/filter — see
+    /// `build_palette_items`.
+    static PALETTE_ACTIONS: std::cell::RefCell<Vec<PaletteAction>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Compute the visible JSON-tree rows for the current collapse state and push
@@ -11224,6 +11347,8 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let store = store.clone();
+        let saved_queries = saved_queries.clone();
+        let recent_queries = recent_queries.clone();
         window.on_toggle_palette(move || {
             if let Some(w) = weak.upgrade() {
                 let opening = !w.get_palette_open();
@@ -11252,8 +11377,15 @@ fn main() -> Result<(), slint::PlatformError> {
                             )
                         })
                         .collect();
-                    let items = build_palette_items(&names, &w, "");
+                    let (items, actions) = build_palette_items(
+                        &names,
+                        &w,
+                        &saved_queries.borrow(),
+                        &recent_queries.borrow(),
+                        "",
+                    );
                     w.set_palette_items(ModelRc::from(Rc::new(VecModel::from(items))));
+                    PALETTE_ACTIONS.with(|s| *s.borrow_mut() = actions);
                 }
             }
         });
@@ -11263,6 +11395,8 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = window.as_weak();
         let store = store.clone();
+        let saved_queries = saved_queries.clone();
+        let recent_queries = recent_queries.clone();
         window.on_palette_filter(move |q| {
             if let Some(w) = weak.upgrade() {
                 let names: Vec<(
@@ -11288,18 +11422,40 @@ fn main() -> Result<(), slint::PlatformError> {
                         )
                     })
                     .collect();
-                let items = build_palette_items(&names, &w, &q.to_lowercase());
+                let (items, actions) = build_palette_items(
+                    &names,
+                    &w,
+                    &saved_queries.borrow(),
+                    &recent_queries.borrow(),
+                    &q.to_lowercase(),
+                );
                 w.set_palette_items(ModelRc::from(Rc::new(VecModel::from(items))));
+                PALETTE_ACTIONS.with(|s| *s.borrow_mut() = actions);
             }
         });
     }
 
-    // ----- palette choose (MVP: just closes) -----
+    // ----- palette choose -----
     {
         let weak = window.as_weak();
-        window.on_palette_choose(move |_idx| {
+        window.on_palette_choose(move |idx| {
             if let Some(w) = weak.upgrade() {
                 w.set_palette_open(false);
+                let action = PALETTE_ACTIONS
+                    .with(|s| s.borrow().get(idx.max(0) as usize).cloned())
+                    .unwrap_or(PaletteAction::None);
+                match action {
+                    PaletteAction::None => {}
+                    PaletteAction::Connect(i) => w.invoke_connect_clicked(i as i32),
+                    PaletteAction::OpenTable(db, label) => w.invoke_open_table(db, label),
+                    PaletteAction::OpenFunction(name) => w.invoke_open_function(name),
+                    PaletteAction::OpenSavedQuery(name, idx) => {
+                        w.invoke_open_query(SharedString::from(name), idx as i32)
+                    }
+                    PaletteAction::OpenRecent(idx) => {
+                        w.invoke_open_query(SharedString::default(), idx as i32)
+                    }
+                }
             }
         });
     }

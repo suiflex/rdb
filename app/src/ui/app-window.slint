@@ -793,6 +793,12 @@ callback create-table-commit();
                     return accept;
                 }
             }
+            // Plain j/k (vim-style row nav) vs Cmd/Ctrl+K (palette) don't
+            // collide: every branch in the ctrl/meta block above returns
+            // accept, so ⌘K is consumed before falling through here. Keep
+            // that early-return-before-fallthrough order if this handler
+            // grows — reordering the two blocks would make ⌘K also move
+            // the row selection.
             if (e.text == "j") {
                 root.move-row(1);
                 return accept;
