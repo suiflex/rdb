@@ -138,6 +138,15 @@ brew install suiflex/tap/rdb
 
 Upgrade later with `brew upgrade rdb`.
 
+> **macOS Gatekeeper note:** the `.app` is ad-hoc signed (no paid Apple
+> Developer notarization). The cask and `install.sh` both strip the
+> quarantine flag automatically, so a normal install just works. If you
+> downloaded the `.dmg` straight from a GitHub Release and macOS says the
+> app is damaged / rejected, clear it yourself:
+> ```bash
+> xattr -dr com.apple.quarantine /Applications/RDB.app
+> ```
+
 ### Windows
 
 ```powershell

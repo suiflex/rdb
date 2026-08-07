@@ -21,4 +21,15 @@ cask "rdb" do
   homepage "https://github.com/suiflex/rdb"
 
   app "RDB.app"
+
+  # The .app is ad-hoc signed (no Apple Developer cert), so Gatekeeper
+  # rejects it as "damaged"/"rejected by OS" once macOS re-checks the
+  # quarantine flag Homebrew leaves on the download (e.g. opening via
+  # Spotlight). Stripping it here is the standard cask workaround short
+  # of paid notarization. See suiflex/rdb#184.
+  postflight do
+    system_command "/usr/bin/xattr",
+                    args: ["-cr", "#{appdir}/RDB.app"],
+                    sudo: false
+  end
 end

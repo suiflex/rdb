@@ -155,10 +155,22 @@ export component TabularGrid inherits Rectangle {
         if root.filter-open: HorizontalLayout {
             height: 26px;
             Rectangle { width: 44px; background: Tokens.chrome; }
-            for col[c] in root.columns: Rectangle {
+            for col[c] in root.columns: col-filter-box := Rectangle {
                 width: root.col-widths.length > c ? root.col-widths[c] : 140px;
                 background: Tokens.chrome;
                 clip: true;
+                property <string> pending-text: "";
+                // Debounce so a full re-query doesn't fire on every keystroke
+                // (was noticeable as input lag, worst on high-latency
+                // connections regardless of engine).
+                debounce := Timer {
+                    interval: 300ms;
+                    running: false;
+                    triggered => {
+                        self.running = false;
+                        root.set-col-filter(c, col-filter-box.pending-text);
+                    }
+                }
                 Rectangle {
                     x: 2px;
                     y: 2px;
@@ -177,8 +189,13 @@ export component TabularGrid inherits Rectangle {
                         font-family: Tokens.mono;
                         font-size: Tokens.font-xs;
                         single-line: true;
-                        // filter live as the user types (no Enter needed)
-                        edited => { root.set-col-filter(c, self.text); }
+                        // filter live as the user types (no Enter needed),
+                        // but debounced so it queries after a short pause
+                        edited => {
+                            col-filter-box.pending-text = self.text;
+                            debounce.running = true;
+                            debounce.restart();
+                        }
                     }
                 }
             }
@@ -304,7 +321,10 @@ export component TabularGrid inherits Rectangle {
                         // face — an estimate, not a measurement, so the editor can
                         // size itself to the value without a layout round-trip.
                         // Bump the constant if short values start wrapping.
-                        property <length> text-w: cell.text.character-count * 7px + 2 * Tokens.sp2;
+                        // Tracks the live in-progress text (root.editing-value),
+                        // not the last-committed cell.text, so the box keeps
+                        // growing as the user types instead of clipping input.
+                        property <length> text-w: root.editing-value.character-count * 7px + 2 * Tokens.sp2;
                         // Never narrower than the cell, never wider than the value
                         // needs, still capped so a huge JSON blob can't span the pane.
                         property <length> editor-w: self.compact-editor ? parent.width
