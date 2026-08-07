@@ -736,12 +736,21 @@ impl EditorState {
 
     /// Statement under the cursor: the `;`-delimited segment containing the
     /// cursor, ignoring semicolons inside single-quoted literals. Falls back
-    /// to the current line when the segment is empty.
+    /// to the current line when the segment is empty. A leading `-- comment`
+    /// block with no `;` of its own is transparent to `statement_bounds`'s
+    /// segment scan, so it can ride along as a prefix on whichever real
+    /// statement follows — trimmed off here so Run/the query console only
+    /// see the real SQL, not unrelated commented-out lines above it.
+    /// `statement_bounds` itself is left untrimmed — it's shared with
+    /// `replace_current_statement`, and changing its bounds here would also
+    /// change what gets spliced out on Format SQL / autocomplete-accept,
+    /// which is a separate, pre-existing behavior this fix doesn't touch.
     pub fn current_statement(&self) -> String {
         let (s, e) = self.statement_bounds();
         let text = self.text();
         let chars: Vec<char> = text.chars().collect();
-        chars[s..e].iter().collect::<String>().trim().to_string()
+        let stmt: String = chars[s..e].iter().collect::<String>().trim().to_string();
+        trim_leading_comments(&stmt).to_string()
     }
 
     /// Replace the `;`-delimited statement under the cursor with `text`,
@@ -894,6 +903,28 @@ fn is_blank_sql(seg: &str) -> bool {
         .all(|l| l.is_empty())
 }
 
+/// Strip leading blank lines and full `-- comment` lines from `stmt`.
+/// Returns `stmt` unchanged if trimming would consume it entirely (cursor
+/// genuinely sitting inside a comment-only block, nothing real to show).
+fn trim_leading_comments(stmt: &str) -> &str {
+    let mut rest = stmt;
+    loop {
+        let trimmed = rest.trim_start();
+        match trimmed.strip_prefix("--") {
+            Some(after) => rest = after.split_once('\n').map_or("", |(_, tail)| tail),
+            None => {
+                rest = trimmed;
+                break;
+            }
+        }
+    }
+    if rest.is_empty() {
+        stmt
+    } else {
+        rest
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1030,6 +1061,27 @@ mod tests {
     fn statement_without_semicolons_is_whole_text() {
         let ed = EditorState::from_text("SELECT *\nFROM t");
         assert_eq!(ed.current_statement(), "SELECT *\nFROM t");
+    }
+
+    #[test]
+    fn statement_drops_leading_comment_block_glued_by_bounds() {
+        // Reproduces the reported buffer shape: a leading comment block with
+        // no `;` of its own gets glued onto the following statement by
+        // statement_bounds' segment scan; current_statement() must trim it
+        // off so Run/the console only show the SELECT the cursor is on.
+        let text = "-- update t\n-- set x = 1\n-- where y = 2;\n\nselect * from t;\n-- where z = 3;\n\nupdate t set x = 1;";
+        let mut ed = EditorState::from_text(text);
+        ed.line = 4; // the `select * from t;` line
+        ed.col = 0;
+        assert_eq!(ed.current_statement(), "select * from t;");
+    }
+
+    #[test]
+    fn statement_in_pure_comment_block_keeps_comments() {
+        // Cursor sitting inside a comment-only segment (nothing real to
+        // trim to) still returns the comment text rather than empty.
+        let ed = EditorState::from_text("-- just a note\n-- nothing else");
+        assert_eq!(ed.current_statement(), "-- just a note\n-- nothing else");
     }
 
     #[test]
