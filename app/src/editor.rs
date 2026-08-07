@@ -708,18 +708,24 @@ impl EditorState {
         // segment's end, which also equals the next segment's start) runs the
         // statement it just closed, not the following one. `find` yields the
         // earliest match, so the closing segment wins.
-        let (s, e) = segments
+        let matched = segments
             .iter()
             .copied()
-            .find(|&(s, e)| offset >= s && offset <= e)
-            .or_else(|| segments.last().copied())
-            .unwrap_or((0, chars.len()));
-        let stmt: String = chars[s..e].iter().collect();
-        if !stmt.trim().is_empty() {
-            return (s, e);
+            .find(|&(s, e)| offset >= s && offset <= e);
+        if let Some((s, e)) = matched {
+            let stmt: String = chars[s..e].iter().collect();
+            if !stmt.trim().is_empty() {
+                return (s, e);
+            }
         }
-        // Blank segment (e.g. cursor sits in trailing whitespace after the
-        // last statement) — fall back to the current line's own range.
+        // No segment contains the cursor, or the one that does is blank
+        // (e.g. cursor sits in trailing whitespace after the last
+        // statement) — fall back to the current line's own range. Never
+        // fall back to "the last statement in the buffer": if the
+        // offset/segment match ever misses, that would silently run an
+        // unrelated statement elsewhere in the buffer — including one the
+        // user never selected — instead of the harmless no-op/syntax-error
+        // a current-line fallback gives.
         let mut line_start = 0;
         for l in &self.lines[..self.line] {
             line_start += l.chars().count() + 1;
