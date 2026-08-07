@@ -39,6 +39,7 @@ export component TabularGrid inherits Rectangle {
     callback cell-edited(int, int, string); // Enter in the inline editor
     callback cell-advance(int, int, string, bool); // Tab/Shift+Tab → commit + edit neighbour
     callback edit-cancelled();
+    callback copy-request();               // Cmd/Ctrl+C while the grid has focus
     in property <int> scroll-grid-tick;
     property <int> date-row: -1;
     property <int> date-col: -1;
@@ -65,6 +66,18 @@ export component TabularGrid inherits Rectangle {
         flick.viewport-y = min(0px, flick.height - flick.viewport-height);
     }
 
+    // Claims keyboard focus on any row/cell interaction (see cell-ta below) so
+    // Cmd/Ctrl+C copies the grid's row-range selection instead of whatever
+    // the SQL editor last had focused — the editor's own FocusScope never
+    // releases focus on its own, so the grid has to explicitly take it back.
+    grid-focus := FocusScope {
+        key-pressed(e) => {
+            if ((e.modifiers.control || e.modifiers.meta) && e.text == "c") {
+                root.copy-request();
+                return accept;
+            }
+            return reject;
+        }
     // One two-axis Flickable scrolls both ways (trackpad smooth on both), and
     // rows are manually windowed — only the on-screen slice exists — so it stays
     // light on large results. The header sits above and pans with viewport-x.
@@ -281,6 +294,7 @@ export component TabularGrid inherits Rectangle {
                         double-clicked => { root.editing-value = cell.text; root.edit-cell(r, c); }
                         pointer-event(e) => {
                             if (e.kind == PointerEventKind.down) {
+                                grid-focus.focus();
                                 root.row-press(r, e.modifiers.shift);
                             }
                         }
@@ -522,6 +536,7 @@ export component TabularGrid inherits Rectangle {
                 }
             }
         }
+    }
     }
 
     date-picker := DatePickerPopup {

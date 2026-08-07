@@ -765,6 +765,7 @@ export component QueryPane inherits Rectangle {
                 select-cell(r, c) => { root.select-cell(r, c); }
                 row-press(r, shift) => { root.row-press(r, shift); }
                 row-drag(r) => { root.row-drag(r); }
+                copy-request() => { root.copy-results(); }
                 edit-cell(r, c) => { root.edit-cell(r, c); }
                 cell-edited(r, c, t) => { root.cell-edited(r, c, t); }
                 cell-advance(r, c, t, fwd) => { root.cell-advance(r, c, t, fwd); }
