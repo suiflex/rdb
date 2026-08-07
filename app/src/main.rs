@@ -2470,6 +2470,31 @@ fn set_p_selected_row(w: &MainWindow, pane: usize, row: i32) {
         w.set_p1_selected_row(row);
     }
 }
+fn set_p_range_anchor(w: &MainWindow, pane: usize, row: i32) {
+    if pane == 0 {
+        w.set_range_anchor_row(row);
+    } else {
+        w.set_p1_range_anchor_row(row);
+    }
+}
+/// Slice `grid` down to the pane's finalized drag/shift-click row range, if
+/// any is active and still in bounds; otherwise return the grid unchanged.
+fn range_sliced_grid(
+    grid: &model::GridModel,
+    pane: usize,
+) -> (model::GridModel, Option<(usize, usize)>) {
+    let range = SELECTED_RANGE.with(|s| s.borrow()[pane]);
+    match range {
+        Some((start, end)) if end < grid.rows.len() => (
+            model::GridModel {
+                columns: grid.columns.clone(),
+                rows: grid.rows[start..=end].to_vec(),
+            },
+            Some((start, end)),
+        ),
+        _ => (grid.clone(), None),
+    }
+}
 /// Per-column indented JSON for one grid row, empty where the value isn't JSON.
 /// Feeds the Details panel so a JSON cell reads as formatted text there too.
 fn detail_pretty_row(g: &model::GridModel, row: usize) -> Vec<SharedString> {
@@ -3101,6 +3126,12 @@ thread_local! {
     /// thread_local suffices; no cross-tab persistence is needed.
     static DOC_TREES: std::cell::RefCell<[(Vec<model::DocNode>, HashSet<String>); 2]> =
         std::cell::RefCell::new(Default::default());
+    /// Finalized (start, end) row range from the last drag/shift-click in the
+    /// results grid, per pane. `None` once a plain click lands with no range,
+    /// or once a fresh result is presented — Copy falls back to the full grid
+    /// then.
+    static SELECTED_RANGE: std::cell::RefCell<[Option<(usize, usize)>; 2]> =
+        std::cell::RefCell::new(Default::default());
 }
 
 /// Compute the visible JSON-tree rows for the current collapse state and push
@@ -3279,6 +3310,8 @@ fn present_view(
     // Details gate `(selected-row + 1) * col-count <= cells.length` then evaluates
     // false — so the panel silently vanishes even while its toggle is on.
     set_p_selected_row(w, pane, 0);
+    set_p_range_anchor(w, pane, -1);
+    SELECTED_RANGE.with(|s| s.borrow_mut()[pane] = None);
     // Seed the Details JSON preview for the first row of the new result.
     if let Some(g) = displayed_grid.lock().unwrap().as_ref() {
         refresh_detail_pretty(w, pane, g, 0);
@@ -8581,11 +8614,17 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(grid) = displayed_grid.lock().unwrap().clone() else {
                 return;
             };
+            let (to_copy, range) = range_sliced_grid(&grid, 0);
             use copypasta::ClipboardProvider;
             let msg = match copypasta::ClipboardContext::new()
-                .and_then(|mut cb| cb.set_contents(export::to_tsv(&grid)))
+                .and_then(|mut cb| cb.set_contents(export::to_tsv(&to_copy)))
             {
-                Ok(()) => format!("copied {} rows", grid.rows.len()),
+                Ok(()) => match range {
+                    Some((start, end)) => {
+                        format!("copied {} of {} rows", end - start + 1, grid.rows.len())
+                    }
+                    None => format!("copied {} rows", grid.rows.len()),
+                },
                 Err(e) => format!("copy failed: {e}"),
             };
             w.set_results_meta(SharedString::from(msg));
@@ -8752,6 +8791,31 @@ fn main() -> Result<(), slint::PlatformError> {
                 if let Some(g) = panes[1].displayed_grid.lock().unwrap().as_ref() {
                     refresh_detail_pretty(&w, 1, g, row);
                 }
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_p1_row_press(move |row, shift| {
+            if let Some(w) = weak.upgrade() {
+                if !shift || w.get_p1_range_anchor_row() < 0 {
+                    set_p_range_anchor(&w, 1, row);
+                }
+                set_p_selected_row(&w, 1, row);
+                SELECTED_RANGE.with(|s| s.borrow_mut()[1] = None);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_p1_row_drag(move |row| {
+            if let Some(w) = weak.upgrade() {
+                set_p_selected_row(&w, 1, row);
+                let anchor = w.get_p1_range_anchor_row();
+                SELECTED_RANGE.with(|s| {
+                    s.borrow_mut()[1] = (anchor >= 0 && anchor != row)
+                        .then(|| (anchor.min(row) as usize, anchor.max(row) as usize));
+                });
             }
         });
     }
@@ -9033,11 +9097,17 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(grid) = panes[1].displayed_grid.lock().unwrap().clone() else {
                 return;
             };
+            let (to_copy, range) = range_sliced_grid(&grid, 1);
             use copypasta::ClipboardProvider;
             let msg = match copypasta::ClipboardContext::new()
-                .and_then(|mut cb| cb.set_contents(export::to_tsv(&grid)))
+                .and_then(|mut cb| cb.set_contents(export::to_tsv(&to_copy)))
             {
-                Ok(()) => format!("copied {} rows", grid.rows.len()),
+                Ok(()) => match range {
+                    Some((start, end)) => {
+                        format!("copied {} of {} rows", end - start + 1, grid.rows.len())
+                    }
+                    None => format!("copied {} rows", grid.rows.len()),
+                },
                 Err(e) => format!("copy failed: {e}"),
             };
             set_p_results_meta(&w, 1, SharedString::from(msg));
@@ -10598,6 +10668,31 @@ fn main() -> Result<(), slint::PlatformError> {
                 if let Some(g) = displayed_grid.lock().unwrap().as_ref() {
                     refresh_detail_pretty(&w, 0, g, r);
                 }
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_row_press(move |row, shift| {
+            if let Some(w) = weak.upgrade() {
+                if !shift || w.get_range_anchor_row() < 0 {
+                    set_p_range_anchor(&w, 0, row);
+                }
+                set_p_selected_row(&w, 0, row);
+                SELECTED_RANGE.with(|s| s.borrow_mut()[0] = None);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_row_drag(move |row| {
+            if let Some(w) = weak.upgrade() {
+                set_p_selected_row(&w, 0, row);
+                let anchor = w.get_range_anchor_row();
+                SELECTED_RANGE.with(|s| {
+                    s.borrow_mut()[0] = (anchor >= 0 && anchor != row)
+                        .then(|| (anchor.min(row) as usize, anchor.max(row) as usize));
+                });
             }
         });
     }
