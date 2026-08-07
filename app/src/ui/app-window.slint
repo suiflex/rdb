@@ -792,6 +792,10 @@ callback create-table-commit();
                     if (root.active-pane == 1) { root.select-p1-tab(8); } else { root.select-tab(8); }
                     return accept;
                 }
+                if (e.text == "c") {
+                    if (root.active-pane == 1) { root.p1-copy-results(); } else { root.copy-results(); }
+                    return accept;
+                }
             }
             // Plain j/k (vim-style row nav) vs Cmd/Ctrl+K (palette) don't
             // collide: every branch in the ctrl/meta block above returns
