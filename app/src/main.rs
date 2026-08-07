@@ -2477,20 +2477,32 @@ fn set_p_range_anchor(w: &MainWindow, pane: usize, row: i32) {
         w.set_p1_range_anchor_row(row);
     }
 }
-/// Slice `grid` down to the pane's finalized drag/shift-click row range, if
-/// any is active and still in bounds; otherwise return the grid unchanged.
+fn set_p_range_anchor_col(w: &MainWindow, pane: usize, col: i32) {
+    if pane == 0 {
+        w.set_range_anchor_col(col);
+    } else {
+        w.set_p1_range_anchor_col(col);
+    }
+}
+/// Slice `grid` down to the pane's finalized drag/shift-click range, if any
+/// is active and still in bounds; otherwise return the grid unchanged. A
+/// range is always exactly one column wide (the column the drag started
+/// in) — see the `range-anchor-col` doc comment in tabular-grid.slint.
 fn range_sliced_grid(
     grid: &model::GridModel,
     pane: usize,
-) -> (model::GridModel, Option<(usize, usize)>) {
+) -> (model::GridModel, Option<(usize, usize, usize)>) {
     let range = SELECTED_RANGE.with(|s| s.borrow()[pane]);
     match range {
-        Some((start, end)) if end < grid.rows.len() => (
+        Some((start, end, col)) if end < grid.rows.len() && col < grid.columns.len() => (
             model::GridModel {
-                columns: grid.columns.clone(),
-                rows: grid.rows[start..=end].to_vec(),
+                columns: vec![grid.columns[col].clone()],
+                rows: grid.rows[start..=end]
+                    .iter()
+                    .map(|row| vec![row[col].clone()])
+                    .collect(),
             },
-            Some((start, end)),
+            Some((start, end, col)),
         ),
         _ => (grid.clone(), None),
     }
@@ -3248,7 +3260,7 @@ thread_local! {
     /// results grid, per pane. `None` once a plain click lands with no range,
     /// or once a fresh result is presented — Copy falls back to the full grid
     /// then.
-    static SELECTED_RANGE: std::cell::RefCell<[Option<(usize, usize)>; 2]> =
+    static SELECTED_RANGE: std::cell::RefCell<[Option<(usize, usize, usize)>; 2]> =
         std::cell::RefCell::new(Default::default());
     /// What each row of the currently displayed ⌘K palette list does when
     /// chosen, rebuilt alongside `palette_items` every open/filter — see
@@ -3434,6 +3446,7 @@ fn present_view(
     // false — so the panel silently vanishes even while its toggle is on.
     set_p_selected_row(w, pane, 0);
     set_p_range_anchor(w, pane, -1);
+    set_p_range_anchor_col(w, pane, -1);
     SELECTED_RANGE.with(|s| s.borrow_mut()[pane] = None);
     // Seed the Details JSON preview for the first row of the new result.
     if let Some(g) = displayed_grid.lock().unwrap().as_ref() {
@@ -8743,9 +8756,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 .and_then(|mut cb| cb.set_contents(export::to_tsv(&to_copy)))
             {
                 Ok(()) => match range {
-                    Some((start, end)) => {
-                        format!("copied {} of {} rows", end - start + 1, grid.rows.len())
-                    }
+                    Some((start, end, col)) => format!(
+                        "copied {} of {} rows, column {}",
+                        end - start + 1,
+                        grid.rows.len(),
+                        grid.columns[col].name
+                    ),
                     None => format!("copied {} rows", grid.rows.len()),
                 },
                 Err(e) => format!("copy failed: {e}"),
@@ -8919,12 +8935,14 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let weak = window.as_weak();
-        window.on_p1_row_press(move |row, shift| {
+        window.on_p1_row_press(move |row, col, shift| {
             if let Some(w) = weak.upgrade() {
                 if !shift || w.get_p1_range_anchor_row() < 0 {
                     set_p_range_anchor(&w, 1, row);
+                    set_p_range_anchor_col(&w, 1, col);
                 }
                 set_p_selected_row(&w, 1, row);
+                w.set_p1_selected_col(col);
                 SELECTED_RANGE.with(|s| s.borrow_mut()[1] = None);
             }
         });
@@ -8935,9 +8953,16 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(w) = weak.upgrade() {
                 set_p_selected_row(&w, 1, row);
                 let anchor = w.get_p1_range_anchor_row();
+                let anchor_col = w.get_p1_range_anchor_col();
                 SELECTED_RANGE.with(|s| {
-                    s.borrow_mut()[1] = (anchor >= 0 && anchor != row)
-                        .then(|| (anchor.min(row) as usize, anchor.max(row) as usize));
+                    s.borrow_mut()[1] =
+                        (anchor >= 0 && anchor != row && anchor_col >= 0).then(|| {
+                            (
+                                anchor.min(row) as usize,
+                                anchor.max(row) as usize,
+                                anchor_col as usize,
+                            )
+                        });
                 });
             }
         });
@@ -9226,9 +9251,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 .and_then(|mut cb| cb.set_contents(export::to_tsv(&to_copy)))
             {
                 Ok(()) => match range {
-                    Some((start, end)) => {
-                        format!("copied {} of {} rows", end - start + 1, grid.rows.len())
-                    }
+                    Some((start, end, col)) => format!(
+                        "copied {} of {} rows, column {}",
+                        end - start + 1,
+                        grid.rows.len(),
+                        grid.columns[col].name
+                    ),
                     None => format!("copied {} rows", grid.rows.len()),
                 },
                 Err(e) => format!("copy failed: {e}"),
@@ -10796,12 +10824,14 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let weak = window.as_weak();
-        window.on_row_press(move |row, shift| {
+        window.on_row_press(move |row, col, shift| {
             if let Some(w) = weak.upgrade() {
                 if !shift || w.get_range_anchor_row() < 0 {
                     set_p_range_anchor(&w, 0, row);
+                    set_p_range_anchor_col(&w, 0, col);
                 }
                 set_p_selected_row(&w, 0, row);
+                w.set_selected_col(col);
                 SELECTED_RANGE.with(|s| s.borrow_mut()[0] = None);
             }
         });
@@ -10812,9 +10842,16 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(w) = weak.upgrade() {
                 set_p_selected_row(&w, 0, row);
                 let anchor = w.get_range_anchor_row();
+                let anchor_col = w.get_range_anchor_col();
                 SELECTED_RANGE.with(|s| {
-                    s.borrow_mut()[0] = (anchor >= 0 && anchor != row)
-                        .then(|| (anchor.min(row) as usize, anchor.max(row) as usize));
+                    s.borrow_mut()[0] =
+                        (anchor >= 0 && anchor != row && anchor_col >= 0).then(|| {
+                            (
+                                anchor.min(row) as usize,
+                                anchor.max(row) as usize,
+                                anchor_col as usize,
+                            )
+                        });
                 });
             }
         });
