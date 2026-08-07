@@ -360,10 +360,16 @@ fn dedupe_column_names(mut cols: Vec<VmColumn>) -> Vec<VmColumn> {
 /// "N rows affected" toast. `None` for anything else (SELECT, DDL, NoSQL
 /// commands) so the toast falls back to its plain form.
 pub fn sql_verb(sql: &str) -> Option<&'static str> {
-    let word = sql
-        .trim_start()
-        .split(|c: char| c.is_whitespace() || c == '(')
-        .next()?;
+    let mut s = sql;
+    loop {
+        s = s.trim_start();
+        if let Some(rest) = s.strip_prefix("--") {
+            s = rest.split_once('\n').map_or("", |(_, after)| after);
+            continue;
+        }
+        break;
+    }
+    let word = s.split(|c: char| c.is_whitespace() || c == '(').next()?;
     match word.to_ascii_uppercase().as_str() {
         "INSERT" => Some("INSERT"),
         "UPDATE" => Some("UPDATE"),
@@ -673,6 +679,14 @@ mod tests {
         assert_eq!(sql_verb("delete from t"), Some("DELETE"));
         assert_eq!(sql_verb("select * from t"), None);
         assert_eq!(sql_verb(""), None);
+        assert_eq!(
+            sql_verb("-- where taint = 'T11T';\n\nupdate t set x = 1"),
+            Some("UPDATE")
+        );
+        assert_eq!(
+            sql_verb("-- one\n-- two\n\n  delete from t"),
+            Some("DELETE")
+        );
     }
 
     #[test]
