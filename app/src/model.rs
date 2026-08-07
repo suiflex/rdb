@@ -356,6 +356,31 @@ fn dedupe_column_names(mut cols: Vec<VmColumn>) -> Vec<VmColumn> {
     cols
 }
 
+/// First keyword of a SQL statement (INSERT/UPDATE/DELETE), used to label the
+/// "N rows affected" toast. `None` for anything else (SELECT, DDL, NoSQL
+/// commands) so the toast falls back to its plain form.
+pub fn sql_verb(sql: &str) -> Option<&'static str> {
+    let word = sql
+        .trim_start()
+        .split(|c: char| c.is_whitespace() || c == '(')
+        .next()?;
+    match word.to_ascii_uppercase().as_str() {
+        "INSERT" => Some("INSERT"),
+        "UPDATE" => Some("UPDATE"),
+        "DELETE" => Some("DELETE"),
+        _ => None,
+    }
+}
+
+/// Enrich a bare "N rows affected" status with the statement verb and query
+/// latency, e.g. `"UPDATE — 3 rows affected · 12 ms"`.
+pub fn format_affected(status: &str, verb: Option<&str>, latency: &str) -> String {
+    match verb {
+        Some(verb) => format!("{verb} — {status} · {latency}"),
+        None => format!("{status} · {latency}"),
+    }
+}
+
 /// Convert any ResultSet into its presentation-ready view. Each variant keeps
 /// its own shape instead of collapsing to a single grid.
 pub fn to_result_view(rs: &ResultSet) -> ResultView {
@@ -639,6 +664,27 @@ mod tests {
             ResultView::Affected(s) => assert_eq!(s, "3 rows affected"),
             other => panic!("expected Affected, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sql_verb_detects_mutations() {
+        assert_eq!(sql_verb("  update t set x = 1"), Some("UPDATE"));
+        assert_eq!(sql_verb("INSERT INTO t VALUES (1)"), Some("INSERT"));
+        assert_eq!(sql_verb("delete from t"), Some("DELETE"));
+        assert_eq!(sql_verb("select * from t"), None);
+        assert_eq!(sql_verb(""), None);
+    }
+
+    #[test]
+    fn format_affected_includes_verb_and_latency() {
+        assert_eq!(
+            format_affected("3 rows affected", Some("UPDATE"), "12 ms"),
+            "UPDATE — 3 rows affected · 12 ms"
+        );
+        assert_eq!(
+            format_affected("3 rows affected", None, "12 ms"),
+            "3 rows affected · 12 ms"
+        );
     }
 
     #[test]

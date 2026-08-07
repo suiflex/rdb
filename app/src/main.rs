@@ -7362,6 +7362,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 // is what the grid shows (TablePlus semantics). Redis/Mongo
                 // take the whole text as a single command.
                 let mut split_views: Vec<model::ResultView> = Vec::new();
+                let mut split_verbs: Vec<Option<&'static str>> = Vec::new();
                 let (outcome, n_stmts, last_stmt) = match picked.as_ref() {
                     Some((engine, driver)) => {
                         let stmts = if matches!(
@@ -7422,6 +7423,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             if split {
                                 if let Ok(rs) = &out {
                                     split_views.push(model::to_result_view(rs));
+                                    split_verbs.push(model::sql_verb(&s));
                                 }
                             }
                         }
@@ -7440,6 +7442,21 @@ fn main() -> Result<(), slint::PlatformError> {
                 let view = outcome.as_ref().ok().map(model::to_result_view);
                 let model_ms = model_started.elapsed().as_millis() as u64;
                 let elapsed_ms = started.elapsed().as_millis().max(1) as u64;
+                // Only a genuine `Ok(rs)` reaches here — the "error: ..." Affected
+                // variant used elsewhere for failures is built on a separate path
+                // that never calls `to_result_view`, so any Affected we see below
+                // is always a real "N rows affected" from a successful mutation.
+                let view = view.map(|v| match v {
+                    model::ResultView::Affected(status) => {
+                        let verb = last_stmt.as_deref().and_then(model::sql_verb);
+                        model::ResultView::Affected(model::format_affected(
+                            &status,
+                            verb,
+                            &format!("{elapsed_ms} ms"),
+                        ))
+                    }
+                    other => other,
+                });
                 let err = outcome.err();
                 // A hand-typed `SELECT ... FROM t` result has no row identity by
                 // default. When it's an unambiguous single-table select (no
@@ -7515,7 +7532,8 @@ fn main() -> Result<(), slint::PlatformError> {
                                 if split && split_views.len() >= 2 {
                                     let stored: Vec<StoredResult> = split_views
                                         .iter()
-                                        .map(|vw| {
+                                        .zip(split_verbs.iter())
+                                        .map(|(vw, verb)| {
                                             let rows = match vw {
                                                 model::ResultView::Table(g) => g.rows.len(),
                                                 model::ResultView::Documents(d) => {
@@ -7524,8 +7542,20 @@ fn main() -> Result<(), slint::PlatformError> {
                                                 model::ResultView::Affected(_) => 0,
                                             }
                                                 as u64;
+                                            let vw = match vw {
+                                                model::ResultView::Affected(status) => {
+                                                    model::ResultView::Affected(
+                                                        model::format_affected(
+                                                            status,
+                                                            *verb,
+                                                            &format!("{elapsed_ms} ms"),
+                                                        ),
+                                                    )
+                                                }
+                                                other => other.clone(),
+                                            };
                                             StoredResult {
-                                                view: vw.clone(),
+                                                view: vw,
                                                 meta: query_timing_meta(
                                                     rows, 1, elapsed_ms, queue_ms, driver_ms,
                                                     model_ms,
