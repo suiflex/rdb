@@ -1823,18 +1823,33 @@ fn save_query_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active: Option<&str>) 
     }
 }
 
+/// Tab ids are minted as `query:<connection>:<N>`; pull `N` back out so a
+/// restored tab's number can be folded into the in-memory counter and never
+/// re-handed-out to a freshly created tab.
+fn tab_id_number(id: &str) -> Option<usize> {
+    id.rsplit(':').next()?.parse().ok()
+}
+
 /// Load persisted SQL tabs into fresh `WorkspaceTab`s (empty results/browse).
-/// Returns the tabs, each group's active tab id (if it still exists), and the
-/// focused group.
-fn load_query_tabs() -> (Vec<WorkspaceTab>, Option<String>, Option<String>, usize) {
+/// Returns the tabs, each group's active tab id (if it still exists), the
+/// focused group, and the highest tab number embedded in any restored id (0
+/// if none) — callers fold this into their `query_number` counter so a
+/// newly-created tab can never collide with a restored one.
+fn load_query_tabs() -> (
+    Vec<WorkspaceTab>,
+    Option<String>,
+    Option<String>,
+    usize,
+    usize,
+) {
     let Ok(path) = rdb_connstore::ConnStore::query_tabs_path() else {
-        return (Vec::new(), None, None, 0);
+        return (Vec::new(), None, None, 0, 0);
     };
     let Some(payload): Option<PersistedTabs> = std::fs::read_to_string(path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
     else {
-        return (Vec::new(), None, None, 0);
+        return (Vec::new(), None, None, 0, 0);
     };
     let tabs: Vec<WorkspaceTab> = payload
         .tabs
@@ -1853,10 +1868,21 @@ fn load_query_tabs() -> (Vec<WorkspaceTab>, Option<String>, Option<String>, usiz
             t
         })
         .collect();
+    let max_number = tabs
+        .iter()
+        .filter_map(|t| tab_id_number(&t.id))
+        .max()
+        .unwrap_or(0);
     let exists = |id: &String| tabs.iter().any(|t| t.id == *id);
     let active = payload.active.filter(|id| exists(id));
     let active_p1 = payload.active_p1.filter(|id| exists(id));
-    (tabs, active, active_p1, payload.active_group.min(1))
+    (
+        tabs,
+        active,
+        active_p1,
+        payload.active_group.min(1),
+        max_number,
+    )
 }
 
 fn page_bounds(page: u64, limit: u64, total: Option<u64>, shown: u64) -> (u64, u64, bool, bool) {
@@ -6950,6 +6976,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let edit_buf = edit_buf.clone();
         let db_override = db_override.clone();
         let tabs_restored = tabs_restored.clone();
+        let query_number = query_number.clone();
         let restore_tab = restore_tab.clone();
         let save_active_tab = save_active_tab.clone();
         let save_p1_tab = save_p1_tab.clone();
@@ -6987,7 +7014,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let restore = !tabs_restored.get() || db_ovr.is_some();
             tabs_restored.set(true);
             let (init_tabs, init_active, init_active_p1, init_active_group) = if restore {
-                load_query_tabs()
+                let (tabs, active, active_p1, active_group, max_number) = load_query_tabs();
+                // Never let a freshly-minted tab reuse a number a restored tab
+                // already holds — `fetch_max` only ever raises the counter.
+                query_number.fetch_max(max_number, std::sync::atomic::Ordering::Relaxed);
+                (tabs, active, active_p1, active_group)
             } else {
                 // Retain every open tab across the switch so the workspace
                 // behaves like a set of persistent documents — the SQL scratch
