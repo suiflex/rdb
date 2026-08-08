@@ -25,6 +25,8 @@ export struct PaletteItem {
     expanded: bool,
     // Last row of a group's visible block — rounds the card's bottom corners.
     is-group-end: bool,
+    // Nesting depth of this row's group (0 = top-level). Mirrors `ConnItem.depth`.
+    depth: int,
 }
 
 export component ListModal inherits Rectangle {
@@ -146,7 +148,7 @@ export component ListModal inherits Rectangle {
                                 }
                             }
                             if !is-section: HorizontalLayout {
-                                padding-left: Tokens.sp2;
+                                padding-left: Tokens.sp2 + it.depth * Tokens.sp3;
                                 padding-right: Tokens.sp2;
                                 spacing: Tokens.sp3;
 

@@ -620,15 +620,25 @@ callback create-table-commit();
     in-out property <string> f-params;
     in-out property <string> f-color;
     in-out property <string> f-env-tag;
-    in-out property <string> f-group;
+    // Derived by ConnForm from the Group/Subgroup dropdowns — read-only here.
+    out property <string> f-group: conn-form.f-group;
     in-out property <string> f-group-display;
     in property <[string]> group-options;
+    in-out property <string> f-new-group-text;
+    in-out property <string> f-subgroup-display;
+    in property <[string]> subgroup-options;
+    in-out property <string> f-new-subgroup-text;
+    callback form-group-changed(string);
     in-out property <string> f-import-url;
     in property <string> form-error;
     in property <string> test-result;
     in property <bool> test-ok;
     in property <bool> test-busy;
     callback open-add-form();
+    // Same as open-add-form(), but starts the Group dropdown on "+ New
+    // group…" (the text field is left empty — the user types the full path,
+    // e.g. "<parent>/<child>", themselves).
+    callback open-add-form-in-group(string);
     callback open-edit-form(int);
     callback export-conns(int);
     callback form-engine-changed(string);
@@ -1137,6 +1147,7 @@ callback create-table-commit();
             cancel-connect() => { root.cancel-connect(); }
             test-clicked(i) => { root.test-conn-quick(i); }
             add-clicked() => { root.open-add-form(); }
+            add-conn-in-group(g) => { root.open-add-form-in-group(g); }
             edit-clicked(i) => { root.open-edit-form(i); }
             toggle-group(g) => { root.toggle-group(g); }
             group-rename(o, n) => { root.group-rename(o, n); }
@@ -1227,7 +1238,8 @@ callback create-table-commit();
                                 height: Tokens.doc-tab-h;
                                 background: i == root.active-tab ? Tokens.card
                                     : (tab-ta.has-hover ? Tokens.card.with-alpha(0.5) : transparent);
-                                border-radius: 0;
+                                border-radius: Tokens.radius;
+                                clip: true;
                                 tab-ta := TouchArea {
                                     property <bool> dragging: false;
                                     moved => {
@@ -1428,6 +1440,8 @@ callback create-table-commit();
                                 height: Tokens.doc-tab-h;
                                 background: i == root.p1-active-tab ? Tokens.card
                                     : (p1-tab-ta.has-hover ? Tokens.card.with-alpha(0.5) : transparent);
+                                border-radius: Tokens.radius;
+                                clip: true;
                                 p1-tab-ta := TouchArea {
                                     property <bool> dragging: false;
                                     moved => {
@@ -2451,7 +2465,7 @@ callback create-table-commit();
     }
 
     // ----- connection form overlay (drawn on top of palette layer) -----
-    ConnForm {
+    conn-form := ConnForm {
         width: root.width;
         height: root.height;
         open: root.form-open;
@@ -2468,9 +2482,15 @@ callback create-table-commit();
         f-params <=> root.f-params;
         f-color <=> root.f-color;
         f-env-tag <=> root.f-env-tag;
-        f-group <=> root.f-group;
         f-group-display <=> root.f-group-display;
         group-options: root.group-options;
+        f-new-group-text <=> root.f-new-group-text;
+        f-subgroup-display <=> root.f-subgroup-display;
+        subgroup-options: root.subgroup-options;
+        f-new-subgroup-text <=> root.f-new-subgroup-text;
+        group-changed(v) => {
+            root.form-group-changed(v);
+        }
         f-import-url <=> root.f-import-url;
         form-error: root.form-error;
         test-result: root.test-result;

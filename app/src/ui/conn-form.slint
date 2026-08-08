@@ -57,12 +57,29 @@ export component ConnForm inherits Rectangle {
     in-out property <string> f-params;     // Mongo options query string or full URI
     in-out property <string> f-color;      // selected hex
     in-out property <string> f-env-tag;    // "None"|"Local"|"Dev"|"Staging"|"Testing"|"Production"
-    in-out property <string> f-group;      // sidebar folder label; empty = ungrouped
-    in-out property <string> f-group-display; // text shown in the Group dropdown ("None" when f-group is empty)
-    in property <[string]> group-options;  // ["None", ...distinct groups, "+ New group…"]
+    // Derived, not written to directly (see below) — the two dropdowns and
+    // their free-text fallbacks are the actual source of truth.
+    out property <string> f-group: root.f-group-display == "None" ? ""
+        : root.f-group-display == "+ New group…" ? root.f-new-group-text
+        : root.f-subgroup-display == "None" ? root.f-group-display
+        : root.f-subgroup-display == "+ New subgroup…"
+            ? (root.f-new-subgroup-text == "" ? root.f-group-display : root.f-group-display + "/" + root.f-new-subgroup-text)
+        : root.f-group-display + "/" + root.f-subgroup-display;
+    in-out property <string> f-group-display; // top-level Group dropdown value ("None" when ungrouped)
+    in property <[string]> group-options;  // ["None", ...top-level group names, "+ New group…"]
+    in-out property <string> f-new-group-text; // typed when f-group-display == "+ New group…"
+    in-out property <string> f-subgroup-display; // Subgroup dropdown value; only meaningful once a real group is picked
+    in property <[string]> subgroup-options; // ["None", ...direct-child leaves of f-group-display, "+ New subgroup…"]
+    in-out property <string> f-new-subgroup-text; // typed when f-subgroup-display == "+ New subgroup…"
+    callback group-changed(string);
     // Live-derived (not manually toggled), so a stale true doesn't carry over
     // from a previous dialog session — Rust always resets f-group-display on open.
     property <bool> creating-new-group: root.f-group-display == "+ New group…";
+    // A real existing (or about-to-be-created) top group is selected — the
+    // Subgroup row only ever shows once this is true, no group means
+    // nothing to nest under.
+    property <bool> has-parent-group: root.f-group-display != "None" && root.f-group-display != "+ New group…";
+    property <bool> creating-new-subgroup: root.f-subgroup-display == "+ New subgroup…";
     in-out property <string> f-import-url;  // pasted connection URL
     in property <string> form-error;
     in property <string> test-result;   // test-connection status line
@@ -294,7 +311,13 @@ export component ConnForm inherits Rectangle {
                     model: root.group-options;
                     current-value <=> root.f-group-display;
                     selected(v) => {
-                        root.f-group = (v == "None" || v == "+ New group…") ? "" : v;
+                        // A new parent invalidates whatever subgroup was
+                        // picked for the old one.
+                        root.f-subgroup-display = "None";
+                        root.f-new-subgroup-text = "";
+                        if (v != "+ New group…") {
+                            root.group-changed(v);
+                        }
                     }
                 }
             }
@@ -304,8 +327,29 @@ export component ConnForm inherits Rectangle {
                 FormLabel { text: ""; }
                 FormField {
                     horizontal-stretch: 1;
-                    text <=> root.f-group;
+                    text <=> root.f-new-group-text;
                     placeholder: "New group name";
+                }
+            }
+            // Nothing to nest under until a real group is picked.
+            if root.has-parent-group: HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: "Subgroup"; }
+                SelectBox {
+                    horizontal-stretch: 1;
+                    model: root.subgroup-options;
+                    current-value <=> root.f-subgroup-display;
+                }
+            }
+            if root.has-parent-group && root.creating-new-subgroup: HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: ""; }
+                FormField {
+                    horizontal-stretch: 1;
+                    text <=> root.f-new-subgroup-text;
+                    placeholder: "New subgroup name";
                 }
             }
 

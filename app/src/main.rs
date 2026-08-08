@@ -196,82 +196,256 @@ fn existing_groups(store: &rdb_connstore::ConnStore) -> Vec<String> {
     groups
 }
 
-/// Options for the New/Edit dialog's Group dropdown: "None" + every
-/// distinct group already in use + a trailing "create new" entry.
+/// Distinct top-level group names (the first path segment of every entry
+/// `existing_groups` returns), sorted.
+fn top_level_groups(store: &rdb_connstore::ConnStore) -> Vec<String> {
+    let mut tops: Vec<String> = existing_groups(store)
+        .iter()
+        .map(|g| g.split('/').next().unwrap_or(g).to_string())
+        .collect();
+    tops.sort();
+    tops.dedup();
+    tops
+}
+
+/// Options for the New/Edit dialog's top-level Group dropdown: "None" +
+/// every distinct top-level group already in use + a trailing "create new"
+/// entry. Nesting under a chosen group is a separate Subgroup dropdown, see
+/// `subgroup_picker_options`.
 fn group_picker_options(store: &rdb_connstore::ConnStore) -> Vec<String> {
     let mut opts = vec!["None".to_string()];
-    opts.extend(existing_groups(store));
+    opts.extend(top_level_groups(store));
     opts.push("+ New group…".to_string());
     opts
 }
 
-/// Build the grouped sidebar row model: a header row per group followed by its
-/// connection rows (unless the group is collapsed). `index` on each connection
-/// row is its position in the store list, so connect/edit callbacks stay correct
-/// regardless of grouping or ordering. `collapsed` holds the set of group labels
-/// currently folded shut.
-fn build_conn_items(
-    store: &rdb_connstore::ConnStore,
-    collapsed: &HashSet<String>,
-    filter: &str,
-) -> Vec<ConnItem> {
-    let needle = filter.trim().to_lowercase();
-    // Bucket store indices by group label, preserving first-seen group order.
-    let mut order: Vec<String> = Vec::new();
-    let mut buckets: std::collections::HashMap<String, Vec<usize>> =
-        std::collections::HashMap::new();
-    for (i, sc) in store.list().iter().enumerate() {
-        if !needle.is_empty() && !sc.name.to_lowercase().contains(&needle) {
-            continue;
-        }
-        let g = sc
-            .group
-            .as_deref()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or(UNGROUPED)
-            .to_string();
-        if !buckets.contains_key(&g) {
-            order.push(g.clone());
-        }
-        buckets.entry(g).or_default().push(i);
+/// Options for the Subgroup dropdown once `parent` is picked as the top
+/// group: "None" + every direct child of `parent` already in use (by leaf
+/// name) + a trailing "create new" entry. Grandchildren (anything nested
+/// two or more levels under `parent`) are not listed here — the guided
+/// picker is two levels deep; deeper nesting still works by typing a
+/// `/`-containing name into the "create new" free-text field.
+fn subgroup_picker_options(store: &rdb_connstore::ConnStore, parent: &str) -> Vec<String> {
+    let mut leaves: Vec<String> = existing_groups(store)
+        .iter()
+        .filter(|g| rdb_connstore::group_parent(g) == Some(parent))
+        .map(|g| rdb_connstore::group_leaf(g).to_string())
+        .collect();
+    leaves.sort();
+    leaves.dedup();
+    let mut opts = vec!["None".to_string()];
+    opts.extend(leaves);
+    opts.push("+ New subgroup…".to_string());
+    opts
+}
+
+/// Where a connection/subfolder currently at `sc_group` (a descendant of
+/// `deleted`, itself included) lands once `deleted` is removed: a direct
+/// member promotes to `deleted`'s parent (`None` if `deleted` was
+/// top-level); a deeper descendant has `deleted`'s own segment spliced out
+/// and is reparented one level up, same as a file manager deleting a folder.
+fn cascade_delete_group(deleted: &str, sc_group: &str) -> Option<String> {
+    if sc_group == deleted {
+        return rdb_connstore::group_parent(deleted).map(str::to_string);
+    }
+    let suffix = &sc_group[deleted.len() + 1..]; // past "deleted/"
+    Some(match rdb_connstore::group_parent(deleted) {
+        Some(parent) => format!("{parent}/{suffix}"),
+        None => suffix.to_string(),
+    })
+}
+
+/// Where a connection/subfolder currently at `sc_group` (a descendant of
+/// `old`, itself included) lands once `old` is renamed to `new`: the `old`
+/// prefix is swapped for `new`, keeping whatever nested suffix followed it.
+fn cascade_rename_group(old: &str, new: &str, sc_group: &str) -> String {
+    if sc_group == old {
+        new.to_string()
+    } else {
+        format!("{new}{}", &sc_group[old.len()..]) // keeps the "/suffix" tail
+    }
+}
+
+#[cfg(test)]
+mod group_cascade_tests {
+    use super::*;
+
+    #[test]
+    fn delete_direct_member_promotes_to_parent() {
+        assert_eq!(cascade_delete_group("OSS", "OSS"), None);
+        assert_eq!(
+            cascade_delete_group("OSS/Production", "OSS/Production"),
+            Some("OSS".to_string())
+        );
     }
 
-    let mut rows: Vec<ConnItem> = Vec::new();
-    for g in &order {
-        // Ungrouped connections list flat (no header) when they are the only
-        // bucket; once real groups exist they get their own UNGROUPED header.
-        let is_ungrouped = g == UNGROUPED && order.len() == 1;
-        let expanded = is_ungrouped || !collapsed.contains(g);
-        if !is_ungrouped {
-            rows.push(ConnItem {
-                id: SharedString::default(),
-                name: g.to_uppercase().into(),
-                engine: SharedString::default(),
-                color: theme::accent_or_default(""),
-                has_custom_color: false,
-                is_header: true,
-                expanded,
-                index: -1,
-                group: g.clone().into(),
-                subline: SharedString::default(),
-                local: false,
-                count: buckets[g].len() as i32,
-                favorite: false,
-                env_tag_label: SharedString::default(),
-                env_tag_color: theme::accent_or_default(""),
-                is_group_end: false,
-            });
+    #[test]
+    fn delete_descendant_splices_out_the_deleted_segment() {
+        assert_eq!(
+            cascade_delete_group("OSS/Production", "OSS/Production/DB"),
+            Some("OSS/DB".to_string())
+        );
+        assert_eq!(
+            cascade_delete_group("OSS", "OSS/Production/DB"),
+            Some("Production/DB".to_string())
+        );
+    }
+
+    #[test]
+    fn rename_direct_member_and_descendant_suffix() {
+        assert_eq!(
+            cascade_rename_group("OSS", "OSS-Legacy", "OSS"),
+            "OSS-Legacy"
+        );
+        assert_eq!(
+            cascade_rename_group("OSS", "OSS-Legacy", "OSS/Production"),
+            "OSS-Legacy/Production"
+        );
+        assert_eq!(
+            cascade_rename_group("OSS/Production", "OSS/Prod", "OSS/Production/DB"),
+            "OSS/Prod/DB"
+        );
+    }
+}
+
+#[cfg(test)]
+mod build_conn_items_tests {
+    use super::*;
+    use rdb_connstore::{ConnStore, EncryptedFileBackend, Engine, SavedConnection};
+
+    /// A throwaway `ConnStore` backed by a temp dir, seeded with connections
+    /// at the given group paths (`None` = ungrouped). Never touches the real
+    /// platform config dir.
+    fn store_with_groups(groups: &[Option<&str>]) -> (tempfile::TempDir, ConnStore) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let backend = EncryptedFileBackend::new(dir.path()).expect("file secret backend");
+        let mut store = ConnStore::new(dir.path().join("connections.json"), Box::new(backend));
+        for (i, g) in groups.iter().enumerate() {
+            let mut sc = SavedConnection::new(format!("conn{i}"), Engine::Postgres, "h", 5432, "u");
+            sc.group = g.map(str::to_string);
+            store.add(sc).expect("add");
         }
-        if !expanded {
-            // Collapsed: the header is the only (and thus last) visible row.
-            if let Some(last) = rows.last_mut() {
-                last.is_group_end = true;
-            }
-            continue;
+        (dir, store)
+    }
+
+    #[test]
+    fn implied_ancestor_header_renders_with_zero_direct_members() {
+        let (_dir, store) = store_with_groups(&[Some("OSS/Production")]);
+        let rows = build_conn_items(&store, &HashSet::new(), "");
+        // OSS (0 direct, 1 nested) -> OSS/Production (1 direct) -> the connection.
+        assert_eq!(rows.len(), 3);
+        assert!(rows[0].is_header);
+        assert_eq!(rows[0].group.as_str(), "OSS");
+        assert_eq!(rows[0].depth, 0);
+        assert_eq!(rows[0].count, 1);
+        assert!(rows[1].is_header);
+        assert_eq!(rows[1].group.as_str(), "OSS/Production");
+        assert_eq!(rows[1].depth, 1);
+        assert_eq!(rows[1].count, 1);
+        assert!(!rows[2].is_header);
+        assert_eq!(rows[2].group.as_str(), "OSS/Production");
+        assert_eq!(rows[2].depth, 1);
+    }
+
+    #[test]
+    fn collapsing_a_parent_hides_the_whole_subtree() {
+        let (_dir, store) = store_with_groups(&[Some("OSS/Production"), Some("OSS")]);
+        let collapsed = HashSet::from(["OSS".to_string()]);
+        let rows = build_conn_items(&store, &collapsed, "");
+        // Only the OSS header itself remains visible.
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].is_header);
+        assert_eq!(rows[0].group.as_str(), "OSS");
+        assert!(!rows[0].expanded);
+        assert!(rows[0].is_group_end);
+    }
+
+    #[test]
+    fn is_group_end_lands_on_the_deepest_last_row_of_each_top_level_group() {
+        let (_dir, store) = store_with_groups(&[Some("OSS/Production"), Some("LOCAL")]);
+        let rows = build_conn_items(&store, &HashSet::new(), "");
+        // OSS, OSS/Production, conn0 (deepest last row of the OSS card),
+        // LOCAL, conn1 (last row of the LOCAL card).
+        assert_eq!(rows.len(), 5);
+        assert!(rows[2].is_group_end, "conn0 should close the OSS card");
+        assert!(
+            !rows[1].is_group_end,
+            "the OSS/Production header is not the card's true end"
+        );
+        assert!(rows[4].is_group_end, "conn1 should close the LOCAL card");
+    }
+}
+
+/// Total connections directly or transitively under `path` (used for a
+/// folder header's count badge).
+fn subtree_conn_count(
+    path: &str,
+    child_folders: &std::collections::HashMap<Option<String>, Vec<String>>,
+    direct_conns: &std::collections::HashMap<String, Vec<usize>>,
+) -> i32 {
+    let mut total = direct_conns.get(path).map_or(0, |v| v.len() as i32);
+    if let Some(children) = child_folders.get(&Some(path.to_string())) {
+        for child in children {
+            total += subtree_conn_count(child, child_folders, direct_conns);
         }
-        // Favorites float to the top of their group, then explicit sort order.
-        // Stable sort keeps store insertion order for equal keys (order == 0).
-        let mut idxs = buckets[g].clone();
+    }
+    total
+}
+
+/// Depth-first: push `path`'s header row, then (unless collapsed) its child
+/// folders followed by its own direct connection rows. Never touches
+/// `is_group_end` — that is only meaningful at the top-level group's true
+/// last visible row, which the caller marks after the whole subtree returns.
+fn emit_group_subtree(
+    path: &str,
+    depth: i32,
+    store: &rdb_connstore::ConnStore,
+    child_folders: &std::collections::HashMap<Option<String>, Vec<String>>,
+    direct_conns: &std::collections::HashMap<String, Vec<usize>>,
+    collapsed: &HashSet<String>,
+    rows: &mut Vec<ConnItem>,
+) {
+    let expanded = !collapsed.contains(path);
+    rows.push(ConnItem {
+        id: SharedString::default(),
+        name: rdb_connstore::group_leaf(path).to_uppercase().into(),
+        engine: SharedString::default(),
+        color: theme::accent_or_default(""),
+        has_custom_color: false,
+        is_header: true,
+        expanded,
+        index: -1,
+        group: path.into(),
+        subline: SharedString::default(),
+        local: false,
+        count: subtree_conn_count(path, child_folders, direct_conns),
+        favorite: false,
+        env_tag_label: SharedString::default(),
+        env_tag_color: theme::accent_or_default(""),
+        is_group_end: false,
+        depth,
+    });
+    if !expanded {
+        // Collapsing a folder hides its whole subtree, not just its direct rows.
+        return;
+    }
+    if let Some(children) = child_folders.get(&Some(path.to_string())) {
+        for child in children {
+            emit_group_subtree(
+                child,
+                depth + 1,
+                store,
+                child_folders,
+                direct_conns,
+                collapsed,
+                rows,
+            );
+        }
+    }
+    if let Some(idxs) = direct_conns.get(path) {
+        // Favorites float to the top, then explicit sort order. Stable sort
+        // keeps store insertion order for equal keys (order == 0).
+        let mut idxs = idxs.clone();
         idxs.sort_by_key(|&i| {
             let s = &store.list()[i];
             (!s.favorite, s.order)
@@ -291,7 +465,7 @@ fn build_conn_items(
                 is_header: false,
                 expanded: true,
                 index: i as i32,
-                group: g.clone().into(),
+                group: path.into(),
                 subline: subline.into(),
                 local: s.local,
                 count: 0,
@@ -300,9 +474,124 @@ fn build_conn_items(
                 env_tag_color: theme::env_tag_color(s.env_tag)
                     .unwrap_or_else(|| theme::accent_or_default("")),
                 is_group_end: false,
+                depth,
             });
         }
-        // Expanded: the last member row just pushed is the group's visible end.
+    }
+}
+
+/// Build the grouped sidebar row model: a header row per group (and, once
+/// nested, per subgroup) followed by its connection rows, depth-first,
+/// unless the group is collapsed. `index` on each connection row is its
+/// position in the store list, so connect/edit callbacks stay correct
+/// regardless of grouping or ordering. `collapsed` holds the set of full
+/// group paths currently folded shut.
+///
+/// `SavedConnection.group` is treated as a `/`-delimited path: `"OSS"` is a
+/// top-level group same as before, `"OSS/Production"` nests under it. A
+/// group's ancestors are registered as folder headers even if they hold no
+/// connections directly, so `"OSS"` still renders when every connection
+/// under it lives at `"OSS/Production"`.
+fn build_conn_items(
+    store: &rdb_connstore::ConnStore,
+    collapsed: &HashSet<String>,
+    filter: &str,
+) -> Vec<ConnItem> {
+    let needle = filter.trim().to_lowercase();
+    // child_folders[None] is the top-level order; child_folders[Some(p)] is
+    // p's direct subfolders, both in first-seen order across the store scan.
+    let mut child_folders: std::collections::HashMap<Option<String>, Vec<String>> =
+        std::collections::HashMap::new();
+    let mut registered: HashSet<String> = HashSet::new();
+    let mut direct_conns: std::collections::HashMap<String, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (i, sc) in store.list().iter().enumerate() {
+        if !needle.is_empty() && !sc.name.to_lowercase().contains(&needle) {
+            continue;
+        }
+        let g = sc
+            .group
+            .as_deref()
+            .and_then(rdb_connstore::normalize_group_path)
+            .unwrap_or_else(|| UNGROUPED.to_string());
+        if g == UNGROUPED {
+            if registered.insert(UNGROUPED.to_string()) {
+                child_folders
+                    .entry(None)
+                    .or_default()
+                    .push(UNGROUPED.to_string());
+            }
+        } else {
+            // Register g and every ancestor, shallowest first, so a parent
+            // is always in child_folders before its child is appended to it.
+            for anc in rdb_connstore::group_ancestors(&g)
+                .map(str::to_string)
+                .chain(std::iter::once(g.clone()))
+            {
+                if registered.insert(anc.clone()) {
+                    let parent = rdb_connstore::group_parent(&anc).map(str::to_string);
+                    child_folders.entry(parent).or_default().push(anc);
+                }
+            }
+        }
+        direct_conns.entry(g).or_default().push(i);
+    }
+
+    let root_order = child_folders.get(&None).cloned().unwrap_or_default();
+    let mut rows: Vec<ConnItem> = Vec::new();
+    for path in &root_order {
+        // Ungrouped connections list flat (no header) when they are the only
+        // top-level bucket; once real groups exist they get their own
+        // UNGROUPED header like any other top-level folder.
+        if path == UNGROUPED && root_order.len() == 1 {
+            if let Some(idxs) = direct_conns.get(UNGROUPED) {
+                let mut idxs = idxs.clone();
+                idxs.sort_by_key(|&i| {
+                    let s = &store.list()[i];
+                    (!s.favorite, s.order)
+                });
+                for &i in &idxs {
+                    let s = &store.list()[i];
+                    let subline = match &s.database {
+                        Some(db) => format!("{} : {}", s.host, db),
+                        None => s.host.clone(),
+                    };
+                    rows.push(ConnItem {
+                        id: s.id.clone().into(),
+                        name: s.name.clone().into(),
+                        engine: AnyDriver::badge(s.engine).into(),
+                        color: theme::accent_or_default(s.color.as_deref().unwrap_or("")),
+                        has_custom_color: s.color.is_some(),
+                        is_header: false,
+                        expanded: true,
+                        index: i as i32,
+                        group: UNGROUPED.into(),
+                        subline: subline.into(),
+                        local: s.local,
+                        count: 0,
+                        favorite: s.favorite,
+                        env_tag_label: theme::env_tag_label(s.env_tag).into(),
+                        env_tag_color: theme::env_tag_color(s.env_tag)
+                            .unwrap_or_else(|| theme::accent_or_default("")),
+                        is_group_end: false,
+                        depth: 0,
+                    });
+                }
+            }
+        } else {
+            emit_group_subtree(
+                path,
+                0,
+                store,
+                &child_folders,
+                &direct_conns,
+                collapsed,
+                &mut rows,
+            );
+        }
+        // Whatever this top-level group's true last visible row ended up
+        // being (its header if collapsed, its deepest descendant otherwise)
+        // is the one that rounds the card's bottom corners.
         if let Some(last) = rows.last_mut() {
             last.is_group_end = true;
         }
@@ -326,7 +615,7 @@ fn build_conn_palette_items(
     for r in rows {
         if r.is_header {
             items.push(PaletteItem {
-                label: r.group.to_lowercase().into(),
+                label: rdb_connstore::group_leaf(&r.group).to_lowercase().into(),
                 kind: "group".into(),
                 sub: SharedString::default(),
                 local: false,
@@ -337,6 +626,7 @@ fn build_conn_palette_items(
                 group: r.group,
                 expanded: r.expanded,
                 is_group_end: r.is_group_end,
+                depth: r.depth,
             });
             map.push(-1);
         } else {
@@ -352,6 +642,7 @@ fn build_conn_palette_items(
                 group: r.group,
                 expanded: r.expanded,
                 is_group_end: r.is_group_end,
+                depth: r.depth,
             });
             map.push(r.index);
         }
@@ -411,6 +702,7 @@ mod row_group_at_y_tests {
             env_tag_label: SharedString::default(),
             env_tag_color: Default::default(),
             is_group_end: false,
+            depth: 0,
         }
     }
 
@@ -1823,18 +2115,33 @@ fn save_query_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active: Option<&str>) 
     }
 }
 
+/// Tab ids are minted as `query:<connection>:<N>`; pull `N` back out so a
+/// restored tab's number can be folded into the in-memory counter and never
+/// re-handed-out to a freshly created tab.
+fn tab_id_number(id: &str) -> Option<usize> {
+    id.rsplit(':').next()?.parse().ok()
+}
+
 /// Load persisted SQL tabs into fresh `WorkspaceTab`s (empty results/browse).
-/// Returns the tabs, each group's active tab id (if it still exists), and the
-/// focused group.
-fn load_query_tabs() -> (Vec<WorkspaceTab>, Option<String>, Option<String>, usize) {
+/// Returns the tabs, each group's active tab id (if it still exists), the
+/// focused group, and the highest tab number embedded in any restored id (0
+/// if none) — callers fold this into their `query_number` counter so a
+/// newly-created tab can never collide with a restored one.
+fn load_query_tabs() -> (
+    Vec<WorkspaceTab>,
+    Option<String>,
+    Option<String>,
+    usize,
+    usize,
+) {
     let Ok(path) = rdb_connstore::ConnStore::query_tabs_path() else {
-        return (Vec::new(), None, None, 0);
+        return (Vec::new(), None, None, 0, 0);
     };
     let Some(payload): Option<PersistedTabs> = std::fs::read_to_string(path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
     else {
-        return (Vec::new(), None, None, 0);
+        return (Vec::new(), None, None, 0, 0);
     };
     let tabs: Vec<WorkspaceTab> = payload
         .tabs
@@ -1853,10 +2160,21 @@ fn load_query_tabs() -> (Vec<WorkspaceTab>, Option<String>, Option<String>, usiz
             t
         })
         .collect();
+    let max_number = tabs
+        .iter()
+        .filter_map(|t| tab_id_number(&t.id))
+        .max()
+        .unwrap_or(0);
     let exists = |id: &String| tabs.iter().any(|t| t.id == *id);
     let active = payload.active.filter(|id| exists(id));
     let active_p1 = payload.active_p1.filter(|id| exists(id));
-    (tabs, active, active_p1, payload.active_group.min(1))
+    (
+        tabs,
+        active,
+        active_p1,
+        payload.active_group.min(1),
+        max_number,
+    )
 }
 
 fn page_bounds(page: u64, limit: u64, total: Option<u64>, shown: u64) -> (u64, u64, bool, bool) {
@@ -2661,6 +2979,7 @@ fn build_palette_items(
         group: SharedString::default(),
         expanded: false,
         is_group_end: false,
+        depth: 0,
     };
     let mut items: Vec<PaletteItem> = Vec::new();
     let mut actions: Vec<PaletteAction> = Vec::new();
@@ -2685,6 +3004,7 @@ fn build_palette_items(
                 group: SharedString::default(),
                 expanded: false,
                 is_group_end: false,
+                depth: 0,
             });
             actions.push(PaletteAction::Connect(idx));
         }
@@ -2716,6 +3036,7 @@ fn build_palette_items(
                 group: SharedString::default(),
                 expanded: false,
                 is_group_end: false,
+                depth: 0,
             });
             actions.push(PaletteAction::OpenTable(db, label));
         }
@@ -2737,6 +3058,7 @@ fn build_palette_items(
                 group: SharedString::default(),
                 expanded: false,
                 is_group_end: false,
+                depth: 0,
             });
             actions.push(PaletteAction::OpenTable(db, label));
         }
@@ -2758,6 +3080,7 @@ fn build_palette_items(
                 group: SharedString::default(),
                 expanded: false,
                 is_group_end: false,
+                depth: 0,
             });
             actions.push(PaletteAction::OpenFunction(label));
         }
@@ -2783,6 +3106,7 @@ fn build_palette_items(
                 group: SharedString::default(),
                 expanded: false,
                 is_group_end: false,
+                depth: 0,
             });
             actions.push(PaletteAction::OpenSavedQuery(name.clone(), idx));
         }
@@ -2808,6 +3132,7 @@ fn build_palette_items(
                 group: SharedString::default(),
                 expanded: false,
                 is_group_end: false,
+                depth: 0,
             });
             actions.push(PaletteAction::OpenRecent(idx));
         }
@@ -3990,6 +4315,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     group: SharedString::default(),
                     expanded: false,
                     is_group_end: false,
+                    depth: 0,
                 })
                 .collect();
             *panes[pane].completion_ctx.borrow_mut() =
@@ -4869,6 +5195,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     group: SharedString::default(),
                     expanded: false,
                     is_group_end: false,
+                    depth: 0,
                 })
                 .collect();
             if items.is_empty() {
@@ -4919,6 +5246,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     group: SharedString::default(),
                     expanded: false,
                     is_group_end: false,
+                    depth: 0,
                 })
                 .collect();
             if items.is_empty() {
@@ -6213,7 +6541,9 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // ----- delete a group: its connections fall back to Ungrouped -----
+    // ----- delete a group: its connections + descendant subfolders promote
+    // one level up (a top-level folder's members fall back to Ungrouped,
+    // same as before nesting existed) -----
     {
         let weak = window.as_weak();
         let store = store.clone();
@@ -6227,20 +6557,25 @@ fn main() -> Result<(), slint::PlatformError> {
             let g = g.to_string();
             {
                 let mut st = store.borrow_mut();
-                let ids: Vec<String> = st
+                let members: Vec<(String, String)> = st
                     .list()
                     .iter()
-                    .filter(|s| s.group.as_deref() == Some(g.as_str()))
-                    .map(|s| s.id.clone())
+                    .filter_map(|s| {
+                        let grp = s.group.as_deref()?;
+                        rdb_connstore::is_descendant(grp, &g)
+                            .then(|| (s.id.clone(), grp.to_string()))
+                    })
                     .collect();
-                for id in ids {
+                for (id, grp) in members {
                     if let Some(mut sc) = st.get(&id).cloned() {
-                        sc.group = None;
+                        sc.group = cascade_delete_group(&g, &grp);
                         let _ = st.update(sc);
                     }
                 }
             }
-            collapsed.borrow_mut().remove(&g);
+            collapsed
+                .borrow_mut()
+                .retain(|p| !rdb_connstore::is_descendant(p, &g));
             let groups: Vec<String> = collapsed.borrow().iter().cloned().collect();
             let _ = settings
                 .borrow_mut()
@@ -6251,7 +6586,8 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // ----- rename a group: every member connection follows -----
+    // ----- rename a group: every member connection and descendant subfolder
+    // follows, prefix-replaced -----
     {
         let weak = window.as_weak();
         let store = store.clone();
@@ -6263,31 +6599,46 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let old = old.to_string();
-            let new = new.trim().to_string();
-            if new.is_empty() || new == old {
+            let Some(new) = rdb_connstore::normalize_group_path(&new) else {
+                return;
+            };
+            // Also rejects a no-op rename (new == old counts as its own
+            // descendant) and renaming a folder into its own subtree, which
+            // would otherwise create a cycle.
+            if rdb_connstore::is_descendant(&new, &old) {
                 return;
             }
             {
                 let mut st = store.borrow_mut();
-                let ids: Vec<String> = st
+                let members: Vec<(String, String)> = st
                     .list()
                     .iter()
-                    .filter(|s| s.group.as_deref() == Some(old.as_str()))
-                    .map(|s| s.id.clone())
+                    .filter_map(|s| {
+                        let grp = s.group.as_deref()?;
+                        rdb_connstore::is_descendant(grp, &old)
+                            .then(|| (s.id.clone(), grp.to_string()))
+                    })
                     .collect();
-                for id in ids {
+                for (id, grp) in members {
                     if let Some(mut sc) = st.get(&id).cloned() {
-                        sc.group = Some(new.clone());
+                        sc.group = Some(cascade_rename_group(&old, &new, &grp));
                         let _ = st.update(sc);
                     }
                 }
             }
             // Carry the collapsed state over so renaming doesn't silently
-            // re-expand a group the user had folded shut.
+            // re-expand a group (or one of its subfolders) the user had
+            // folded shut.
             {
                 let mut c = collapsed.borrow_mut();
-                if c.remove(&old) {
-                    c.insert(new.clone());
+                let renamed: Vec<String> = c
+                    .iter()
+                    .filter(|p| rdb_connstore::is_descendant(p, &old))
+                    .cloned()
+                    .collect();
+                for p in renamed {
+                    c.remove(&p);
+                    c.insert(cascade_rename_group(&old, &new, &p));
                 }
             }
             let groups: Vec<String> = collapsed.borrow().iter().cloned().collect();
@@ -6950,6 +7301,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let edit_buf = edit_buf.clone();
         let db_override = db_override.clone();
         let tabs_restored = tabs_restored.clone();
+        let query_number = query_number.clone();
         let restore_tab = restore_tab.clone();
         let save_active_tab = save_active_tab.clone();
         let save_p1_tab = save_p1_tab.clone();
@@ -6987,7 +7339,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let restore = !tabs_restored.get() || db_ovr.is_some();
             tabs_restored.set(true);
             let (init_tabs, init_active, init_active_p1, init_active_group) = if restore {
-                load_query_tabs()
+                let (tabs, active, active_p1, active_group, max_number) = load_query_tabs();
+                // Never let a freshly-minted tab reuse a number a restored tab
+                // already holds — `fetch_max` only ever raises the counter.
+                query_number.fetch_max(max_number, std::sync::atomic::Ordering::Relaxed);
+                (tabs, active, active_p1, active_group)
             } else {
                 // Retain every open tab across the switch so the workspace
                 // behaves like a set of persistent documents — the SQL scratch
@@ -11708,10 +12064,68 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_params(SharedString::default());
             w.set_f_color(SharedString::from("#2c5fd8"));
             w.set_f_env_tag(SharedString::from("None"));
-            w.set_f_group(SharedString::default());
             w.set_f_group_display(SharedString::from("None"));
+            w.set_f_new_group_text(SharedString::default());
+            w.set_f_subgroup_display(SharedString::from("None"));
+            w.set_f_new_subgroup_text(SharedString::default());
             w.set_group_options(ModelRc::from(Rc::new(VecModel::from(
                 group_picker_options(&store.borrow())
+                    .into_iter()
+                    .map(SharedString::from)
+                    .collect::<Vec<_>>(),
+            ))));
+            w.set_subgroup_options(ModelRc::from(Rc::new(VecModel::from(vec![
+                SharedString::from("None"),
+                SharedString::from("+ New subgroup…"),
+            ]))));
+            w.set_f_import_url(SharedString::default());
+            w.set_form_error(SharedString::default());
+            w.set_test_result(SharedString::default());
+            w.set_test_ok(false);
+            w.set_test_busy(false);
+            w.set_form_open(true);
+        });
+    }
+    // open add form, pre-nested under an existing top-level group ("New
+    // Subgroup" on the picker's group context menu, only offered on
+    // top-level headers — see picker.slint) — same as open-add-form, except
+    // Group starts on `parent` and Subgroup starts on "+ New subgroup…"
+    // with an empty text field, so the user only has to type the leaf name.
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let editing_id = editing_id.clone();
+        window.on_open_add_form_in_group(move |parent| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let parent = parent.to_string();
+            *editing_id.borrow_mut() = String::new();
+            w.set_form_edit_mode(false);
+            w.set_f_name(SharedString::default());
+            w.set_f_engine(SharedString::from("PostgreSQL"));
+            w.set_f_host(SharedString::from("localhost"));
+            w.set_f_port(SharedString::from("5432"));
+            w.set_f_user(SharedString::default());
+            w.set_f_database(SharedString::default());
+            w.set_f_password(SharedString::default());
+            w.set_f_has_password(false);
+            w.set_f_sslmode(SharedString::from("Prefer"));
+            w.set_f_params(SharedString::default());
+            w.set_f_color(SharedString::from("#2c5fd8"));
+            w.set_f_env_tag(SharedString::from("None"));
+            w.set_f_group_display(SharedString::from(parent.clone()));
+            w.set_f_new_group_text(SharedString::default());
+            w.set_f_subgroup_display(SharedString::from("+ New subgroup…"));
+            w.set_f_new_subgroup_text(SharedString::default());
+            w.set_group_options(ModelRc::from(Rc::new(VecModel::from(
+                group_picker_options(&store.borrow())
+                    .into_iter()
+                    .map(SharedString::from)
+                    .collect::<Vec<_>>(),
+            ))));
+            w.set_subgroup_options(ModelRc::from(Rc::new(VecModel::from(
+                subgroup_picker_options(&store.borrow(), &parent)
                     .into_iter()
                     .map(SharedString::from)
                     .collect::<Vec<_>>(),
@@ -11764,10 +12178,43 @@ fn main() -> Result<(), slint::PlatformError> {
                 sc.color.unwrap_or_else(|| "#2c5fd8".into()),
             ));
             w.set_f_env_tag(SharedString::from(sc.env_tag.as_str()));
-            w.set_f_group_display(SharedString::from(
-                sc.group.clone().unwrap_or_else(|| "None".into()),
-            ));
-            w.set_f_group(SharedString::from(sc.group.unwrap_or_default()));
+            w.set_f_new_group_text(SharedString::default());
+            match sc.group.as_deref() {
+                None => {
+                    w.set_f_group_display(SharedString::from("None"));
+                    w.set_f_subgroup_display(SharedString::from("None"));
+                    w.set_f_new_subgroup_text(SharedString::default());
+                    w.set_subgroup_options(ModelRc::from(Rc::new(VecModel::from(vec![
+                        SharedString::from("None"),
+                        SharedString::from("+ New subgroup…"),
+                    ]))));
+                }
+                Some(g) => {
+                    let top = g.split('/').next().unwrap_or(g).to_string();
+                    let rest = g[top.len()..].trim_start_matches('/').to_string();
+                    let sub_opts = subgroup_picker_options(&st, &top);
+                    w.set_f_group_display(SharedString::from(top));
+                    if rest.is_empty() {
+                        w.set_f_subgroup_display(SharedString::from("None"));
+                        w.set_f_new_subgroup_text(SharedString::default());
+                    } else if sub_opts.iter().any(|o| o == &rest) {
+                        w.set_f_subgroup_display(SharedString::from(rest));
+                        w.set_f_new_subgroup_text(SharedString::default());
+                    } else {
+                        // A deeper/irregular path than the guided picker
+                        // covers — surface it as free text so editing never
+                        // silently truncates it.
+                        w.set_f_subgroup_display(SharedString::from("+ New subgroup…"));
+                        w.set_f_new_subgroup_text(SharedString::from(rest));
+                    }
+                    w.set_subgroup_options(ModelRc::from(Rc::new(VecModel::from(
+                        sub_opts
+                            .into_iter()
+                            .map(SharedString::from)
+                            .collect::<Vec<_>>(),
+                    ))));
+                }
+            }
             w.set_group_options(ModelRc::from(Rc::new(VecModel::from(
                 group_picker_options(&st)
                     .into_iter()
@@ -11780,6 +12227,25 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_test_ok(false);
             w.set_test_busy(false);
             w.set_form_open(true);
+        });
+    }
+    // Group dropdown changed -> recompute the Subgroup dropdown's options
+    // for the newly-picked parent.
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        window.on_form_group_changed(move |top| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let opts = if top == "None" || top == "+ New group…" {
+                vec!["None".to_string(), "+ New subgroup…".to_string()]
+            } else {
+                subgroup_picker_options(&store.borrow(), &top)
+            };
+            w.set_subgroup_options(ModelRc::from(Rc::new(VecModel::from(
+                opts.into_iter().map(SharedString::from).collect::<Vec<_>>(),
+            ))));
         });
     }
     // engine changed -> default port if port empty/default-ish
