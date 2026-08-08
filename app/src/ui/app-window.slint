@@ -1227,7 +1227,8 @@ callback create-table-commit();
                                 height: Tokens.doc-tab-h;
                                 background: i == root.active-tab ? Tokens.card
                                     : (tab-ta.has-hover ? Tokens.card.with-alpha(0.5) : transparent);
-                                border-radius: 0;
+                                border-radius: Tokens.radius;
+                                clip: true;
                                 tab-ta := TouchArea {
                                     property <bool> dragging: false;
                                     moved => {
@@ -1428,6 +1429,8 @@ callback create-table-commit();
                                 height: Tokens.doc-tab-h;
                                 background: i == root.p1-active-tab ? Tokens.card
                                     : (p1-tab-ta.has-hover ? Tokens.card.with-alpha(0.5) : transparent);
+                                border-radius: Tokens.radius;
+                                clip: true;
                                 p1-tab-ta := TouchArea {
                                     property <bool> dragging: false;
                                     moved => {
