@@ -35,6 +35,10 @@ export component ConnPicker inherits Rectangle {
     callback cancel-connect();
     callback test-clicked(int);
     callback add-clicked();
+    // "New Subgroup" on a group's context menu: opens the add-connection
+    // form with the Group field ready for a full path (arg is the parent
+    // group's path, informational only — the text itself starts empty).
+    callback add-conn-in-group(string);
     callback edit-clicked(int);
     // Export saved connections to ~/Downloads. Arg is the format: 0 = JSON, 1 = CSV.
     callback export-conns(int);
@@ -55,6 +59,7 @@ export component ConnPicker inherits Rectangle {
 
     // Group header context menu (Rename/Delete) + its rename modal state.
     property <string> group-menu-target: "";
+    property <int> group-menu-target-depth: 0;
     property <length> group-menu-x: 0px;
     property <length> group-menu-y: 0px;
     property <bool> rename-modal-open: false;
@@ -163,6 +168,7 @@ export component ConnPicker inherits Rectangle {
                                             && e.button == PointerEventButton.right
                                             && item.group != "Ungrouped") {
                                             root.group-menu-target = item.group;
+                                            root.group-menu-target-depth = item.depth;
                                             root.group-menu-x = self.absolute-position.x - root.absolute-position.x;
                                             root.group-menu-y = self.absolute-position.y - root.absolute-position.y;
                                             group-menu.show();
@@ -179,6 +185,7 @@ export component ConnPicker inherits Rectangle {
                                     // position.
                                     width: parent.width;
                                     height: parent.height;
+                                    padding-left: Tokens.sp2 + item.depth * Tokens.sp3;
                                     spacing: Tokens.sp2;
                                     // No `alignment: start` here (deliberately) — that
                                     // mode disables stretch factors entirely, which is
@@ -263,6 +270,7 @@ export component ConnPicker inherits Rectangle {
                                             gmore-ta := TouchArea {
                                                 clicked => {
                                                     root.group-menu-target = item.group;
+                                                    root.group-menu-target-depth = item.depth;
                                                     root.group-menu-x = self.absolute-position.x - root.absolute-position.x;
                                                     root.group-menu-y = self.absolute-position.y - root.absolute-position.y;
                                                     group-menu.show();
@@ -301,7 +309,7 @@ export component ConnPicker inherits Rectangle {
                                 }
 
                                 HorizontalLayout {
-                                    padding-left: Tokens.sp3;
+                                    padding-left: Tokens.sp3 + item.depth * Tokens.sp3;
                                     padding-right: Tokens.sp3;
                                     spacing: Tokens.sp3;
                                     // Drag handle: reorders within the group.
@@ -785,7 +793,7 @@ export component ConnPicker inherits Rectangle {
         // 60px — the reason the menu opened in an unrelated spot). Clamp so
         // it stays on screen if the button sits near the panel's edge.
         x: min(root.group-menu-x, root.width - 148px);
-        y: min(root.group-menu-y, root.height - 96px);
+        y: min(root.group-menu-y, root.height - 124px);
         width: 140px;
         Rectangle {
             background: Tokens.card;
@@ -796,20 +804,28 @@ export component ConnPicker inherits Rectangle {
             drop-shadow-color: Tokens.text.with-alpha(0.25);
             VerticalLayout {
                 padding: 4px;
-                for label[action] in ["Rename", "Delete"]: Rectangle {
-                    height: 28px;
+                // "New Subgroup" only makes sense on a top-level group — the
+                // guided Group/Subgroup picker in the connection form is
+                // two levels deep, not a full tree, so a subfolder header
+                // doesn't offer it.
+                property <bool> target-is-top-level: root.group-menu-target-depth == 0;
+                for label[action] in ["New Subgroup", "Rename", "Delete"]: Rectangle {
+                    visible: action != 0 || target-is-top-level;
+                    height: self.visible ? 28px : 0px;
                     border-radius: Tokens.radius;
-                    background: gmenu-ta.has-hover ? (action == 1 ? Tokens.error-tint : Tokens.accent-tint) : transparent;
+                    background: gmenu-ta.has-hover ? (action == 2 ? Tokens.error-tint : Tokens.accent-tint) : transparent;
                     Text {
                         x: Tokens.sp2;
                         text: label;
-                        color: action == 1 ? Tokens.error : Tokens.text;
+                        color: action == 2 ? Tokens.error : Tokens.text;
                         font-size: Tokens.font-sm;
                         vertical-alignment: center;
                     }
                     gmenu-ta := TouchArea {
                         clicked => {
                             if (action == 0) {
+                                root.add-conn-in-group(root.group-menu-target);
+                            } else if (action == 1) {
                                 root.rename-old = root.group-menu-target;
                                 root.rename-text = root.group-menu-target;
                                 root.rename-modal-open = true;

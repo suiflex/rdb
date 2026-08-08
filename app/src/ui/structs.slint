@@ -53,6 +53,9 @@ export struct ConnItem {
     // if expanded, otherwise the header itself) — rounds the card's bottom
     // corners so consecutive groups read as separate cards.
     is-group-end: bool,
+    // Nesting depth of this row's group (0 = top-level). Drives left indent;
+    // mirrors `TreeNode.depth`.
+    depth: int,
 }
 // One Host/Port/… row of the connection-detail card.
 export struct KvRow { k: string, v: string }
