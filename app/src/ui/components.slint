@@ -2,6 +2,21 @@
 import { Tokens } from "tokens.slint";
 import { AppIcon } from "icons.slint";
 
+// Rounded, bordered, drop-shadowed surface used for panels that should read
+// as floating above the canvas (connection picker, workspace sidebar) rather
+// than flush-filling their column. Callers place it with their own gutter
+// inset (x/y/width/height) since that varies by host layout.
+export component FloatingCard inherits Rectangle {
+    background: Tokens.sidebar;
+    border-radius: Tokens.radius-lg;
+    border-width: 1px;
+    border-color: Tokens.border;
+    drop-shadow-blur: 18px;
+    drop-shadow-color: #00000035;
+    drop-shadow-offset-y: 6px;
+    clip: true;
+}
+
 // iOS-style on/off switch. One place for the pill + sliding knob so every
 // settings toggle stays identical.
 export component Toggle inherits TouchArea {

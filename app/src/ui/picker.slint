@@ -4,7 +4,7 @@
 import { Tokens } from "tokens.slint";
 import {
     DbBadge, OutlineChip, PrimaryButton, SecondaryButton, TextButton,
-    TagChip, FilterField, Tooltip
+    TagChip, FilterField, Tooltip, FloatingCard
 } from "components.slint";
 import { AppIcon } from "icons.slint";
 import { ConnItem, KvRow } from "structs.slint";
@@ -73,19 +73,11 @@ export component ConnPicker inherits Rectangle {
             width: 560px;
             background: Tokens.canvas;
 
-            card := Rectangle {
+            card := FloatingCard {
                 x: Tokens.sp3;
                 y: Tokens.sp3;
                 width: parent.width - 2 * Tokens.sp3;
                 height: parent.height - 2 * Tokens.sp3;
-                background: Tokens.sidebar;
-                border-radius: Tokens.radius-lg;
-                border-width: 1px;
-                border-color: Tokens.border;
-                drop-shadow-blur: 18px;
-                drop-shadow-color: #00000035;
-                drop-shadow-offset-y: 6px;
-                clip: true;
 
             VerticalLayout {
                 spacing: 0;

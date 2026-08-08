@@ -3,7 +3,7 @@
 // Reference: design/2-workspace.png (left column).
 import { Tokens } from "tokens.slint";
 import { TreeNode } from "structs.slint";
-import { DbBadge, FilterField, KeyCap, Tooltip, Shortcut } from "components.slint";
+import { DbBadge, FilterField, KeyCap, Tooltip, Shortcut, FloatingCard } from "components.slint";
 import { AppIcon } from "icons.slint";
 import { ScrollView, Spinner } from "std-widgets.slint";
 
@@ -61,7 +61,15 @@ export component Sidebar inherits Rectangle {
         }
     }
 
-    background: Tokens.sidebar;
+    // Canvas gutter around the card so the sidebar reads as a floating panel
+    // (matches the connection-picker's left column) instead of a flush column.
+    background: Tokens.canvas;
+
+    card := FloatingCard {
+        x: Tokens.sp3;
+        y: Tokens.sp3;
+        width: parent.width - 2 * Tokens.sp3;
+        height: parent.height - 2 * Tokens.sp3;
 
     VerticalLayout {
         spacing: 0;
@@ -422,6 +430,7 @@ export component Sidebar inherits Rectangle {
                 }
             }
         }
+    }
     }
 
     history-menu := PopupWindow {
