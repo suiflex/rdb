@@ -314,7 +314,7 @@ fn from_table_columns(stmt: &str, nodes: &[VmTreeNode]) -> Vec<Candidate> {
 
 /// The last SQL keyword token on `line`, uppercased (via the editor lexer).
 fn last_keyword(line: &str) -> Option<String> {
-    crate::editor::lex_line(line)
+    crate::editor::lex_line(rdb_connstore::QueryLanguage::Sql, line)
         .into_iter()
         .rev()
         .find(|s| s.kind == 1)

@@ -4122,6 +4122,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let sync_editor = {
         let weak = window.as_weak();
         let panes = panes.clone();
+        let cur_engine = cur_engine.clone();
         // Persistent per-pane line models, mutated in place each sync so the
         // per-line TouchAreas survive (a fresh model would drop the one holding
         // an in-flight drag). See `sync_vec_model`.
@@ -4135,12 +4136,16 @@ fn main() -> Result<(), slint::PlatformError> {
             let folded_heads = panes[pane].folded_heads.clone();
             let ed = ed_state.borrow();
             let sel = ed.selection();
+            let language = cur_engine
+                .borrow()
+                .map(rdb_connstore::Engine::language)
+                .unwrap_or(rdb_connstore::QueryLanguage::Sql);
             let lines: Vec<ModelRc<Span>> = ed
                 .lines
                 .iter()
                 .enumerate()
                 .map(|(li, l)| {
-                    let mut spans = editor::lex_line(l);
+                    let mut spans = editor::lex_line(language, l);
                     // selection highlight: char-col range covered on this line
                     if let Some(((sl, sc), (el, ec))) = sel {
                         if li >= sl && li <= el {
@@ -5108,7 +5113,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let lines: Vec<ModelRc<Span>> = def
                 .lines()
                 .map(|l| {
-                    let spans: Vec<Span> = editor::lex_line(l)
+                    // Function bodies are always SQL (Postgres introspection),
+                    // regardless of the tab's connected engine.
+                    let spans: Vec<Span> = editor::lex_line(rdb_connstore::QueryLanguage::Sql, l)
                         .into_iter()
                         .map(|sp| Span {
                             cols: sp.text.chars().count() as i32,

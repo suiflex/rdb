@@ -1,7 +1,20 @@
-//! SQL editor state: a line-based text buffer with cursor, plus a small
-//! per-line lexer that feeds the highlighted span model. Lines are lexed
-//! independently (line comments and single-line strings only), which keeps
-//! re-lexing incremental: only the edited line changes shape.
+//! Editor state: a line-based text buffer with cursor, plus a small per-line
+//! lexer that feeds the highlighted span model. Lines are lexed independently
+//! (line comments and single-line strings only), which keeps re-lexing
+//! incremental: only the edited line changes shape.
+//!
+//! The lexer's keyword set is per-`QueryLanguage` (see the `sql`/`cql`/
+//! `mongo`/`command` submodules) — the tokenizing loop itself (comment/
+//! string/number/identifier scanning) is identical across dialects, only the
+//! keyword table differs.
+
+pub mod cql;
+pub mod mongo;
+pub mod sql;
+
+pub mod command;
+
+use rdb_connstore::QueryLanguage;
 
 /// Span kinds, mirrored in code-editor.slint: 0 plain · 1 keyword ·
 /// 2 string · 3 function · 4 comment · 5 number. `sel` marks the span as
@@ -13,93 +26,23 @@ pub struct Span {
     pub sel: bool,
 }
 
-const KEYWORDS: &[&str] = &[
-    "SELECT",
-    "FROM",
-    "WHERE",
-    "GROUP",
-    "BY",
-    "ORDER",
-    "LIMIT",
-    "OFFSET",
-    "JOIN",
-    "LEFT",
-    "RIGHT",
-    "INNER",
-    "OUTER",
-    "ON",
-    "AS",
-    "AND",
-    "OR",
-    "NOT",
-    "IN",
-    "IS",
-    "NULL",
-    "INSERT",
-    "INTO",
-    "VALUES",
-    "UPDATE",
-    "SET",
-    "DELETE",
-    "CREATE",
-    "TABLE",
-    "FUNCTION",
-    "REPLACE",
-    "RETURNS",
-    "LANGUAGE",
-    "BEGIN",
-    "END",
-    "RETURN",
-    "DESC",
-    "ASC",
-    "HAVING",
-    "UNION",
-    "ALL",
-    "DISTINCT",
-    "CASE",
-    "WHEN",
-    "THEN",
-    "ELSE",
-    "LIKE",
-    "ILIKE",
-    "BETWEEN",
-    "EXISTS",
-    "WITH",
-    "IMMUTABLE",
-    "PARALLEL",
-    "SAFE",
-    "STRICT",
-    "OR",
-];
-
-/// Redis / Mongo dialects reuse the SQL lexer with extra command words.
-const COMMAND_WORDS: &[&str] = &[
-    "GET",
-    "MGET",
-    "HGETALL",
-    "LRANGE",
-    "ZRANGE",
-    "SMEMBERS",
-    "SCAN",
-    "TYPE",
-    "TTL",
-    "KEYS",
-    "FIND",
-    "AGGREGATE",
-];
+fn is_keyword_for(language: QueryLanguage, word: &str) -> bool {
+    match language {
+        QueryLanguage::Sql => sql::is_keyword(word),
+        QueryLanguage::Cql => cql::is_keyword(word),
+        QueryLanguage::Command => command::is_keyword(word),
+        QueryLanguage::Mongo => mongo::is_keyword(word),
+    }
+}
 
 fn is_ident(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-/// Lex one line into colored spans. Whitespace stays attached to plain spans
-/// so concatenating span texts reproduces the line exactly.
-/// True when `word` (already uppercased) is a SQL keyword.
-pub fn is_keyword(word: &str) -> bool {
-    KEYWORDS.contains(&word)
-}
-
-pub fn lex_line(line: &str) -> Vec<Span> {
+/// Lex one line into colored spans for the given dialect. Whitespace stays
+/// attached to plain spans so concatenating span texts reproduces the line
+/// exactly.
+pub fn lex_line(language: QueryLanguage, line: &str) -> Vec<Span> {
     let mut spans: Vec<Span> = Vec::new();
     let push = |spans: &mut Vec<Span>, text: &str, kind: i32| {
         if text.is_empty() {
@@ -160,10 +103,9 @@ pub fn lex_line(line: &str) -> Vec<Span> {
             }
             let word: String = chars[i..j].iter().collect();
             let upper = word.to_uppercase();
-            let kind = if chars.get(j) == Some(&'(') && !KEYWORDS.contains(&upper.as_str()) {
+            let kind = if chars.get(j) == Some(&'(') && !is_keyword_for(language, &upper) {
                 3
-            } else if KEYWORDS.contains(&upper.as_str()) || COMMAND_WORDS.contains(&upper.as_str())
-            {
+            } else if is_keyword_for(language, &upper) {
                 1
             } else {
                 0
@@ -930,7 +872,7 @@ mod tests {
     use super::*;
 
     fn kinds(line: &str) -> Vec<(String, i32)> {
-        lex_line(line)
+        lex_line(QueryLanguage::Sql, line)
             .into_iter()
             .map(|s| (s.text, s.kind))
             .collect()
@@ -972,9 +914,34 @@ mod tests {
     }
 
     #[test]
+    fn redis_lexer_does_not_highlight_sql_keywords() {
+        // Regression: Redis previously reused the SQL keyword set, so `WHERE`
+        // typed as a Redis argument was wrongly painted as a keyword.
+        let ks: Vec<(String, i32)> = lex_line(QueryLanguage::Command, "GET WHERE")
+            .into_iter()
+            .map(|s| (s.text, s.kind))
+            .collect();
+        assert!(ks.contains(&("GET".into(), 1)));
+        assert!(!ks.contains(&("WHERE".into(), 1)));
+    }
+
+    #[test]
+    fn cql_lexer_does_not_highlight_join() {
+        let ks: Vec<(String, i32)> = lex_line(QueryLanguage::Cql, "SELECT * FROM t JOIN")
+            .into_iter()
+            .map(|s| (s.text, s.kind))
+            .collect();
+        assert!(ks.contains(&("SELECT".into(), 1)));
+        assert!(!ks.contains(&("JOIN".into(), 1)));
+    }
+
+    #[test]
     fn spans_roundtrip_line_text() {
         let line = "JOIN sectors s ON s.id = e.id_sector";
-        let joined: String = lex_line(line).into_iter().map(|s| s.text).collect();
+        let joined: String = lex_line(QueryLanguage::Sql, line)
+            .into_iter()
+            .map(|s| s.text)
+            .collect();
         assert_eq!(joined, line);
     }
 
@@ -1220,7 +1187,7 @@ mod tests {
 
     #[test]
     fn overlay_selection_splits_spans() {
-        let spans = lex_line("SELECT 1");
+        let spans = lex_line(QueryLanguage::Sql, "SELECT 1");
         let out = overlay_selection(spans, 3, 8);
         let joined: String = out.iter().map(|s| s.text.clone()).collect();
         assert_eq!(joined, "SELECT 1");
@@ -1234,7 +1201,7 @@ mod tests {
 
     #[test]
     fn overlay_selection_empty_range_noop() {
-        let spans = lex_line("SELECT 1");
+        let spans = lex_line(QueryLanguage::Sql, "SELECT 1");
         let out = overlay_selection(spans.clone(), 4, 4);
         assert_eq!(out, spans);
     }

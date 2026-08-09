@@ -72,7 +72,7 @@ pub fn format(sql: &str) -> String {
             }
             let word: String = chars[start..i].iter().collect();
             let upper = word.to_uppercase();
-            if editor::is_keyword(&upper) {
+            if editor::sql::is_keyword(&upper) {
                 let joins_previous =
                     upper == "JOIN" && JOIN_QUALIFIERS.contains(&prev_word.as_str());
                 if CLAUSE_STARTERS.contains(&upper.as_str()) && !out.is_empty() && !joins_previous {
