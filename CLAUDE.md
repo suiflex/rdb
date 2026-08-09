@@ -156,7 +156,26 @@ Keep the scope specific (`app`, `driver-postgres`, `driver-mysql`, `core`,
      placeholder ternary, field-visibility `if` conditions e.g. SSL mode) and
      `app/src/ui/app-window.slint`'s Settings → About tab (static engine list
      string).
-  6. Docs/marketing surfaces that list engines by name — easy to forget since
+  6. **Icon assets — two separate tracks, both need the new engine**:
+     - Monochrome: `app/src/ui/icons/db-<engine>.svg` (a single-color glyph —
+       real brand SVGs work fine here too, `AppIcon`'s `colorize` flattens
+       whatever's there to one flat tint), wired into `DbBadge`'s `known`
+       list and `Tokens.db-color()` in `tokens.slint` (`components.slint`).
+     - Full-color: `app/src/ui/icons/brand/<engine>.svg`, wired into
+       `EngineLogo`'s ternary (`components.slint`, backs the Engine
+       dropdown's `show-logo` and the empty-state "Works with" row in
+       `picker.slint`).
+     - **No official mark available → don't hand-draw one.** Fall back to
+       text instead: `DbBadge`'s `fallback-text` (e.g. `"MS"` for SQL
+       Server), `EngineLogo`'s empty-source case (renders nothing, row text
+       still shows the name), and `website/Engines.astro`'s `icon: null`
+       entries all do this — keep new engines with no real logo consistent
+       with that pattern rather than improvising a glyph.
+  7. `.github/ISSUE_TEMPLATE/bug_report.yml` — the "Database engine" dropdown
+     `options:` list (missed for two engines in a row before this line was
+     added — it's easy to forget since nothing enforces it, same class of
+     gap as the docs/marketing list below).
+  8. Docs/marketing surfaces that list engines by name — easy to forget since
      nothing enforces them: `README.md` (badge line, Features bullet,
      Supported Engines table, `Query` enum snippet, usage instructions,
      Project status line, Crate overview table), `npm/README.md` (near-dupe
