@@ -1035,7 +1035,7 @@ fn filter_operators(engine: rdb_connstore::Engine) -> Vec<SharedString> {
             "IS NULL",
             "IS NOT NULL",
         ],
-        Engine::MySql | Engine::Sqlite | Engine::Mssql => &[
+        Engine::MySql | Engine::Sqlite | Engine::Mssql | Engine::Clickhouse => &[
             "=",
             "<>",
             ">",
@@ -1596,6 +1596,9 @@ fn default_pk_type(engine: rdb_connstore::Engine) -> &'static str {
         rdb_connstore::Engine::MySql => "INT",
         rdb_connstore::Engine::Sqlite => "INTEGER",
         rdb_connstore::Engine::Mssql => "INT IDENTITY(1,1)",
+        // ClickHouse has no auto-increment/serial equivalent — ORDER BY is
+        // its closest concept, not a per-column identity default.
+        rdb_connstore::Engine::Clickhouse => "UInt64",
         _ => "int",
     }
 }
@@ -1606,6 +1609,7 @@ fn default_col_type(engine: rdb_connstore::Engine) -> &'static str {
         rdb_connstore::Engine::MySql => "VARCHAR(255)",
         rdb_connstore::Engine::Sqlite => "TEXT",
         rdb_connstore::Engine::Mssql => "NVARCHAR(255)",
+        rdb_connstore::Engine::Clickhouse => "String",
         _ => "text",
     }
 }
@@ -2350,6 +2354,15 @@ fn browse_text(
                 "SELECT TOP ({limit}) * FROM \"{}\"{where_sql}",
                 table.name.replace('"', "\"\"")
             )
+        }
+        rdb_connstore::Engine::Clickhouse => {
+            let q = |s: &str| s.replace('"', "\"\"");
+            let where_sql = sql_where(col_filters, |c| format!("\"{}\"", q(c)), "LIKE");
+            let target = match table.database.as_deref() {
+                Some(db) if !db.is_empty() => format!("\"{}\".\"{}\"", q(db), q(&table.name)),
+                _ => format!("\"{}\"", q(&table.name)),
+            };
+            format!("SELECT * FROM {target}{where_sql} LIMIT {limit} OFFSET {offset}")
         }
     }
 }
@@ -12061,6 +12074,7 @@ fn main() -> Result<(), slint::PlatformError> {
             "SQLite" => "0", // file-based: port unused
             "Cassandra" => "9042",
             "SQL Server" => "1433",
+            "ClickHouse" => "8123",
             _ => "5432",
         }
     }
@@ -12072,6 +12086,7 @@ fn main() -> Result<(), slint::PlatformError> {
             "SQLite" => rdb_connstore::Engine::Sqlite,
             "Cassandra" => rdb_connstore::Engine::Cassandra,
             "SQL Server" => rdb_connstore::Engine::Mssql,
+            "ClickHouse" => rdb_connstore::Engine::Clickhouse,
             _ => rdb_connstore::Engine::Postgres,
         }
     }

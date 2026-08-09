@@ -23,6 +23,7 @@ rdb-driver-mongo = { path = "../crates/driver-mongo" }
 rdb-driver-sqlite = { path = "../crates/driver-sqlite" }
 rdb-driver-cassandra = { path = "../crates/driver-cassandra" }
 rdb-driver-mssql = { path = "../crates/driver-mssql" }
+rdb-driver-clickhouse = { path = "../crates/driver-clickhouse" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

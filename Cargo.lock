@@ -5899,6 +5899,7 @@ dependencies = [
  "rdb-connstore",
  "rdb-core",
  "rdb-driver-cassandra",
+ "rdb-driver-clickhouse",
  "rdb-driver-mongo",
  "rdb-driver-mssql",
  "rdb-driver-mysql",

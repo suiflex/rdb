@@ -13,6 +13,7 @@ use rdb_core::result::ResultSet;
 use rdb_core::schema::{Container, Schema};
 use rdb_core::write::{TableRef, WriteOp};
 use rdb_driver_cassandra::CassandraDriver;
+use rdb_driver_clickhouse::ClickhouseDriver;
 use rdb_driver_mongo::MongoDriver;
 use rdb_driver_mssql::MssqlDriver;
 use rdb_driver_mysql::MysqlDriver;
@@ -32,6 +33,7 @@ pub enum AnyDriver {
     // Boxed: a tiberius Client's connection buffers are far larger than the
     // other drivers, same reasoning as Cassandra above.
     Mssql(Box<MssqlDriver>),
+    Clickhouse(ClickhouseDriver),
     /// In-process demo driver (RDB_MOCK=1); no network, seeded data.
     #[cfg(feature = "mock")]
     Mock(crate::mock::MockDriver),
@@ -48,6 +50,7 @@ impl AnyDriver {
             Engine::Sqlite => "SQLite",
             Engine::Cassandra => "Cassandra",
             Engine::Mssql => "SQL Server",
+            Engine::Clickhouse => "ClickHouse",
         }
     }
 
@@ -61,6 +64,7 @@ impl AnyDriver {
             Engine::Sqlite => "sqlite",
             Engine::Cassandra => "cassandra",
             Engine::Mssql => "mssql",
+            Engine::Clickhouse => "clickhouse",
         }
     }
 
@@ -82,6 +86,7 @@ impl AnyDriver {
                 AnyDriver::Cassandra(Box::new(CassandraDriver::connect(cfg).await?))
             }
             Engine::Mssql => AnyDriver::Mssql(Box::new(MssqlDriver::connect(cfg).await?)),
+            Engine::Clickhouse => AnyDriver::Clickhouse(ClickhouseDriver::connect(cfg).await?),
         })
     }
 
@@ -103,6 +108,7 @@ impl AnyDriver {
             AnyDriver::Sqlite(d) => d.ping().await,
             AnyDriver::Cassandra(d) => d.ping().await,
             AnyDriver::Mssql(d) => d.ping().await,
+            AnyDriver::Clickhouse(d) => d.ping().await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.ping().await,
         }
@@ -117,6 +123,7 @@ impl AnyDriver {
             AnyDriver::Sqlite(d) => d.schema().await,
             AnyDriver::Cassandra(d) => d.schema().await,
             AnyDriver::Mssql(d) => d.schema().await,
+            AnyDriver::Clickhouse(d) => d.schema().await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.schema().await,
         }
@@ -131,6 +138,7 @@ impl AnyDriver {
             AnyDriver::Sqlite(d) => d.schema_for(schema).await,
             AnyDriver::Cassandra(d) => d.schema_for(schema).await,
             AnyDriver::Mssql(d) => d.schema_for(schema).await,
+            AnyDriver::Clickhouse(d) => d.schema_for(schema).await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.schema_for(schema).await,
         }
@@ -145,6 +153,7 @@ impl AnyDriver {
             AnyDriver::Sqlite(d) => d.list_schemas().await,
             AnyDriver::Cassandra(d) => d.list_schemas().await,
             AnyDriver::Mssql(d) => d.list_schemas().await,
+            AnyDriver::Clickhouse(d) => d.list_schemas().await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.list_schemas().await,
         }
@@ -159,6 +168,7 @@ impl AnyDriver {
             AnyDriver::Sqlite(d) => d.list_databases().await,
             AnyDriver::Cassandra(d) => d.list_databases().await,
             AnyDriver::Mssql(d) => d.list_databases().await,
+            AnyDriver::Clickhouse(d) => d.list_databases().await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.list_databases().await,
         }
@@ -173,6 +183,7 @@ impl AnyDriver {
             AnyDriver::Sqlite(d) => d.containers(database).await,
             AnyDriver::Cassandra(d) => d.containers(database).await,
             AnyDriver::Mssql(d) => d.containers(database).await,
+            AnyDriver::Clickhouse(d) => d.containers(database).await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.containers(database).await,
         }
@@ -187,6 +198,7 @@ impl AnyDriver {
             AnyDriver::Sqlite(d) => d.query(q).await,
             AnyDriver::Cassandra(d) => d.query(q).await,
             AnyDriver::Mssql(d) => d.query(q).await,
+            AnyDriver::Clickhouse(d) => d.query(q).await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.query(q).await,
         }
@@ -210,6 +222,7 @@ impl AnyDriver {
             AnyDriver::Sqlite(d) => d.query_stream(q, batch, cancel, sink).await,
             AnyDriver::Cassandra(d) => d.query_stream(q, batch, cancel, sink).await,
             AnyDriver::Mssql(d) => d.query_stream(q, batch, cancel, sink).await,
+            AnyDriver::Clickhouse(d) => d.query_stream(q, batch, cancel, sink).await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.query_stream(q, batch, cancel, sink).await,
         }
@@ -224,6 +237,7 @@ impl AnyDriver {
             AnyDriver::Sqlite(d) => d.primary_key(table).await,
             AnyDriver::Cassandra(d) => d.primary_key(table).await,
             AnyDriver::Mssql(d) => d.primary_key(table).await,
+            AnyDriver::Clickhouse(d) => d.primary_key(table).await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.primary_key(table).await,
         }
@@ -238,6 +252,7 @@ impl AnyDriver {
             AnyDriver::Sqlite(d) => d.count(table).await,
             AnyDriver::Cassandra(d) => d.count(table).await,
             AnyDriver::Mssql(d) => d.count(table).await,
+            AnyDriver::Clickhouse(d) => d.count(table).await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.count(table).await,
         }
@@ -252,6 +267,7 @@ impl AnyDriver {
             AnyDriver::Sqlite(d) => d.commit(ops).await,
             AnyDriver::Cassandra(d) => d.commit(ops).await,
             AnyDriver::Mssql(d) => d.commit(ops).await,
+            AnyDriver::Clickhouse(d) => d.commit(ops).await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.commit(ops).await,
         }
@@ -308,6 +324,12 @@ pub fn write_statements(engine: Engine, ops: &[WriteOp]) -> Vec<String> {
             (Engine::Mssql, WriteOp::Delete { table, pk }) => {
                 rdb_driver_mssql::write_sql::delete_sql(table, pk)
             }
+            (Engine::Clickhouse, WriteOp::Insert { table, values }) => {
+                rdb_driver_clickhouse::write_sql::insert_sql(table, values)
+            }
+            // ClickHouse has no update_sql/delete_sql (see write_sql.rs) —
+            // commit() rejects these outright, this is preview text only.
+            (Engine::Clickhouse, op) => format!("ClickHouse write (unsupported): {op:?}"),
             (Engine::Mongo, op) => format!("MongoDB write: {op:?}"),
             (Engine::Redis, op) => format!("Redis write: {op:?}"),
         })
