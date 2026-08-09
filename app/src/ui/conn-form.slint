@@ -141,6 +141,7 @@ export component ConnForm inherits Rectangle {
                 FormLabel { text: "Engine"; }
                 SelectBox {
                     horizontal-stretch: 1;
+                    show-logo: true;
                     model: ["PostgreSQL", "MySQL", "Redis", "MongoDB", "SQLite", "Cassandra", "SQL Server", "ClickHouse"];
                     current-value <=> root.f-engine;
                     selected(v) => { root.engine-changed(v); }
