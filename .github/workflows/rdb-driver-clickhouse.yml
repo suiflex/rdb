@@ -1,0 +1,39 @@
+name: rdb-driver-clickhouse
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - crates/driver-clickhouse/**
+      - crates/core/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/rdb-driver-clickhouse.yml
+  pull_request:
+    paths:
+      - crates/driver-clickhouse/**
+      - crates/core/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/rdb-driver-clickhouse.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rdb-driver-clickhouse
+      - run: cargo fmt -p rdb-driver-clickhouse --check
+      - run: cargo clippy -p rdb-driver-clickhouse --all-targets -- -D warnings
+      - run: cargo test -p rdb-driver-clickhouse --lib
