@@ -1,7 +1,7 @@
 # @suiflex/rdb
 
 Native cross-platform database manager — PostgreSQL, MySQL, Redis, MongoDB,
-SQLite, Cassandra in one binary. No Electron.
+SQLite, Cassandra, SQL Server in one binary. No Electron.
 
 ## Install
 
@@ -19,7 +19,7 @@ rdb
 
 ## Features
 
-- **Multi-engine** — PostgreSQL, MySQL/MariaDB, Redis, MongoDB, SQLite, Cassandra in one app
+- **Multi-engine** — PostgreSQL, MySQL/MariaDB, Redis, MongoDB, SQLite, Cassandra, SQL Server in one app
 - **Native UI** — GPU-rendered via Slint (no webview, no Chromium, no Electron)
 - **Fast & light** — no GC, no runtime; aggressive release optimization (LTO, `opt-level=z`, `panic=abort`)
 - **Secure connections** — passwords stored in OS keychain (macOS Keychain, libsecret) with AES-GCM encrypted-file fallback
@@ -41,6 +41,7 @@ rdb
 | MongoDB | `mongodb` crate | Documents (JSON) |
 | SQLite | `rusqlite` | Tabular |
 | Cassandra | `scylla` | Tabular |
+| SQL Server | `tiberius` | Tabular |
 
 ## Design
 
@@ -69,7 +70,8 @@ pub trait Driver: Send + Sync {
 
 ```rust
 pub enum Query {
-    Sql(String),           // PostgreSQL, MySQL, SQLite, Cassandra
+    Sql(String),           // PostgreSQL, MySQL, SQLite, SQL Server
+    Cql(String),           // Cassandra/ScyllaDB
     Command(Vec<String>),  // Redis: ["GET", "key"]
     Mongo(MongoOp),        // find / insert / aggregate
 }
