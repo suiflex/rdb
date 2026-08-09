@@ -31,6 +31,10 @@ body:
         - MySQL
         - Redis
         - MongoDB
+        - SQLite
+        - Cassandra
+        - SQL Server
+        - ClickHouse
         - Not engine-specific
     validations:
       required: true

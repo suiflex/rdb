@@ -636,6 +636,73 @@ export component ConnPicker inherits Rectangle {
                         }
                     }
                 }
+                // Supported-engine trust badges: real brand marks, full
+                // color — unlike DbBadge (the sidebar/picker badge), which
+                // is deliberately monochrome. SQL Server has no official
+                // mark shipped with the app, so it's a text label instead
+                // of a fabricated logo (same choice the website makes).
+                VerticalLayout {
+                    spacing: Tokens.sp1;
+                    alignment: center;
+                    Text {
+                        text: "Works with";
+                        color: Tokens.text-faint;
+                        font-size: Tokens.font-xs;
+                        horizontal-alignment: center;
+                    }
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: Tokens.sp3;
+                        Image {
+                            source: @image-url("icons/brand/postgres.svg");
+                            width: 18px;
+                            height: 18px;
+                            image-fit: contain;
+                        }
+                        Image {
+                            source: @image-url("icons/brand/mysql.svg");
+                            width: 18px;
+                            height: 18px;
+                            image-fit: contain;
+                        }
+                        Image {
+                            source: @image-url("icons/brand/redis.svg");
+                            width: 18px;
+                            height: 18px;
+                            image-fit: contain;
+                        }
+                        Image {
+                            source: @image-url("icons/brand/mongo.svg");
+                            width: 18px;
+                            height: 18px;
+                            image-fit: contain;
+                        }
+                        Image {
+                            source: @image-url("icons/brand/sqlite.svg");
+                            width: 18px;
+                            height: 18px;
+                            image-fit: contain;
+                        }
+                        Image {
+                            source: @image-url("icons/brand/cassandra.svg");
+                            width: 18px;
+                            height: 18px;
+                            image-fit: contain;
+                        }
+                        Image {
+                            source: @image-url("icons/brand/clickhouse.svg");
+                            width: 18px;
+                            height: 18px;
+                            image-fit: contain;
+                        }
+                        Text {
+                            text: "SQL Server";
+                            color: Tokens.text-faint;
+                            font-size: Tokens.font-xs;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
             }
 
             if root.selected-conn >= 0: VerticalLayout {
