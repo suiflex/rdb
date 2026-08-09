@@ -1,0 +1,15 @@
+[package]
+name = "rdb-driver-clickhouse"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rdb-core = { path = "../core" }
+async-trait = "0.1"
+clickhouse = { version = "0.15", default-features = false, features = ["lz4", "rustls-tls"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[dev-dependencies]
+testcontainers = "0.27"
+testcontainers-modules = { version = "0.15", features = ["clickhouse"] }
