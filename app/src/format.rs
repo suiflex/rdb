@@ -1,21 +1,40 @@
-//! Minimal SQL formatter: uppercase keywords, one clause per line, collapsed
+//! Query formatter: uppercase keywords, one clause per line, collapsed
 //! whitespace. String literals, quoted identifiers and comments pass through
 //! untouched. Not a parser — just enough for an editor tidy-up button.
+//!
+//! The clause-splitting algorithm is identical across dialects — only the
+//! keyword set and which keywords start a new line differ — so `sql`/`cql`
+//! just supply a `Spec` to the shared `run` loop instead of duplicating it.
 
-use crate::editor;
+pub mod cql;
+pub mod sql;
 
-/// Keywords that start a new line. BY/ON etc. stay inline after their opener.
-const CLAUSE_STARTERS: &[&str] = &[
-    "FROM", "WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "JOIN", "LEFT", "RIGHT",
-    "INNER", "FULL", "UNION", "VALUES", "SET",
-];
+use rdb_connstore::QueryLanguage;
 
-/// Join qualifiers: a following JOIN stays on the same line.
-const JOIN_QUALIFIERS: &[&str] = &["LEFT", "RIGHT", "INNER", "FULL", "OUTER", "CROSS"];
+/// Per-dialect knobs for the shared formatting loop.
+pub struct Spec {
+    pub is_keyword: fn(&str) -> bool,
+    /// Keywords that start a new line. BY/ON etc. stay inline after their opener.
+    pub clause_starters: &'static [&'static str],
+    /// Qualifiers (LEFT/INNER/…) after which a following JOIN stays on the
+    /// same line instead of starting a new one.
+    pub join_qualifiers: &'static [&'static str],
+}
 
-pub fn format(sql: &str) -> String {
-    let chars: Vec<char> = sql.chars().collect();
-    let mut out = String::with_capacity(sql.len());
+/// Format `text` for `language`. `None` for Redis/Mongo — the Format button
+/// stays hidden for those (see `sql_capable` in main.rs), this is
+/// defense-in-depth against a stray call.
+pub fn dispatch(language: QueryLanguage, text: &str) -> Option<String> {
+    match language {
+        QueryLanguage::Sql => Some(run(&sql::SPEC, text)),
+        QueryLanguage::Cql => Some(run(&cql::SPEC, text)),
+        QueryLanguage::Command | QueryLanguage::Mongo => None,
+    }
+}
+
+fn run(spec: &Spec, text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
     let mut i = 0;
     let mut prev_word = String::new();
     while i < chars.len() {
@@ -72,10 +91,13 @@ pub fn format(sql: &str) -> String {
             }
             let word: String = chars[start..i].iter().collect();
             let upper = word.to_uppercase();
-            if editor::is_keyword(&upper) {
+            if (spec.is_keyword)(&upper) {
                 let joins_previous =
-                    upper == "JOIN" && JOIN_QUALIFIERS.contains(&prev_word.as_str());
-                if CLAUSE_STARTERS.contains(&upper.as_str()) && !out.is_empty() && !joins_previous {
+                    upper == "JOIN" && spec.join_qualifiers.contains(&prev_word.as_str());
+                if spec.clause_starters.contains(&upper.as_str())
+                    && !out.is_empty()
+                    && !joins_previous
+                {
                     while out.ends_with(' ') {
                         out.pop();
                     }
@@ -101,6 +123,10 @@ pub fn format(sql: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn format(sql: &str) -> String {
+        dispatch(QueryLanguage::Sql, sql).unwrap()
+    }
 
     #[test]
     fn uppercases_and_splits_clauses() {
@@ -132,5 +158,31 @@ mod tests {
             format("select a from t where a=1;"),
             "SELECT a\nFROM t\nWHERE a=1;"
         );
+    }
+
+    #[test]
+    fn command_and_mongo_are_not_formatted() {
+        assert!(dispatch(QueryLanguage::Command, "GET k").is_none());
+        assert!(dispatch(QueryLanguage::Mongo, "db.t.find()").is_none());
+    }
+
+    #[test]
+    fn cql_splits_where_and_allow_filtering() {
+        let got = dispatch(
+            QueryLanguage::Cql,
+            "select * from ks.t where k=1 allow filtering",
+        )
+        .unwrap();
+        assert_eq!(got, "SELECT *\nFROM ks.t\nWHERE k=1\nALLOW FILTERING");
+    }
+
+    #[test]
+    fn cql_does_not_break_on_create_table_primary_key() {
+        let got = dispatch(
+            QueryLanguage::Cql,
+            "create table t (id int, primary key (id))",
+        )
+        .unwrap();
+        assert_eq!(got, "CREATE TABLE t (id int, PRIMARY KEY (id))");
     }
 }

@@ -18,13 +18,13 @@ mod completion;
 mod dispatch;
 mod editor;
 mod export;
+mod format;
 mod mock;
 mod model;
 mod query_parse;
 mod self_update;
 #[cfg(feature = "mock")]
 mod shot;
-mod sql_format;
 mod theme;
 mod update;
 
@@ -1035,7 +1035,7 @@ fn filter_operators(engine: rdb_connstore::Engine) -> Vec<SharedString> {
             "IS NULL",
             "IS NOT NULL",
         ],
-        Engine::MySql | Engine::Sqlite => &[
+        Engine::MySql | Engine::Sqlite | Engine::Mssql | Engine::Clickhouse => &[
             "=",
             "<>",
             ">",
@@ -1595,6 +1595,10 @@ fn default_pk_type(engine: rdb_connstore::Engine) -> &'static str {
         rdb_connstore::Engine::Postgres => "serial",
         rdb_connstore::Engine::MySql => "INT",
         rdb_connstore::Engine::Sqlite => "INTEGER",
+        rdb_connstore::Engine::Mssql => "INT IDENTITY(1,1)",
+        // ClickHouse has no auto-increment/serial equivalent — ORDER BY is
+        // its closest concept, not a per-column identity default.
+        rdb_connstore::Engine::Clickhouse => "UInt64",
         _ => "int",
     }
 }
@@ -1604,6 +1608,8 @@ fn default_col_type(engine: rdb_connstore::Engine) -> &'static str {
     match engine {
         rdb_connstore::Engine::MySql => "VARCHAR(255)",
         rdb_connstore::Engine::Sqlite => "TEXT",
+        rdb_connstore::Engine::Mssql => "NVARCHAR(255)",
+        rdb_connstore::Engine::Clickhouse => "String",
         _ => "text",
     }
 }
@@ -2333,6 +2339,30 @@ fn browse_text(
         }
         rdb_connstore::Engine::Redis => {
             format!("BROWSE {} {offset} {limit}", table.name)
+        }
+        rdb_connstore::Engine::Mssql => {
+            // ponytail: TOP-only — T-SQL's OFFSET/FETCH requires an ORDER BY
+            // column, which there's no reliable default for here; paging
+            // beyond the first page is a follow-up (same class of caveat as
+            // Cassandra's LIMIT-only browse above).
+            let where_sql = sql_where(
+                col_filters,
+                |c| format!("\"{}\"", c.replace('"', "\"\"")),
+                "LIKE",
+            );
+            format!(
+                "SELECT TOP ({limit}) * FROM \"{}\"{where_sql}",
+                table.name.replace('"', "\"\"")
+            )
+        }
+        rdb_connstore::Engine::Clickhouse => {
+            let q = |s: &str| s.replace('"', "\"\"");
+            let where_sql = sql_where(col_filters, |c| format!("\"{}\"", q(c)), "LIKE");
+            let target = match table.database.as_deref() {
+                Some(db) if !db.is_empty() => format!("\"{}\".\"{}\"", q(db), q(&table.name)),
+                _ => format!("\"{}\"", q(&table.name)),
+            };
+            format!("SELECT * FROM {target}{where_sql} LIMIT {limit} OFFSET {offset}")
         }
     }
 }
@@ -4122,6 +4152,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let sync_editor = {
         let weak = window.as_weak();
         let panes = panes.clone();
+        let cur_engine = cur_engine.clone();
         // Persistent per-pane line models, mutated in place each sync so the
         // per-line TouchAreas survive (a fresh model would drop the one holding
         // an in-flight drag). See `sync_vec_model`.
@@ -4135,12 +4166,16 @@ fn main() -> Result<(), slint::PlatformError> {
             let folded_heads = panes[pane].folded_heads.clone();
             let ed = ed_state.borrow();
             let sel = ed.selection();
+            let language = cur_engine
+                .borrow()
+                .map(rdb_connstore::Engine::language)
+                .unwrap_or(rdb_connstore::QueryLanguage::Sql);
             let lines: Vec<ModelRc<Span>> = ed
                 .lines
                 .iter()
                 .enumerate()
                 .map(|(li, l)| {
-                    let mut spans = editor::lex_line(l);
+                    let mut spans = editor::lex_line(language, l);
                     // selection highlight: char-col range covered on this line
                     if let Some(((sl, sc), (el, ec))) = sel {
                         if li >= sl && li <= el {
@@ -4288,13 +4323,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 (ed.before_cursor_doc(), ed.current_statement())
             };
             let schema = w.get_schema_name().to_string();
-            let mongo = matches!(*cur_engine.borrow(), Some(rdb_connstore::Engine::Mongo));
+            let language = cur_engine
+                .borrow()
+                .map(rdb_connstore::Engine::language)
+                .unwrap_or(rdb_connstore::QueryLanguage::Sql);
             let (word_len, cands) = completion::suggest(
                 &before,
                 &stmt,
                 &completion_nodes.lock().unwrap(),
                 &schema,
-                mongo,
+                language,
             );
             if cands.is_empty() {
                 set_p_completion_visible(&w, pane, false);
@@ -5108,7 +5146,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let lines: Vec<ModelRc<Span>> = def
                 .lines()
                 .map(|l| {
-                    let spans: Vec<Span> = editor::lex_line(l)
+                    // Function bodies are always SQL (Postgres introspection),
+                    // regardless of the tab's connected engine.
+                    let spans: Vec<Span> = editor::lex_line(rdb_connstore::QueryLanguage::Sql, l)
                         .into_iter()
                         .map(|sp| Span {
                             cols: sp.text.chars().count() as i32,
@@ -7638,13 +7678,10 @@ fn main() -> Result<(), slint::PlatformError> {
                                 .unwrap_or(&schema_names[0])
                                 .clone(),
                         };
-                        // SQL editor only makes sense for the SQL engines.
+                        // Format only makes sense for text query languages.
                         let sql_capable = matches!(
-                            engine,
-                            rdb_connstore::Engine::Postgres
-                                | rdb_connstore::Engine::MySql
-                                | rdb_connstore::Engine::Sqlite
-                                | rdb_connstore::Engine::Cassandra
+                            rdb_connstore::Engine::language(engine),
+                            rdb_connstore::QueryLanguage::Sql | rdb_connstore::QueryLanguage::Cql
                         );
                         *raw_nodes.lock().unwrap() = nodes;
                         // Seed autocomplete with the active schema's tables plus a
@@ -9729,16 +9766,21 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let panes = panes.clone();
         let sync_editor = sync_editor.clone();
+        let cur_engine = cur_engine.clone();
         window.on_format_sql(move || {
+            let language = cur_engine
+                .borrow()
+                .map(rdb_connstore::Engine::language)
+                .unwrap_or(rdb_connstore::QueryLanguage::Sql);
             let changed = {
                 let mut ed = panes[0].ed_state.borrow_mut();
                 let stmt = ed.current_statement();
-                if stmt.trim().is_empty() {
-                    false
-                } else {
-                    let formatted = sql_format::format(&stmt);
-                    ed.replace_current_statement(&formatted);
-                    true
+                match format::dispatch(language, &stmt) {
+                    Some(formatted) if !stmt.trim().is_empty() => {
+                        ed.replace_current_statement(&formatted);
+                        true
+                    }
+                    _ => false,
                 }
             };
             if changed {
@@ -9749,16 +9791,21 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let panes = panes.clone();
         let sync_editor = sync_editor.clone();
+        let cur_engine = cur_engine.clone();
         window.on_p1_format_sql(move || {
+            let language = cur_engine
+                .borrow()
+                .map(rdb_connstore::Engine::language)
+                .unwrap_or(rdb_connstore::QueryLanguage::Sql);
             let changed = {
                 let mut ed = panes[1].ed_state.borrow_mut();
                 let stmt = ed.current_statement();
-                if stmt.trim().is_empty() {
-                    false
-                } else {
-                    let formatted = sql_format::format(&stmt);
-                    ed.replace_current_statement(&formatted);
-                    true
+                match format::dispatch(language, &stmt) {
+                    Some(formatted) if !stmt.trim().is_empty() => {
+                        ed.replace_current_statement(&formatted);
+                        true
+                    }
+                    _ => false,
                 }
             };
             if changed {
@@ -12026,6 +12073,8 @@ fn main() -> Result<(), slint::PlatformError> {
             "MongoDB" => "27017",
             "SQLite" => "0", // file-based: port unused
             "Cassandra" => "9042",
+            "SQL Server" => "1433",
+            "ClickHouse" => "8123",
             _ => "5432",
         }
     }
@@ -12036,6 +12085,8 @@ fn main() -> Result<(), slint::PlatformError> {
             "MongoDB" => rdb_connstore::Engine::Mongo,
             "SQLite" => rdb_connstore::Engine::Sqlite,
             "Cassandra" => rdb_connstore::Engine::Cassandra,
+            "SQL Server" => rdb_connstore::Engine::Mssql,
+            "ClickHouse" => rdb_connstore::Engine::Clickhouse,
             _ => rdb_connstore::Engine::Postgres,
         }
     }

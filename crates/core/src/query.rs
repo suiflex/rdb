@@ -6,8 +6,12 @@ use serde_json::Value as Json;
 /// `RdbError::UnsupportedQuery` for the rest.
 #[derive(Debug, Clone)]
 pub enum Query {
-    /// SQL text — Postgres, MySQL.
+    /// SQL text — Postgres, MySQL, SQLite.
     Sql(String),
+    /// CQL text — Cassandra/ScyllaDB. Kept distinct from `Sql` even though
+    /// both are plain strings today: CQL has no JOIN/subquery/HAVING, so a
+    /// driver that only understands SQL must not silently accept it.
+    Cql(String),
     /// Raw command tokens — Redis, e.g. `["GET", "key"]`.
     Command(Vec<String>),
     /// Structured Mongo operation. Boxed so the fat Mongo variant doesn't
@@ -46,6 +50,15 @@ mod tests {
         let q = Query::Sql("SELECT 1".into());
         match q {
             Query::Sql(s) => assert_eq!(s, "SELECT 1"),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn cql_variant_carries_text() {
+        let q = Query::Cql("SELECT * FROM ks.t".into());
+        match q {
+            Query::Cql(s) => assert_eq!(s, "SELECT * FROM ks.t"),
             _ => panic!("wrong variant"),
         }
     }

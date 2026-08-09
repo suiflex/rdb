@@ -1,8 +1,8 @@
 # Vision
 
 RDB is a **native, lightweight database editor for many engines** — one small
-binary that speaks PostgreSQL, MySQL, Redis, MongoDB, SQLite, and Cassandra
-today, with room to grow.
+binary that speaks PostgreSQL, MySQL, Redis, MongoDB, SQLite, Cassandra, SQL
+Server, and ClickHouse today, with room to grow.
 
 The goal is simple: give people a fast, local-first tool that opens instantly,
 stays out of the way, and handles a wide range of databases without shipping a

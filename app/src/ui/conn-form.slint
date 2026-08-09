@@ -141,7 +141,8 @@ export component ConnForm inherits Rectangle {
                 FormLabel { text: "Engine"; }
                 SelectBox {
                     horizontal-stretch: 1;
-                    model: ["PostgreSQL", "MySQL", "Redis", "MongoDB", "SQLite", "Cassandra"];
+                    show-logo: true;
+                    model: ["PostgreSQL", "MySQL", "Redis", "MongoDB", "SQLite", "Cassandra", "SQL Server", "ClickHouse"];
                     current-value <=> root.f-engine;
                     selected(v) => { root.engine-changed(v); }
                 }
@@ -160,6 +161,8 @@ export component ConnForm inherits Rectangle {
                         : root.f-engine == "MongoDB" ? "mongodb://user:pass@host:27017/db"
                         : root.f-engine == "Cassandra" ? "cassandra://user:pass@host:9042/keyspace"
                         : root.f-engine == "SQLite" ? "sqlite:///path/to/database.db"
+                        : root.f-engine == "SQL Server" ? "sqlserver://user:pass@host:1433/db"
+                        : root.f-engine == "ClickHouse" ? "clickhouse://default@host:8123/db"
                         : "postgresql://user:pass@host:5432/db?sslmode=require";
                     accepted => { root.import-url(); }
                 }
@@ -227,7 +230,7 @@ export component ConnForm inherits Rectangle {
             }
 
             // SSL mode only applies to the SQL engines.
-            if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL": HorizontalLayout {
+            if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL" || root.f-engine == "SQL Server" || root.f-engine == "ClickHouse": HorizontalLayout {
                 height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "SSL mode"; }

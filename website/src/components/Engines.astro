@@ -6,9 +6,12 @@ import {
   siMongodb,
   siSqlite,
   siApachecassandra,
+  siClickhouse,
 } from "simple-icons";
 import { REPO_LINKS } from "../config";
 
+// simple-icons has no Microsoft SQL Server mark (it only covers open brands),
+// so that entry renders without an `icon` — see the conditional <svg> below.
 const engines = [
   { icon: siPostgresql, name: "PostgreSQL", detail: "via tokio-postgres" },
   { icon: siMysql, name: "MySQL / MariaDB", detail: "via mysql_async" },
@@ -16,6 +19,8 @@ const engines = [
   { icon: siMongodb, name: "MongoDB", detail: "JSON document queries" },
   { icon: siSqlite, name: "SQLite", detail: "local files, zero setup" },
   { icon: siApachecassandra, name: "Cassandra", detail: "via the scylla driver" },
+  { icon: null, name: "SQL Server", detail: "via tiberius (T-SQL)" },
+  { icon: siClickhouse, name: "ClickHouse", detail: "via HTTP, FORMAT JSON reads" },
 ];
 ---
 
@@ -23,9 +28,13 @@ const engines = [
   {
     engines.map((engine) => (
       <li class="flex items-center gap-3 bg-panel px-4 py-4 transition-colors hover:bg-panel-2 sm:px-5">
-        <svg viewBox="0 0 24 24" class="h-6 w-6 shrink-0 fill-fg-2" aria-hidden="true">
-          <path d={engine.icon.path} />
-        </svg>
+        {
+          engine.icon && (
+            <svg viewBox="0 0 24 24" class="h-6 w-6 shrink-0 fill-fg-2" aria-hidden="true">
+              <path d={engine.icon.path} />
+            </svg>
+          )
+        }
         <div class="min-w-0">
           <p class="truncate text-sm font-medium">{engine.name}</p>
           <p class="truncate font-mono text-xs text-fg-3">{engine.detail}</p>
@@ -35,7 +44,7 @@ const engines = [
   }
 </ul>
 <p class="mt-4 text-sm text-fg-3">
-  All six ship in the current release. ClickHouse, BigQuery, and Oracle are
+  All eight ship in the current release. BigQuery and Oracle are
   <a
     href={REPO_LINKS.vision}
     rel="noopener"

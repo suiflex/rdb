@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <strong>Native cross-platform database manager.<br>PostgreSQL · MySQL · Redis · MongoDB · SQLite · Cassandra — one binary, no Electron.</strong>
+  <strong>Native cross-platform database manager.<br>PostgreSQL · MySQL · Redis · MongoDB · SQLite · Cassandra · SQL Server · ClickHouse — one binary, no Electron.</strong>
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@ A native, lightweight, cross-platform database manager built with Rust and Slint
 
 ## Features
 
-- **Multi-engine** — PostgreSQL, MySQL/MariaDB, Redis, MongoDB, SQLite, Cassandra in one app
+- **Multi-engine** — PostgreSQL, MySQL/MariaDB, Redis, MongoDB, SQLite, Cassandra, SQL Server, ClickHouse in one app
 - **Native UI** — GPU-rendered via Slint (no webview, no Chromium, no Electron)
 - **Fast & light** — no GC, no runtime; aggressive release optimization (LTO, `opt-level=z`, `panic=abort`)
 - **Secure connections** — passwords stored in OS keychain (macOS Keychain, libsecret) with AES-GCM encrypted-file fallback
@@ -47,6 +47,8 @@ A native, lightweight, cross-platform database manager built with Rust and Slint
 | MongoDB | `mongodb` crate | Documents (JSON) |
 | SQLite | `rusqlite` | Tabular |
 | Cassandra | `scylla` | Tabular |
+| SQL Server | `tiberius` | Tabular |
+| ClickHouse | `clickhouse` (HTTP) | Tabular |
 
 ## Design
 
@@ -75,7 +77,8 @@ pub trait Driver: Send + Sync {
 
 ```rust
 pub enum Query {
-    Sql(String),           // PostgreSQL, MySQL, SQLite, Cassandra
+    Sql(String),           // PostgreSQL, MySQL, SQLite, SQL Server, ClickHouse
+    Cql(String),           // Cassandra/ScyllaDB
     Command(Vec<String>),  // Redis: ["GET", "key"]
     Mongo(MongoOp),        // find / insert / aggregate
 }
@@ -218,7 +221,7 @@ The release binary lands at `target/release/rdb`.
 ### Connect & query
 
 1. Click a saved connection → connects, schema loads in sidebar.
-2. Type SQL (PostgreSQL/MySQL), a Redis command (e.g. `GET key`), or a MongoDB JSON operation in the query editor.
+2. Type SQL (PostgreSQL/MySQL/SQL Server/ClickHouse), CQL (Cassandra), a Redis command (e.g. `GET key`), or a MongoDB JSON operation in the query editor.
 3. `Cmd+Enter` (macOS) / `Ctrl+Enter` (Linux) to run.
 4. Click a table/collection in the sidebar to auto-generate and run a `SELECT *` / `find` query.
 
@@ -232,7 +235,7 @@ Type in the **Filter** box above the grid — filters rows client-side without r
 
 ## Project status
 
-Active development. Ships 6 engines (PostgreSQL, MySQL, Redis, MongoDB, SQLite, Cassandra); planned expansion to ~20 (ClickHouse, BigQuery, Oracle, and more).
+Active development. Ships 8 engines (PostgreSQL, MySQL, Redis, MongoDB, SQLite, Cassandra, SQL Server, ClickHouse); planned expansion to ~20 (BigQuery, Oracle, and more).
 
 ## Crate overview
 
@@ -247,6 +250,8 @@ Active development. Ships 6 engines (PostgreSQL, MySQL, Redis, MongoDB, SQLite, 
 | `rdb-driver-mongo` | MongoDB driver via `mongodb` crate |
 | `rdb-driver-sqlite` | SQLite driver via `rusqlite` |
 | `rdb-driver-cassandra` | Cassandra driver via `scylla` |
+| `rdb-driver-mssql` | SQL Server driver via `tiberius` |
+| `rdb-driver-clickhouse` | ClickHouse driver via the `clickhouse` HTTP crate |
 
 ## License
 

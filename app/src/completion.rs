@@ -1,68 +1,19 @@
-//! SQL identifier autocomplete: given the text before the cursor and the
-//! in-memory schema tree (`VmTreeNode` list), suggest keywords, table names, or
-//! column names based on the SQL context. Columns resolve through a light
-//! `FROM tbl alias` alias map so `alias.` offers that table's columns.
+//! Identifier autocomplete: given the text before the cursor and the
+//! in-memory schema tree (`VmTreeNode` list), suggest keywords, table names,
+//! or column names based on the query context. Columns resolve through a
+//! light `FROM tbl alias` alias map so `alias.` offers that table's columns.
+//!
+//! Dispatch is per-`QueryLanguage` (see the `sql`/`cql`/`mongo`/`command`
+//! submodules) — each dialect owns its own keyword set and clause-position
+//! logic; this file keeps only the tree helpers they share (table/column
+//! lookup, fuzzy ranking) plus the top-level `suggest` dispatcher.
 
 use crate::model::VmTreeNode;
 
-/// SQL keywords offered when the cursor is at a statement/clause boundary.
-const KEYWORDS: &[&str] = &[
-    "SELECT",
-    "FROM",
-    "WHERE",
-    "INSERT",
-    "INTO",
-    "VALUES",
-    "UPDATE",
-    "SET",
-    "DELETE",
-    "JOIN",
-    "INNER",
-    "LEFT",
-    "RIGHT",
-    "OUTER",
-    "FULL",
-    "ON",
-    "AS",
-    "GROUP",
-    "ORDER",
-    "BY",
-    "HAVING",
-    "LIMIT",
-    "OFFSET",
-    "DISTINCT",
-    "AND",
-    "OR",
-    "NOT",
-    "NULL",
-    "IS",
-    "IN",
-    "LIKE",
-    "BETWEEN",
-    "ASC",
-    "DESC",
-    "COUNT",
-    "CREATE",
-    "TABLE",
-    "ALTER",
-    "DROP",
-    "INDEX",
-    // Date/aggregate functions — widely-portable names only (e.g. not
-    // MySQL's DATE_FORMAT or Postgres' TO_CHAR specifically).
-    "EXTRACT",
-    "DATE_TRUNC",
-    "NOW",
-    "CURRENT_DATE",
-    "CURRENT_TIMESTAMP",
-    "INTERVAL",
-    "AGE",
-    "COALESCE",
-    "CAST",
-    "SUM",
-    "AVG",
-    "MIN",
-    "MAX",
-];
+pub mod command;
+pub mod cql;
+pub mod mongo;
+pub mod sql;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Candidate {
@@ -71,61 +22,10 @@ pub struct Candidate {
     pub sub: String,  // owning table, for column hints
 }
 
-fn is_keyword(w: &str) -> bool {
-    let u = w.to_uppercase();
-    KEYWORDS.contains(&u.as_str())
-}
-
 /// Field nodes store `"name: type"` for the sidebar; completions insert the
 /// bare column name only.
 fn field_name(label: &str) -> &str {
     label.split(':').next().unwrap_or(label).trim()
-}
-
-fn keywords() -> Vec<Candidate> {
-    KEYWORDS
-        .iter()
-        .map(|k| Candidate {
-            label: (*k).to_string(),
-            kind: "keyword".into(),
-            sub: String::new(),
-        })
-        .collect()
-}
-
-/// mongosh collection methods, offered after `db.<collection>.` so Mongo
-/// completion reaches parity with SQL column completion.
-const MONGO_METHODS: &[&str] = &[
-    "find",
-    "findOne",
-    "aggregate",
-    "countDocuments",
-    "distinct",
-    "insertOne",
-    "insertMany",
-    "updateOne",
-    "updateMany",
-    "deleteOne",
-    "deleteMany",
-];
-
-fn mongo_methods() -> Vec<Candidate> {
-    MONGO_METHODS
-        .iter()
-        .map(|m| Candidate {
-            label: (*m).to_string(),
-            kind: "keyword".into(),
-            sub: String::new(),
-        })
-        .collect()
-}
-
-/// Does `name` match a collection node (MongoDB) in the tree?
-fn is_collection(nodes: &[VmTreeNode], name: &str) -> bool {
-    let nl = name.to_lowercase();
-    nodes
-        .iter()
-        .any(|n| n.kind == "collection" && n.label.to_lowercase() == nl)
 }
 
 /// Every column across the schema (deduped by name), for SELECT/WHERE contexts
@@ -153,7 +53,7 @@ fn all_columns(nodes: &[VmTreeNode]) -> Vec<Candidate> {
 /// Map a table name or `FROM tbl alias` alias to its underlying table name.
 /// `.` stays inside a token so a schema-qualified `schema.table alias` keeps the
 /// table reference whole and the alias is read as the next token.
-fn resolve_alias(stmt: &str, owner: &str) -> String {
+fn resolve_alias(stmt: &str, owner: &str, language: rdb_connstore::QueryLanguage) -> String {
     let ol = owner.to_lowercase();
     let words: Vec<&str> = stmt
         .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '.'))
@@ -165,7 +65,7 @@ fn resolve_alias(stmt: &str, owner: &str) -> String {
             let table = words[i + 1];
             // `FROM tbl alias` — alias is the following non-keyword word.
             if let Some(alias) = words.get(i + 2) {
-                if !is_keyword(alias) && alias.to_lowercase() == ol {
+                if !is_keyword_for(language, alias) && alias.to_lowercase() == ol {
                     return table.to_string();
                 }
             }
@@ -175,6 +75,13 @@ fn resolve_alias(stmt: &str, owner: &str) -> String {
         }
     }
     owner.to_string()
+}
+
+fn is_keyword_for(language: rdb_connstore::QueryLanguage, w: &str) -> bool {
+    match language {
+        rdb_connstore::QueryLanguage::Cql => cql::is_keyword(&w.to_uppercase()),
+        _ => sql::is_keyword(w),
+    }
 }
 
 /// How well `word` (already lowercased) matches `label`, lowest is best:
@@ -312,9 +219,10 @@ fn from_table_columns(stmt: &str, nodes: &[VmTreeNode]) -> Vec<Candidate> {
     cols
 }
 
-/// The last SQL keyword token on `line`, uppercased (via the editor lexer).
-fn last_keyword(line: &str) -> Option<String> {
-    crate::editor::lex_line(line)
+/// The last keyword token on `line` for `language`, uppercased (via the
+/// editor lexer, so it agrees with what's actually highlighted).
+fn last_keyword(line: &str, language: rdb_connstore::QueryLanguage) -> Option<String> {
+    crate::editor::lex_line(language, line)
         .into_iter()
         .rev()
         .find(|s| s.kind == 1)
@@ -332,8 +240,13 @@ pub fn suggest(
     stmt: &str,
     nodes: &[VmTreeNode],
     active_schema: &str,
-    mongo: bool,
+    language: rdb_connstore::QueryLanguage,
 ) -> (usize, Vec<Candidate>) {
+    // Redis has no table/column tree or dot-completion — dispatch entirely to
+    // its own line-based command completion.
+    if language == rdb_connstore::QueryLanguage::Command {
+        return command::suggest(before_cursor);
+    }
     // Default table/column suggestions come from the active schema only, so the
     // popup follows the connected schema without the user picking it first.
     let scope = schema_scope(nodes, active_schema);
@@ -345,67 +258,36 @@ pub fn suggest(
     if word.is_empty() && !head.ends_with('.') {
         return (0, Vec::new());
     }
+    let is_mongo = language == rdb_connstore::QueryLanguage::Mongo;
     let mut cands = if let Some(before_dot) = head.strip_suffix('.') {
         // `table.` / `alias.` → that table's columns. When the name before the
         // dot is a schema/database, offer that schema's tables instead.
         // Explicit `schema.` uses the whole tree so other schemas stay reachable.
         let owner_word = trailing_word(before_dot);
-        let owner = resolve_alias(stmt, owner_word);
+        let owner = resolve_alias(stmt, owner_word, language);
         let cols = columns_of(nodes, &owner);
         if !cols.is_empty() {
             cols
-        } else if mongo && owner_word.eq_ignore_ascii_case("db") {
+        } else if is_mongo && owner_word.eq_ignore_ascii_case("db") {
             // MongoDB: `db.` is the current database — offer its collections.
             tables(scope)
-        } else if mongo && is_collection(nodes, owner_word) {
+        } else if is_mongo && mongo::is_collection(nodes, owner_word) {
             // MongoDB: `db.<collection>.` — offer collection methods.
-            mongo_methods()
+            mongo::methods()
         } else if is_database(nodes, owner_word) {
             tables(schema_scope(nodes, owner_word))
         } else {
             cols
         }
-    } else if mongo {
-        // MongoDB has no SQL keywords: offer the `db` handle and the active
-        // database's collections instead of DELETE/SELECT/… noise.
-        let mut c = vec![Candidate {
-            label: "db".into(),
-            kind: "keyword".into(),
-            sub: String::new(),
-        }];
-        c.extend(tables(scope));
-        c
+    } else if is_mongo {
+        mongo::bare_word(scope)
     } else {
         // Keyword context comes from the current line; `before_cursor` may span
         // several lines (alias resolution needs the whole statement).
         let cur_line = before_cursor.rsplit('\n').next().unwrap_or(before_cursor);
-        match last_keyword(cur_line).as_deref() {
-            // table position: active-schema tables plus every schema name, so a
-            // `schema.table` from another namespace can be started.
-            Some("FROM") | Some("JOIN") | Some("INTO") | Some("UPDATE") | Some("TABLE") => {
-                let mut c = tables(scope);
-                c.extend(schemas(nodes));
-                c
-            }
-            // column position: offer columns and tables, plus keywords so the
-            // next clause (FROM/WHERE/…) is always reachable, e.g. after `*`.
-            Some("SELECT") | Some("WHERE") | Some("AND") | Some("OR") | Some("ON")
-            | Some("HAVING") | Some("SET") | Some("BY") | Some("VALUES") => {
-                // Columns of the statement's own FROM/JOIN tables come first (they
-                // are what's actually in scope, cross-schema included), then the
-                // active-schema columns/tables and keywords as a fallback.
-                let mut c = from_table_columns(stmt, nodes);
-                c.extend(all_columns(scope));
-                c.extend(tables(scope));
-                c.extend(keywords());
-                c
-            }
-            // statement start / no useful context: keywords + tables
-            _ => {
-                let mut c = keywords();
-                c.extend(tables(scope));
-                c
-            }
+        match language {
+            rdb_connstore::QueryLanguage::Cql => cql::bare_word(cur_line, stmt, nodes, scope),
+            _ => sql::bare_word(cur_line, stmt, nodes, scope),
         }
     };
     let wl = word.to_lowercase();
@@ -434,9 +316,9 @@ mod tests {
         before: &str,
         nodes: &[VmTreeNode],
         active_schema: &str,
-        mongo: bool,
+        language: rdb_connstore::QueryLanguage,
     ) -> (usize, Vec<Candidate>) {
-        suggest(before, before, nodes, active_schema, mongo)
+        suggest(before, before, nodes, active_schema, language)
     }
 
     fn nodes() -> Vec<VmTreeNode> {
@@ -456,15 +338,35 @@ mod tests {
 
     #[test]
     fn empty_and_whitespace_context_suppress_popup() {
-        assert!(sug("", &nodes(), "public", false).1.is_empty());
-        assert!(sug("   ", &nodes(), "public", false).1.is_empty());
+        assert!(
+            sug("", &nodes(), "public", rdb_connstore::QueryLanguage::Sql)
+                .1
+                .is_empty()
+        );
+        assert!(
+            sug("   ", &nodes(), "public", rdb_connstore::QueryLanguage::Sql)
+                .1
+                .is_empty()
+        );
         // trailing space after a keyword: wait for the user to start typing
-        assert!(sug("select ", &nodes(), "public", false).1.is_empty());
+        assert!(sug(
+            "select ",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Sql
+        )
+        .1
+        .is_empty());
     }
 
     #[test]
     fn from_prefix_suggests_matching_table() {
-        let (n, c) = sug("select * from ste", &nodes(), "public", false);
+        let (n, c) = sug(
+            "select * from ste",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
         assert_eq!(n, 3);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -478,7 +380,7 @@ mod tests {
             "select * from step_config where step_config.",
             &nodes(),
             "public",
-            false,
+            rdb_connstore::QueryLanguage::Sql,
         );
         assert_eq!(n, 0);
         assert_eq!(
@@ -496,7 +398,7 @@ mod tests {
             label: "log_inbound".into(),
             kind: "collection".into(),
         });
-        let (n, c) = sug("db.log", &ns, "public", true);
+        let (n, c) = sug("db.log", &ns, "public", rdb_connstore::QueryLanguage::Mongo);
         assert_eq!(n, 3);
         assert!(c.iter().any(|x| x.label == "log_inbound"));
     }
@@ -509,7 +411,12 @@ mod tests {
             label: "log_inbound".into(),
             kind: "collection".into(),
         });
-        let (_, c) = sug("db.log_inbound.fi", &ns, "public", true);
+        let (_, c) = sug(
+            "db.log_inbound.fi",
+            &ns,
+            "public",
+            rdb_connstore::QueryLanguage::Mongo,
+        );
         assert!(c.iter().any(|x| x.label == "find"));
         assert!(c.iter().any(|x| x.label == "findOne"));
     }
@@ -523,9 +430,65 @@ mod tests {
             label: "log_inbound".into(),
             kind: "collection".into(),
         });
-        let (_, c) = sug("d", &ns, "public", true);
+        let (_, c) = sug("d", &ns, "public", rdb_connstore::QueryLanguage::Mongo);
         assert!(c.iter().any(|x| x.label == "db"));
         assert!(!c.iter().any(|x| x.label == "DELETE"));
+    }
+
+    #[test]
+    fn redis_bare_word_suggests_commands_not_sql_keywords() {
+        // Regression: Redis previously fell into the SQL keyword branch and
+        // got offered SELECT/DELETE/etc, which don't exist in Redis.
+        let (_, c) = sug("GE", &[], "public", rdb_connstore::QueryLanguage::Command);
+        assert!(c.iter().any(|x| x.label == "GET"));
+        assert!(!c.iter().any(|x| x.label == "SELECT"));
+        assert!(!c.iter().any(|x| x.label == "DELETE"));
+    }
+
+    #[test]
+    fn redis_completion_only_at_line_start() {
+        // A command's arguments (the key name) aren't completed against the
+        // command list.
+        let (_, c) = sug(
+            "GET k",
+            &[],
+            "public",
+            rdb_connstore::QueryLanguage::Command,
+        );
+        assert!(c.is_empty());
+    }
+
+    #[test]
+    fn cql_bare_word_offers_no_join_or_having() {
+        // CQL has no JOIN/HAVING — offering them would be SQL leaking through.
+        // (SQL would suggest JOIN/HAVING here since both are keyword prefixes
+        // of "j"/"h" reachable from the SELECT column-position branch.)
+        let (_, c) = sug(
+            "select j",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Cql,
+        );
+        assert!(!c.iter().any(|x| x.label == "JOIN"));
+        let (_, c) = sug(
+            "select h",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Cql,
+        );
+        assert!(!c.iter().any(|x| x.label == "HAVING"));
+    }
+
+    #[test]
+    fn cql_from_prefix_suggests_matching_table() {
+        let (n, c) = sug(
+            "select * from ste",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Cql,
+        );
+        assert_eq!(n, 3);
+        assert!(c.iter().any(|x| x.label == "step_config"));
     }
 
     /// Typing a mid-word `_` segment finds the identifier, and a true prefix
@@ -550,7 +513,12 @@ mod tests {
                 kind: "field".into(),
             },
         ];
-        let (_, c) = sug("select teknis", &n, "public", false);
+        let (_, c) = sug(
+            "select teknis",
+            &n,
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"flag_teknis"));
         // `teknis_id` is a real prefix → ranks ahead of the mid-word match.
@@ -579,7 +547,7 @@ mod tests {
             "select * from oss_rba_common.step_journal where step",
             &two,
             "public",
-            false,
+            rdb_connstore::QueryLanguage::Sql,
         );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"step_id"));
@@ -590,7 +558,7 @@ mod tests {
             "select * from oss_rba_common.step_journal where step",
             &two,
             "public",
-            false,
+            rdb_connstore::QueryLanguage::Sql,
         );
         assert!(c2.iter().any(|x| x.label == "step_id"));
         assert!(!c2.iter().any(|x| x.label == "id"));
@@ -619,7 +587,7 @@ mod tests {
             "select con from oss_rba_common.step_config",
             &two,
             "public",
-            false,
+            rdb_connstore::QueryLanguage::Sql,
         );
         assert_eq!(n, 3);
         assert_eq!(c.first().map(|x| x.label.as_str()), Some("config_id"));
@@ -633,7 +601,7 @@ mod tests {
             "select a. from step_config a",
             &nodes(),
             "public",
-            false,
+            rdb_connstore::QueryLanguage::Sql,
         );
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -653,16 +621,26 @@ mod tests {
             mk("config_id", "field"),
         ];
         // Schema name typed without its underscores.
-        let (_, c) = sug("select * from ossrbacommon", &n, "oss_rba_common", false);
+        let (_, c) = sug(
+            "select * from ossrbacommon",
+            &n,
+            "oss_rba_common",
+            rdb_connstore::QueryLanguage::Sql,
+        );
         assert!(c.iter().any(|x| x.label == "oss_rba_common"));
         // Not schemas only — tables and columns too.
-        let (_, c) = sug("select * from stepconfig", &n, "oss_rba_common", false);
+        let (_, c) = sug(
+            "select * from stepconfig",
+            &n,
+            "oss_rba_common",
+            rdb_connstore::QueryLanguage::Sql,
+        );
         assert!(c.iter().any(|x| x.label == "step_config"));
         let (_, c) = sug(
             "select * from step_config where configid",
             &n,
             "oss_rba_common",
-            false,
+            rdb_connstore::QueryLanguage::Sql,
         );
         assert!(c.iter().any(|x| x.label == "config_id"));
     }
@@ -678,7 +656,12 @@ mod tests {
             mk("stepconfig", "table"),
             mk("step_config", "table"),
         ];
-        let (_, c) = sug("select * from stepc", &n, "public", false);
+        let (_, c) = sug(
+            "select * from stepc",
+            &n,
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["stepconfig", "step_config"]
@@ -687,7 +670,12 @@ mod tests {
 
     #[test]
     fn bare_word_completes_keyword() {
-        let (n, c) = sug("sele", &nodes(), "public", false);
+        let (n, c) = sug(
+            "sele",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
         assert_eq!(n, 4);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -698,7 +686,12 @@ mod tests {
     #[test]
     fn select_context_offers_columns() {
         // Type-triggered: a prefix is required before the popup appears.
-        let (_, c) = sug("select n", &nodes(), "public", false);
+        let (_, c) = sug(
+            "select n",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"name"));
     }
@@ -709,7 +702,7 @@ mod tests {
             "select * from step_config sc where sc.",
             &nodes(),
             "public",
-            false,
+            rdb_connstore::QueryLanguage::Sql,
         );
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -722,13 +715,13 @@ mod tests {
     #[test]
     fn schema_qualified_alias_join_resolves_columns() {
         let a = "select * from public.step_config a left join public.users b on a.";
-        let (_, c) = sug(a, &nodes(), "public", false);
+        let (_, c) = sug(a, &nodes(), "public", rdb_connstore::QueryLanguage::Sql);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["config_id", "name"]
         );
         let b = "select * from public.step_config a left join public.users b on b.";
-        let (_, c) = sug(b, &nodes(), "public", false);
+        let (_, c) = sug(b, &nodes(), "public", rdb_connstore::QueryLanguage::Sql);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["id"]
@@ -740,7 +733,7 @@ mod tests {
     #[test]
     fn multiline_join_alias_resolves_columns() {
         let sql = "select * from public.step_config a\nleft join public.users b on a.";
-        let (_, c) = sug(sql, &nodes(), "public", false);
+        let (_, c) = sug(sql, &nodes(), "public", rdb_connstore::QueryLanguage::Sql);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["config_id", "name"]
@@ -749,14 +742,24 @@ mod tests {
 
     #[test]
     fn star_context_offers_from_keyword() {
-        let (_, c) = sug("select * f", &nodes(), "public", false);
+        let (_, c) = sug(
+            "select * f",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"FROM"));
     }
 
     #[test]
     fn schema_dot_suggests_its_tables() {
-        let (n, c) = sug("select * from public.", &nodes(), "public", false);
+        let (n, c) = sug(
+            "select * from public.",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
         assert_eq!(n, 0);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -776,7 +779,12 @@ mod tests {
                 kind: "field".into(),
             },
         ];
-        let (_, c) = sug("select * from users where users.", &typed, "public", false);
+        let (_, c) = sug(
+            "select * from users where users.",
+            &typed,
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
         assert_eq!(c[0].label, "id");
     }
 
@@ -796,12 +804,22 @@ mod tests {
             mk("oid", "field"),
         ];
         // Type-triggered: a prefix ("t") is required before the popup appears.
-        let (_, c) = sug("select * from t", &two, "public", false);
+        let (_, c) = sug(
+            "select * from t",
+            &two,
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"t_users"));
         assert!(!labels.contains(&"t_orders"));
 
-        let (_, c) = sug("select * from t", &two, "other", false);
+        let (_, c) = sug(
+            "select * from t",
+            &two,
+            "other",
+            rdb_connstore::QueryLanguage::Sql,
+        );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"t_orders"));
         assert!(!labels.contains(&"t_users"));
@@ -827,7 +845,12 @@ mod tests {
     #[test]
     fn from_offers_schema_names() {
         // Type-triggered: "a" narrows to the analytics schema name.
-        let (_, c) = sug("select * from a", &two_schema_nodes(), "public", false);
+        let (_, c) = sug(
+            "select * from a",
+            &two_schema_nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"analytics"));
     }
@@ -840,7 +863,7 @@ mod tests {
             "select * from analytics.",
             &two_schema_nodes(),
             "public",
-            false,
+            rdb_connstore::QueryLanguage::Sql,
         );
         assert_eq!(n, 0);
         assert_eq!(

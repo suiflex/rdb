@@ -1,0 +1,17 @@
+[package]
+name = "rdb-driver-mssql"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rdb-core = { path = "../core" }
+async-trait = "0.1"
+chrono = "0.4"
+futures-util = "0.3"
+tiberius = { version = "0.12", default-features = false, features = ["tds73", "rustls", "chrono"] }
+tokio = { version = "1", features = ["net", "rt-multi-thread", "macros"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+
+[dev-dependencies]
+testcontainers = "0.27"
+testcontainers-modules = { version = "0.15", features = ["mssql_server"] }

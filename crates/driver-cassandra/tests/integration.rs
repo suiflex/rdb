@@ -38,7 +38,7 @@ async fn connect_schema_query_count_commit() {
     driver.ping().await.expect("ping");
 
     driver
-        .query(&Query::Sql(
+        .query(&Query::Cql(
             "CREATE KEYSPACE IF NOT EXISTS rdb_it WITH replication = \
              {'class':'SimpleStrategy','replication_factor':1}"
                 .into(),
@@ -46,13 +46,13 @@ async fn connect_schema_query_count_commit() {
         .await
         .expect("create keyspace");
     driver
-        .query(&Query::Sql(
+        .query(&Query::Cql(
             "CREATE TABLE IF NOT EXISTS rdb_it.users (id int PRIMARY KEY, name text)".into(),
         ))
         .await
         .expect("create table");
     driver
-        .query(&Query::Sql(
+        .query(&Query::Cql(
             "INSERT INTO rdb_it.users (id, name) VALUES (1, 'ada')".into(),
         ))
         .await
@@ -87,7 +87,7 @@ async fn connect_schema_query_count_commit() {
         .expect("commit");
 
     match driver
-        .query(&Query::Sql(
+        .query(&Query::Cql(
             "SELECT name FROM rdb_it.users WHERE id = 1".into(),
         ))
         .await
@@ -98,7 +98,7 @@ async fn connect_schema_query_count_commit() {
     }
 
     driver
-        .query(&Query::Sql("DROP KEYSPACE rdb_it".into()))
+        .query(&Query::Cql("DROP KEYSPACE rdb_it".into()))
         .await
         .expect("drop keyspace");
     driver.close().await.expect("close");

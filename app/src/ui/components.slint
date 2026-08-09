@@ -104,9 +104,34 @@ export component TooltipArea inherits TouchArea {
 // Dropdown select: shows the current value + a ▾ caret so it reads as a
 // picker even when closed, then a click opens a themed option list. Replaces
 // std-widgets ComboBox, which rendered as a blank borderless box in this theme.
+// Full-color brand mark for the engine picker (icons/brand/*.svg) — distinct
+// from AppIcon, which always `colorize`s to one flat tint. Engines with no
+// official mark shipped (e.g. SQL Server — none hand-drawn, per operator's
+// call) render nothing rather than a fabricated logo; the row's own text
+// label still carries the name.
+component EngineLogo inherits Image {
+    in property <string> label;
+    width: 16px;
+    height: 16px;
+    image-fit: contain;
+    source:
+        label == "PostgreSQL" ? @image-url("icons/brand/postgres.svg")
+        : label == "MySQL" ? @image-url("icons/brand/mysql.svg")
+        : label == "Redis" ? @image-url("icons/brand/redis.svg")
+        : label == "MongoDB" ? @image-url("icons/brand/mongo.svg")
+        : label == "SQLite" ? @image-url("icons/brand/sqlite.svg")
+        : label == "Cassandra" ? @image-url("icons/brand/cassandra.svg")
+        : label == "ClickHouse" ? @image-url("icons/brand/clickhouse.svg")
+        : @image-url("");
+}
+
 export component SelectBox inherits Rectangle {
     in property <[string]> model;
     in-out property <string> current-value;
+    // Opt-in: prefixes the current value and every option row with its
+    // brand logo (EngineLogo). Only the connection form's Engine dropdown
+    // sets this — every other SelectBox (SSL mode, Group, …) is unaffected.
+    in property <bool> show-logo: false;
     callback selected(string);
     height: Tokens.button-h + 4px;
     border-radius: Tokens.radius;
@@ -120,6 +145,10 @@ export component SelectBox inherits Rectangle {
         padding-left: Tokens.sp2;
         padding-right: Tokens.sp2;
         spacing: Tokens.sp2;
+        if root.show-logo: VerticalLayout {
+            alignment: center;
+            EngineLogo { label: root.current-value; }
+        }
         Text {
             text: root.current-value;
             color: Tokens.text;
@@ -159,6 +188,11 @@ export component SelectBox inherits Rectangle {
                     }
                     HorizontalLayout {
                         padding-left: Tokens.sp2;
+                        spacing: Tokens.sp2;
+                        if root.show-logo: VerticalLayout {
+                            alignment: center;
+                            EngineLogo { label: opt; }
+                        }
                         Text {
                             text: opt;
                             color: Tokens.text;
@@ -174,7 +208,7 @@ export component SelectBox inherits Rectangle {
 
 // Engine badge: rounded square with 2-letter code, engine color fill.
 export component DbBadge inherits Rectangle {
-    in property <string> engine; // "postgres" | "mysql" | "redis" | "sqlite" | "mongo" | "cassandra"
+    in property <string> engine; // "postgres" | "mysql" | "redis" | "sqlite" | "mongo" | "cassandra" | "clickhouse" | "mssql"
     in property <length> size: 24px;
     // Callers with a per-connection custom accent can override this; the
     // default keeps every existing call site's engine-colored look as-is.
@@ -186,17 +220,21 @@ export component DbBadge inherits Rectangle {
     // Known engine → white brand glyph (icons/db-<engine>.svg via AppIcon).
     property <bool> known: engine == "postgres" || engine == "mysql"
         || engine == "redis" || engine == "sqlite" || engine == "mongo"
-        || engine == "cassandra";
+        || engine == "cassandra" || engine == "clickhouse";
+    // Engines with no real brand mark available (e.g. SQL Server — no
+    // official logo shipped, and none hand-drawn per operator's call) get
+    // their initials spelled out instead of a fabricated icon or a bare "?".
+    // A truly unrecognized engine still falls back to "?".
+    property <string> fallback-text: engine == "mssql" ? "MS" : "?";
     if known: AppIcon {
         name: "db-" + engine;
         size: root.size * 0.58;
         color: white;
     }
-    // ponytail: fallback keeps unknown engines from rendering a blank card.
     if !known: Text {
-        text: "?";
+        text: root.fallback-text;
         color: white;
-        font-size: root.size * 0.42;
+        font-size: root.size * 0.34;
         font-weight: 700;
     }
 }

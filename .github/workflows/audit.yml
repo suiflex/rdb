@@ -38,4 +38,18 @@ jobs:
           #   2026-0235 rkyv        — rust_decimal optional dep, feature not
           #                           enabled by driver-postgres, latest
           #                           rust_decimal (1.42.1) still pulls it
-          ignore: RUSTSEC-2026-0194,RUSTSEC-2026-0195,RUSTSEC-2024-0436,RUSTSEC-2026-0206,RUSTSEC-2026-0192,RUSTSEC-2025-0141,RUSTSEC-2026-0235
+          #   2026-0098/0099/0104 rustls-webpki — tiberius (driver-mssql) ->
+          #                           tokio-rustls 0.24 -> rustls 0.21, whose
+          #                           own Cargo.toml pins webpki ^0.101; the
+          #                           patched 0.103.12+/0.104 releases are
+          #                           for the rustls 0.23 line only, so this
+          #                           can't be bumped without tiberius itself
+          #                           moving off tokio-rustls 0.24. Neither
+          #                           issue applies to how we use it: the
+          #                           name-constraint bugs need a misissued
+          #                           cert to already pass signature
+          #                           verification, and the CRL panic only
+          #                           affects code that parses CRLs, which
+          #                           this workspace never does. Revisit when
+          #                           tiberius bumps its rustls pin.
+          ignore: RUSTSEC-2026-0194,RUSTSEC-2026-0195,RUSTSEC-2024-0436,RUSTSEC-2026-0206,RUSTSEC-2026-0192,RUSTSEC-2025-0141,RUSTSEC-2026-0235,RUSTSEC-2026-0098,RUSTSEC-2026-0099,RUSTSEC-2026-0104
