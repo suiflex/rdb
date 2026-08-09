@@ -116,8 +116,10 @@ impl Driver for CassandraDriver {
 
     async fn query(&self, q: &Query) -> Result<ResultSet> {
         let cql = match q {
-            Query::Sql(s) => s,
-            Query::Command(_) | Query::Mongo(_) => return Err(RdbError::UnsupportedQuery),
+            Query::Cql(s) => s,
+            Query::Sql(_) | Query::Command(_) | Query::Mongo(_) => {
+                return Err(RdbError::UnsupportedQuery)
+            }
         };
         let res = self
             .session

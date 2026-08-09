@@ -2,25 +2,25 @@
 //! The connected `Engine` decides how the text is interpreted, so a single
 //! editor drives all four paradigms.
 
-use rdb_connstore::Engine;
+use rdb_connstore::{Engine, QueryLanguage};
 use rdb_core::query::{MongoKind, MongoOp, Query};
 
 /// Turn raw editor text into a typed `Query` for the connected engine.
 /// Returns a human-readable error string on malformed input (shown in the
 /// result-status line; no driver call is made).
 pub fn parse_query(engine: Engine, text: &str) -> Result<Query, String> {
-    match engine {
-        // SQL engines parse `--` comments (inline and whole-line) natively, so
-        // send the buffer verbatim — same as every other SQL editor. Stripping
-        // comment lines here re-joined the surrounding lines and could shift a
-        // clause onto the wrong statement (e.g. a `WHERE` whose only condition
-        // was commented, followed by the real predicate two lines down).
-        Engine::Postgres | Engine::MySql | Engine::Sqlite | Engine::Cassandra => {
-            Ok(Query::Sql(text.to_string()))
-        }
+    match engine.language() {
+        // SQL/CQL engines parse `--` comments (inline and whole-line) natively,
+        // so send the buffer verbatim — same as every other SQL editor.
+        // Stripping comment lines here re-joined the surrounding lines and
+        // could shift a clause onto the wrong statement (e.g. a `WHERE` whose
+        // only condition was commented, followed by the real predicate two
+        // lines down).
+        QueryLanguage::Sql => Ok(Query::Sql(text.to_string())),
+        QueryLanguage::Cql => Ok(Query::Cql(text.to_string())),
         // Redis/Mongo have no server-side line comments, so drop commented lines
         // (Cmd+/ toggles them) before interpreting.
-        Engine::Redis => {
+        QueryLanguage::Command => {
             let cleaned = strip_comment_lines(engine, text);
             let tokens: Vec<String> = cleaned.split_whitespace().map(|s| s.to_string()).collect();
             if tokens.is_empty() {
@@ -28,7 +28,7 @@ pub fn parse_query(engine: Engine, text: &str) -> Result<Query, String> {
             }
             Ok(Query::Command(tokens))
         }
-        Engine::Mongo => parse_mongo(&strip_comment_lines(engine, text)),
+        QueryLanguage::Mongo => parse_mongo(&strip_comment_lines(engine, text)),
     }
 }
 
@@ -360,6 +360,16 @@ mod tests {
                 Query::Sql(s) => assert_eq!(s, "SELECT 1"),
                 _ => panic!("expected Sql"),
             }
+        }
+    }
+
+    #[test]
+    fn cassandra_produces_cql_not_sql() {
+        // Cassandra speaks CQL, not SQL — it must not land in the Sql variant
+        // just because both are plain-text query languages.
+        match parse_query(Engine::Cassandra, "SELECT * FROM ks.t").unwrap() {
+            Query::Cql(s) => assert_eq!(s, "SELECT * FROM ks.t"),
+            _ => panic!("expected Cql"),
         }
     }
 

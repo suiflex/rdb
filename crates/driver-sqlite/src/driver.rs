@@ -81,7 +81,9 @@ impl Driver for SqliteDriver {
     async fn query(&self, q: &Query) -> Result<ResultSet> {
         let sql = match q {
             Query::Sql(s) => s.clone(),
-            Query::Command(_) | Query::Mongo(_) => return Err(RdbError::UnsupportedQuery),
+            Query::Cql(_) | Query::Command(_) | Query::Mongo(_) => {
+                return Err(RdbError::UnsupportedQuery)
+            }
         };
         self.with_conn(move |c| run_sql(c, &sql)).await
     }

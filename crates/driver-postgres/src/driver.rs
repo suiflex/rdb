@@ -225,7 +225,7 @@ fn pg_err(e: &tokio_postgres::Error) -> String {
 async fn query_impl(client: &Client, q: &Query) -> Result<ResultSet> {
     let sql = match q {
         Query::Sql(s) => s,
-        Query::Command(_) | Query::Mongo(_) => return Err(RdbError::UnsupportedQuery),
+        Query::Cql(_) | Query::Command(_) | Query::Mongo(_) => return Err(RdbError::UnsupportedQuery),
     };
 
     if is_row_returning(sql) {
@@ -272,7 +272,7 @@ async fn query_stream_impl(
 
     let sql = match q {
         Query::Sql(s) => s,
-        Query::Command(_) | Query::Mongo(_) => return Err(RdbError::UnsupportedQuery),
+        Query::Cql(_) | Query::Command(_) | Query::Mongo(_) => return Err(RdbError::UnsupportedQuery),
     };
     if !is_row_returning(sql) {
         client
