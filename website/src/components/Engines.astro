@@ -6,6 +6,7 @@ import {
   siMongodb,
   siSqlite,
   siApachecassandra,
+  siClickhouse,
 } from "simple-icons";
 import { REPO_LINKS } from "../config";
 
@@ -19,6 +20,7 @@ const engines = [
   { icon: siSqlite, name: "SQLite", detail: "local files, zero setup" },
   { icon: siApachecassandra, name: "Cassandra", detail: "via the scylla driver" },
   { icon: null, name: "SQL Server", detail: "via tiberius (T-SQL)" },
+  { icon: siClickhouse, name: "ClickHouse", detail: "via HTTP, FORMAT JSON reads" },
 ];
 ---
 
@@ -42,7 +44,7 @@ const engines = [
   }
 </ul>
 <p class="mt-4 text-sm text-fg-3">
-  All seven ship in the current release. ClickHouse, BigQuery, and Oracle are
+  All eight ship in the current release. BigQuery and Oracle are
   <a
     href={REPO_LINKS.vision}
     rel="noopener"

@@ -33,7 +33,8 @@ cargo build --release -p rdb   # release binary
 
 One GitHub Actions workflow per component in `.github/workflows/` — `rdb-app`
 plus one per crate: `rdb-core`, `rdb-connstore`, `rdb-driver-postgres`,
-`rdb-driver-mysql`, `rdb-driver-redis`, `rdb-driver-mongo`, `rdb-driver-mssql`.
+`rdb-driver-mysql`, `rdb-driver-redis`, `rdb-driver-mongo`, `rdb-driver-mssql`,
+`rdb-driver-clickhouse`.
 Each has a `paths:` filter, so editing one component only runs that
 component's CI (lean).
 
@@ -92,6 +93,7 @@ Keep the scope specific (`app`, `driver-postgres`, `driver-mysql`, `core`,
 - `crates/driver-sqlite/` — rusqlite (bundled)
 - `crates/driver-cassandra/` — scylla crate (CQL, Cassandra/ScyllaDB)
 - `crates/driver-mssql/` — tiberius (T-SQL, SQL-auth only in v1, no Windows/AD)
+- `crates/driver-clickhouse/` — HTTP `clickhouse` crate, reads via `FORMAT JSON` (not the typed `Row` path), insert-only write-back
 
 ## Key Rules
 
@@ -104,7 +106,7 @@ Keep the scope specific (`app`, `driver-postgres`, `driver-mysql`, `core`,
 
   | Engine | QueryLanguage | Query shape | Example |
   | --- | --- | --- | --- |
-  | Postgres, MySQL, SQLite, SQL Server | `Sql` | SQL text | `SELECT * FROM users` |
+  | Postgres, MySQL, SQLite, SQL Server, ClickHouse | `Sql` | SQL text | `SELECT * FROM users` |
   | Cassandra | `Cql` | CQL text (no JOIN/subquery/HAVING) | `SELECT * FROM ks.t ALLOW FILTERING` |
   | Redis | `Command` | command tokens | `GET user:1` |
   | MongoDB | `Mongo` | structured op | `find({ age: { $gt: 20 } })` |
