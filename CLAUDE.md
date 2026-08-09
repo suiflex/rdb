@@ -104,7 +104,7 @@ Keep the scope specific (`app`, `driver-postgres`, `driver-mysql`, `core`,
 
   | Engine | QueryLanguage | Query shape | Example |
   | --- | --- | --- | --- |
-  | Postgres, MySQL, SQLite | `Sql` | SQL text | `SELECT * FROM users` |
+  | Postgres, MySQL, SQLite, SQL Server | `Sql` | SQL text | `SELECT * FROM users` |
   | Cassandra | `Cql` | CQL text (no JOIN/subquery/HAVING) | `SELECT * FROM ks.t ALLOW FILTERING` |
   | Redis | `Command` | command tokens | `GET user:1` |
   | MongoDB | `Mongo` | structured op | `find({ age: { $gt: 20 } })` |
@@ -134,6 +134,34 @@ Keep the scope specific (`app`, `driver-postgres`, `driver-mysql`, `core`,
        Skip for structured/command-style languages — button stays hidden.
     5. `app/src/query_parse.rs::parse_query` — build the new `Query` variant
        for this language.
+
+  **Full checklist for a new `Engine` variant** (driver-mssql's addition is
+  the reference — a step here got missed and had to be backfilled twice):
+  1. `crates/connstore/src/model.rs` — `Engine` variant + `Engine::language()` arm.
+  2. `crates/connstore/src/conn_url.rs` — scheme(s) → engine in `scheme_to_engine`.
+  3. New `driver-*` crate + `app/src/dispatch.rs` — `AnyDriver` variant (box it
+     if the driver struct is large — `cargo clippy` catches this via
+     `large_enum_variant`) + `write_statements`. Then run `cargo build -p rdb`
+     and add an arm everywhere it complains — the compiler enumerates every
+     exhaustive `Engine`/`Query` match site for you; don't hand-audit.
+  4. **String-keyed lookups the compiler can NOT catch** (grep the engine's
+     display label, e.g. `"SQL Server"`, across `app/src/main.rs`): the
+     connection-form's `label_to_engine`/`default_port` — `label_to_engine`
+     has a wildcard arm that silently defaults an unmatched label to
+     `Engine::Postgres`, so a missed entry here misroutes a new-connection
+     save to the wrong driver instead of failing to compile.
+  5. UI: `app/src/ui/conn-form.slint` (engine picker `model`, import-URL
+     placeholder ternary, field-visibility `if` conditions e.g. SSL mode) and
+     `app/src/ui/app-window.slint`'s Settings → About tab (static engine list
+     string).
+  6. Docs/marketing surfaces that list engines by name — easy to forget since
+     nothing enforces them: `README.md` (badge line, Features bullet,
+     Supported Engines table, `Query` enum snippet, usage instructions,
+     Project status line, Crate overview table), `npm/README.md` (near-dupe
+     of the above), `VISION.md`, `website/src/components/Engines.astro`
+     (icon + array — check `simple-icons` actually has the brand mark before
+     assuming one exists), `website/src/pages/index.astro` (hero + meta
+     description), `website/src/pages/open-source.astro` (crate list).
 - Async I/O on tokio runtime, results bridge back to Slint main thread via `invoke_from_event_loop`.
 - Release profile: `opt-level=z`, LTO, `panic=abort`, strip.
 - In-app self-update (`app/src/self_update.rs`) only ever runs for
