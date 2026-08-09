@@ -51,6 +51,7 @@ fn scheme_to_engine(scheme: &str) -> Option<Engine> {
         "mongodb" | "mongodb+srv" => Some(Engine::Mongo),
         "sqlite" | "file" => Some(Engine::Sqlite),
         "cassandra" | "cql" | "scylla" => Some(Engine::Cassandra),
+        "mssql" | "sqlserver" => Some(Engine::Mssql),
         _ => None,
     }
 }
@@ -289,6 +290,16 @@ mod tests {
         let p = parse_conn_url("postgres://user:p%40ss%3Aword%2F@host:5432/db").unwrap();
         assert_eq!(p.user.as_deref(), Some("user"));
         assert_eq!(p.password.as_deref(), Some("p@ss:word/"));
+    }
+
+    #[test]
+    fn mssql_scheme() {
+        let p = parse_conn_url("sqlserver://sa:pw@localhost:1433/app").unwrap();
+        assert_eq!(p.engine, Some(Engine::Mssql));
+        assert_eq!(p.host.as_deref(), Some("localhost"));
+        assert_eq!(p.port, Some(1433));
+        assert_eq!(p.user.as_deref(), Some("sa"));
+        assert_eq!(p.database.as_deref(), Some("app"));
     }
 
     #[test]
