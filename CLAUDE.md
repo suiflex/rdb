@@ -95,6 +95,43 @@ Keep the scope specific (`app`, `driver-postgres`, `driver-mysql`, `core`,
 
 - UI (`app/`) names a concrete driver crate only in `app/src/dispatch.rs` (the `AnyDriver` enum); the rest of the app depends on `rdb-core`.
 - Adding new engine = new `driver-*` crate implementing `Driver` trait + a variant in `AnyDriver`.
+  Query-tab behavior (completion, syntax highlighting, format) is driven by
+  `Engine::language()` (`crates/connstore/src/model.rs`), which maps each
+  `Engine` to a `QueryLanguage` (`Sql | Cql | Command | Mongo`) — that's the
+  single fork point completion/lexer/format/`query_parse` all read from.
+
+  | Engine | QueryLanguage | Query shape | Example |
+  | --- | --- | --- | --- |
+  | Postgres, MySQL, SQLite | `Sql` | SQL text | `SELECT * FROM users` |
+  | Cassandra | `Cql` | CQL text (no JOIN/subquery/HAVING) | `SELECT * FROM ks.t ALLOW FILTERING` |
+  | Redis | `Command` | command tokens | `GET user:1` |
+  | MongoDB | `Mongo` | structured op | `find({ age: { $gt: 20 } })` |
+
+  Two cases:
+  - **New driver, existing query language** (e.g. another SQL-family engine,
+    or another Redis-like command store): after the driver crate + `AnyDriver`
+    variant, add the engine to `Engine::language()`'s matching arm. Nothing
+    else changes — completion/lexer/format/`query_parse` pick it up
+    automatically.
+  - **New driver, genuinely new query paradigm** (not SQL-shaped text,
+    command tokens, or a Mongo-style structured op): add a new
+    `QueryLanguage` variant, then:
+    1. `crates/core/src/query.rs` — add a `Query` variant if the wire shape
+       is new too (plain string follows `Sql`/`Cql`; structured op follows
+       `Mongo`'s `Box<Op>`). Grep `Query::Sql(_) | Query::Command(_) | Query::Mongo(_)`
+       for every driver's exhaustive rejection arm that needs the new case
+       added (driver-mysql/redis/mongo use a wildcard `_` arm already and
+       need no change).
+    2. `app/src/editor/<lang>.rs` — keyword table + `is_keyword`, wired into
+       `editor.rs`'s `keywords_for`.
+    3. `app/src/completion/<lang>.rs` — bare-word + dot-context completion,
+       wired into `completion::suggest`'s `match language`.
+    4. If formattable text (not structured like Mongo): `app/src/format/<lang>.rs`
+       supplying a `format::Spec`, wired into `format::dispatch`; add the
+       language to `sql_capable` in `main.rs` so the Format button shows.
+       Skip for structured/command-style languages — button stays hidden.
+    5. `app/src/query_parse.rs::parse_query` — build the new `Query` variant
+       for this language.
 - Async I/O on tokio runtime, results bridge back to Slint main thread via `invoke_from_event_loop`.
 - Release profile: `opt-level=z`, LTO, `panic=abort`, strip.
 - In-app self-update (`app/src/self_update.rs`) only ever runs for
