@@ -23,6 +23,7 @@ fn engine_label(e: Engine) -> &'static str {
         Engine::Mongo => "mongo",
         Engine::Sqlite => "sqlite",
         Engine::Cassandra => "cassandra",
+        Engine::Mssql => "mssql",
     }
 }
 
@@ -36,6 +37,7 @@ fn engine_scheme(e: Engine) -> &'static str {
         Engine::Mongo => "mongodb",
         Engine::Sqlite => "sqlite",
         Engine::Cassandra => "cassandra",
+        Engine::Mssql => "sqlserver",
     }
 }
 

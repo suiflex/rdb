@@ -14,6 +14,7 @@ use rdb_core::schema::{Container, Schema};
 use rdb_core::write::{TableRef, WriteOp};
 use rdb_driver_cassandra::CassandraDriver;
 use rdb_driver_mongo::MongoDriver;
+use rdb_driver_mssql::MssqlDriver;
 use rdb_driver_mysql::MysqlDriver;
 use rdb_driver_postgres::PostgresDriver;
 use rdb_driver_redis::RedisDriver;
@@ -28,6 +29,9 @@ pub enum AnyDriver {
     // Boxed: a scylla Session is far larger than the other drivers, so keep it
     // off the enum's inline footprint (clippy::large_enum_variant).
     Cassandra(Box<CassandraDriver>),
+    // Boxed: a tiberius Client's connection buffers are far larger than the
+    // other drivers, same reasoning as Cassandra above.
+    Mssql(Box<MssqlDriver>),
     /// In-process demo driver (RDB_MOCK=1); no network, seeded data.
     #[cfg(feature = "mock")]
     Mock(crate::mock::MockDriver),
@@ -43,6 +47,7 @@ impl AnyDriver {
             Engine::Mongo => "MongoDB",
             Engine::Sqlite => "SQLite",
             Engine::Cassandra => "Cassandra",
+            Engine::Mssql => "SQL Server",
         }
     }
 
@@ -55,6 +60,7 @@ impl AnyDriver {
             Engine::Mongo => "mongo",
             Engine::Sqlite => "sqlite",
             Engine::Cassandra => "cassandra",
+            Engine::Mssql => "mssql",
         }
     }
 
@@ -75,6 +81,7 @@ impl AnyDriver {
             Engine::Cassandra => {
                 AnyDriver::Cassandra(Box::new(CassandraDriver::connect(cfg).await?))
             }
+            Engine::Mssql => AnyDriver::Mssql(Box::new(MssqlDriver::connect(cfg).await?)),
         })
     }
 
@@ -95,6 +102,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.ping().await,
             AnyDriver::Sqlite(d) => d.ping().await,
             AnyDriver::Cassandra(d) => d.ping().await,
+            AnyDriver::Mssql(d) => d.ping().await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.ping().await,
         }
@@ -108,6 +116,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.schema().await,
             AnyDriver::Sqlite(d) => d.schema().await,
             AnyDriver::Cassandra(d) => d.schema().await,
+            AnyDriver::Mssql(d) => d.schema().await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.schema().await,
         }
@@ -121,6 +130,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.schema_for(schema).await,
             AnyDriver::Sqlite(d) => d.schema_for(schema).await,
             AnyDriver::Cassandra(d) => d.schema_for(schema).await,
+            AnyDriver::Mssql(d) => d.schema_for(schema).await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.schema_for(schema).await,
         }
@@ -134,6 +144,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.list_schemas().await,
             AnyDriver::Sqlite(d) => d.list_schemas().await,
             AnyDriver::Cassandra(d) => d.list_schemas().await,
+            AnyDriver::Mssql(d) => d.list_schemas().await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.list_schemas().await,
         }
@@ -147,6 +158,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.list_databases().await,
             AnyDriver::Sqlite(d) => d.list_databases().await,
             AnyDriver::Cassandra(d) => d.list_databases().await,
+            AnyDriver::Mssql(d) => d.list_databases().await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.list_databases().await,
         }
@@ -160,6 +172,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.containers(database).await,
             AnyDriver::Sqlite(d) => d.containers(database).await,
             AnyDriver::Cassandra(d) => d.containers(database).await,
+            AnyDriver::Mssql(d) => d.containers(database).await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.containers(database).await,
         }
@@ -173,6 +186,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.query(q).await,
             AnyDriver::Sqlite(d) => d.query(q).await,
             AnyDriver::Cassandra(d) => d.query(q).await,
+            AnyDriver::Mssql(d) => d.query(q).await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.query(q).await,
         }
@@ -195,6 +209,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.query_stream(q, batch, cancel, sink).await,
             AnyDriver::Sqlite(d) => d.query_stream(q, batch, cancel, sink).await,
             AnyDriver::Cassandra(d) => d.query_stream(q, batch, cancel, sink).await,
+            AnyDriver::Mssql(d) => d.query_stream(q, batch, cancel, sink).await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.query_stream(q, batch, cancel, sink).await,
         }
@@ -208,6 +223,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.primary_key(table).await,
             AnyDriver::Sqlite(d) => d.primary_key(table).await,
             AnyDriver::Cassandra(d) => d.primary_key(table).await,
+            AnyDriver::Mssql(d) => d.primary_key(table).await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.primary_key(table).await,
         }
@@ -221,6 +237,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.count(table).await,
             AnyDriver::Sqlite(d) => d.count(table).await,
             AnyDriver::Cassandra(d) => d.count(table).await,
+            AnyDriver::Mssql(d) => d.count(table).await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.count(table).await,
         }
@@ -234,6 +251,7 @@ impl AnyDriver {
             AnyDriver::Mongo(d) => d.commit(ops).await,
             AnyDriver::Sqlite(d) => d.commit(ops).await,
             AnyDriver::Cassandra(d) => d.commit(ops).await,
+            AnyDriver::Mssql(d) => d.commit(ops).await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.commit(ops).await,
         }
@@ -280,6 +298,15 @@ pub fn write_statements(engine: Engine, ops: &[WriteOp]) -> Vec<String> {
             }
             (Engine::Cassandra, WriteOp::Delete { table, pk }) => {
                 rdb_driver_cassandra::write_cql::delete_sql(table, pk)
+            }
+            (Engine::Mssql, WriteOp::Update { table, pk, changes }) => {
+                rdb_driver_mssql::write_sql::update_sql(table, pk, changes)
+            }
+            (Engine::Mssql, WriteOp::Insert { table, values }) => {
+                rdb_driver_mssql::write_sql::insert_sql(table, values)
+            }
+            (Engine::Mssql, WriteOp::Delete { table, pk }) => {
+                rdb_driver_mssql::write_sql::delete_sql(table, pk)
             }
             (Engine::Mongo, op) => format!("MongoDB write: {op:?}"),
             (Engine::Redis, op) => format!("Redis write: {op:?}"),

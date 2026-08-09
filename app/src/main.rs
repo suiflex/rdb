@@ -1035,7 +1035,7 @@ fn filter_operators(engine: rdb_connstore::Engine) -> Vec<SharedString> {
             "IS NULL",
             "IS NOT NULL",
         ],
-        Engine::MySql | Engine::Sqlite => &[
+        Engine::MySql | Engine::Sqlite | Engine::Mssql => &[
             "=",
             "<>",
             ">",
@@ -1595,6 +1595,7 @@ fn default_pk_type(engine: rdb_connstore::Engine) -> &'static str {
         rdb_connstore::Engine::Postgres => "serial",
         rdb_connstore::Engine::MySql => "INT",
         rdb_connstore::Engine::Sqlite => "INTEGER",
+        rdb_connstore::Engine::Mssql => "INT IDENTITY(1,1)",
         _ => "int",
     }
 }
@@ -1604,6 +1605,7 @@ fn default_col_type(engine: rdb_connstore::Engine) -> &'static str {
     match engine {
         rdb_connstore::Engine::MySql => "VARCHAR(255)",
         rdb_connstore::Engine::Sqlite => "TEXT",
+        rdb_connstore::Engine::Mssql => "NVARCHAR(255)",
         _ => "text",
     }
 }
@@ -2333,6 +2335,21 @@ fn browse_text(
         }
         rdb_connstore::Engine::Redis => {
             format!("BROWSE {} {offset} {limit}", table.name)
+        }
+        rdb_connstore::Engine::Mssql => {
+            // ponytail: TOP-only — T-SQL's OFFSET/FETCH requires an ORDER BY
+            // column, which there's no reliable default for here; paging
+            // beyond the first page is a follow-up (same class of caveat as
+            // Cassandra's LIMIT-only browse above).
+            let where_sql = sql_where(
+                col_filters,
+                |c| format!("\"{}\"", c.replace('"', "\"\"")),
+                "LIKE",
+            );
+            format!(
+                "SELECT TOP ({limit}) * FROM \"{}\"{where_sql}",
+                table.name.replace('"', "\"\"")
+            )
         }
     }
 }
@@ -12043,6 +12060,7 @@ fn main() -> Result<(), slint::PlatformError> {
             "MongoDB" => "27017",
             "SQLite" => "0", // file-based: port unused
             "Cassandra" => "9042",
+            "SQL Server" => "1433",
             _ => "5432",
         }
     }
@@ -12053,6 +12071,7 @@ fn main() -> Result<(), slint::PlatformError> {
             "MongoDB" => rdb_connstore::Engine::Mongo,
             "SQLite" => rdb_connstore::Engine::Sqlite,
             "Cassandra" => rdb_connstore::Engine::Cassandra,
+            "SQL Server" => rdb_connstore::Engine::Mssql,
             _ => rdb_connstore::Engine::Postgres,
         }
     }

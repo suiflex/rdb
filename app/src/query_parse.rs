@@ -100,7 +100,7 @@ pub fn single_table_name(sql: &str) -> Option<(Option<String>, String)> {
 /// Editor placeholder/hint per engine (shown in the UI).
 pub fn editor_hint(engine: Engine) -> &'static str {
     match engine {
-        Engine::Postgres | Engine::MySql | Engine::Sqlite => "SELECT * FROM table",
+        Engine::Postgres | Engine::MySql | Engine::Sqlite | Engine::Mssql => "SELECT * FROM table",
         Engine::Cassandra => "SELECT * FROM keyspace.table",
         Engine::Redis => "SET key value",
         Engine::Mongo => r#"db.coll.find({ })  ·  or JSON envelope"#,
@@ -111,7 +111,9 @@ pub fn editor_hint(engine: Engine) -> &'static str {
 /// Cmd+/ toggle and to strip commented lines before a query runs.
 pub fn comment_prefix(engine: Engine) -> &'static str {
     match engine {
-        Engine::Postgres | Engine::MySql | Engine::Sqlite | Engine::Cassandra => "--",
+        Engine::Postgres | Engine::MySql | Engine::Sqlite | Engine::Cassandra | Engine::Mssql => {
+            "--"
+        }
         Engine::Redis => "#",
         Engine::Mongo => "//",
     }
