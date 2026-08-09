@@ -18,13 +18,13 @@ mod completion;
 mod dispatch;
 mod editor;
 mod export;
+mod format;
 mod mock;
 mod model;
 mod query_parse;
 mod self_update;
 #[cfg(feature = "mock")]
 mod shot;
-mod sql_format;
 mod theme;
 mod update;
 
@@ -7648,13 +7648,10 @@ fn main() -> Result<(), slint::PlatformError> {
                                 .unwrap_or(&schema_names[0])
                                 .clone(),
                         };
-                        // SQL editor only makes sense for the SQL engines.
+                        // Format only makes sense for text query languages.
                         let sql_capable = matches!(
-                            engine,
-                            rdb_connstore::Engine::Postgres
-                                | rdb_connstore::Engine::MySql
-                                | rdb_connstore::Engine::Sqlite
-                                | rdb_connstore::Engine::Cassandra
+                            rdb_connstore::Engine::language(engine),
+                            rdb_connstore::QueryLanguage::Sql | rdb_connstore::QueryLanguage::Cql
                         );
                         *raw_nodes.lock().unwrap() = nodes;
                         // Seed autocomplete with the active schema's tables plus a
@@ -9739,16 +9736,21 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let panes = panes.clone();
         let sync_editor = sync_editor.clone();
+        let cur_engine = cur_engine.clone();
         window.on_format_sql(move || {
+            let language = cur_engine
+                .borrow()
+                .map(rdb_connstore::Engine::language)
+                .unwrap_or(rdb_connstore::QueryLanguage::Sql);
             let changed = {
                 let mut ed = panes[0].ed_state.borrow_mut();
                 let stmt = ed.current_statement();
-                if stmt.trim().is_empty() {
-                    false
-                } else {
-                    let formatted = sql_format::format(&stmt);
-                    ed.replace_current_statement(&formatted);
-                    true
+                match format::dispatch(language, &stmt) {
+                    Some(formatted) if !stmt.trim().is_empty() => {
+                        ed.replace_current_statement(&formatted);
+                        true
+                    }
+                    _ => false,
                 }
             };
             if changed {
@@ -9759,16 +9761,21 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let panes = panes.clone();
         let sync_editor = sync_editor.clone();
+        let cur_engine = cur_engine.clone();
         window.on_p1_format_sql(move || {
+            let language = cur_engine
+                .borrow()
+                .map(rdb_connstore::Engine::language)
+                .unwrap_or(rdb_connstore::QueryLanguage::Sql);
             let changed = {
                 let mut ed = panes[1].ed_state.borrow_mut();
                 let stmt = ed.current_statement();
-                if stmt.trim().is_empty() {
-                    false
-                } else {
-                    let formatted = sql_format::format(&stmt);
-                    ed.replace_current_statement(&formatted);
-                    true
+                match format::dispatch(language, &stmt) {
+                    Some(formatted) if !stmt.trim().is_empty() => {
+                        ed.replace_current_statement(&formatted);
+                        true
+                    }
+                    _ => false,
                 }
             };
             if changed {
