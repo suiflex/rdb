@@ -33,8 +33,9 @@ cargo build --release -p rdb   # release binary
 
 One GitHub Actions workflow per component in `.github/workflows/` — `rdb-app`
 plus one per crate: `rdb-core`, `rdb-connstore`, `rdb-driver-postgres`,
-`rdb-driver-mysql`, `rdb-driver-redis`, `rdb-driver-mongo`. Each has a
-`paths:` filter, so editing one component only runs that component's CI (lean).
+`rdb-driver-mysql`, `rdb-driver-redis`, `rdb-driver-mongo`, `rdb-driver-mssql`.
+Each has a `paths:` filter, so editing one component only runs that
+component's CI (lean).
 
 - **Known gap**: `rdb-driver-sqlite` and `rdb-driver-cassandra` have no
   dedicated workflow yet, and the root `Makefile`'s `BE_PKGS` (used by
@@ -90,6 +91,7 @@ Keep the scope specific (`app`, `driver-postgres`, `driver-mysql`, `core`,
 - `crates/driver-mongo/` — mongodb crate
 - `crates/driver-sqlite/` — rusqlite (bundled)
 - `crates/driver-cassandra/` — scylla crate (CQL, Cassandra/ScyllaDB)
+- `crates/driver-mssql/` — tiberius (T-SQL, SQL-auth only in v1, no Windows/AD)
 
 ## Key Rules
 
