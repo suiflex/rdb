@@ -145,8 +145,9 @@ export component SelectBox inherits Rectangle {
         padding-left: Tokens.sp2;
         padding-right: Tokens.sp2;
         spacing: Tokens.sp2;
-        if root.show-logo: EngineLogo {
-            label: root.current-value;
+        if root.show-logo: VerticalLayout {
+            alignment: center;
+            EngineLogo { label: root.current-value; }
         }
         Text {
             text: root.current-value;
@@ -188,8 +189,9 @@ export component SelectBox inherits Rectangle {
                     HorizontalLayout {
                         padding-left: Tokens.sp2;
                         spacing: Tokens.sp2;
-                        if root.show-logo: EngineLogo {
-                            label: opt;
+                        if root.show-logo: VerticalLayout {
+                            alignment: center;
+                            EngineLogo { label: opt; }
                         }
                         Text {
                             text: opt;
