@@ -4293,13 +4293,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 (ed.before_cursor_doc(), ed.current_statement())
             };
             let schema = w.get_schema_name().to_string();
-            let mongo = matches!(*cur_engine.borrow(), Some(rdb_connstore::Engine::Mongo));
+            let language = cur_engine
+                .borrow()
+                .map(rdb_connstore::Engine::language)
+                .unwrap_or(rdb_connstore::QueryLanguage::Sql);
             let (word_len, cands) = completion::suggest(
                 &before,
                 &stmt,
                 &completion_nodes.lock().unwrap(),
                 &schema,
-                mongo,
+                language,
             );
             if cands.is_empty() {
                 set_p_completion_visible(&w, pane, false);
