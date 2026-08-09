@@ -15,6 +15,9 @@ pub enum Engine {
     Cassandra,
     /// SQL Server (T-SQL); SQL auth only in v1, no Windows/AD auth.
     Mssql,
+    /// ClickHouse (analytics/OLAP), HTTP interface; `database` holds the
+    /// default database. Insert-only write-back (no row-level UPDATE/DELETE).
+    Clickhouse,
 }
 
 /// The query dialect an engine's editor tab speaks. Drives completion, syntax
@@ -34,7 +37,11 @@ impl Engine {
     /// truth for completion/lexer/format dispatch — see `QueryLanguage`.
     pub fn language(self) -> QueryLanguage {
         match self {
-            Engine::Postgres | Engine::MySql | Engine::Sqlite | Engine::Mssql => QueryLanguage::Sql,
+            Engine::Postgres
+            | Engine::MySql
+            | Engine::Sqlite
+            | Engine::Mssql
+            | Engine::Clickhouse => QueryLanguage::Sql,
             Engine::Cassandra => QueryLanguage::Cql,
             Engine::Redis => QueryLanguage::Command,
             Engine::Mongo => QueryLanguage::Mongo,
@@ -253,5 +260,6 @@ mod tests {
         assert_eq!(Engine::Redis.language(), QueryLanguage::Command);
         assert_eq!(Engine::Mongo.language(), QueryLanguage::Mongo);
         assert_eq!(Engine::Mssql.language(), QueryLanguage::Sql);
+        assert_eq!(Engine::Clickhouse.language(), QueryLanguage::Sql);
     }
 }

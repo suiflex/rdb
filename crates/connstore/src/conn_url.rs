@@ -52,6 +52,7 @@ fn scheme_to_engine(scheme: &str) -> Option<Engine> {
         "sqlite" | "file" => Some(Engine::Sqlite),
         "cassandra" | "cql" | "scylla" => Some(Engine::Cassandra),
         "mssql" | "sqlserver" => Some(Engine::Mssql),
+        "clickhouse" | "clickhouses" => Some(Engine::Clickhouse),
         _ => None,
     }
 }
@@ -197,8 +198,8 @@ pub fn parse_conn_url(url: &str) -> Result<ParsedUrl, ConnUrlError> {
             }
         }
     }
-    // `rediss://` implies TLS even without a query flag.
-    if sslmode.is_none() && scheme == "rediss" {
+    // `rediss://` / `clickhouses://` implies TLS even without a query flag.
+    if sslmode.is_none() && (scheme == "rediss" || scheme == "clickhouses") {
         sslmode = Some(SslMode::Require);
     }
 
@@ -300,6 +301,22 @@ mod tests {
         assert_eq!(p.port, Some(1433));
         assert_eq!(p.user.as_deref(), Some("sa"));
         assert_eq!(p.database.as_deref(), Some("app"));
+    }
+
+    #[test]
+    fn clickhouse_scheme() {
+        let p = parse_conn_url("clickhouse://default@localhost:8123/app").unwrap();
+        assert_eq!(p.engine, Some(Engine::Clickhouse));
+        assert_eq!(p.host.as_deref(), Some("localhost"));
+        assert_eq!(p.port, Some(8123));
+        assert_eq!(p.database.as_deref(), Some("app"));
+    }
+
+    #[test]
+    fn clickhouses_scheme_implies_tls() {
+        let p = parse_conn_url("clickhouses://host:8443").unwrap();
+        assert_eq!(p.engine, Some(Engine::Clickhouse));
+        assert_eq!(p.sslmode, Some(SslMode::Require));
     }
 
     #[test]
