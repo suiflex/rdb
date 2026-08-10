@@ -44,9 +44,16 @@ body:
       label: Operating system
       options:
         - macOS
+        - Windows
         - Linux
+        - Other
     validations:
       required: true
+  - type: input
+    id: os-detail
+    attributes:
+      label: OS version / distro (optional)
+      placeholder: e.g. macOS 15.2, Ubuntu 24.04, Windows 11, FreeBSD 14
   - type: input
     id: version
     attributes:
