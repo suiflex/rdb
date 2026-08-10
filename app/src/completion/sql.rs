@@ -87,13 +87,16 @@ pub fn bare_word(
     stmt: &str,
     nodes: &[VmTreeNode],
     scope: &[VmTreeNode],
+    active_schema: &str,
 ) -> Vec<Candidate> {
     match super::last_keyword(cur_line, rdb_connstore::QueryLanguage::Sql).as_deref() {
-        // table position: active-schema tables plus every schema name, so a
-        // `schema.table` from another namespace can be started.
+        // table position: active-schema tables, every schema name, and every
+        // other schema's tables pre-qualified, so a cross-schema table can be
+        // completed from its own name without typing the schema first.
         Some("FROM") | Some("JOIN") | Some("INTO") | Some("UPDATE") | Some("TABLE") => {
             let mut c = tables(scope);
             c.extend(super::schemas(nodes));
+            c.extend(super::qualified_tables(nodes, active_schema));
             c
         }
         // column position: offer columns and tables, plus keywords so the

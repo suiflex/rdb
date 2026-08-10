@@ -100,7 +100,33 @@ fn match_rank(label: &str, word: &str) -> Option<u8> {
     if l.replace('_', "").starts_with(&word.replace('_', "")) {
         return Some(2);
     }
+    // Subsequence: the typed chars appear in order but not contiguously, so a
+    // long name can be reached by skipping through it (`t_invl` finds
+    // `t_invoice_line`). Last resort — every prefix tier outranks it.
+    if is_subsequence(&l, word) {
+        return Some(3);
+    }
+    // A schema-qualified label (`schema.table`) is matched on its table part
+    // too, so a cross-schema table is reachable by its own name. Ranked below
+    // the same tier on a bare label: an in-scope table wins the slot.
+    if let Some((_, table)) = l.split_once('.') {
+        if let Some(r) = match_rank(table, word) {
+            return Some(r + 4);
+        }
+    }
     None
+}
+
+/// Are `word`'s chars present in `label`, in order but not necessarily
+/// adjacent? Both are already lowercased.
+fn is_subsequence(label: &str, word: &str) -> bool {
+    let mut w = word.chars().peekable();
+    for c in label.chars() {
+        if w.peek() == Some(&c) {
+            w.next();
+        }
+    }
+    w.peek().is_none()
 }
 
 /// The trailing run of identifier chars at the end of `s` (ASCII identifier).
@@ -166,6 +192,28 @@ fn schemas(nodes: &[VmTreeNode]) -> Vec<Candidate> {
             label: n.label.clone(),
             kind: "database".into(),
             sub: String::new(),
+        })
+        .collect()
+}
+
+/// Every table outside the active schema, labelled `schema.table` so it is
+/// insertable as-is. The active schema's own tables are already offered bare
+/// by `tables(scope)`, so they are skipped here rather than listed twice.
+fn qualified_tables(nodes: &[VmTreeNode], active_schema: &str) -> Vec<Candidate> {
+    let active = active_schema.to_lowercase();
+    nodes
+        .iter()
+        .filter(|n| n.kind == "database" && n.label.to_lowercase() != active)
+        .flat_map(|db| {
+            schema_scope(nodes, &db.label)
+                .iter()
+                .filter(|n| n.kind == "table" || n.kind == "collection")
+                .map(|t| Candidate {
+                    label: format!("{}.{}", db.label, t.label),
+                    kind: "table".into(),
+                    sub: db.label.clone(),
+                })
+                .collect::<Vec<_>>()
         })
         .collect()
 }
@@ -287,7 +335,7 @@ pub fn suggest(
         let cur_line = before_cursor.rsplit('\n').next().unwrap_or(before_cursor);
         match language {
             rdb_connstore::QueryLanguage::Cql => cql::bare_word(cur_line, stmt, nodes, scope),
-            _ => sql::bare_word(cur_line, stmt, nodes, scope),
+            _ => sql::bare_word(cur_line, stmt, nodes, scope, active_schema),
         }
     };
     let wl = word.to_lowercase();
@@ -334,6 +382,77 @@ mod tests {
             mk("users", "table"),
             mk("id", "field"),
         ]
+    }
+
+    /// Two schemas, so a table outside the active one has to be reached by
+    /// its qualified name.
+    fn cross_schema_nodes() -> Vec<VmTreeNode> {
+        let mk = |l: &str, k: &str| VmTreeNode {
+            label: l.into(),
+            kind: k.into(),
+        };
+        vec![
+            mk("public", "database"),
+            mk("users", "table"),
+            mk("id", "field"),
+            mk("billing", "database"),
+            mk("t_invoice_line", "table"),
+            mk("id_invoice", "field"),
+        ]
+    }
+
+    #[test]
+    fn table_position_offers_other_schemas_tables_pre_qualified() {
+        let (_, c) = sug(
+            "select * from t_invoi",
+            &cross_schema_nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
+        assert!(
+            c.iter().any(|c| c.label == "billing.t_invoice_line"),
+            "got {:?}",
+            c.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+    }
+
+    /// The typed chars skip through the name rather than prefixing it —
+    /// `t_invl` reaches `t_invoice_line`.
+    #[test]
+    fn qualified_table_matches_a_subsequence_of_its_name() {
+        let (_, c) = sug(
+            "select * from t_invl",
+            &cross_schema_nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
+        assert!(
+            c.iter().any(|c| c.label == "billing.t_invoice_line"),
+            "got {:?}",
+            c.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn active_schema_tables_outrank_qualified_ones() {
+        let (_, c) = sug(
+            "select * from u",
+            &cross_schema_nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
+        assert_eq!(c.first().map(|c| c.label.as_str()), Some("users"));
+    }
+
+    #[test]
+    fn qualified_tables_skip_the_active_schema() {
+        let (_, c) = sug(
+            "select * from user",
+            &cross_schema_nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
+        assert!(!c.iter().any(|c| c.label == "public.users"), "got {c:?}");
     }
 
     #[test]
