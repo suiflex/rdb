@@ -298,15 +298,23 @@ pub fn suggest(
     // Default table/column suggestions come from the active schema only, so the
     // popup follows the connected schema without the user picking it first.
     let scope = schema_scope(nodes, active_schema);
-    let word = trailing_word(before_cursor);
-    let head = before_cursor.strip_suffix(word).unwrap_or(before_cursor);
+    let is_mongo = language == rdb_connstore::QueryLanguage::Mongo;
+    let mut word = trailing_word(before_cursor);
+    let mut head = before_cursor.strip_suffix(word).unwrap_or(before_cursor);
+    // Mongo operator/stage names are `$`-prefixed, but `$` isn't an identifier
+    // char, so `trailing_word` stops right after it — extend the word (and
+    // its replace length) back over the `$` so matching/insertion land on
+    // the whole `$eq`-style token instead of duplicating the `$`.
+    if is_mongo && head.ends_with('$') {
+        word = &before_cursor[before_cursor.len() - word.len() - 1..];
+        head = before_cursor.strip_suffix(word).unwrap_or(before_cursor);
+    }
     // Type-triggered: don't pop up on an empty line or right after whitespace —
     // only once the user has typed at least one char of a word. `table.`/`alias.`
-    // is an explicit request for that table's columns, so it still fires.
+    // (or a bare Mongo `$`) is an explicit request, so it still fires.
     if word.is_empty() && !head.ends_with('.') {
         return (0, Vec::new());
     }
-    let is_mongo = language == rdb_connstore::QueryLanguage::Mongo;
     let mut cands = if let Some(before_dot) = head.strip_suffix('.') {
         // `table.` / `alias.` → that table's columns. When the name before the
         // dot is a schema/database, offer that schema's tables instead.
@@ -328,7 +336,10 @@ pub fn suggest(
             cols
         }
     } else if is_mongo {
-        mongo::bare_word(scope)
+        match mongo::call_context(before_cursor) {
+            Some(ctx) if ctx.depth >= 1 => mongo::in_call(&ctx, nodes),
+            _ => mongo::bare_word(scope),
+        }
     } else {
         // Keyword context comes from the current line; `before_cursor` may span
         // several lines (alias resolution needs the whole statement).
@@ -538,6 +549,45 @@ mod tests {
         );
         assert!(c.iter().any(|x| x.label == "find"));
         assert!(c.iter().any(|x| x.label == "findOne"));
+    }
+
+    #[test]
+    fn mongo_find_filter_offers_field_names() {
+        let mut ns = nodes();
+        ns.push(VmTreeNode {
+            label: "log_inbound".into(),
+            kind: "collection".into(),
+        });
+        ns.push(VmTreeNode {
+            label: "source".into(),
+            kind: "field".into(),
+        });
+        let (_, c) = sug(
+            "db.log_inbound.find({ sou",
+            &ns,
+            "public",
+            rdb_connstore::QueryLanguage::Mongo,
+        );
+        assert!(c.iter().any(|x| x.label == "source"));
+    }
+
+    #[test]
+    fn mongo_dollar_offers_query_operators_and_replaces_whole_token() {
+        let mut ns = nodes();
+        ns.push(VmTreeNode {
+            label: "log_inbound".into(),
+            kind: "collection".into(),
+        });
+        let (n, c) = sug(
+            "db.log_inbound.find({ age: { $g",
+            &ns,
+            "public",
+            rdb_connstore::QueryLanguage::Mongo,
+        );
+        // Replace length covers the `$` too, so accepting "$gt" doesn't
+        // duplicate the `$` the user already typed.
+        assert_eq!(n, 2);
+        assert!(c.iter().any(|x| x.label == "$gt"));
     }
 
     #[test]
