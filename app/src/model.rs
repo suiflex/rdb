@@ -378,6 +378,17 @@ pub fn sql_verb(sql: &str) -> Option<&'static str> {
     }
 }
 
+/// Render a millisecond duration for display: bare milliseconds below a
+/// second, one-decimal seconds above it, so a slow query reads `"27.5 s"`
+/// instead of `"27519 ms"`.
+pub fn format_latency(ms: u64) -> String {
+    if ms < 1_000 {
+        format!("{ms} ms")
+    } else {
+        format!("{:.1} s", ms as f64 / 1_000.0)
+    }
+}
+
 /// Enrich a bare "N rows affected" status with the statement verb and query
 /// latency, e.g. `"UPDATE — 3 rows affected · 12 ms"`.
 pub fn format_affected(status: &str, verb: Option<&str>, latency: &str) -> String {
@@ -699,6 +710,15 @@ mod tests {
             format_affected("3 rows affected", None, "12 ms"),
             "3 rows affected · 12 ms"
         );
+    }
+
+    #[test]
+    fn format_latency_switches_to_seconds_at_a_thousand_ms() {
+        assert_eq!(format_latency(0), "0 ms");
+        assert_eq!(format_latency(999), "999 ms");
+        assert_eq!(format_latency(1_000), "1.0 s");
+        assert_eq!(format_latency(27_519), "27.5 s");
+        assert_eq!(format_latency(125_340), "125.3 s");
     }
 
     #[test]
