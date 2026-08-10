@@ -221,9 +221,21 @@ The release binary lands at `target/release/rdb`.
 ### Connect & query
 
 1. Click a saved connection → connects, schema loads in sidebar.
-2. Type SQL (PostgreSQL/MySQL/SQL Server/ClickHouse), CQL (Cassandra), a Redis command (e.g. `GET key`), or a MongoDB JSON operation in the query editor.
+2. Type a query for the connected engine — syntax differs per engine, see below.
 3. `Cmd+Enter` (macOS) / `Ctrl+Enter` (Linux) to run.
 4. Click a table/collection in the sidebar to auto-generate and run a `SELECT *` / `find` query.
+
+### Query syntax per engine
+
+| Engine | Language | Example |
+| --- | --- | --- |
+| PostgreSQL, MySQL, SQLite, SQL Server, ClickHouse | SQL | `SELECT * FROM users` |
+| Cassandra | CQL (no JOIN/subquery/HAVING) | `SELECT * FROM keyspace.table` |
+| Redis | command tokens | `GET user:1`, `SET user:1 value` |
+| MongoDB | mongosh chain, or a JSON envelope | `db.users.find({ age: { $gt: 20 } }).limit(5)`<br>`{"collection":"users","op":"find","body":{}}` |
+
+More detail (including MongoDB's supported methods/modifiers) is on the
+[docs page](https://rdb.suiflex.dev/docs).
 
 ### Command palette
 
