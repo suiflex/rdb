@@ -33,6 +33,17 @@ pub fn methods() -> Vec<Candidate> {
         .collect()
 }
 
+/// mongosh's chained result modifiers, offered after a closed
+/// `db.<collection>.<method>(...)` call (`db.coll.find().<here>`) — see
+/// `call_context`'s `depth == 0` case. Matches `query_parse.rs`'s
+/// `parse_mongo_line`, which parses this chain permissively after any method
+/// (not just `find`), so offered the same way here rather than gating on it.
+const CHAIN_MODIFIERS: &[&str] = &["limit", "skip", "sort"];
+
+pub fn chain_modifiers() -> Vec<Candidate> {
+    keyword_candidates(CHAIN_MODIFIERS)
+}
+
 /// Does `name` match a collection node in the tree?
 pub fn is_collection(nodes: &[VmTreeNode], name: &str) -> bool {
     let nl = name.to_lowercase();

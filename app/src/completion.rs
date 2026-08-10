@@ -331,6 +331,15 @@ pub fn suggest(
         } else if is_mongo && mongo::is_collection(nodes, owner_word) {
             // MongoDB: `db.<collection>.` — offer collection methods.
             mongo::methods()
+        } else if is_mongo
+            && owner_word.is_empty()
+            && matches!(mongo::call_context(before_dot), Some(ctx) if ctx.depth == 0)
+        {
+            // MongoDB: `db.coll.find().` — the call closed (every `{`/`[` it
+            // opened is matched), so offer chained modifiers instead of
+            // falling through to column completion (there's no owner name
+            // right before this dot to look up columns for anyway).
+            mongo::chain_modifiers()
         } else {
             let cols = columns_of(nodes, &owner);
             if !cols.is_empty() {
@@ -579,6 +588,26 @@ mod tests {
         );
         assert!(c.iter().any(|x| x.label == "find"));
         assert!(!c.iter().any(|x| x.label == "source"));
+    }
+
+    #[test]
+    fn mongo_closed_call_dot_offers_chain_modifiers() {
+        // `db.coll.find().s` — the call already closed, so `.` should offer
+        // limit/skip/sort, not fall through to (empty) column completion.
+        let mut ns = nodes();
+        ns.push(VmTreeNode {
+            label: "log_inbound".into(),
+            kind: "collection".into(),
+        });
+        let (n, c) = sug(
+            "db.log_inbound.find().s",
+            &ns,
+            "public",
+            rdb_connstore::QueryLanguage::Mongo,
+        );
+        assert_eq!(n, 1);
+        assert!(c.iter().any(|x| x.label == "sort"));
+        assert!(!c.iter().any(|x| x.label == "limit"));
     }
 
     #[test]
