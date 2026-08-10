@@ -5885,7 +5885,7 @@ dependencies = [
 
 [[package]]
 name = "rdb"
-version = "0.33.0"
+version = "0.34.1"
 dependencies = [
  "async-trait",
  "chrono",
