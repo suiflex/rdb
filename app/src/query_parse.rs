@@ -109,6 +109,19 @@ pub fn editor_hint(engine: Engine) -> &'static str {
     }
 }
 
+/// Short label for the "new query tab" button, naming the connected
+/// engine's query language.
+pub fn language_label(engine: Engine) -> &'static str {
+    match engine {
+        Engine::Postgres | Engine::MySql | Engine::Sqlite | Engine::Mssql | Engine::Clickhouse => {
+            "SQL"
+        }
+        Engine::Cassandra => "CQL",
+        Engine::Redis => "Redis",
+        Engine::Mongo => "Mongo",
+    }
+}
+
 /// Line-comment marker for the engine's query language. Used by the editor's
 /// Cmd+/ toggle and to strip commented lines before a query runs.
 pub fn comment_prefix(engine: Engine) -> &'static str {

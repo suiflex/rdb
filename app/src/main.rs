@@ -7811,6 +7811,9 @@ fn main() -> Result<(), slint::PlatformError> {
                             if let Some(w) = weak2.upgrade() {
                                 w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
                                 w.set_sql_capable(sql_capable);
+                                w.set_new_tab_label(
+                                    crate::query_parse::language_label(engine).into(),
+                                );
                                 w.set_schema_name(schema_current);
                                 w.set_schema_list(ModelRc::from(Rc::new(VecModel::from(
                                     schema_names,
