@@ -10,7 +10,7 @@ const guides = [
   },
   {
     title: "Connect and query",
-    body: "Click a saved connection and the schema loads in the sidebar. Type SQL, a Redis command, or a MongoDB JSON operation, then press Cmd+Enter (Ctrl+Enter on Windows and Linux) to run.",
+    body: "Click a saved connection and the schema loads in the sidebar. Type a query for the connected engine — see Query syntax below — then press Cmd+Enter (Ctrl+Enter on Windows and Linux) to run.",
   },
   {
     title: "Browse a table",
@@ -19,6 +19,33 @@ const guides = [
   {
     title: "Jump anywhere",
     body: "Cmd+K opens the command palette: fuzzy-search every saved connection and schema object without touching the mouse.",
+  },
+];
+
+const querySyntax = [
+  {
+    engines: "PostgreSQL, MySQL, SQLite, SQL Server, ClickHouse",
+    language: "SQL",
+    examples: ["SELECT * FROM users WHERE active = true"],
+  },
+  {
+    engines: "Cassandra",
+    language: "CQL",
+    examples: ["SELECT * FROM keyspace.table ALLOW FILTERING"],
+    note: "No JOIN, subquery, or HAVING — CQL is a narrower dialect than SQL.",
+  },
+  {
+    engines: "Redis",
+    language: "command tokens",
+    examples: ["GET user:1", "SET user:1 value", "HGETALL user:1"],
+  },
+  {
+    engines: "MongoDB",
+    language: "mongosh chain, or a JSON envelope",
+    examples: [
+      "db.users.find({ age: { $gt: 20 } }).limit(5)",
+      '{"collection":"users","op":"find","body":{}}',
+    ],
   },
 ];
 ---
@@ -56,6 +83,32 @@ const guides = [
         ))
       }
     </ol>
+  </section>
+
+  <section class="border-t border-line" aria-label="Query syntax">
+    <div class="mx-auto max-w-4xl px-4 py-14 sm:px-6">
+      <h2 class="font-display text-2xl font-semibold tracking-tight">Query syntax per engine</h2>
+      <p class="mt-3 max-w-xl text-sm leading-relaxed text-fg-2">
+        Each engine's query editor tab speaks that engine's native language
+        — there's no single unified query syntax across all of them.
+      </p>
+      <div class="mt-6 grid gap-4 sm:grid-cols-2">
+        {
+          querySyntax.map((row) => (
+            <div class="rounded-xl border border-line bg-panel px-4 py-4">
+              <span class="block text-sm font-medium">{row.engines}</span>
+              <span class="block text-xs text-fg-3">{row.language}</span>
+              <div class="mt-3 space-y-2">
+                {row.examples.map((ex) => (
+                  <pre class="overflow-x-auto rounded-lg border border-line bg-code px-3 py-2 font-mono text-[13px] text-fg-2"><code>{ex}</code></pre>
+                ))}
+              </div>
+              {row.note && <p class="mt-2 text-xs text-fg-3">{row.note}</p>}
+            </div>
+          ))
+        }
+      </div>
+    </div>
   </section>
 
   <section class="border-t border-line">
