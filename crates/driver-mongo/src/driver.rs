@@ -32,10 +32,6 @@ pub struct MongoDriver {
 /// Fallback collection cap when the UI has not pushed a limit yet.
 const DEFAULT_COLLECTION_LIMIT: usize = 200;
 
-/// Documents sampled per collection for field-name completion. Cheap: one
-/// `find().limit(n)` round trip, no full scan, no index required.
-const FIELD_SAMPLE_SIZE: u32 = 20;
-
 /// Mongo's internal databases. Hidden from the sidebar so the user's own
 /// databases aren't buried, matching Compass/TablePlus defaults.
 fn is_system_db(name: &str) -> bool {
@@ -557,7 +553,14 @@ mod tests {
         );
         assert_eq!(
             order,
-            vec!["name", "age", "address", "address.city", "email", "address.zip"]
+            vec![
+                "name",
+                "age",
+                "address",
+                "address.city",
+                "email",
+                "address.zip"
+            ]
         );
         assert_eq!(types["age"], "int32");
         assert_eq!(types["address"], "object");

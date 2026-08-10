@@ -10,7 +10,7 @@ use rdb_core::driver::Driver;
 use rdb_core::error::Result;
 use rdb_core::query::Query;
 use rdb_core::result::ResultSet;
-use rdb_core::schema::{Container, Schema};
+use rdb_core::schema::{Container, Field, Schema};
 use rdb_core::write::{TableRef, WriteOp};
 use rdb_driver_cassandra::CassandraDriver;
 use rdb_driver_clickhouse::ClickhouseDriver;
@@ -186,6 +186,26 @@ impl AnyDriver {
             AnyDriver::Clickhouse(d) => d.containers(database).await,
             #[cfg(feature = "mock")]
             AnyDriver::Mock(d) => d.containers(database).await,
+        }
+    }
+
+    pub async fn sample_fields(
+        &self,
+        database: &str,
+        container: &str,
+        sample_size: u32,
+    ) -> Result<Vec<Field>> {
+        match self {
+            AnyDriver::Postgres(d) => d.sample_fields(database, container, sample_size).await,
+            AnyDriver::Mysql(d) => d.sample_fields(database, container, sample_size).await,
+            AnyDriver::Redis(d) => d.sample_fields(database, container, sample_size).await,
+            AnyDriver::Mongo(d) => d.sample_fields(database, container, sample_size).await,
+            AnyDriver::Sqlite(d) => d.sample_fields(database, container, sample_size).await,
+            AnyDriver::Cassandra(d) => d.sample_fields(database, container, sample_size).await,
+            AnyDriver::Mssql(d) => d.sample_fields(database, container, sample_size).await,
+            AnyDriver::Clickhouse(d) => d.sample_fields(database, container, sample_size).await,
+            #[cfg(feature = "mock")]
+            AnyDriver::Mock(d) => d.sample_fields(database, container, sample_size).await,
         }
     }
 

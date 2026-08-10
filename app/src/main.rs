@@ -29,7 +29,7 @@ mod theme;
 mod update;
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -41,6 +41,8 @@ use dispatch::AnyDriver;
 const UNGROUPED: &str = "Ungrouped";
 const MIN_FONT_SIZE: i32 = 10;
 const MAX_FONT_SIZE: i32 = 18;
+/// Documents sampled per Mongo collection to seed field-name completion.
+const MONGO_FIELD_SAMPLE_SIZE: u32 = 20;
 
 fn clamp_font_size(size: i32) -> i32 {
     size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE)
@@ -7645,7 +7647,8 @@ fn main() -> Result<(), slint::PlatformError> {
                             .into_iter()
                             .map(SharedString::from)
                             .collect();
-                        *slot = Some((engine, Arc::new(driver)));
+                        let driver = Arc::new(driver);
+                        *slot = Some((engine, driver.clone()));
                         drop(slot);
                         let nodes = model::to_tree_model(&schema);
                         let fields = model::to_structure_model(&schema);
@@ -7720,9 +7723,54 @@ fn main() -> Result<(), slint::PlatformError> {
                         // and columns fill in from the background load below.
                         let all_schema_names: Vec<String> =
                             schema_names.iter().map(|s| s.to_string()).collect();
+                        // Mongo has no real schema, so sample a few documents per
+                        // collection to seed field-name completion (`find({ | })`).
+                        // Only the completion seed gets the sampled fields — the
+                        // sidebar tree (`raw_nodes`, above) keeps the real,
+                        // unsampled schema so it doesn't start rendering field
+                        // rows under every collection.
+                        let completion_schema = if matches!(engine, rdb_connstore::Engine::Mongo) {
+                            if let Some(dbase) = schema.databases.first() {
+                                let mut set = tokio::task::JoinSet::new();
+                                for cont in &dbase.containers {
+                                    let driver = driver.clone();
+                                    let db = dbase.name.clone();
+                                    let name = cont.name.clone();
+                                    set.spawn(async move {
+                                        let fields = driver
+                                            .sample_fields(&db, &name, MONGO_FIELD_SAMPLE_SIZE)
+                                            .await
+                                            .unwrap_or_default();
+                                        (name, fields)
+                                    });
+                                }
+                                let mut sampled: HashMap<String, Vec<rdb_core::schema::Field>> =
+                                    HashMap::new();
+                                while let Some(res) = set.join_next().await {
+                                    if let Ok((name, fields)) = res {
+                                        sampled.insert(name, fields);
+                                    }
+                                }
+                                let mut cloned = schema.clone();
+                                if let Some(d) = cloned.databases.first_mut() {
+                                    for cont in &mut d.containers {
+                                        if let Some(fields) = sampled.remove(&cont.name) {
+                                            cont.fields = fields;
+                                        }
+                                    }
+                                }
+                                cloned
+                            } else {
+                                schema.clone()
+                            }
+                        } else {
+                            schema.clone()
+                        };
                         {
-                            let mut seed =
-                                model::to_completion_nodes(schema_current.as_str(), &schema);
+                            let mut seed = model::to_completion_nodes(
+                                schema_current.as_str(),
+                                &completion_schema,
+                            );
                             for name in &all_schema_names {
                                 if name != schema_current.as_str() {
                                     seed.push(model::VmTreeNode {
