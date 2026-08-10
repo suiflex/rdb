@@ -1941,11 +1941,24 @@ fn query_timing_meta(
     } else {
         format!("{rows} rows")
     };
+    let total = model::format_latency(total_ms);
     let overhead_ms = queue_ms + model_ms;
     if overhead_ms >= 25 {
-        format!("{prefix} · {total_ms} ms (db {driver_ms} · wait {queue_ms} · process {model_ms})")
+        // Breakdown stays bare so the parenthesis reads as a split of the
+        // total; it carries the total's unit.
+        let (db, wait, process) = if total_ms >= 1_000 {
+            (
+                driver_ms as f64 / 1e3,
+                queue_ms as f64 / 1e3,
+                model_ms as f64 / 1e3,
+            )
+        } else {
+            (driver_ms as f64, queue_ms as f64, model_ms as f64)
+        };
+        let d = if total_ms >= 1_000 { 1 } else { 0 };
+        format!("{prefix} · {total} (db {db:.d$} · wait {wait:.d$} · process {process:.d$})")
     } else {
-        format!("{prefix} · {total_ms} ms")
+        format!("{prefix} · {total}")
     }
 }
 
@@ -2014,6 +2027,18 @@ mod record_recent_tests {
         assert_eq!(
             query_timing_meta(2, 2, 97, 30, 60, 7),
             "2 statements · 2 rows · 97 ms (db 60 · wait 30 · process 7)"
+        );
+    }
+
+    #[test]
+    fn query_timing_switches_to_seconds_past_a_thousand_ms() {
+        assert_eq!(
+            query_timing_meta(1, 1, 27519, 1, 27510, 1),
+            "1 rows · 27.5 s"
+        );
+        assert_eq!(
+            query_timing_meta(1, 1, 27519, 300, 27200, 19),
+            "1 rows · 27.5 s (db 27.2 · wait 0.3 · process 0.0)"
         );
     }
 
@@ -8019,7 +8044,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         model::ResultView::Affected(model::format_affected(
                             &status,
                             verb,
-                            &format!("{elapsed_ms} ms"),
+                            &model::format_latency(elapsed_ms),
                         ))
                     }
                     other => other,
@@ -8115,7 +8140,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                                         model::format_affected(
                                                             status,
                                                             *verb,
-                                                            &format!("{elapsed_ms} ms"),
+                                                            &model::format_latency(elapsed_ms),
                                                         ),
                                                     )
                                                 }
@@ -8127,7 +8152,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                                     rows, 1, elapsed_ms, queue_ms, driver_ms,
                                                     model_ms,
                                                 ),
-                                                latency: format!("{elapsed_ms} ms"),
+                                                latency: model::format_latency(elapsed_ms),
                                                 grid: GridState::default(),
                                                 connection_id: query_connection_id.clone(),
                                                 engine: query_badge.engine.clone(),
@@ -8181,7 +8206,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 let meta = query_timing_meta(
                                     shown, n_stmts, elapsed_ms, queue_ms, driver_ms, model_ms,
                                 );
-                                let latency = format!("{elapsed_ms} ms");
+                                let latency = model::format_latency(elapsed_ms);
                                 let sr = StoredResult {
                                     view: v.clone(),
                                     meta: meta.clone(),
@@ -8485,11 +8510,11 @@ fn main() -> Result<(), slint::PlatformError> {
                                 }) => {
                                     let g = accum.borrow().clone();
                                     let n = g.rows.len();
+                                    let latency = model::format_latency(elapsed_ms);
                                     let meta = format!(
-                                        "{n} rows{} · {elapsed_ms} ms",
+                                        "{n} rows{} · {latency}",
                                         if capped { " (capped)" } else { "" }
                                     );
-                                    let latency = format!("{elapsed_ms} ms");
                                     let view = model::ResultView::Table(g);
                                     let sr = StoredResult {
                                         view: view.clone(),
@@ -12433,7 +12458,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
                         w.set_sel_footer(SharedString::from(match result {
-                            Ok(ms) => format!("connection ok · {ms}ms"),
+                            Ok(ms) => format!("connection ok · {}", model::format_latency(ms)),
                             Err(e) => format!("connection failed: {e}"),
                         }));
                     }
