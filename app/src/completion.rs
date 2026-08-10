@@ -321,19 +321,25 @@ pub fn suggest(
         // Explicit `schema.` uses the whole tree so other schemas stay reachable.
         let owner_word = trailing_word(before_dot);
         let owner = resolve_alias(stmt, owner_word, language);
-        let cols = columns_of(nodes, &owner);
-        if !cols.is_empty() {
-            cols
-        } else if is_mongo && owner_word.eq_ignore_ascii_case("db") {
+        // MongoDB's `db.` / `db.<collection>.` shapes are unambiguous and must
+        // win over column completion: a collection's sampled fields (from
+        // Driver::sample_fields) would otherwise satisfy the `!cols.is_empty()`
+        // check below and hide the method list.
+        if is_mongo && owner_word.eq_ignore_ascii_case("db") {
             // MongoDB: `db.` is the current database — offer its collections.
             tables(scope)
         } else if is_mongo && mongo::is_collection(nodes, owner_word) {
             // MongoDB: `db.<collection>.` — offer collection methods.
             mongo::methods()
-        } else if is_database(nodes, owner_word) {
-            tables(schema_scope(nodes, owner_word))
         } else {
-            cols
+            let cols = columns_of(nodes, &owner);
+            if !cols.is_empty() {
+                cols
+            } else if is_database(nodes, owner_word) {
+                tables(schema_scope(nodes, owner_word))
+            } else {
+                cols
+            }
         }
     } else if is_mongo {
         match mongo::call_context(before_cursor) {
@@ -549,6 +555,30 @@ mod tests {
         );
         assert!(c.iter().any(|x| x.label == "find"));
         assert!(c.iter().any(|x| x.label == "findOne"));
+    }
+
+    /// Regression: once `Driver::sample_fields` populates a collection's
+    /// fields, `db.<collection>.` must still offer methods, not those fields
+    /// (the `!cols.is_empty()` check must not win over the Mongo dot-branch).
+    #[test]
+    fn mongo_collection_dot_with_sampled_fields_still_suggests_methods() {
+        let mut ns = nodes();
+        ns.push(VmTreeNode {
+            label: "log_inbound".into(),
+            kind: "collection".into(),
+        });
+        ns.push(VmTreeNode {
+            label: "source".into(),
+            kind: "field".into(),
+        });
+        let (_, c) = sug(
+            "db.log_inbound.fi",
+            &ns,
+            "public",
+            rdb_connstore::QueryLanguage::Mongo,
+        );
+        assert!(c.iter().any(|x| x.label == "find"));
+        assert!(!c.iter().any(|x| x.label == "source"));
     }
 
     #[test]
