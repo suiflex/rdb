@@ -52,4 +52,11 @@ jobs:
           #                           affects code that parses CRLs, which
           #                           this workspace never does. Revisit when
           #                           tiberius bumps its rustls pin.
-          ignore: RUSTSEC-2026-0194,RUSTSEC-2026-0195,RUSTSEC-2024-0436,RUSTSEC-2026-0206,RUSTSEC-2026-0192,RUSTSEC-2025-0141,RUSTSEC-2026-0235,RUSTSEC-2026-0098,RUSTSEC-2026-0099,RUSTSEC-2026-0104
+          #   2025-0134 rustls-pemfile — tiberius (driver-mssql) -> pinned
+          #                           1.0.4; crate is unmaintained (archived
+          #                           upstream, no CVE), and tiberius 0.12.3
+          #                           (latest on crates.io) still depends on
+          #                           it directly. Revisit when tiberius
+          #                           bumps off it (upstream suggests
+          #                           rustls-pki-types' PemObject trait).
+          ignore: RUSTSEC-2026-0194,RUSTSEC-2026-0195,RUSTSEC-2024-0436,RUSTSEC-2026-0206,RUSTSEC-2026-0192,RUSTSEC-2025-0141,RUSTSEC-2026-0235,RUSTSEC-2026-0098,RUSTSEC-2026-0099,RUSTSEC-2026-0104,RUSTSEC-2025-0134
