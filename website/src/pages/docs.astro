@@ -10,7 +10,7 @@ const guides = [
   },
   {
     title: "Connect and query",
-    body: "Click a saved connection and the schema loads in the sidebar. Type a query for the connected engine — see Query syntax below — then press Cmd+Enter (Ctrl+Enter on Windows and Linux) to run.",
+    body: "Click a saved connection and the schema loads in the sidebar. Type a query for the connected engine (see Query syntax below), then press Cmd+Enter (Ctrl+Enter on Windows and Linux) to run.",
   },
   {
     title: "Browse a table",
@@ -32,7 +32,7 @@ const querySyntax = [
     engines: "Cassandra",
     language: "CQL",
     examples: ["SELECT * FROM keyspace.table ALLOW FILTERING"],
-    note: "No JOIN, subquery, or HAVING — CQL is a narrower dialect than SQL.",
+    note: "No JOIN, subquery, or HAVING: CQL is a narrower dialect than SQL.",
   },
   {
     engines: "Redis",
@@ -89,8 +89,8 @@ const querySyntax = [
     <div class="mx-auto max-w-4xl px-4 py-14 sm:px-6">
       <h2 class="font-display text-2xl font-semibold tracking-tight">Query syntax per engine</h2>
       <p class="mt-3 max-w-xl text-sm leading-relaxed text-fg-2">
-        Each engine's query editor tab speaks that engine's native language
-        — there's no single unified query syntax across all of them.
+        Each engine's query editor tab speaks that engine's native language;
+        there's no single unified query syntax across all of them.
       </p>
       <div class="mt-6 grid gap-4 sm:grid-cols-2">
         {
