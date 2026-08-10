@@ -3931,6 +3931,11 @@ fn main() -> Result<(), slint::PlatformError> {
         .enable_all()
         .build()
         .expect("tokio runtime");
+    // Kept alive for the rest of main(): Slint's winit backend, rfd, and
+    // notify-rust all pull in zbus on Linux and need an entered runtime the
+    // moment they touch D-Bus during startup, before any of our own async
+    // code runs.
+    let _rt_guard = rt.enter();
     let rt = Arc::new(rt);
 
     let window = MainWindow::new()?;
