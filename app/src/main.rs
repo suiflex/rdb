@@ -1639,6 +1639,55 @@ async fn try_connect(
     }
 }
 
+/// Build the query editor's completion seed for one schema/database. Mongo
+/// has no real schema, so this samples each collection's fields first (see
+/// `Driver::sample_fields`) and completes only the seed with them — the
+/// sidebar tree keeps the real, unsampled schema so it doesn't start
+/// rendering field rows under every collection. Every other engine just
+/// converts the schema tree directly. Shared by the connect flow and the
+/// schema/database switcher, which both need to (re)populate this seed.
+async fn build_completion_seed(
+    driver: &Arc<AnyDriver>,
+    engine: rdb_connstore::Engine,
+    schema_current: &str,
+    schema: &rdb_core::schema::Schema,
+) -> Vec<model::VmTreeNode> {
+    if !matches!(engine, rdb_connstore::Engine::Mongo) {
+        return model::to_completion_nodes(schema_current, schema);
+    }
+    let Some(dbase) = schema.databases.first() else {
+        return model::to_completion_nodes(schema_current, schema);
+    };
+    let mut set = tokio::task::JoinSet::new();
+    for cont in &dbase.containers {
+        let driver = driver.clone();
+        let db = dbase.name.clone();
+        let name = cont.name.clone();
+        set.spawn(async move {
+            let fields = driver
+                .sample_fields(&db, &name, MONGO_FIELD_SAMPLE_SIZE)
+                .await
+                .unwrap_or_default();
+            (name, fields)
+        });
+    }
+    let mut sampled: HashMap<String, Vec<rdb_core::schema::Field>> = HashMap::new();
+    while let Some(res) = set.join_next().await {
+        if let Ok((name, fields)) = res {
+            sampled.insert(name, fields);
+        }
+    }
+    let mut cloned = schema.clone();
+    if let Some(d) = cloned.databases.first_mut() {
+        for cont in &mut d.containers {
+            if let Some(fields) = sampled.remove(&cont.name) {
+                cont.fields = fields;
+            }
+        }
+    }
+    model::to_completion_nodes(schema_current, &cloned)
+}
+
 /// Kind of the active tab ("table" | "sql" | "function"), empty when none.
 fn active_tab_kind(w: &MainWindow) -> String {
     use slint::Model;
@@ -5333,6 +5382,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let rt = rt.clone();
         let current = current.clone();
         let raw_nodes = raw_nodes.clone();
+        let completion_nodes = completion_nodes.clone();
         let cur_engine = cur_engine.clone();
         let expanded_tables = expanded_tables.clone();
         let collapsed_categories = collapsed_categories.clone();
@@ -5413,6 +5463,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let weak2 = weak.clone();
             let current = current.clone();
             let raw_nodes = raw_nodes.clone();
+            let completion_nodes = completion_nodes.clone();
             let expanded_tables = expanded_tables.clone();
             let loaded_dbs = loaded_dbs.clone();
             let query_console = query_console.clone();
@@ -5442,6 +5493,12 @@ fn main() -> Result<(), slint::PlatformError> {
                     clear_loading();
                     return;
                 };
+                // Completion previously stayed seeded from whatever schema was
+                // scoped at connect (possibly empty, if the connection had no
+                // default database) — refresh it for the schema/database the
+                // user just switched to.
+                let seed = build_completion_seed(&driver, engine, &schema_name, &schema).await;
+                *completion_nodes.lock().unwrap() = seed;
                 let nodes = model::to_tree_model(&schema);
                 // Nested engines (Mongo/Redis/Cassandra) now scope to the one
                 // chosen database; open it so its collections show at once.
@@ -7723,54 +7780,14 @@ fn main() -> Result<(), slint::PlatformError> {
                         // and columns fill in from the background load below.
                         let all_schema_names: Vec<String> =
                             schema_names.iter().map(|s| s.to_string()).collect();
-                        // Mongo has no real schema, so sample a few documents per
-                        // collection to seed field-name completion (`find({ | })`).
-                        // Only the completion seed gets the sampled fields — the
-                        // sidebar tree (`raw_nodes`, above) keeps the real,
-                        // unsampled schema so it doesn't start rendering field
-                        // rows under every collection.
-                        let completion_schema = if matches!(engine, rdb_connstore::Engine::Mongo) {
-                            if let Some(dbase) = schema.databases.first() {
-                                let mut set = tokio::task::JoinSet::new();
-                                for cont in &dbase.containers {
-                                    let driver = driver.clone();
-                                    let db = dbase.name.clone();
-                                    let name = cont.name.clone();
-                                    set.spawn(async move {
-                                        let fields = driver
-                                            .sample_fields(&db, &name, MONGO_FIELD_SAMPLE_SIZE)
-                                            .await
-                                            .unwrap_or_default();
-                                        (name, fields)
-                                    });
-                                }
-                                let mut sampled: HashMap<String, Vec<rdb_core::schema::Field>> =
-                                    HashMap::new();
-                                while let Some(res) = set.join_next().await {
-                                    if let Ok((name, fields)) = res {
-                                        sampled.insert(name, fields);
-                                    }
-                                }
-                                let mut cloned = schema.clone();
-                                if let Some(d) = cloned.databases.first_mut() {
-                                    for cont in &mut d.containers {
-                                        if let Some(fields) = sampled.remove(&cont.name) {
-                                            cont.fields = fields;
-                                        }
-                                    }
-                                }
-                                cloned
-                            } else {
-                                schema.clone()
-                            }
-                        } else {
-                            schema.clone()
-                        };
                         {
-                            let mut seed = model::to_completion_nodes(
+                            let mut seed = build_completion_seed(
+                                &driver,
+                                engine,
                                 schema_current.as_str(),
-                                &completion_schema,
-                            );
+                                &schema,
+                            )
+                            .await;
                             for name in &all_schema_names {
                                 if name != schema_current.as_str() {
                                     seed.push(model::VmTreeNode {
