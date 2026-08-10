@@ -51,6 +51,21 @@ pub trait Driver: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Best-effort field discovery for schema-less engines (Mongo): sample up
+    /// to `sample_size` documents from `container` and union their keys into
+    /// [`Field`](crate::schema::Field)s, for the query editor's completion
+    /// popup. Engines with a real schema already get fields from
+    /// [`Driver::schema`]/[`Driver::containers`] and can ignore this — default
+    /// is empty, no sampling.
+    async fn sample_fields(
+        &self,
+        _database: &str,
+        _container: &str,
+        _sample_size: u32,
+    ) -> Result<Vec<crate::schema::Field>> {
+        Ok(Vec::new())
+    }
+
     /// Run a query. Drivers handle the `Query` variant(s) they support and
     /// return `RdbError::UnsupportedQuery` for the rest.
     async fn query(&self, q: &Query) -> Result<ResultSet>;

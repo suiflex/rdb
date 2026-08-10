@@ -13,7 +13,7 @@ use rdb_core::driver::Driver;
 use rdb_core::error::{RdbError, Result};
 use rdb_core::query::{MongoKind, MongoOp, Query};
 use rdb_core::result::{Cell, ResultSet};
-use rdb_core::schema::{Container, ContainerKind, Database, Schema};
+use rdb_core::schema::{Container, ContainerKind, Database, Field, Schema};
 use rdb_core::write::{TableRef, WriteOp};
 
 use crate::convert::{document_to_json, json_to_document};
@@ -31,6 +31,10 @@ pub struct MongoDriver {
 
 /// Fallback collection cap when the UI has not pushed a limit yet.
 const DEFAULT_COLLECTION_LIMIT: usize = 200;
+
+/// Documents sampled per collection for field-name completion. Cheap: one
+/// `find().limit(n)` round trip, no full scan, no index required.
+const FIELD_SAMPLE_SIZE: u32 = 20;
 
 /// Mongo's internal databases. Hidden from the sidebar so the user's own
 /// databases aren't buried, matching Compass/TablePlus defaults.
@@ -216,6 +220,43 @@ impl Driver for MongoDriver {
             .collect())
     }
 
+    /// Mongo has no real schema, so completion falls back to sampling: union
+    /// the top-level keys (plus one level of nested-object dot notation,
+    /// e.g. `address.city`) across up to `sample_size` documents.
+    async fn sample_fields(
+        &self,
+        database: &str,
+        container: &str,
+        sample_size: u32,
+    ) -> Result<Vec<Field>> {
+        let coll: Collection<Document> = self.client.database(database).collection(container);
+        let mut cursor = coll
+            .find(doc! {})
+            .limit(sample_size as i64)
+            .await
+            .map_err(|e| RdbError::Schema(e.to_string()))?;
+        let mut order: Vec<String> = Vec::new();
+        let mut types: std::collections::HashMap<String, &'static str> =
+            std::collections::HashMap::new();
+        while let Some(d) = cursor
+            .try_next()
+            .await
+            .map_err(|e| RdbError::Schema(e.to_string()))?
+        {
+            collect_keys(&d, "", &mut order, &mut types);
+        }
+        Ok(order
+            .into_iter()
+            .map(|name| Field {
+                type_name: types.get(&name).copied().unwrap_or("mixed").to_string(),
+                name,
+                nullable: true,
+                pk: false,
+                fk: false,
+            })
+            .collect())
+    }
+
     async fn query(&self, q: &Query) -> Result<ResultSet> {
         let op: &MongoOp = match q {
             Query::Mongo(op) => op,
@@ -355,6 +396,43 @@ fn pk_id(pk: &[(String, Cell)]) -> Result<mongodb::bson::Bson> {
     Ok(cell_to_bson(cell))
 }
 
+/// Insert-order union of a document's keys into `order`/`types`, one level
+/// of nested objects deep (`address.city`), used by [`MongoDriver::sample_fields`].
+fn collect_keys(
+    doc: &Document,
+    prefix: &str,
+    order: &mut Vec<String>,
+    types: &mut std::collections::HashMap<String, &'static str>,
+) {
+    for (key, value) in doc {
+        let full = format!("{prefix}{key}");
+        if !types.contains_key(&full) {
+            order.push(full.clone());
+        }
+        types.insert(full.clone(), bson_type_name(value));
+        if let mongodb::bson::Bson::Document(sub) = value {
+            collect_keys(sub, &format!("{full}."), order, types);
+        }
+    }
+}
+
+fn bson_type_name(b: &mongodb::bson::Bson) -> &'static str {
+    use mongodb::bson::Bson;
+    match b {
+        Bson::Double(_) => "double",
+        Bson::String(_) => "string",
+        Bson::Array(_) => "array",
+        Bson::Document(_) => "object",
+        Bson::Boolean(_) => "bool",
+        Bson::Null => "null",
+        Bson::Int32(_) => "int32",
+        Bson::Int64(_) => "int64",
+        Bson::ObjectId(_) => "objectId",
+        Bson::DateTime(_) => "date",
+        _ => "mixed",
+    }
+}
+
 fn cell_to_bson(c: &Cell) -> mongodb::bson::Bson {
     use mongodb::bson::Bson;
     match c {
@@ -459,6 +537,31 @@ mod tests {
     fn build_uri_full_uri_override_is_verbatim() {
         let srv = "mongodb+srv://user:pass@cluster0.abc.mongodb.net/app?retryWrites=true";
         assert_eq!(build_uri(&cfg(Some(srv), SslMode::Require)), srv);
+    }
+
+    #[test]
+    fn collect_keys_unions_top_level_and_one_nested_level() {
+        let mut order = Vec::new();
+        let mut types = std::collections::HashMap::new();
+        collect_keys(
+            &doc! { "name": "a", "age": 1, "address": { "city": "x" } },
+            "",
+            &mut order,
+            &mut types,
+        );
+        collect_keys(
+            &doc! { "name": "b", "email": "b@x.com", "address": { "zip": "1" } },
+            "",
+            &mut order,
+            &mut types,
+        );
+        assert_eq!(
+            order,
+            vec!["name", "age", "address", "address.city", "email", "address.zip"]
+        );
+        assert_eq!(types["age"], "int32");
+        assert_eq!(types["address"], "object");
+        assert_eq!(types["address.city"], "string");
     }
 
     #[test]
