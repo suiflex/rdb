@@ -292,6 +292,9 @@ callback create-table-commit();
     // result shape: 0 Table, 1 Documents, 2 KeyValue, 3 Affected
     in property <int> result-kind: 0;
     in property <bool> sql-capable: true;
+    // Label for the "+ new query tab" button — names the connected engine's
+    // query language (SQL/CQL/Redis/Mongo) instead of a hardcoded "SQL".
+    in property <string> new-tab-label: "SQL";
     in property <string> result-status;
     in-out property <int> selected-row: 0;
     in-out property <int> selected-col: -1;
@@ -984,7 +987,7 @@ callback create-table-commit();
                     VerticalLayout {
                         alignment: center;
                         SecondaryButton {
-                            text: "SQL";
+                            text: root.new-tab-label;
                             tooltip: "New query tab  " + Shortcut.primary + Shortcut.separator + "T";
                             height: 28px;
                             clicked => { root.new-tab(); }
