@@ -1,7 +1,11 @@
 name: release-please
 
 on:
-  push:
+  # A maintainer starts release preparation explicitly after batching changes.
+  workflow_dispatch:
+  # A merged release PR is finalized automatically into a tag and release.
+  pull_request:
+    types: [closed]
     branches: [develop]
 
 permissions:
@@ -14,10 +18,17 @@ concurrency:
 
 jobs:
   release-please:
+    # Manual runs prepare/update the release PR. Pull request runs only
+    # finalize a merged Release Please PR, never an application PR.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'release-please--'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: develop
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
 
