@@ -582,6 +582,13 @@ export component UnderlineSegment inherits Rectangle {
     in property <bool> active: false;
     callback clicked;
     width: label.preferred-width;
+    // Explicit and constant — without it this auto-sizes from `label`'s own
+    // box, and since `active` also switches font-weight, the active and
+    // inactive segments end up with very slightly different glyph metrics
+    // and therefore different auto-heights, throwing off any alignment
+    // that assumes every instance shares one height (siblings in a row,
+    // this segment vs. its own pair).
+    height: Tokens.font-sm + 2 * Tokens.sp1;
     label := Text {
         text: root.text;
         color: active ? Tokens.accent : (ta.has-hover ? Tokens.text : Tokens.text-dim);
