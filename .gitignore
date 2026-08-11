@@ -17,6 +17,7 @@ desktop.ini
 docs/superpowers
 .forgeguard
 .mcp.json
+.pi
 
 # Env & secrets
 .env
