@@ -369,7 +369,7 @@ callback create-table-commit();
     callback set-font-size(int);
     in-out property <bool> results-collapsed: false;
     callback editor-key(string, bool, bool, bool) -> bool;
-    callback editor-press(int, int);
+    callback editor-press(int, int, bool);
     callback editor-drag(int, int);
     callback editor-select-word(int, int);
     // find-in-editor (⌘F)
@@ -539,7 +539,7 @@ callback create-table-commit();
     callback p1-find-close();
     callback p1-toggle-fold(int);
     callback p1-editor-key(string, bool, bool, bool) -> bool;
-    callback p1-editor-press(int, int);
+    callback p1-editor-press(int, int, bool);
     callback p1-editor-drag(int, int);
     callback p1-editor-select-word(int, int);
     in property <int> p1-pending-count;
@@ -1697,7 +1697,7 @@ callback create-table-commit();
                         p1-find-close() => { root.p1-find-close(); }
                         p1-toggle-fold(l) => { root.p1-toggle-fold(l); }
                         p1-editor-key(t, cmd, alt, shift) => { root.p1-editor-key(t, cmd, alt, shift) }
-                        p1-editor-press(l, c) => { root.p1-editor-press(l, c); }
+                        p1-editor-press(l, c, sh) => { root.p1-editor-press(l, c, sh); }
                         p1-editor-drag(l, c) => { root.p1-editor-drag(l, c); }
                         p1-editor-select-word(l, c) => { root.p1-editor-select-word(l, c); }
                         p1-completion-choose(i) => { root.p1-completion-choose(i); }
@@ -1782,7 +1782,7 @@ callback create-table-commit();
                         scroll-grid-tick: root.scroll-grid-tick;
                         index-rows: root.index-rows;
                         editor-key(t, cmd, alt, shift) => { root.editor-key(t, cmd, alt, shift) }
-                        editor-press(l, c) => { root.editor-press(l, c); }
+                        editor-press(l, c, sh) => { root.editor-press(l, c, sh); }
                         editor-drag(l, c) => { root.editor-drag(l, c); }
                         editor-select-word(l, c) => { root.editor-select-word(l, c); }
                         find-open: root.find-open;

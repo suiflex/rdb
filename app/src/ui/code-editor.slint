@@ -26,7 +26,7 @@ export component CodeEditor inherits Rectangle {
     callback edit-key(string, bool, bool, bool) -> bool;
     // Mouse: press places the caret, drag extends the selection, double-click
     // selects the word. All carry (line, col) hit-tested from the pointer.
-    callback press-pos(int, int);
+    callback press-pos(int, int, bool);
     callback drag-pos(int, int);
     callback select-word(int, int);
     // SQL autocomplete popup, anchored under the caret
@@ -116,7 +116,7 @@ export component CodeEditor inherits Rectangle {
                                 focus-scope.focus();
                                 self.press-x = self.mouse-x;
                                 self.press-y = self.mouse-y;
-                                root.press-pos(parent.hit-line, parent.hit-col);
+                                root.press-pos(parent.hit-line, parent.hit-col, e.modifiers.shift);
                             }
                         }
                         moved => {
