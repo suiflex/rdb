@@ -12705,9 +12705,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 (host, port)
             };
             let sslmode = match w.get_f_sslmode().to_string().as_str() {
-                "Disable" => rdb_core::conn::SslMode::Disable,
                 "Require" => rdb_core::conn::SslMode::Require,
-                _ => rdb_core::conn::SslMode::Prefer,
+                "Prefer" => rdb_core::conn::SslMode::Prefer,
+                // Empty/unset (the SSL mode field is hidden for engines
+                // like Redis that never populate `f-sslmode`) must not
+                // silently become `Prefer` — that maps to `rediss://` and
+                // hangs a TLS handshake against a plain server instead of
+                // failing fast or connecting at all.
+                _ => rdb_core::conn::SslMode::Disable,
             };
             let database = {
                 let d = w.get_f_database().to_string();
@@ -12824,9 +12829,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 (host, port)
             };
             let sslmode = match w.get_f_sslmode().to_string().as_str() {
-                "Disable" => rdb_core::conn::SslMode::Disable,
                 "Require" => rdb_core::conn::SslMode::Require,
-                _ => rdb_core::conn::SslMode::Prefer,
+                "Prefer" => rdb_core::conn::SslMode::Prefer,
+                // Empty/unset (the SSL mode field is hidden for engines
+                // like Redis that never populate `f-sslmode`) must not
+                // silently become `Prefer` — that maps to `rediss://` and
+                // hangs a TLS handshake against a plain server instead of
+                // failing fast or connecting at all.
+                _ => rdb_core::conn::SslMode::Disable,
             };
             let database = {
                 let d = w.get_f_database().to_string();
