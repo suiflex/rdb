@@ -601,6 +601,52 @@ fn build_conn_items(
     rows
 }
 
+/// Bucket `build_conn_items`'s flat rows into one `TopLevelGroup` per
+/// top-level header, so the sidebar can draw a single continuous outline
+/// around each top-level card (header + every nested subgroup/connection
+/// under it) instead of guessing card boundaries from a flat list. The
+/// no-groups case (every connection ungrouped) never emits a header row at
+/// all — that stays a single header-less group, same as before.
+fn group_conn_items(flat: Vec<ConnItem>) -> Vec<TopLevelGroup> {
+    if flat.first().is_some_and(|first| !first.is_header) {
+        return vec![TopLevelGroup {
+            has_header: false,
+            rows: ModelRc::from(Rc::new(VecModel::from(flat))),
+        }];
+    }
+    let mut groups = Vec::new();
+    let mut cur: Vec<ConnItem> = Vec::new();
+    for item in flat {
+        if item.is_header && item.depth == 0 && !cur.is_empty() {
+            groups.push(TopLevelGroup {
+                has_header: true,
+                rows: ModelRc::from(Rc::new(VecModel::from(std::mem::take(&mut cur)))),
+            });
+        }
+        cur.push(item);
+    }
+    if !cur.is_empty() {
+        groups.push(TopLevelGroup {
+            has_header: true,
+            rows: ModelRc::from(Rc::new(VecModel::from(cur))),
+        });
+    }
+    groups
+}
+
+/// `build_conn_items` + `group_conn_items`, wrapped straight into the
+/// `ModelRc` the sidebar's `set_connections` expects — the one-liner every
+/// call site should use instead of repeating the two-step build+wrap.
+fn build_sidebar_model(
+    store: &rdb_connstore::ConnStore,
+    collapsed: &HashSet<String>,
+    filter: &str,
+) -> ModelRc<TopLevelGroup> {
+    ModelRc::from(Rc::new(VecModel::from(group_conn_items(build_conn_items(
+        store, collapsed, filter,
+    )))))
+}
+
 /// Flatten `build_conn_items`'s output into the ⌘O "Open Connection" modal's
 /// `PaletteItem` list plus a parallel index map (`-1` for a header row, the
 /// real store index for a connection row) — shared by the modal's open
@@ -650,6 +696,45 @@ fn build_conn_palette_items(
         }
     }
     (items, map)
+}
+
+/// Bucket a flat `PaletteItem` list into `PaletteGroup`s for `ListModal`,
+/// same rule as `group_conn_items`: a `"group"`-kind row at depth 0 starts a
+/// new top-level card. Every `ListModal` caller other than the ⌘O connection
+/// picker never emits a `"group"`-kind row at all, so their list's first
+/// item is never `"group"` and this always falls through to the single
+/// `has_header: false` bucket — unaffected, same as before.
+fn group_palette_items(flat: Vec<PaletteItem>) -> Vec<PaletteGroup> {
+    if flat.first().is_some_and(|first| first.kind != "group") {
+        let start_index = 0;
+        return vec![PaletteGroup {
+            has_header: false,
+            start_index,
+            rows: ModelRc::from(Rc::new(VecModel::from(flat))),
+        }];
+    }
+    let mut groups = Vec::new();
+    let mut cur: Vec<PaletteItem> = Vec::new();
+    let mut cur_start = 0i32;
+    for (i, item) in flat.into_iter().enumerate() {
+        if item.kind == "group" && item.depth == 0 && !cur.is_empty() {
+            groups.push(PaletteGroup {
+                has_header: true,
+                start_index: cur_start,
+                rows: ModelRc::from(Rc::new(VecModel::from(std::mem::take(&mut cur)))),
+            });
+            cur_start = i as i32;
+        }
+        cur.push(item);
+    }
+    if !cur.is_empty() {
+        groups.push(PaletteGroup {
+            has_header: true,
+            start_index: cur_start,
+            rows: ModelRc::from(Rc::new(VecModel::from(cur))),
+        });
+    }
+    groups
 }
 
 /// Walk `rendered` (the same list `build_conn_items` produced) accumulating
@@ -4225,9 +4310,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let items =
-                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
-            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+            w.set_connections(build_sidebar_model(
+                &store.borrow(),
+                &collapsed.borrow(),
+                &conn_filter.borrow(),
+            ));
         }
     };
     rebuild_sidebar();
@@ -5331,7 +5418,9 @@ fn main() -> Result<(), slint::PlatformError> {
             if items.is_empty() {
                 return;
             }
-            w.set_db_items(ModelRc::from(Rc::new(VecModel::from(items))));
+            w.set_db_items(ModelRc::from(Rc::new(VecModel::from(group_palette_items(
+                items,
+            )))));
             w.set_db_modal_open(true);
         });
     }
@@ -5342,7 +5431,14 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let Some(it) = w.get_db_items().row_data(idx.max(0) as usize) else {
+            // `db-items` is always the single-bucket wrap (never real
+            // top-level groups), so its one `PaletteGroup.rows` is the flat
+            // list `idx` was always meant to index into.
+            let Some(it) = w
+                .get_db_items()
+                .row_data(0)
+                .and_then(|g| g.rows.row_data(idx.max(0) as usize))
+            else {
                 return;
             };
             w.set_db_modal_open(false);
@@ -5382,7 +5478,9 @@ fn main() -> Result<(), slint::PlatformError> {
             if items.is_empty() {
                 return;
             }
-            w.set_schema_items(ModelRc::from(Rc::new(VecModel::from(items))));
+            w.set_schema_items(ModelRc::from(Rc::new(VecModel::from(group_palette_items(
+                items,
+            )))));
             w.set_schema_modal_open(true);
         });
     }
@@ -5409,7 +5507,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             w.set_schema_modal_open(false);
-            let Some(it) = w.get_schema_items().row_data(idx.max(0) as usize) else {
+            // Same single-bucket wrap as `db-items` — see comment there.
+            let Some(it) = w
+                .get_schema_items()
+                .row_data(0)
+                .and_then(|g| g.rows.row_data(idx.max(0) as usize))
+            else {
                 return;
             };
             let schema_name = it.label.to_string();
@@ -5817,7 +5920,9 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             let (items, map) = build_conn_palette_items(&store.borrow(), &collapsed.borrow(), "");
             *conn_modal_map.borrow_mut() = map;
-            w.set_conn_items(ModelRc::from(Rc::new(VecModel::from(items))));
+            w.set_conn_items(ModelRc::from(Rc::new(VecModel::from(group_palette_items(
+                items,
+            )))));
             w.set_conn_modal_open(true);
         });
     }
@@ -6666,15 +6771,19 @@ fn main() -> Result<(), slint::PlatformError> {
             let _ = settings
                 .borrow_mut()
                 .update(|s| s.ui_state.collapsed_groups = groups);
-            let items =
-                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
-            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+            w.set_connections(build_sidebar_model(
+                &store.borrow(),
+                &collapsed.borrow(),
+                &conn_filter.borrow(),
+            ));
             // Keep the ⌘O modal in sync too, whichever surface triggered this.
             if w.get_conn_modal_open() {
                 let (items, map) =
                     build_conn_palette_items(&store.borrow(), &collapsed.borrow(), "");
                 *conn_modal_map.borrow_mut() = map;
-                w.set_conn_items(ModelRc::from(Rc::new(VecModel::from(items))));
+                w.set_conn_items(ModelRc::from(Rc::new(VecModel::from(group_palette_items(
+                    items,
+                )))));
             }
         });
     }
@@ -6718,9 +6827,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let _ = settings
                 .borrow_mut()
                 .update(|s| s.ui_state.collapsed_groups = groups);
-            let items =
-                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
-            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+            w.set_connections(build_sidebar_model(
+                &store.borrow(),
+                &collapsed.borrow(),
+                &conn_filter.borrow(),
+            ));
         });
     }
 
@@ -6783,9 +6894,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let _ = settings
                 .borrow_mut()
                 .update(|s| s.ui_state.collapsed_groups = groups);
-            let items =
-                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
-            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+            w.set_connections(build_sidebar_model(
+                &store.borrow(),
+                &collapsed.borrow(),
+                &conn_filter.borrow(),
+            ));
         });
     }
 
@@ -6800,9 +6913,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             *conn_filter.borrow_mut() = t.to_string();
-            let items =
-                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
-            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+            w.set_connections(build_sidebar_model(
+                &store.borrow(),
+                &collapsed.borrow(),
+                &conn_filter.borrow(),
+            ));
         });
     }
 
@@ -6825,9 +6940,11 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             let (id, was_fav) = id;
             let _ = store.borrow_mut().set_favorite(&id, !was_fav);
-            let items =
-                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
-            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+            w.set_connections(build_sidebar_model(
+                &store.borrow(),
+                &collapsed.borrow(),
+                &conn_filter.borrow(),
+            ));
         });
     }
 
@@ -6875,12 +6992,11 @@ fn main() -> Result<(), slint::PlatformError> {
                         };
                         let _ = store.borrow_mut().update(sc);
                     }
-                    let items = build_conn_items(
+                    w.set_connections(build_sidebar_model(
                         &store.borrow(),
                         &collapsed.borrow(),
                         &conn_filter.borrow(),
-                    );
-                    w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+                    ));
                     return;
                 }
             }
@@ -6916,9 +7032,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 (from.id.clone(), members[target_pos])
             };
             let _ = store.borrow_mut().reorder(&from_id, target_vec_idx);
-            let items =
-                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
-            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+            w.set_connections(build_sidebar_model(
+                &store.borrow(),
+                &collapsed.borrow(),
+                &conn_filter.borrow(),
+            ));
         });
     }
 
@@ -11931,7 +12049,9 @@ fn main() -> Result<(), slint::PlatformError> {
                         &recent_queries.borrow(),
                         "",
                     );
-                    w.set_palette_items(ModelRc::from(Rc::new(VecModel::from(items))));
+                    w.set_palette_items(ModelRc::from(Rc::new(VecModel::from(
+                        group_palette_items(items),
+                    ))));
                     PALETTE_ACTIONS.with(|s| *s.borrow_mut() = actions);
                 }
             }
@@ -11976,7 +12096,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     &recent_queries.borrow(),
                     &q.to_lowercase(),
                 );
-                w.set_palette_items(ModelRc::from(Rc::new(VecModel::from(items))));
+                w.set_palette_items(ModelRc::from(Rc::new(VecModel::from(group_palette_items(
+                    items,
+                )))));
                 PALETTE_ACTIONS.with(|s| *s.borrow_mut() = actions);
             }
         });
@@ -12658,12 +12780,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let conn_filter = conn_filter.clone();
             move || {
                 if let Some(w) = weak.upgrade() {
-                    let items = build_conn_items(
+                    w.set_connections(build_sidebar_model(
                         &store.borrow(),
                         &collapsed.borrow(),
                         &conn_filter.borrow(),
-                    );
-                    w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+                    ));
                 }
             }
         };
@@ -12820,9 +12941,11 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_form_open(false);
             w.set_selected_conn(-1);
             w.set_schema_tree(ModelRc::from(Rc::new(VecModel::<TreeNode>::default())));
-            let items =
-                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
-            w.set_connections(ModelRc::from(Rc::new(VecModel::from(items))));
+            w.set_connections(build_sidebar_model(
+                &store.borrow(),
+                &collapsed.borrow(),
+                &conn_filter.borrow(),
+            ));
         });
     }
 
