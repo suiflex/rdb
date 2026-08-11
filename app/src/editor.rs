@@ -207,10 +207,18 @@ pub fn sanitize(s: &str) -> String {
         .filter_map(|c| match c {
             '\n' | '\t' => Some(c),
             // Zs category + NBSP variants → plain space
-            '\u{00a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{202f}' | '\u{205f}'
+            '\u{00a0}'
+            | '\u{1680}'
+            | '\u{2000}'..='\u{200a}'
+            | '\u{202f}'
+            | '\u{205f}'
             | '\u{3000}' => Some(' '),
             // zero-width / invisible formatting marks
-            '\u{00ad}' | '\u{200b}'..='\u{200f}' | '\u{2028}' | '\u{2029}' | '\u{2060}'
+            '\u{00ad}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{2060}'
             | '\u{feff}' => None,
             c if c.is_control() => None,
             c => Some(c),
