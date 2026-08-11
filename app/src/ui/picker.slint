@@ -131,16 +131,14 @@ export component ConnPicker inherits Rectangle {
                         alignment: start;
 
                         for item[i] in root.connections: Rectangle {
-                            // Headers (except the very first) carry a little
-                            // extra height above their real 28px content so a
-                            // gap opens up before each new group's card; the
-                            // inner content Rectangle anchors to the bottom of
-                            // that extra space rather than filling it. Row
-                            // items carry the card background directly on this
-                            // outer shell instead (no gap to work around), so
-                            // the existing selected/hover Rectangle underneath
-                            // stays untouched and just composites over it.
-                            height: item.is-header ? (i > 0 ? 28px + Tokens.sp2 : 28px) : 40px;
+                            // Only top-level groups start a new card. Subgroups
+                            // stay attached to their parent card; adding the same
+                            // gap before them makes the hierarchy look broken.
+                            // The inner header Rectangle is anchored to the
+                            // bottom when a top-level gap is present.
+                            height: item.is-header
+                                ? (item.depth == 0 && i > 0 ? 28px + Tokens.sp2 : 28px)
+                                : 40px;
                             background: item.is-header ? transparent : Tokens.card;
                             border-top-left-radius: !item.is-header && i == 0 ? Tokens.radius-lg : 0px;
                             border-top-right-radius: !item.is-header && i == 0 ? Tokens.radius-lg : 0px;
@@ -152,8 +150,8 @@ export component ConnPicker inherits Rectangle {
                                 y: parent.height - 28px;
                                 height: 28px;
                                 background: Tokens.card;
-                                border-top-left-radius: Tokens.radius-lg;
-                                border-top-right-radius: Tokens.radius-lg;
+                                border-top-left-radius: item.depth == 0 ? Tokens.radius-lg : 0px;
+                                border-top-right-radius: item.depth == 0 ? Tokens.radius-lg : 0px;
                                 border-bottom-left-radius: item.is-group-end ? Tokens.radius-lg : 0px;
                                 border-bottom-right-radius: item.is-group-end ? Tokens.radius-lg : 0px;
                                 hdr-ta := TouchArea {
