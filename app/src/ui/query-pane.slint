@@ -617,6 +617,21 @@ export component QueryPane inherits Rectangle {
                         tooltip: "Toggle the per-column filter row";
                         clicked => { root.filter-open = !root.filter-open; }
                     }
+                    // Mongo query results use the same Grid/Tree document view as
+                    // collection browsing; keep the switch available in this header too.
+                    if root.result-kind == 1: HorizontalLayout {
+                        spacing: Tokens.sp3;
+                        UnderlineSegment {
+                            text: "Grid";
+                            active: root.doc-view == 0;
+                            clicked => { root.doc-view = 0; }
+                        }
+                        UnderlineSegment {
+                            text: "Tree";
+                            active: root.doc-view == 1;
+                            clicked => { root.doc-view = 1; }
+                        }
+                    }
                     TextButton {
                         text: "Copy";
                         tooltip: "Copy every loaded row to the clipboard as TSV";
