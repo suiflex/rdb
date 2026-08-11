@@ -618,18 +618,26 @@ export component QueryPane inherits Rectangle {
                         clicked => { root.filter-open = !root.filter-open; }
                     }
                     // Mongo query results use the same Grid/Tree document view as
-                    // collection browsing; keep the switch available in this header too.
-                    if root.result-kind == 1: HorizontalLayout {
-                        spacing: Tokens.sp3;
-                        UnderlineSegment {
-                            text: "Grid";
-                            active: root.doc-view == 0;
-                            clicked => { root.doc-view = 0; }
-                        }
-                        UnderlineSegment {
-                            text: "Tree";
-                            active: root.doc-view == 1;
-                            clicked => { root.doc-view = 1; }
+                    // collection browsing; keep the switch available in this header
+                    // too. `UnderlineSegment` has no explicit height (it sizes to
+                    // its label text), unlike the `TextButton` siblings around it
+                    // (fixed `Tokens.button-h`) — without this `VerticalLayout`
+                    // wrapper to center it, the row's default stretch alignment
+                    // pulls it out of line with them.
+                    if root.result-kind == 1: VerticalLayout {
+                        alignment: center;
+                        HorizontalLayout {
+                            spacing: Tokens.sp3;
+                            UnderlineSegment {
+                                text: "Grid";
+                                active: root.doc-view == 0;
+                                clicked => { root.doc-view = 0; }
+                            }
+                            UnderlineSegment {
+                                text: "Tree";
+                                active: root.doc-view == 1;
+                                clicked => { root.doc-view = 1; }
+                            }
                         }
                     }
                     TextButton {
