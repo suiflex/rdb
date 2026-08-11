@@ -361,6 +361,7 @@ export component ConnForm inherits Rectangle {
                 color: Tokens.error;
                 font-size: Tokens.font-sm;
                 horizontal-alignment: center;
+                wrap: word-wrap;
             }
 
             if root.test-busy || root.test-result != "": Text {
@@ -368,6 +369,7 @@ export component ConnForm inherits Rectangle {
                 color: root.test-ok ? Tokens.ok : Tokens.text-dim;
                 font-size: Tokens.font-sm;
                 horizontal-alignment: center;
+                wrap: word-wrap;
             }
 
             HorizontalLayout {
