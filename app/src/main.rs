@@ -2136,6 +2136,13 @@ fn default_split_ratio() -> f32 {
     0.5
 }
 
+/// Disk restore is only for the first connection of an app session. Reconnecting
+/// with a different database must keep the in-memory workspace: it contains tabs
+/// and results that may have been created since the last persistence write.
+fn should_restore_query_tabs(tabs_restored: bool) -> bool {
+    !tabs_restored
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 struct PersistedTabs {
     tabs: Vec<PersistedTab>,
@@ -7467,7 +7474,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // persisted SQL scratch tabs; a later switch to another connection
             // keeps the SQL scratch tabs so the user can hop between connections
             // without losing their queries.
-            let restore = !tabs_restored.get() || db_ovr.is_some();
+            let restore = should_restore_query_tabs(tabs_restored.get());
             tabs_restored.set(true);
             let (init_tabs, init_active, init_active_p1, init_active_group) = if restore {
                 let (tabs, active, active_p1, active_group, max_number) = load_query_tabs();
@@ -13101,6 +13108,12 @@ mod tests {
             pk: false,
         }];
         assert!(build_create_table(None, "t", &no_type, rdb_connstore::Engine::Postgres).is_err());
+    }
+
+    #[test]
+    fn query_tabs_restore_only_on_first_connection() {
+        assert!(should_restore_query_tabs(false));
+        assert!(!should_restore_query_tabs(true));
     }
 
     #[test]
