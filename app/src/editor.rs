@@ -198,8 +198,29 @@ pub struct EditorState {
 
 const UNDO_CAP: usize = 200;
 
+/// Fold text the font can't draw into something it can, so pasted SQL from a
+/// browser/Word/Notion doesn't render as tofu boxes: exotic Unicode spaces
+/// (NBSP, ideographic, en/em quad…) become a plain space, zero-width marks and
+/// stray control chars are dropped. `\n`/`\t` pass through untouched.
+pub fn sanitize(s: &str) -> String {
+    s.chars()
+        .filter_map(|c| match c {
+            '\n' | '\t' => Some(c),
+            // Zs category + NBSP variants → plain space
+            '\u{00a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{202f}' | '\u{205f}'
+            | '\u{3000}' => Some(' '),
+            // zero-width / invisible formatting marks
+            '\u{00ad}' | '\u{200b}'..='\u{200f}' | '\u{2028}' | '\u{2029}' | '\u{2060}'
+            | '\u{feff}' => None,
+            c if c.is_control() => None,
+            c => Some(c),
+        })
+        .collect()
+}
+
 impl EditorState {
     pub fn from_text(text: &str) -> Self {
+        let text = sanitize(text);
         let mut lines: Vec<String> = text.split('\n').map(str::to_string).collect();
         if lines.is_empty() {
             lines.push(String::new());
@@ -374,10 +395,14 @@ impl EditorState {
     // ----- mutations (all undo-recorded, all selection-aware) -----
 
     pub fn insert(&mut self, s: &str) {
+        let s = sanitize(s);
+        if s.is_empty() {
+            return;
+        }
         let one_char = s.chars().count() == 1 && !s.contains('\n');
         self.push_undo(one_char && self.sel.is_none());
         self.remove_selection();
-        self.insert_raw(s);
+        self.insert_raw(&s);
     }
 
     fn insert_raw(&mut self, s: &str) {
@@ -1069,6 +1094,21 @@ mod tests {
         ed.col = 8;
         ed.replace_current_statement("SELECT 2;");
         assert_eq!(ed.text(), "select 1;\nSELECT 2;\nselect 3;");
+    }
+
+    // ----- sanitize -----
+
+    #[test]
+    fn sanitize_folds_exotic_spaces_and_drops_invisibles() {
+        // NBSP + ideographic space → plain space; ZWSP/BOM/soft hyphen dropped.
+        let dirty = "SELECT\u{00a0}1\u{3000}FROM\u{200b}t\u{feff};\u{00ad}";
+        assert_eq!(sanitize(dirty), "SELECT 1 FROMt;");
+        // newlines and tabs survive
+        assert_eq!(sanitize("a\n\tb"), "a\n\tb");
+        // pasted text lands clean in the buffer
+        let mut ed = EditorState::from_text("");
+        ed.insert(dirty);
+        assert_eq!(ed.text(), "SELECT 1 FROMt;");
     }
 
     // ----- selection -----
