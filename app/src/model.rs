@@ -745,7 +745,11 @@ mod tests {
     fn documents_render_as_json_text_block() {
         let rs = ResultSet::Documents(vec![serde_json::json!({"a": 1})]);
         match to_result_view(&rs) {
-            ResultView::Documents(d) => assert!(d.json.contains("\"a\"")),
+            ResultView::Documents(d) => {
+                assert!(d.json.contains("\"a\""));
+                assert_eq!(d.tree.len(), 2);
+                assert_eq!(d.tree[1].key, "a");
+            }
             other => panic!("expected Documents, got {other:?}"),
         }
     }
