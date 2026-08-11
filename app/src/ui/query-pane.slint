@@ -621,12 +621,18 @@ export component QueryPane inherits Rectangle {
                     // collection browsing; keep the switch available in this header
                     // too. `UnderlineSegment` has no explicit height (it sizes to
                     // its label text), unlike the `TextButton` siblings around it
-                    // (fixed `Tokens.button-h`) — without this `VerticalLayout`
-                    // wrapper to center it, the row's default stretch alignment
-                    // pulls it out of line with them.
-                    if root.result-kind == 1: VerticalLayout {
-                        alignment: center;
-                        HorizontalLayout {
+                    // (fixed `Tokens.button-h`) — a `VerticalLayout{alignment:center}`
+                    // wrapper still left it a hair off (nested-layout auto-sizing
+                    // through this row's own stretch cross-axis-alignment isn't
+                    // reliable here), so this centers it with an explicit `y`
+                    // instead: a plain `Rectangle` (not a layout, so `y`/`height` on
+                    // its child are respected literally) stretches to the row's full
+                    // height like every sibling, and the inner row is placed at the
+                    // exact vertical center of that height, no auto-sizing involved.
+                    if root.result-kind == 1: Rectangle {
+                        gt-row := HorizontalLayout {
+                            y: (parent.height - self.preferred-height) / 2;
+                            height: self.preferred-height;
                             spacing: Tokens.sp3;
                             UnderlineSegment {
                                 text: "Grid";
