@@ -8000,9 +8000,10 @@ fn main() -> Result<(), slint::PlatformError> {
                                 w.set_connected(false);
                                 w.set_connecting(false);
                                 w.set_tree_loading(false);
-                                w.set_picker_error(SharedString::from(format!(
-                                    "connection failed: {e}"
-                                )));
+                                // `e` is `RdbError`, whose own `Display` already
+                                // reads "connection failed: …" — don't prefix it
+                                // again.
+                                w.set_picker_error(SharedString::from(format!("{e}")));
                             }
                         });
                     }
@@ -12658,7 +12659,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     if let Some(w) = weak2.upgrade() {
                         w.set_sel_footer(SharedString::from(match result {
                             Ok(ms) => format!("connection ok · {}", model::format_latency(ms)),
-                            Err(e) => format!("connection failed: {e}"),
+                            // `RdbError`'s own `Display` already reads
+                            // "connection failed: …" — don't prefix it again.
+                            Err(e) => format!("{e}"),
                         }));
                     }
                 });
@@ -12758,9 +12761,9 @@ fn main() -> Result<(), slint::PlatformError> {
                             }
                             Err(e) => {
                                 w.set_test_ok(false);
-                                w.set_test_result(SharedString::from(format!(
-                                    "connection failed: {e}"
-                                )));
+                                // `RdbError`'s own `Display` already reads
+                                // "connection failed: …" — don't prefix it again.
+                                w.set_test_result(SharedString::from(format!("{e}")));
                             }
                         }
                     }
