@@ -28,12 +28,27 @@ export struct PaletteItem {
     // Nesting depth of this row's group (0 = top-level). Mirrors `ConnItem.depth`.
     depth: int,
 }
+// One top-level card of grouped items: the ⌘O "Open Connection" picker's own
+// header + nested subgroups + connections, boxed with a continuous outline
+// (mirrors `TopLevelGroup` in the sidebar). Every other `ListModal` user
+// (⌘K, ⌘⇧O, schema switcher) never has real top-level groups, so their flat
+// row list is wrapped as a single `has-header: false` bucket — no border,
+// same rendering as before.
+export struct PaletteGroup {
+    has-header: bool,
+    // Position of `rows[0]` in the original flat list — lets a row inside
+    // this group recover its true global index (`start-index + local i`)
+    // for `root.selected`/`root.choose(...)`, which Rust still treats as a
+    // single flat position across every group.
+    start-index: int,
+    rows: [PaletteItem],
+}
 
 export component ListModal inherits Rectangle {
     in property <bool> open;
     in property <string> title;
     in property <string> placeholder: "Search...";
-    in property <[PaletteItem]> items;
+    in property <[PaletteGroup]> items;
     in-out property <int> selected: 0;
     in property <length> card-width: 520px;
     in property <string> confirm-label: "Open";
@@ -100,9 +115,32 @@ export component ListModal inherits Rectangle {
                 Flickable {
                     viewport-height: list.preferred-height;
                     list := VerticalLayout {
-                        spacing: 1px;
+                        // Gap *between* top-level group cards (⌘O connection
+                        // picker only — every other caller has a single
+                        // `has-header: false` bucket, so this never applies).
+                        spacing: Tokens.sp2;
                         alignment: start;
-                        for it[i] in root.items: Rectangle {
+                        for grp[gi] in root.items: Rectangle {
+                            // One continuous card around a whole top-level
+                            // connection group (⌘O picker only), mirroring
+                            // the sidebar's `TopLevelGroup` outline. Every
+                            // other caller's single flat bucket draws no
+                            // border/background here at all.
+                            height: gwrap.preferred-height;
+                            background: grp.has-header ? Tokens.card : transparent;
+                            border-width: grp.has-header ? 1px : 0px;
+                            border-color: Tokens.border-strong;
+                            border-radius: Tokens.radius-lg;
+
+                            gwrap := VerticalLayout {
+                                padding: grp.has-header ? 1px : 0px;
+                                // Non-conn-group callers keep their original
+                                // uniform hairline gap between every row; the
+                                // conn-group card stays flush (its own
+                                // sibling-subgroup gap is added per-row below).
+                                spacing: grp.has-header ? 0px : 1px;
+                                alignment: start;
+                                for it[i] in grp.rows: Rectangle {
                             // Non-selectable group header (GitHub-style sections).
                             property <bool> is-section: it.kind == "section";
                             property <bool> is-group: it.kind == "group";
@@ -113,24 +151,45 @@ export component ListModal inherits Rectangle {
                             // unaffected.
                             property <bool> in-conn-group: is-group || it.group != "";
                             property <bool> two-line: it.sub != "";
-                            height: is-section ? 28px : two-line ? 44px : 34px;
-                            border-top-left-radius: is-group ? Tokens.radius-lg : Tokens.radius;
-                            border-top-right-radius: is-group ? Tokens.radius-lg : Tokens.radius;
-                            border-bottom-left-radius: it.is-group-end ? Tokens.radius-lg : Tokens.radius;
-                            border-bottom-right-radius: it.is-group-end ? Tokens.radius-lg : Tokens.radius;
+                            property <length> content-h: is-section ? 28px : two-line ? 44px : 34px;
+                            // True flat position — what `root.selected`/
+                            // `root.choose(...)` actually mean to Rust.
+                            property <int> global-i: grp.start-index + i;
+                            // Same box-boundary rule as the sidebar, scoped to
+                            // conn-group rows only — every other caller keeps
+                            // its original always-`Tokens.radius` pill style.
+                            property <bool> box-top: is-group || i == 0
+                                || (in-conn-group && it.depth > 0 && grp.rows[i - 1].depth != it.depth);
+                            property <bool> box-bottom: i == grp.rows.length - 1
+                                || (in-conn-group && grp.rows[i + 1].depth < it.depth)
+                                || (in-conn-group && grp.rows[i + 1].depth == it.depth && grp.rows[i + 1].kind == "group");
+                            property <bool> needs-gap: in-conn-group && box-top && i > 0
+                                && grp.rows[i - 1].depth >= it.depth;
+                            height: needs-gap ? content-h + Tokens.sp2 : content-h;
+                            background: transparent;
+
+                            card-box := Rectangle {
+                                y: parent.height - content-h;
+                                height: content-h;
+                                x: in-conn-group ? it.depth * Tokens.sp2 : 0px;
+                                width: parent.width - 2 * self.x;
+                                border-top-left-radius: in-conn-group ? (box-top ? Tokens.radius-lg : 0px) : Tokens.radius;
+                                border-top-right-radius: in-conn-group ? (box-top ? Tokens.radius-lg : 0px) : Tokens.radius;
+                                border-bottom-left-radius: in-conn-group ? (box-bottom ? Tokens.radius-lg : 0px) : Tokens.radius;
+                                border-bottom-right-radius: in-conn-group ? (box-bottom ? Tokens.radius-lg : 0px) : Tokens.radius;
                             background: is-section ? transparent
-                                : i == root.selected ? Tokens.chrome
+                                : global-i == root.selected ? Tokens.chrome
                                 : it-ta.has-hover ? Tokens.canvas
-                                : in-conn-group ? Tokens.card : transparent;
+                                : in-conn-group ? (it.depth > 0 ? Tokens.canvas : Tokens.card) : transparent;
                             it-ta := TouchArea {
                                 clicked => {
                                     if (is-group) {
                                         root.toggle-group(it.group);
                                     } else if (!is-section) {
-                                        root.selected = i;
+                                        root.selected = global-i;
                                     }
                                 }
-                                double-clicked => { if (!is-section && !is-group) { root.choose(i); } }
+                                double-clicked => { if (!is-section && !is-group) { root.choose(global-i); } }
                             }
                             // Section header: small dim caps, no icon.
                             if is-section: HorizontalLayout {
@@ -246,6 +305,9 @@ export component ListModal inherits Rectangle {
                                     }
                                 }
                             }
+                            } // card-box
+                                }
+                            } // gwrap
                         }
                     }
                 }

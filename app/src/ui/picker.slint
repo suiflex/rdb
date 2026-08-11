@@ -4,14 +4,14 @@
 import { Tokens } from "tokens.slint";
 import {
     DbBadge, OutlineChip, PrimaryButton, SecondaryButton, TextButton,
-    TagChip, FilterField, Tooltip, FloatingCard
+    TagChip, FilterField, Tooltip, FloatingCard, DangerButton
 } from "components.slint";
 import { AppIcon } from "icons.slint";
-import { ConnItem, KvRow } from "structs.slint";
+import { ConnItem, KvRow, TopLevelGroup } from "structs.slint";
 import { ScrollView } from "std-widgets.slint";
 
 export component ConnPicker inherits Rectangle {
-    in property <[ConnItem]> connections;
+    in property <[TopLevelGroup]> connections;
     in property <int> selected-conn: -1;
     in property <string> error;
     // True while a connect attempt is in flight (button shows a spinner label).
@@ -65,6 +65,8 @@ export component ConnPicker inherits Rectangle {
     property <bool> rename-modal-open: false;
     property <string> rename-old: "";
     property <string> rename-text: "";
+    property <bool> delete-confirm-open: false;
+    property <string> delete-confirm-target: "";
 
     background: Tokens.canvas;
 
@@ -121,39 +123,85 @@ export component ConnPicker inherits Rectangle {
                     list-content := VerticalLayout {
                         padding-left: Tokens.sp3;
                         padding-right: Tokens.sp3;
-                        // No uniform spacing here — that's what left a visible
-                        // gap between every row, including within one card
-                        // (header to its first member, member to member). The
-                        // only gap wanted is *between* cards, which the header
-                        // row's own extra height (added above, `i > 0`) already
-                        // provides.
-                        spacing: 0px;
+                        // Spacing here is *between* top-level group cards only
+                        // — each card below is its own element now, so this
+                        // is the one place that gap needs to be expressed.
+                        spacing: Tokens.sp2;
                         alignment: start;
 
-                        for item[i] in root.connections: Rectangle {
-                            // Only top-level groups start a new card. Subgroups
-                            // stay attached to their parent card; adding the same
-                            // gap before them makes the hierarchy look broken.
-                            // The inner header Rectangle is anchored to the
-                            // bottom when a top-level gap is present.
-                            height: item.is-header
-                                ? (item.depth == 0 && i > 0 ? 28px + Tokens.sp2 : 28px)
-                                : 40px;
-                            background: item.is-header ? transparent : Tokens.card;
-                            border-top-left-radius: !item.is-header && i == 0 ? Tokens.radius-lg : 0px;
-                            border-top-right-radius: !item.is-header && i == 0 ? Tokens.radius-lg : 0px;
-                            border-bottom-left-radius: !item.is-header && item.is-group-end ? Tokens.radius-lg : 0px;
-                            border-bottom-right-radius: !item.is-header && item.is-group-end ? Tokens.radius-lg : 0px;
+                        for grp[gi] in root.connections: Rectangle {
+                            // One continuous card around a whole top-level
+                            // group — its header, every nested subgroup, and
+                            // any of its own direct connections — so all of
+                            // it reads as belonging to the same group no
+                            // matter how a nested subgroup's own distinct
+                            // color breaks up the fill inside. The no-groups
+                            // case (`has-header` false, nothing ever put in a
+                            // group) has nothing to outline — it's just the
+                            // bare connection list on the canvas, as before.
+                            height: gwrap.preferred-height;
+                            background: grp.has-header ? Tokens.card : transparent;
+                            border-width: grp.has-header ? 1px : 0px;
+                            border-color: Tokens.border-strong;
+                            border-radius: Tokens.radius-lg;
+
+                            gwrap := VerticalLayout {
+                                padding: grp.has-header ? 1px : 0px;
+                                spacing: 0px;
+                                alignment: start;
+
+                                for item[i] in grp.rows: Rectangle {
+                            // A box "starts" on a header row (top-level group or
+                            // nested subgroup alike), or on a *nested* row whose
+                            // depth differs from the row before it (a subgroup's
+                            // own connections resuming after a deeper nested
+                            // subgroup ends). A depth-0 row never starts its own
+                            // box this way — a group's direct connections
+                            // resuming after a subgroup must stay flush and same
+                            // color as their header, or they read as detached
+                            // from the group instead of still belonging to it.
+                            // A box "ends" on the last row before depth drops
+                            // back out of it, or before a sibling header at the
+                            // same depth begins — which also naturally closes a
+                            // collapsed (childless) header's box on itself. This
+                            // one rule generalizes the old depth-0-only
+                            // `is-group-end` special case to any nesting depth.
+                            property <bool> box-top: item.is-header || i == 0
+                                || (item.depth > 0 && grp.rows[i - 1].depth != item.depth);
+                            property <bool> box-bottom: i == grp.rows.length - 1
+                                || grp.rows[i + 1].depth < item.depth
+                                || (grp.rows[i + 1].depth == item.depth && grp.rows[i + 1].is-header);
+                            property <length> content-h: item.is-header ? 28px : 40px;
+                            // A gap only belongs *between* sibling boxes at the
+                            // same-or-shallower level (a new subgroup starting,
+                            // or a parent's own rows resuming after one ends) —
+                            // never between a header and the first row of its
+                            // own box, which must stay visually attached.
+                            property <bool> needs-gap: box-top && i > 0
+                                && grp.rows[i - 1].depth >= item.depth;
+
+                            height: needs-gap ? content-h + Tokens.sp2 : content-h;
+                            background: transparent;
+
+                            // Card surface: the top-level group's card keeps its
+                            // usual full-width fill; a subgroup gets an inset,
+                            // differently-shaded surface so it reads as its own
+                            // card nested inside the parent group's card.
+                            card-box := Rectangle {
+                                y: parent.height - content-h;
+                                height: content-h;
+                                x: item.depth * Tokens.sp2;
+                                width: parent.width - 2 * self.x;
+                                background: item.depth > 0 ? Tokens.canvas : Tokens.card;
+                                border-top-left-radius: box-top ? Tokens.radius-lg : 0px;
+                                border-top-right-radius: box-top ? Tokens.radius-lg : 0px;
+                                border-bottom-left-radius: box-bottom ? Tokens.radius-lg : 0px;
+                                border-bottom-right-radius: box-bottom ? Tokens.radius-lg : 0px;
 
                             // --- group header row ---
                             if item.is-header: Rectangle {
-                                y: parent.height - 28px;
-                                height: 28px;
-                                background: Tokens.card;
-                                border-top-left-radius: item.depth == 0 ? Tokens.radius-lg : 0px;
-                                border-top-right-radius: item.depth == 0 ? Tokens.radius-lg : 0px;
-                                border-bottom-left-radius: item.is-group-end ? Tokens.radius-lg : 0px;
-                                border-bottom-right-radius: item.is-group-end ? Tokens.radius-lg : 0px;
+                                width: parent.width;
+                                height: parent.height;
                                 hdr-ta := TouchArea {
                                     // `item.group` is the raw-case key stored on
                                     // SavedConnection; `item.name` is uppercased
@@ -433,6 +481,9 @@ export component ConnPicker inherits Rectangle {
                                     }
                                 }
                             }
+                            } // card-box
+                                }
+                            } // gwrap
                         }
                     }
                 }
@@ -895,7 +946,8 @@ export component ConnPicker inherits Rectangle {
                                 root.rename-text = root.group-menu-target;
                                 root.rename-modal-open = true;
                             } else {
-                                root.group-delete(root.group-menu-target);
+                                root.delete-confirm-target = root.group-menu-target;
+                                root.delete-confirm-open = true;
                             }
                             group-menu.close();
                         }
@@ -970,6 +1022,62 @@ export component ConnPicker inherits Rectangle {
                         clicked => {
                             root.group-rename(root.rename-old, root.rename-text);
                             root.rename-modal-open = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- Delete group confirmation -----
+    Rectangle {
+        visible: root.delete-confirm-open;
+        background: Tokens.veil;
+        TouchArea { clicked => { root.delete-confirm-open = false; } }
+        Rectangle {
+            width: 340px;
+            x: (parent.width - self.width) / 2;
+            y: 140px;
+            height: dbox.preferred-height;
+            border-radius: Tokens.modal-radius;
+            background: Tokens.card;
+            border-width: 1px;
+            border-color: Tokens.border;
+            drop-shadow-blur: 42px;
+            drop-shadow-offset-y: 12px;
+            drop-shadow-color: #1C191426;
+            TouchArea {}
+            dbox := VerticalLayout {
+                padding: Tokens.sp4;
+                spacing: Tokens.sp3;
+                Text {
+                    text: "Delete group?";
+                    color: Tokens.text;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "\"" + root.delete-confirm-target + "\" will be deleted. Connections inside move up to the parent group — nothing is destroyed.";
+                    color: Tokens.text-dim;
+                    font-size: Tokens.font-sm;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    alignment: end;
+                    SecondaryButton {
+                        text: "Cancel";
+                        height: 30px;
+                        clicked => { root.delete-confirm-open = false; }
+                    }
+                    DangerButton {
+                        text: "Delete";
+                        height: 30px;
+                        clicked => {
+                            root.group-delete(root.delete-confirm-target);
+                            root.delete-confirm-open = false;
                         }
                     }
                 }

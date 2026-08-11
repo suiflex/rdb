@@ -57,6 +57,18 @@ export struct ConnItem {
     // mirrors `TreeNode.depth`.
     depth: int,
 }
+// One top-level card in the sidebar: its own header row plus every row
+// nested under it (subgroup headers, direct connections), so the sidebar
+// can draw one continuous outline around the whole card. `has-header` is
+// false only in the no-groups-at-all case, where the store's connections
+// render as a single flat, header-less list (no card/outline drawn).
+export struct TopLevelGroup {
+    has-header: bool,
+    // Includes the top-level header row itself as the first element when
+    // `has-header` is true — one flat list lets the sidebar reuse its
+    // per-row header/connection rendering unchanged, just scoped per group.
+    rows: [ConnItem],
+}
 // One Host/Port/… row of the connection-detail card.
 export struct KvRow { k: string, v: string }
 export struct StructField { name: string, type-name: string, nullable: bool }
