@@ -9,7 +9,7 @@ import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow, DocRow, Re
 import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "palette.slint";
-import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton, FilterField, UnderlineSegment, DbBadge, Tooltip, TooltipArea, Shortcut } from "components.slint";
+import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton, FilterField, ResultModeToggle, DbBadge, Tooltip, TooltipArea, Shortcut } from "components.slint";
 import { ScrollView, TextEdit, ComboBox } from "std-widgets.slint";
 import { AppIcon } from "icons.slint";
 
@@ -224,21 +224,12 @@ export component QueryPane inherits Rectangle {
                         clicked => { root.browse-editor-open = !root.browse-editor-open; }
                     }
                 }
-                // Mongo document view switch (grid table ⇄ JSON tree)
+                // Mongo document view switch (grid table ⇄ JSON tree).
                 if root.result-kind == 1: VerticalLayout {
                     alignment: center;
-                    HorizontalLayout {
-                        spacing: Tokens.sp3;
-                        UnderlineSegment {
-                            text: "Grid";
-                            active: root.doc-view == 0;
-                            clicked => { root.doc-view = 0; }
-                        }
-                        UnderlineSegment {
-                            text: "Tree";
-                            active: root.doc-view == 1;
-                            clicked => { root.doc-view = 1; }
-                        }
+                    ResultModeToggle {
+                        mode: root.doc-view;
+                        changed(mode) => { root.doc-view = mode; }
                     }
                 }
                 VerticalLayout {
@@ -618,39 +609,10 @@ export component QueryPane inherits Rectangle {
                         clicked => { root.filter-open = !root.filter-open; }
                     }
                     // Mongo query results use the same Grid/Tree document view as
-                    // collection browsing; keep the switch available in this header
-                    // too. `UnderlineSegment` has no explicit height (it sizes to
-                    // its label text), unlike the `TextButton` siblings around it
-                    // (fixed `Tokens.button-h`) — a `VerticalLayout{alignment:center}`
-                    // wrapper still left it a hair off (nested-layout auto-sizing
-                    // through this row's own stretch cross-axis-alignment isn't
-                    // reliable here), so this centers it with an explicit `y`
-                    // instead: a plain `Rectangle` (not a layout, so `y`/`height` on
-                    // its child are respected literally) stretches to the row's full
-                    // height like every sibling, and the inner row is placed at the
-                    // exact vertical center of that height, no auto-sizing involved.
-                    if root.result-kind == 1: Rectangle {
-                        // Explicit width — otherwise this Rectangle has no
-                        // natural size and the row's default stretch along
-                        // its main (horizontal) axis hands it all the
-                        // leftover space, shoving Copy/Export/Chart to the
-                        // far right.
-                        width: gt-row.preferred-width;
-                        gt-row := HorizontalLayout {
-                            y: (parent.height - self.preferred-height) / 2;
-                            height: self.preferred-height;
-                            spacing: Tokens.sp3;
-                            UnderlineSegment {
-                                text: "Grid";
-                                active: root.doc-view == 0;
-                                clicked => { root.doc-view = 0; }
-                            }
-                            UnderlineSegment {
-                                text: "Tree";
-                                active: root.doc-view == 1;
-                                clicked => { root.doc-view = 1; }
-                            }
-                        }
+                    // collection browsing.
+                    if root.result-kind == 1: ResultModeToggle {
+                        mode: root.doc-view;
+                        changed(mode) => { root.doc-view = mode; }
                     }
                     TextButton {
                         text: "Copy";
