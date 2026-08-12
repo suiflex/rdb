@@ -389,27 +389,39 @@ async fn schema_impl(client: &Client, schema: &str) -> Result<Schema> {
         .try_get(0)
         .map_err(|e| RdbError::Schema(pg_err(&e)))?;
 
+    // PK/FK column pairs for the whole schema in one query, instead of two
+    // correlated EXISTS subqueries per column (was O(tables * columns)).
+    let key_rows = client
+        .query(
+            "SELECT tc.constraint_type, kcu.table_name, kcu.column_name \
+             FROM information_schema.table_constraints tc \
+             JOIN information_schema.key_column_usage kcu \
+               ON tc.constraint_name = kcu.constraint_name \
+              AND tc.table_schema = kcu.table_schema \
+             WHERE tc.table_schema = $1 \
+               AND tc.constraint_type IN ('PRIMARY KEY', 'FOREIGN KEY')",
+            &[&schema],
+        )
+        .await
+        .map_err(|e| RdbError::Schema(pg_err(&e)))?;
+    let mut pk_cols: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let mut fk_cols: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    for row in &key_rows {
+        let kind: String = row.get(0);
+        let table: String = row.get(1);
+        let column: String = row.get(2);
+        if kind == "PRIMARY KEY" {
+            pk_cols.insert((table, column));
+        } else {
+            fk_cols.insert((table, column));
+        }
+    }
+
     // User tables + columns from information_schema, scoped to one schema.
     // Ordered so columns of the same table are contiguous for grouping.
     let rows = client
         .query(
-            "SELECT c.table_name, c.column_name, c.data_type, c.is_nullable, \
-             EXISTS (SELECT 1 FROM information_schema.table_constraints tc \
-                     JOIN information_schema.key_column_usage kcu \
-                       ON tc.constraint_name = kcu.constraint_name \
-                      AND tc.table_schema = kcu.table_schema \
-                     WHERE tc.constraint_type = 'PRIMARY KEY' \
-                       AND tc.table_schema = c.table_schema \
-                       AND tc.table_name = c.table_name \
-                       AND kcu.column_name = c.column_name) AS is_pk, \
-             EXISTS (SELECT 1 FROM information_schema.table_constraints tc \
-                     JOIN information_schema.key_column_usage kcu \
-                       ON tc.constraint_name = kcu.constraint_name \
-                      AND tc.table_schema = kcu.table_schema \
-                     WHERE tc.constraint_type = 'FOREIGN KEY' \
-                       AND tc.table_schema = c.table_schema \
-                       AND tc.table_name = c.table_name \
-                       AND kcu.column_name = c.column_name) AS is_fk \
+            "SELECT c.table_name, c.column_name, c.data_type, c.is_nullable \
              FROM information_schema.columns c \
              JOIN information_schema.tables t \
                ON t.table_schema = c.table_schema AND t.table_name = c.table_name \
@@ -426,12 +438,13 @@ async fn schema_impl(client: &Client, schema: &str) -> Result<Schema> {
         let column: String = row.get(1);
         let data_type: String = row.get(2);
         let is_nullable: String = row.get(3); // 'YES' | 'NO'
+        let key = (table.clone(), column.clone());
         let field = Field {
             name: column,
             type_name: data_type,
             nullable: is_nullable.eq_ignore_ascii_case("YES"),
-            pk: row.get(4),
-            fk: row.get(5),
+            pk: pk_cols.contains(&key),
+            fk: fk_cols.contains(&key),
         };
         match containers.last_mut() {
             Some(last) if last.name == table => last.fields.push(field),
