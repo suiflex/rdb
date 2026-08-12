@@ -508,14 +508,18 @@ fn build_conn_items(
     let mut direct_conns: std::collections::HashMap<String, Vec<usize>> =
         std::collections::HashMap::new();
     for (i, sc) in store.list().iter().enumerate() {
-        if !needle.is_empty() && !sc.name.to_lowercase().contains(&needle) {
-            continue;
-        }
         let g = sc
             .group
             .as_deref()
             .and_then(rdb_connstore::normalize_group_path)
             .unwrap_or_else(|| UNGROUPED.to_string());
+        if !needle.is_empty()
+            && !sc.name.to_lowercase().contains(&needle)
+            && !g.to_lowercase().contains(&needle)
+            && !sc.env_tag.as_str().to_lowercase().contains(&needle)
+        {
+            continue;
+        }
         if g == UNGROUPED {
             if registered.insert(UNGROUPED.to_string()) {
                 child_folders
