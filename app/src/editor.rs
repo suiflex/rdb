@@ -225,6 +225,14 @@ pub fn sanitize(s: &str) -> String {
             '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}' | '\u{2032}' => Some('\''),
             '\u{201c}' | '\u{201d}' | '\u{201e}' | '\u{201f}' | '\u{2033}' => Some('"'),
             '\u{2010}'..='\u{2015}' | '\u{2212}' => Some('-'),
+            // ponytail: blocklist of known-bad ranges (private-use/replacement
+            // codepoints from external copy-widget icon fonts), not real
+            // glyph-coverage validation against the editor font
+            '\u{e000}'..='\u{f8ff}'
+            | '\u{f0000}'..='\u{ffffd}'
+            | '\u{100000}'..='\u{10fffd}'
+            | '\u{fffc}'
+            | '\u{fffd}' => None,
             c if c.is_control() => None,
             c => Some(c),
         })
@@ -1127,6 +1135,15 @@ mod tests {
         let mut ed = EditorState::from_text("");
         ed.insert(dirty);
         assert_eq!(ed.text(), "SELECT 1 FROMt;");
+    }
+
+    #[test]
+    fn sanitize_drops_private_use_and_replacement_chars() {
+        // PUA glyph (e.g. from a web tool's copy-button icon font) before SET/WHERE
+        let dirty = "SET\u{e000}x=1\u{fffc}WHERE\u{fffd}y=2";
+        assert_eq!(sanitize(dirty), "SETx=1WHEREy=2");
+        // supplementary PUA-A / PUA-B also dropped
+        assert_eq!(sanitize("a\u{f0000}b\u{100000}c"), "abc");
     }
 
     // ----- selection -----
