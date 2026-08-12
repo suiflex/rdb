@@ -605,7 +605,7 @@ callback create-table-commit();
     in property <int> nosql-collection-limit: 200;
     callback set-nosql-collection-limit(int);
     // Auto-append alias when accepting a table name from completion in FROM/JOIN position.
-    in property <bool> auto-table-alias: true;
+    in-out property <bool> auto-table-alias: true;
     callback set-auto-table-alias(bool);
     in-out property <bool> shortcuts-open: false;
     // Settings modal active section: 0 Appearance, 1 Updates, 2 About.
@@ -2732,7 +2732,10 @@ callback create-table-commit();
                     ToggleRow {
                         label: "Auto table alias";
                         checked: root.auto-table-alias;
-                        toggled => { root.set-auto-table-alias(!root.auto-table-alias); }
+                        toggled => {
+                            root.auto-table-alias = !root.auto-table-alias;
+                            root.set-auto-table-alias(root.auto-table-alias);
+                        }
                     }
                     HorizontalLayout {
                         SecondaryButton {
