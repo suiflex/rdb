@@ -233,6 +233,9 @@ pub fn sanitize(s: &str) -> String {
             | '\u{100000}'..='\u{10fffd}'
             | '\u{fffc}'
             | '\u{fffd}' => None,
+            // variation selectors: orphaned once the PUA/emoji base glyph
+            // they modify is stripped above, still renders as tofu alone
+            '\u{fe00}'..='\u{fe0f}' | '\u{e0100}'..='\u{e01ef}' => None,
             c if c.is_control() => None,
             c => Some(c),
         })
@@ -1144,6 +1147,9 @@ mod tests {
         assert_eq!(sanitize(dirty), "SETx=1WHEREy=2");
         // supplementary PUA-A / PUA-B also dropped
         assert_eq!(sanitize("a\u{f0000}b\u{100000}c"), "abc");
+        // orphaned variation selector (PUA base + VS, base already stripped
+        // above) doesn't survive on its own either
+        assert_eq!(sanitize("SET\u{e000}\u{fe0f}x"), "SETx");
     }
 
     // ----- selection -----
