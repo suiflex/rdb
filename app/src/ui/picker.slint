@@ -311,14 +311,24 @@ export component ConnPicker inherits Rectangle {
                                             border-radius: 11px;
                                             opacity: hdr-ta.has-hover || gmore-ta.has-hover ? 1.0 : 0.0;
                                             background: gmore-ta.has-hover ? Tokens.card.with-alpha(0.5) : transparent;
-                                            HorizontalLayout {
+                                            // HorizontalLayout's cross (vertical) axis
+                                            // defaults to `stretch`, which doesn't
+                                            // resize a fixed-height child but doesn't
+                                            // center it either — dots sat pinned to
+                                            // the top instead of the circle's middle.
+                                            // Wrap in a VerticalLayout for its own
+                                            // (supported) main-axis centering.
+                                            VerticalLayout {
                                                 alignment: center;
-                                                spacing: 2px;
-                                                for _dot in [0, 1, 2]: Rectangle {
-                                                    width: 3px;
-                                                    height: 3px;
-                                                    border-radius: 1.5px;
-                                                    background: Tokens.text-faint;
+                                                HorizontalLayout {
+                                                    alignment: center;
+                                                    spacing: 2px;
+                                                    for _dot in [0, 1, 2]: Rectangle {
+                                                        width: 3px;
+                                                        height: 3px;
+                                                        border-radius: 1.5px;
+                                                        background: Tokens.text-faint;
+                                                    }
                                                 }
                                             }
                                             gmore-ta := TouchArea {
