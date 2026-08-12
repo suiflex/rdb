@@ -2740,21 +2740,11 @@ callback create-table-commit();
                         }
                         ToggleRow {
                             label: "Auto table alias";
-                            description: "Appends a short alias (e.g. order_items → oi) when you accept a table suggestion in FROM/JOIN.";
+                            description: "Appends a short alias (e.g. order_items → oi).";
                             checked: root.auto-table-alias;
                             toggled => {
                                 root.auto-table-alias = !root.auto-table-alias;
                                 root.set-auto-table-alias(root.auto-table-alias);
-                            }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        SecondaryButton {
-                            text: "Keyboard Shortcuts";
-                            clicked => {
-                                root.settings-open = false;
-                                root.shortcuts-open = true;
                             }
                         }
                     }
@@ -2887,7 +2877,14 @@ callback create-table-commit();
 
                 // --- done ---
                 HorizontalLayout {
-                    alignment: end;
+                    if root.settings-tab == 0: SecondaryButton {
+                        text: "Keyboard Shortcuts";
+                        clicked => {
+                            root.settings-open = false;
+                            root.shortcuts-open = true;
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
                     PrimaryButton {
                         text: "Done";
                         clicked => { root.settings-open = false; }
