@@ -257,6 +257,11 @@ export component ConnPicker inherits Rectangle {
                                                 name: "caret";
                                                 size: 8px;
                                                 color: Tokens.warn;
+                                                // chevron glyph's visual mass sits at
+                                                // its bottom vertex, so geometric
+                                                // centering still reads slightly low —
+                                                // nudge up 1px to compensate
+                                                y: (parent.height - self.height) / 2 - 1px;
                                                 transform-rotation: item.expanded ? 0deg : -90deg;
                                             }
                                         }
@@ -298,9 +303,12 @@ export component ConnPicker inherits Rectangle {
                                     if item.group != "Ungrouped": VerticalLayout {
                                         alignment: center;
                                         Rectangle {
-                                            width: 24px;
-                                            height: 20px;
-                                            border-radius: Tokens.radius;
+                                            // square + fully round so the hover halo
+                                            // is always a circle centered on the dots,
+                                            // instead of an off-square rounded rect
+                                            width: 22px;
+                                            height: 22px;
+                                            border-radius: 11px;
                                             opacity: hdr-ta.has-hover || gmore-ta.has-hover ? 1.0 : 0.0;
                                             background: gmore-ta.has-hover ? Tokens.card.with-alpha(0.5) : transparent;
                                             HorizontalLayout {
