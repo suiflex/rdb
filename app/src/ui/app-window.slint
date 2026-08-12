@@ -3,7 +3,7 @@ export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
-    SearchCommandPill, BreadcrumbChip, DbBadge, GlyphButton, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SelectBox, TextButton, Toggle, ToggleRow, Tooltip, TooltipArea, Shortcut
+    SearchCommandPill, BreadcrumbChip, DbBadge, GlyphButton, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SelectBox, SettingsSectionHeader, TextButton, Toggle, ToggleRow, Tooltip, TooltipArea, Shortcut
 } from "components.slint";
 export { Shortcut }
 import { NavCluster } from "nav-cluster.slint";
@@ -2665,78 +2665,90 @@ callback create-table-commit();
 
                 // --- Appearance ---
                 if root.settings-tab == 0: VerticalLayout {
-                    spacing: Tokens.sp3;
-                    ToggleRow {
-                        label: "Dark mode";
-                        checked: Tokens.dark;
-                        toggled => { root.toggle-theme(); }
-                    }
-                    ToggleRow {
-                        label: "Sidebar on the right";
-                        checked: root.sidebar-right;
-                        toggled => {
-                            root.sidebar-right = !root.sidebar-right;
-                            root.set-sidebar-side(root.sidebar-right);
-                        }
-                    }
-                    HorizontalLayout {
+                    spacing: Tokens.sp4;
+
+                    VerticalLayout {
                         spacing: Tokens.sp3;
-                        VerticalLayout {
-                            alignment: center;
-                            horizontal-stretch: 1;
-                            Text {
-                                text: "History entries";
-                                color: Tokens.text;
-                                font-size: 13px;
-                            }
+                        SettingsSectionHeader { label: "Appearance"; }
+                        ToggleRow {
+                            label: "Dark mode";
+                            checked: Tokens.dark;
+                            toggled => { root.toggle-theme(); }
                         }
-                        SelectBox {
-                            width: 82px;
-                            model: ["25", "50", "100", "200"];
-                            current-value: root.history-max-entries == 25 ? "25"
-                                : root.history-max-entries == 100 ? "100"
-                                : root.history-max-entries == 200 ? "200" : "50";
-                            selected(value) => {
-                                root.set-history-max-entries(value == "25" ? 25
-                                    : value == "100" ? 100 : value == "200" ? 200 : 50);
+                        ToggleRow {
+                            label: "Sidebar on the right";
+                            checked: root.sidebar-right;
+                            toggled => {
+                                root.sidebar-right = !root.sidebar-right;
+                                root.set-sidebar-side(root.sidebar-right);
                             }
                         }
                     }
-                    // NoSQL-only: caps how many collections the MongoDB sidebar
-                    // lists per database. RDBMS table listings are unaffected.
-                    HorizontalLayout {
+
+                    VerticalLayout {
                         spacing: Tokens.sp3;
-                        VerticalLayout {
-                            alignment: center;
-                            horizontal-stretch: 1;
-                            Text {
-                                text: "Max collections (MongoDB)";
-                                color: Tokens.text;
-                                font-size: 13px;
+                        SettingsSectionHeader { label: "Editor"; }
+                        HorizontalLayout {
+                            spacing: Tokens.sp3;
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 1;
+                                Text {
+                                    text: "History entries";
+                                    color: Tokens.text;
+                                    font-size: 13px;
+                                }
+                            }
+                            SelectBox {
+                                width: 82px;
+                                model: ["25", "50", "100", "200"];
+                                current-value: root.history-max-entries == 25 ? "25"
+                                    : root.history-max-entries == 100 ? "100"
+                                    : root.history-max-entries == 200 ? "200" : "50";
+                                selected(value) => {
+                                    root.set-history-max-entries(value == "25" ? 25
+                                        : value == "100" ? 100 : value == "200" ? 200 : 50);
+                                }
                             }
                         }
-                        SelectBox {
-                            width: 82px;
-                            model: ["50", "100", "200", "500", "1000"];
-                            current-value: root.nosql-collection-limit == 50 ? "50"
-                                : root.nosql-collection-limit == 100 ? "100"
-                                : root.nosql-collection-limit == 500 ? "500"
-                                : root.nosql-collection-limit == 1000 ? "1000" : "200";
-                            selected(value) => {
-                                root.set-nosql-collection-limit(value == "50" ? 50
-                                    : value == "100" ? 100 : value == "500" ? 500
-                                    : value == "1000" ? 1000 : 200);
+                        // NoSQL-only: caps how many collections the MongoDB sidebar
+                        // lists per database. RDBMS table listings are unaffected.
+                        HorizontalLayout {
+                            spacing: Tokens.sp3;
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 1;
+                                Text {
+                                    text: "Max collections (MongoDB)";
+                                    color: Tokens.text;
+                                    font-size: 13px;
+                                }
+                            }
+                            SelectBox {
+                                width: 82px;
+                                model: ["50", "100", "200", "500", "1000"];
+                                current-value: root.nosql-collection-limit == 50 ? "50"
+                                    : root.nosql-collection-limit == 100 ? "100"
+                                    : root.nosql-collection-limit == 500 ? "500"
+                                    : root.nosql-collection-limit == 1000 ? "1000" : "200";
+                                selected(value) => {
+                                    root.set-nosql-collection-limit(value == "50" ? 50
+                                        : value == "100" ? 100 : value == "500" ? 500
+                                        : value == "1000" ? 1000 : 200);
+                                }
+                            }
+                        }
+                        ToggleRow {
+                            label: "Auto table alias";
+                            description: "Appends a short alias (e.g. order_items → oi) when you accept a table suggestion in FROM/JOIN.";
+                            checked: root.auto-table-alias;
+                            toggled => {
+                                root.auto-table-alias = !root.auto-table-alias;
+                                root.set-auto-table-alias(root.auto-table-alias);
                             }
                         }
                     }
-                    ToggleRow {
-                        label: "Auto table alias";
-                        checked: root.auto-table-alias;
-                        toggled => {
-                            root.auto-table-alias = !root.auto-table-alias;
-                            root.set-auto-table-alias(root.auto-table-alias);
-                        }
-                    }
+
                     HorizontalLayout {
                         SecondaryButton {
                             text: "Keyboard Shortcuts";

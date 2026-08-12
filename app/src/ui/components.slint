@@ -39,19 +39,28 @@ export component Toggle inherits TouchArea {
     }
 }
 
-// A settings line: label on the left, toggle on the right.
+// A settings line: label (+ optional one-line description) on the left,
+// toggle on the right.
 export component ToggleRow inherits HorizontalLayout {
     in property <string> label;
+    in property <string> description: "";
     in property <bool> checked;
     callback toggled();
     spacing: Tokens.sp3;
     VerticalLayout {
         alignment: center;
         horizontal-stretch: 1;
+        spacing: 2px;
         Text {
             text: root.label;
             color: Tokens.text;
             font-size: Tokens.font-md;
+        }
+        if root.description != "": Text {
+            text: root.description;
+            color: Tokens.text-dim;
+            font-size: Tokens.font-xs;
+            wrap: word-wrap;
         }
     }
     VerticalLayout {
@@ -61,6 +70,20 @@ export component ToggleRow inherits HorizontalLayout {
             toggled => { root.toggled(); }
         }
     }
+}
+
+// A small uppercase-ish section label for grouping settings rows, with a
+// hairline divider below.
+export component SettingsSectionHeader inherits VerticalLayout {
+    in property <string> label;
+    spacing: Tokens.sp1;
+    Text {
+        text: root.label;
+        color: Tokens.text-dim;
+        font-size: Tokens.font-xs;
+        font-weight: Tokens.weight-emphasis;
+    }
+    Rectangle { height: 1px; background: Tokens.border; }
 }
 
 // Shared tooltip state. Buttons report their hovered tooltip + window-space
