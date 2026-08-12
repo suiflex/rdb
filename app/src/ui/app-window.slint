@@ -604,6 +604,9 @@ callback create-table-commit();
     // Max collections listed per database for NoSQL (MongoDB); RDBMS unaffected.
     in property <int> nosql-collection-limit: 200;
     callback set-nosql-collection-limit(int);
+    // Auto-append alias when accepting a table name from completion in FROM/JOIN position.
+    in property <bool> auto-table-alias: true;
+    callback set-auto-table-alias(bool);
     in-out property <bool> shortcuts-open: false;
     // Settings modal active section: 0 Appearance, 1 Updates, 2 About.
     in-out property <int> settings-tab: 0;
@@ -2725,6 +2728,11 @@ callback create-table-commit();
                                     : value == "1000" ? 1000 : 200);
                             }
                         }
+                    }
+                    ToggleRow {
+                        label: "Auto table alias";
+                        checked: root.auto-table-alias;
+                        toggled => { root.set-auto-table-alias(!root.auto-table-alias); }
                     }
                     HorizontalLayout {
                         SecondaryButton {

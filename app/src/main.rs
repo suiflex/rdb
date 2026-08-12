@@ -1296,7 +1296,8 @@ mod result_tab_tests {
 struct GroupRuntime {
     ed_state: Rc<RefCell<editor::EditorState>>,
     folded_heads: Rc<RefCell<HashSet<usize>>>,
-    completion_ctx: Rc<RefCell<(usize, Vec<String>)>>,
+    #[allow(clippy::type_complexity)]
+    completion_ctx: Rc<RefCell<(usize, Vec<(String, String)>)>>,
     find_hits: Rc<RefCell<Vec<(usize, usize, usize)>>>,
     edit_buf: Arc<std::sync::Mutex<model::EditBuffer>>,
     results: Arc<std::sync::Mutex<Vec<StoredResult>>>,
@@ -4175,6 +4176,7 @@ fn main() -> Result<(), slint::PlatformError> {
     ));
     window.set_history_max_entries(history_cap.get() as i32);
     window.set_nosql_collection_limit(settings.borrow().get().nosql_collection_limit.max(1) as i32);
+    window.set_auto_table_alias(settings.borrow().get().editor.auto_table_alias);
     window.set_app_version(env!("CARGO_PKG_VERSION").into());
 
     // Fixed window size for the screenshot loop: RDB_WIN=WxH (logical px).
@@ -4531,8 +4533,13 @@ fn main() -> Result<(), slint::PlatformError> {
                     depth: 0,
                 })
                 .collect();
-            *panes[pane].completion_ctx.borrow_mut() =
-                (word_len, cands.iter().map(|c| c.label.clone()).collect());
+            *panes[pane].completion_ctx.borrow_mut() = (
+                word_len,
+                cands
+                    .iter()
+                    .map(|c| (c.label.clone(), c.kind.clone()))
+                    .collect(),
+            );
             set_p_completion_items(&w, pane, ModelRc::from(Rc::new(VecModel::from(items))));
             set_p_completion_selected(&w, pane, 0);
             set_p_completion_visible(&w, pane, true);
@@ -4542,12 +4549,14 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = window.as_weak();
         let panes = panes.clone();
         let sync_editor = sync_editor.clone();
+        let settings = settings.clone();
+        let cur_engine = cur_engine.clone();
         Rc::new(move |pane, idx| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let (word_len, labels) = panes[pane].completion_ctx.borrow().clone();
-            let Some(label) = labels.get(idx.max(0) as usize).cloned() else {
+            let (word_len, entries) = panes[pane].completion_ctx.borrow().clone();
+            let Some((label, kind)) = entries.get(idx.max(0) as usize).cloned() else {
                 return;
             };
             {
@@ -4556,6 +4565,21 @@ fn main() -> Result<(), slint::PlatformError> {
                     ed.backspace();
                 }
                 ed.insert(&label);
+                // Auto-append alias when accepting a table name in FROM/JOIN position.
+                if kind == "table" && settings.borrow().get().editor.auto_table_alias {
+                    let language = cur_engine
+                        .borrow()
+                        .map(rdb_connstore::Engine::language)
+                        .unwrap_or(rdb_connstore::QueryLanguage::Sql);
+                    let before = ed.before_cursor_doc();
+                    let cur_line = before.rsplit('\n').next().unwrap_or(&before);
+                    if completion::is_table_position(cur_line, language) {
+                        let alias = completion::generate_alias(&label);
+                        if !alias.is_empty() {
+                            ed.insert(&format!(" {alias}"));
+                        }
+                    }
+                }
             }
             set_p_completion_visible(&w, pane, false);
             *panes[pane].completion_ctx.borrow_mut() = (0, Vec::new());
@@ -12292,6 +12316,16 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 });
             });
+        });
+    }
+
+    // ----- settings: auto-table-alias toggle -----
+    {
+        let settings = settings.clone();
+        window.on_set_auto_table_alias(move |v| {
+            let _ = settings
+                .borrow_mut()
+                .update(|s| s.editor.auto_table_alias = v);
         });
     }
 
