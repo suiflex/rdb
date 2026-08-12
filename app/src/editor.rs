@@ -220,6 +220,11 @@ pub fn sanitize(s: &str) -> String {
             | '\u{2029}'
             | '\u{2060}'
             | '\u{feff}' => None,
+            // typographic punctuation (WhatsApp/Word/Notion) → ASCII, so it
+            // both renders and parses as SQL
+            '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}' | '\u{2032}' => Some('\''),
+            '\u{201c}' | '\u{201d}' | '\u{201e}' | '\u{201f}' | '\u{2033}' => Some('"'),
+            '\u{2010}'..='\u{2015}' | '\u{2212}' => Some('-'),
             c if c.is_control() => None,
             c => Some(c),
         })
@@ -1113,6 +1118,11 @@ mod tests {
         assert_eq!(sanitize(dirty), "SELECT 1 FROMt;");
         // newlines and tabs survive
         assert_eq!(sanitize("a\n\tb"), "a\n\tb");
+        // smart quotes / dashes from WhatsApp fold to ASCII
+        assert_eq!(
+            sanitize("WHERE name = \u{2018}a\u{2019} \u{2013}\u{2014} \u{201c}b\u{201d}"),
+            "WHERE name = 'a' -- \"b\""
+        );
         // pasted text lands clean in the buffer
         let mut ed = EditorState::from_text("");
         ed.insert(dirty);
