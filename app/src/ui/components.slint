@@ -368,6 +368,7 @@ export component TextButton inherits Rectangle {
         color: active ? Tokens.accent : Tokens.text-dim;
         font-size: Tokens.font-sm;
         font-weight: 500;
+        vertical-alignment: center;
     }
     ta := TooltipArea {
         tip: root.tooltip;
@@ -391,6 +392,7 @@ export component ExportButton inherits Rectangle {
         color: Tokens.text-dim;
         font-size: Tokens.font-sm;
         font-weight: 500;
+        vertical-alignment: center;
     }
     menu := PopupWindow {
         // Default close-on-click swallows the press and closes before the inner
@@ -588,7 +590,7 @@ export component UnderlineSegment inherits Rectangle {
     // and therefore different auto-heights, throwing off any alignment
     // that assumes every instance shares one height (siblings in a row,
     // this segment vs. its own pair).
-    height: Tokens.font-sm + 2 * Tokens.sp1;
+    height: Tokens.button-h;
     label := Text {
         text: root.text;
         color: active ? Tokens.accent : (ta.has-hover ? Tokens.text : Tokens.text-dim);
@@ -603,6 +605,60 @@ export component UnderlineSegment inherits Rectangle {
         background: active ? Tokens.accent : transparent;
     }
     ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+// Result view toggle (Grid/Tree) with the same geometry as toolbar buttons.
+export component ResultModeButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> active: false;
+    in property <string> tooltip;
+    callback clicked;
+    height: Tokens.button-h;
+    width: label.preferred-width + 2 * Tokens.sp2;
+    label := Text {
+        text: root.text;
+        color: root.active ? Tokens.accent : (ta.has-hover ? Tokens.text : Tokens.text-dim);
+        font-size: Tokens.font-sm;
+        font-weight: root.active ? Tokens.weight-emphasis : 500;
+        vertical-alignment: center;
+    }
+    if root.active: Rectangle {
+        y: parent.height - self.height;
+        height: 2px;
+        width: parent.width;
+        background: Tokens.accent;
+    }
+    ta := TooltipArea {
+        tip: root.tooltip;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Grid/Tree toggle used by both query results and direct collection browsing.
+// The component owns its toolbar slot geometry so both parent toolbars place it
+// identically without extra layout wrappers.
+export component ResultModeToggle inherits Rectangle {
+    in property <int> mode: 0;
+    callback changed(int);
+    height: Tokens.button-h;
+    width: row.preferred-width;
+
+    row := HorizontalLayout {
+        height: Tokens.button-h;
+        spacing: Tokens.sp3;
+        ResultModeButton {
+            text: "Grid";
+            active: root.mode == 0;
+            tooltip: "Show the result as a grid";
+            clicked => { root.changed(0); }
+        }
+        ResultModeButton {
+            text: "Tree";
+            active: root.mode == 1;
+            tooltip: "Show the result as a tree";
+            clicked => { root.changed(1); }
+        }
+    }
 }
 
 // Grey tag chip (mono text: profin, fintech).
