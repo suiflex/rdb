@@ -7993,9 +7993,8 @@ fn main() -> Result<(), slint::PlatformError> {
                         // Load every other schema's tables so cross-schema
                         // `schema.table` autocompletes. Runs after the sidebar
                         // (active schema) already rendered; the popup just gains
-                        // more names as this fills.
-                        // ponytail: sequential N+1 fetch, fine for typical schema
-                        // counts; make it concurrent if a wide DB feels laggy.
+                        // more names as this fills. Fetched concurrently, one
+                        // task per schema, instead of sequentially.
                         if matches!(engine, rdb_connstore::Engine::Postgres)
                             && all_schema_names.len() > 1
                         {
@@ -8004,10 +8003,24 @@ fn main() -> Result<(), slint::PlatformError> {
                                 guard.as_ref().map(|(_, d)| d.clone())
                             };
                             if let Some(driver) = driver {
+                                let handles: Vec<_> = all_schema_names
+                                    .iter()
+                                    .cloned()
+                                    .map(|name| {
+                                        let driver = driver.clone();
+                                        tokio::spawn(async move {
+                                            driver
+                                                .schema_for(&name)
+                                                .await
+                                                .ok()
+                                                .map(|s| model::to_completion_nodes(&name, &s))
+                                        })
+                                    })
+                                    .collect();
                                 let mut all = Vec::new();
-                                for name in &all_schema_names {
-                                    if let Ok(s) = driver.schema_for(name).await {
-                                        all.extend(model::to_completion_nodes(name, &s));
+                                for handle in handles {
+                                    if let Ok(Some(nodes)) = handle.await {
+                                        all.extend(nodes);
                                     }
                                 }
                                 if !all.is_empty() {
