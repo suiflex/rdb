@@ -5993,7 +5993,16 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_sel_has_custom_color(s.color.is_some());
             let label = AnyDriver::label(s.engine);
             let sub = match s.group.as_deref().filter(|g| !g.trim().is_empty()) {
-                Some(g) => format!("{label} · grup {}", g.to_lowercase()),
+                Some(g) => {
+                    let mut parts = g.split('/').filter(|p| !p.trim().is_empty());
+                    match (parts.next(), parts.collect::<Vec<_>>().join(" / ")) {
+                        (Some(group), sub) if !sub.is_empty() => {
+                            format!("{label} · Group: {group} · Subgroup: {sub}")
+                        }
+                        (Some(group), _) => format!("{label} · Group: {group}"),
+                        (None, _) => label.to_string(),
+                    }
+                }
                 None => label.to_string(),
             };
             w.set_sel_sub(sub.into());
