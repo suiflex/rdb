@@ -56,6 +56,9 @@ pub struct EditorPrefs {
     pub font_size: u16,
     pub default_page_size: u32,
     pub history_max_entries: u16,
+    /// Auto-append a short alias when accepting a table name from completion
+    /// in FROM/JOIN position. `users` → `users u`, `order_items` → `order_items oi`.
+    pub auto_table_alias: bool,
 }
 
 impl Default for EditorPrefs {
@@ -64,6 +67,7 @@ impl Default for EditorPrefs {
             font_size: 13,
             default_page_size: 100,
             history_max_entries: 50,
+            auto_table_alias: true,
         }
     }
 }
@@ -176,6 +180,7 @@ mod tests {
         assert_eq!(s.get().last_update_check, None);
         assert_eq!(s.get().editor.default_page_size, 100);
         assert_eq!(s.get().editor.history_max_entries, 50);
+        assert!(s.get().editor.auto_table_alias);
         assert_eq!(s.get().nosql_collection_limit, 200);
     }
 
@@ -214,5 +219,6 @@ mod tests {
         assert!(s.get().update_check);
         assert_eq!(s.get().editor.default_page_size, 100);
         assert_eq!(s.get().editor.history_max_entries, 50);
+        assert!(s.get().editor.auto_table_alias);
     }
 }

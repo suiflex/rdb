@@ -277,6 +277,36 @@ fn last_keyword(line: &str, language: rdb_connstore::QueryLanguage) -> Option<St
         .map(|s| s.text.to_uppercase())
 }
 
+/// Whether the cursor is in a table-name position (after FROM, JOIN, INTO,
+/// UPDATE, or TABLE). Used to decide whether to auto-append an alias.
+pub fn is_table_position(line: &str, language: rdb_connstore::QueryLanguage) -> bool {
+    matches!(
+        last_keyword(line, language).as_deref(),
+        Some("FROM") | Some("JOIN") | Some("INTO") | Some("UPDATE") | Some("TABLE")
+    )
+}
+
+/// Generate a short alias from a table name by taking the first letter of
+/// each underscore-delimited segment. `users` → `u`, `order_items` → `oi`.
+pub fn generate_alias(table: &str) -> String {
+    let mut alias = String::new();
+    for part in table.split('_') {
+        if let Some(ch) = part.chars().next() {
+            alias.push(ch.to_ascii_lowercase());
+        }
+    }
+    if alias.is_empty() {
+        // Fallback: first char of the whole name.
+        table
+            .chars()
+            .next()
+            .map(|c| c.to_ascii_lowercase().to_string())
+            .unwrap_or_default()
+    } else {
+        alias
+    }
+}
+
 /// Suggest completions for the text before the cursor. Returns the char length
 /// of the partial word to replace on accept, plus the (prefix-filtered, capped)
 /// candidates. An empty list means "no popup".
@@ -1098,5 +1128,59 @@ mod tests {
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["step_config"]
         );
+    }
+
+    #[test]
+    fn generate_alias_single_word() {
+        assert_eq!(generate_alias("users"), "u");
+    }
+
+    #[test]
+    fn generate_alias_underscore_separated() {
+        assert_eq!(generate_alias("order_items"), "oi");
+        assert_eq!(generate_alias("t_invoice_line"), "til");
+    }
+
+    #[test]
+    fn generate_alias_preserves_case_in_initials() {
+        // Each segment's first char is lowercased.
+        assert_eq!(generate_alias("UserSessions"), "u");
+        assert_eq!(generate_alias("order_Items"), "oi");
+    }
+
+    #[test]
+    fn generate_alias_empty_fallback() {
+        // Edge case: empty string or just underscores.
+        assert_eq!(generate_alias(""), "");
+        assert_eq!(generate_alias("_"), "");
+    }
+
+    #[test]
+    fn is_table_position_detects_from_and_join() {
+        assert!(is_table_position(
+            "select * from ",
+            rdb_connstore::QueryLanguage::Sql
+        ));
+        assert!(is_table_position(
+            "select * from t left join ",
+            rdb_connstore::QueryLanguage::Sql
+        ));
+        assert!(is_table_position(
+            "insert into ",
+            rdb_connstore::QueryLanguage::Sql
+        ));
+        assert!(is_table_position(
+            "update ",
+            rdb_connstore::QueryLanguage::Sql
+        ));
+        // Not table position:
+        assert!(!is_table_position(
+            "select ",
+            rdb_connstore::QueryLanguage::Sql
+        ));
+        assert!(!is_table_position(
+            "select * from users where ",
+            rdb_connstore::QueryLanguage::Sql
+        ));
     }
 }
