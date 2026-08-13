@@ -279,6 +279,41 @@ fn last_keyword(line: &str, language: rdb_connstore::QueryLanguage) -> Option<St
 
 /// Whether the cursor is in a table-name position (after FROM, JOIN, INTO,
 /// UPDATE, or TABLE). Used to decide whether to auto-append an alias.
+/// True when the cursor is inside a quoted literal or a line comment.
+fn in_literal_or_comment(line: &str) -> bool {
+    let mut quote = false;
+    let chars: Vec<char> = line.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if !quote && chars[i] == '-' && chars.get(i + 1) == Some(&'-') {
+            return true;
+        }
+        if chars[i] == '\'' {
+            if quote && chars.get(i + 1) == Some(&'\'') {
+                i += 2;
+                continue;
+            }
+            quote = !quote;
+        }
+        i += 1;
+    }
+    quote
+}
+
+/// LIMIT/OFFSET arguments are values, not identifiers. Suppress completion
+/// while typing their numeric or quoted argument.
+fn sql_clause_argument(line: &str) -> bool {
+    // `LIMIT`/`OFFSET` need not be the first token (`SELECT … LIMIT 10`).
+    // The lexer gives us the actual last keyword, so quoted words and comments
+    // cannot accidentally trigger this guard.
+    matches!(
+        last_keyword(line, rdb_connstore::QueryLanguage::Sql).as_deref(),
+        Some("LIMIT") | Some("OFFSET")
+    ) && line
+        .rsplit_once(char::is_whitespace)
+        .is_some_and(|(_, value)| !value.trim().is_empty())
+}
+
 pub fn is_table_position(line: &str, language: rdb_connstore::QueryLanguage) -> bool {
     matches!(
         last_keyword(line, language).as_deref(),
@@ -339,6 +374,13 @@ pub fn suggest(
         word = &before_cursor[before_cursor.len() - word.len() - 1..];
         head = before_cursor.strip_suffix(word).unwrap_or(before_cursor);
     }
+    // Never complete inside a string/comment. This matters especially for
+    // values after LIMIT/OFFSET and other clause arguments: schema names are
+    // not useful there and make the popup fight normal text entry.
+    let cur_line = before_cursor.rsplit('\n').next().unwrap_or(before_cursor);
+    if in_literal_or_comment(cur_line) || sql_clause_argument(cur_line) {
+        return (0, Vec::new());
+    }
     // Type-triggered: don't pop up on an empty line or right after whitespace —
     // only once the user has typed at least one char of a word. `table.`/`alias.`
     // (or a bare Mongo `$`) is an explicit request, so it still fires.
@@ -388,7 +430,6 @@ pub fn suggest(
     } else {
         // Keyword context comes from the current line; `before_cursor` may span
         // several lines (alias resolution needs the whole statement).
-        let cur_line = before_cursor.rsplit('\n').next().unwrap_or(before_cursor);
         match language {
             rdb_connstore::QueryLanguage::Cql => cql::bare_word(cur_line, stmt, nodes, scope),
             _ => sql::bare_word(cur_line, stmt, nodes, scope, active_schema),
@@ -532,6 +573,37 @@ mod tests {
         )
         .1
         .is_empty());
+    }
+
+    #[test]
+    fn completion_stays_quiet_in_literals_and_limit_arguments() {
+        let nodes = nodes();
+        let (_, literal) = sug(
+            "SELECT * FROM users WHERE name = 'us",
+            &nodes,
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
+        assert!(literal.is_empty());
+        let (_, limit) = sug(
+            "SELECT * FROM users LIMIT 10",
+            &nodes,
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
+        assert!(limit.is_empty());
+    }
+
+    #[test]
+    fn completion_still_works_after_sql_clause_keyword() {
+        let nodes = nodes();
+        let (_, candidates) = sug(
+            "SELECT us",
+            &nodes,
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
+        assert!(candidates.iter().any(|c| c.label == "users"));
     }
 
     #[test]
