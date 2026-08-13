@@ -446,28 +446,18 @@ export component TabularGrid inherits Rectangle {
                                 }
                             }
                         }
-                        // A Flickable (not the std-widgets ScrollView) so its own
-                        // height stays a plain constant — sizing it off
-                        // edit-input's preferred-height while edit-input's width
-                        // comes from this same box is the cyclic dependency that
-                        // broke the read-only inspector's old ScrollView+TextInput
-                        // (see the detail-input comment below). viewport-height
-                        // still tracks the content so it scrolls once it's taller
-                        // than the capped box above.
-                        if root.read-only || (!root.is-boolean(root.columns[c].type-name) && !root.is-date(root.columns[c].type-name)): Flickable {
-                            x: Tokens.sp2;
-                            y: Tokens.sp1;
-                            width: parent.width - 2 * Tokens.sp2;
-                            height: parent.height - 2 * Tokens.sp1;
-                            viewport-height: max(self.height, edit-input.preferred-height);
-                            edit-input := TextInput {
-                                width: parent.width;
-                                // Flickable doesn't lay its child out — without an
-                                // explicit height this collapsed to ~0 and the box
-                                // rendered blank. self.preferred-height is safe to
-                                // self-reference (depends on width/text, not height).
-                                height: max(parent.height, self.preferred-height);
-                                vertical-alignment: top;
+                        // TextEdit, not a hand-rolled Flickable: it owns its own
+                        // viewport/scrollbar (same reason the read-only inspector's
+                        // detail-input below uses it), so a long value wraps and
+                        // scrolls reliably without a manual viewport-height that
+                        // depends on the very content it's sizing.
+                        if root.read-only || (!root.is-boolean(root.columns[c].type-name) && !root.is-date(root.columns[c].type-name)): VerticalLayout {
+                            padding-left: Tokens.sp2;
+                            padding-right: Tokens.sp2;
+                            padding-top: Tokens.sp1;
+                            padding-bottom: Tokens.sp1;
+                            edit-input := TextEdit {
+                                vertical-stretch: 1;
                                 // Read-only view: selectable + copyable, edits blocked.
                                 // Always shows root.editing-value (main.rs seeds it
                                 // pretty-printed for JSON, raw otherwise), same
@@ -477,12 +467,9 @@ export component TabularGrid inherits Rectangle {
                                 read-only: root.read-only;
                                 text: root.editing-value;
                                 edited => { root.editing-value = self.text; }
-                                color: Tokens.text;
                                 font-family: Tokens.mono;
                                 font-size: Tokens.font-sm;
-                                single-line: false;
                                 wrap: word-wrap;
-                                accepted => { if (!root.read-only) { root.cell-edited(r, c, self.text); } }
                                 key-pressed(e) => {
                                     if (e.text == Key.Escape) {
                                         root.edit-cancelled();
