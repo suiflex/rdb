@@ -11669,9 +11669,17 @@ fn main() -> Result<(), slint::PlatformError> {
             let value = pretty_json(value.as_str())
                 .map(SharedString::from)
                 .unwrap_or(value);
+            // editing_value first: the overlay element only exists once BOTH
+            // editing_row and editing_col match (its `if` condition), so
+            // whichever of those two is written last is what creates it and
+            // fires its `init`. Value must already be in place by then, or
+            // TextEdit's init runs against the previous session's stale
+            // text, and the real value arriving right after drags its
+            // auto-scroll-to-cursor to the end of the (now longer) text —
+            // this is what showed only the JSON's closing bracket.
+            w.set_editing_value(value);
             w.set_editing_row(r);
             w.set_editing_col(c);
-            w.set_editing_value(value);
             let base = displayed_grid
                 .lock()
                 .unwrap()
