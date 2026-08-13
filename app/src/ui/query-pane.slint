@@ -64,6 +64,7 @@ export component QueryPane inherits Rectangle {
     in property <int> cursor-line;
     in property <int> cursor-visual-row;
     in property <int> cursor-col;
+    in property <int> error-line: -1;
     // Bumped when the cursor jumps off-screen (find match) so the editor
     // viewport follows it.
     in property <int> scroll-request;
@@ -565,6 +566,7 @@ export component QueryPane inherits Rectangle {
                     cursor-line: root.cursor-line;
                     cursor-visual-row: root.cursor-visual-row;
                     cursor-col: root.cursor-col;
+                    error-line: root.error-line;
                     scroll-request: root.scroll-request;
                     completion-items: root.completion-items;
                     completion-visible: root.completion-visible;

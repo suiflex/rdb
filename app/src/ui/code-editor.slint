@@ -21,6 +21,7 @@ export component CodeEditor inherits Rectangle {
     // Visual row after folded lines are removed; used only to anchor completion.
     in property <int> cursor-visual-row: 0;
     in property <int> cursor-col: 0;
+    in property <int> error-line: -1;
     // (key text, meta/ctrl, alt/option, shift) -> true when the editor consumed
     // the key. meta = ⌘ line/doc motions, alt = ⌥ word motions.
     callback edit-key(string, bool, bool, bool) -> bool;
@@ -93,7 +94,8 @@ export component CodeEditor inherits Rectangle {
                     height: root.line-hidden[li] ? 0 : root.line-h;
                     clip: true;
                     visible: !root.line-hidden[li];
-                    background: li == root.cursor-line ? Tokens.editor-line : transparent;
+                    background: li == root.error-line ? Tokens.error.with-alpha(0.16)
+                        : li == root.cursor-line ? Tokens.editor-line : transparent;
 
                     // Char column under the pointer, hit-tested from the mono
                     // advance width. Rows below the text area (drag) add a line
@@ -188,6 +190,7 @@ export component CodeEditor inherits Rectangle {
                                         : span.kind == 2 ? Tokens.syn-string
                                         : span.kind == 3 ? Tokens.syn-function
                                         : span.kind == 4 ? Tokens.syn-comment
+                                        : span.kind == 6 ? Tokens.error
                                         : Tokens.text;
                                     font-weight: span.kind == 1 ? Tokens.weight-emphasis : 400;
                                     font-italic: span.kind == 4;
