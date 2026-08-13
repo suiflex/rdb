@@ -450,13 +450,13 @@ export component TabularGrid inherits Rectangle {
                             height: parent.height - 2 * Tokens.sp1;
                             vertical-alignment: top;
                             // Read-only view: selectable + copyable, edits blocked.
-                            // Its text is the pretty-printed root.editing-value
-                            // (see main.rs on_edit_cell), same as what text-w/
-                            // editor-w below are sized from — keeps the shown
-                            // content and the box size in sync. Writable cells
-                            // show the raw cell.text and grow via `edited`.
+                            // Always shows root.editing-value (main.rs seeds it
+                            // pretty-printed for JSON, raw otherwise), same
+                            // value text-w/editor-w above are sized from — a
+                            // separate cell.text source here would desync the
+                            // box's size from what's actually rendered in it.
                             read-only: root.read-only;
-                            text: root.read-only ? root.editing-value : (cell.is-null ? "" : cell.text);
+                            text: root.editing-value;
                             edited => { root.editing-value = self.text; }
                             color: Tokens.text;
                             font-family: Tokens.mono;
@@ -483,7 +483,11 @@ export component TabularGrid inherits Rectangle {
                                 }
                                 return reject;
                             }
-                            init => { self.focus(); self.select-all(); }
+                            // Not select-all: with no scroll-into-view on
+                            // TextInput, a long value auto-selected end-to-end
+                            // can lay out its cursor past the visible box,
+                            // making the box look empty. Open at the start.
+                            init => { self.focus(); self.set-selection-offsets(0, 0); }
                         }
                     }
                 }

@@ -11659,15 +11659,16 @@ fn main() -> Result<(), slint::PlatformError> {
             } else {
                 SharedString::default()
             };
-            // Read-only (query result): show JSON indented so it's readable.
-            // Editable grids keep the raw text so a save writes back verbatim.
-            let value = if w.get_grid_read_only() {
-                pretty_json(value.as_str())
-                    .map(SharedString::from)
-                    .unwrap_or(value)
-            } else {
-                value
-            };
+            // Pretty-print JSON so it has real line/whitespace break points —
+            // compact JSON (no spaces after `:`/`,`) has none, which left the
+            // TextInput's word-wrap with nowhere to break and the box
+            // rendering blank (long unbroken run laid out off-view). Applies
+            // to writable grids too: the overlay's box is sized off this same
+            // value (see tabular-grid.slint's text-w), so it must match what
+            // is shown regardless of read-only.
+            let value = pretty_json(value.as_str())
+                .map(SharedString::from)
+                .unwrap_or(value);
             w.set_editing_row(r);
             w.set_editing_col(c);
             w.set_editing_value(value);
