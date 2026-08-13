@@ -780,6 +780,44 @@ impl EditorState {
 /// ignoring semicolons inside single-quoted literals and `-- line comments`.
 /// Trailing `;` and blank/comment-only segments are dropped. Text with no
 /// real statement yields an empty vec; a single statement (no `;`) yields one.
+/// Byte offset into `text` where each split statement's trimmed text begins.
+/// Parallel to `split_statements`; used to map a per-statement error position
+/// back to the full editor buffer for highlighting.
+pub fn statement_offsets(text: &str) -> Vec<usize> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out: Vec<usize> = Vec::new();
+    let mut seg_start = 0usize;
+    let mut in_str = false;
+    let mut i = 0usize;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\'' {
+            in_str = !in_str;
+        } else if !in_str && c == '-' && chars.get(i + 1) == Some(&'-') {
+            while i < chars.len() && chars[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        } else if c == ';' && !in_str {
+            let seg: String = chars[seg_start..i].iter().collect();
+            if !is_blank_sql(&seg) {
+                let trimmed = seg.trim_start();
+                out.push(seg_start + (seg.len() - trimmed.len()));
+            }
+            seg_start = i + 1;
+        }
+        i += 1;
+    }
+    if seg_start < chars.len() {
+        let seg: String = chars[seg_start..].iter().collect();
+        if !is_blank_sql(&seg) {
+            let trimmed = seg.trim_start();
+            out.push(seg_start + (seg.len() - trimmed.len()));
+        }
+    }
+    out
+}
+
 pub fn split_statements(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     let mut out: Vec<String> = Vec::new();
@@ -1322,6 +1360,20 @@ mod tests {
     fn split_empty_text_is_empty() {
         assert!(split_statements("   \n  ").is_empty());
         assert!(split_statements(";;;").is_empty());
+    }
+
+    #[test]
+    fn statement_offsets_map_each_statement_start() {
+        // Byte offsets of each trimmed statement start; leading whitespace and
+        // earlier statements shift later ones, so a per-statement error
+        // position can be mapped back to the full buffer.
+        let sql = "SELECT \n1;\n\n SELECT 2";
+        let offsets = statement_offsets(sql);
+        assert_eq!(offsets, vec![0, 13]);
+        // Position 1 (index 1) in statement 1 is the '2' of `SELECT 2`.
+        // '2' of `SELECT 2` sits at statement offset 7 (`SELECT `); 13 + 7.
+        let mapped = offsets[1] + 7;
+        assert_eq!(sql.as_bytes()[mapped], b'2');
     }
 
     // ----- mouse hit-test -----
