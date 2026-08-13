@@ -1,13 +1,18 @@
 ---
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import Base from "../layouts/Base.astro";
 import { REPO_LINKS } from "../config";
 
 /**
- * The website lives inside the rdb monorepo, so the root changelog
- * is read directly at build time.
+ * The website lives inside the rdb monorepo, so the root changelog is
+ * read directly at build time. Resolved from process.cwd() (astro build
+ * always runs from website/), not import.meta.url — the latter is
+ * relative to wherever the bundler happens to emit this chunk, which
+ * changed depth across an astro major version and silently broke a
+ * fixed "../../../" walk.
  */
-const raw = readFileSync(new URL("../../../CHANGELOG.md", import.meta.url), "utf-8");
+const raw = readFileSync(resolve(process.cwd(), "../CHANGELOG.md"), "utf-8");
 
 interface Release {
   version: string;

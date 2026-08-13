@@ -113,6 +113,7 @@ export component QueryPane inherits Rectangle {
     in property <int> editing-row: -1;
     in property <int> editing-col: -1;
     in-out property <string> editing-value;
+    in property <bool> editing-large: false;
     // Copy inspector for the Mongo tree (mirrors the grid's cell inspector).
     in-out property <string> doc-inspect-value;
     in-out property <bool> doc-inspect-open;
@@ -762,6 +763,7 @@ export component QueryPane inherits Rectangle {
                 editing-row: root.editing-row;
                 editing-col: root.editing-col;
                 editing-value <=> root.editing-value;
+                editing-large: root.editing-large;
                 resize-col(i, d) => { root.resize-col(i, d); }
                 select-cell(r, c) => { root.select-cell(r, c); }
                 row-press(r, c, shift) => { root.row-press(r, c, shift); }

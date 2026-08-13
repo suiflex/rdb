@@ -1982,8 +1982,8 @@ fn derive_query_name(sql: &str, existing: &[(String, String)]) -> String {
         .unwrap_or(base)
 }
 
-/// Pretty-print (indent) a JSON string for read-only display. Returns `None`
-/// when the text isn't a JSON object/array, so plain cells are shown as-is.
+/// Pretty-print (indent) a JSON string for display. Returns `None` when the
+/// text isn't a JSON object/array, so plain cells are shown as-is.
 fn pretty_json(s: &str) -> Option<String> {
     let t = s.trim();
     if !(t.starts_with('{') || t.starts_with('[')) {
@@ -1992,6 +1992,22 @@ fn pretty_json(s: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(t)
         .ok()
         .and_then(|v| serde_json::to_string_pretty(&v).ok())
+}
+
+/// Prepares a cell's raw text for the edit overlay: pretty-prints JSON (so it
+/// has real line breaks to wrap on), and flags values that should open the
+/// roomy centered inspector modal instead of the row-height inline overlay
+/// (which is too short to host a scrollable multi-line editor — see
+/// tabular-grid.slint's modal comment). JSON always qualifies as "large"
+/// since it's always going to want the formatting room regardless of length.
+fn format_cell_edit_value(value: SharedString) -> (SharedString, bool) {
+    match pretty_json(value.as_str()) {
+        Some(pretty) => (SharedString::from(pretty), true),
+        None => {
+            let is_large = value.chars().count() > 80;
+            (value, is_large)
+        }
+    }
 }
 
 /// Strip SQL line comments (`--` to end of line) and blank lines, so a
@@ -3154,20 +3170,64 @@ enum PaletteAction {
     OpenRecent(usize),
 }
 
+/// Formats a `/`-delimited group path (e.g. `"OSS/Postgre"`) as `"Group: OSS
+/// · Subgroup: Postgre"`, or just `"Group: OSS"` with no subgroup. Empty
+/// string (no dangling separator to strip) when `group` is `None`/blank, so
+/// callers can drop the whole line rather than showing an empty group.
+fn group_sub_label(group: Option<&str>) -> String {
+    let Some(g) = group.map(str::trim).filter(|g| !g.is_empty()) else {
+        return String::new();
+    };
+    let mut parts = g.split('/').filter(|p| !p.trim().is_empty());
+    match (parts.next(), parts.collect::<Vec<_>>().join(" / ")) {
+        (Some(group), sub) if !sub.is_empty() => format!("Group: {group} · Subgroup: {sub}"),
+        (Some(group), _) => format!("Group: {group}"),
+        (None, _) => String::new(),
+    }
+}
+
+type PaletteConnName = (
+    String,
+    &'static str,
+    slint::Color,
+    bool,
+    SharedString,
+    slint::Color,
+    String,
+);
+
+/// Connection fields the ⌘K palette needs, including the normalized group
+/// path so its search can match group/env like the sidebar filter does
+/// (`build_conn_items`). Shared by both `on_toggle_palette` and
+/// `on_palette_filter` so their tuple shape can't drift apart.
+fn build_palette_conn_names(store: &rdb_connstore::ConnStore) -> Vec<PaletteConnName> {
+    store
+        .list()
+        .iter()
+        .map(|s| {
+            (
+                s.name.clone(),
+                AnyDriver::badge(s.engine),
+                theme::accent_or_default(s.color.as_deref().unwrap_or("")),
+                s.color.is_some(),
+                theme::env_tag_label(s.env_tag).into(),
+                theme::env_tag_color(s.env_tag).unwrap_or_else(|| theme::accent_or_default("")),
+                s.group
+                    .as_deref()
+                    .and_then(rdb_connstore::normalize_group_path)
+                    .unwrap_or_default(),
+            )
+        })
+        .collect()
+}
+
 /// Build the ⌘K palette model, grouped GitHub-style under non-selectable
 /// "section" header rows. `needle` (lowercase) filters both groups; empty
 /// shows everything. Empty groups drop their header. Returns the flat item
 /// list alongside an index-aligned action list `on_palette_choose` dispatches
 /// on.
 fn build_palette_items(
-    names: &[(
-        String,
-        &'static str,
-        slint::Color,
-        bool,
-        SharedString,
-        slint::Color,
-    )],
+    names: &[PaletteConnName],
     w: &MainWindow,
     saved_queries: &[(String, String)],
     recent_queries: &[HistoryEntry],
@@ -3192,16 +3252,22 @@ fn build_palette_items(
     let conns: Vec<_> = names
         .iter()
         .enumerate()
-        .filter(|(_, (n, ..))| needle.is_empty() || n.to_lowercase().contains(needle))
+        .filter(|(_, (n, _, _, _, env_tag_label, _, group))| {
+            needle.is_empty()
+                || n.to_lowercase().contains(needle)
+                || group.to_lowercase().contains(needle)
+                || env_tag_label.to_lowercase().contains(needle)
+        })
         .collect();
     if !conns.is_empty() {
         items.push(section("Connections"));
         actions.push(PaletteAction::None);
-        for (idx, (n, badge, color, has_custom_color, env_tag_label, env_tag_color)) in conns {
+        for (idx, (n, badge, color, has_custom_color, env_tag_label, env_tag_color, group)) in conns
+        {
             items.push(PaletteItem {
                 label: n.clone().into(),
                 kind: (*badge).into(),
-                sub: SharedString::default(),
+                sub: group_sub_label(Some(group.as_str())).into(),
                 local: false,
                 color: *color,
                 has_custom_color: *has_custom_color,
@@ -3352,6 +3418,13 @@ fn set_p_editing(w: &MainWindow, pane: usize, row: i32, col: i32) {
     } else {
         w.set_p1_editing_row(row);
         w.set_p1_editing_col(col);
+    }
+}
+fn set_p_editing_large(w: &MainWindow, pane: usize, large: bool) {
+    if pane == 0 {
+        w.set_editing_large(large);
+    } else {
+        w.set_p1_editing_large(large);
     }
 }
 fn set_p_doc_tree(w: &MainWindow, pane: usize, m: ModelRc<DocRow>) {
@@ -6011,18 +6084,11 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_sel_color(theme::accent_or_default(s.color.as_deref().unwrap_or("")));
             w.set_sel_has_custom_color(s.color.is_some());
             let label = AnyDriver::label(s.engine);
-            let sub = match s.group.as_deref().filter(|g| !g.trim().is_empty()) {
-                Some(g) => {
-                    let mut parts = g.split('/').filter(|p| !p.trim().is_empty());
-                    match (parts.next(), parts.collect::<Vec<_>>().join(" / ")) {
-                        (Some(group), sub) if !sub.is_empty() => {
-                            format!("{label} · Group: {group} · Subgroup: {sub}")
-                        }
-                        (Some(group), _) => format!("{label} · Group: {group}"),
-                        (None, _) => label.to_string(),
-                    }
-                }
-                None => label.to_string(),
+            let gsub = group_sub_label(s.group.as_deref());
+            let sub = if gsub.is_empty() {
+                label.to_string()
+            } else {
+                format!("{label} · {gsub}")
             };
             w.set_sel_sub(sub.into());
             w.set_sel_local(s.local);
@@ -9747,15 +9813,10 @@ fn main() -> Result<(), slint::PlatformError> {
             } else {
                 SharedString::default()
             };
-            let value = if w.get_p1_grid_read_only() {
-                pretty_json(value.as_str())
-                    .map(SharedString::from)
-                    .unwrap_or(value)
-            } else {
-                value
-            };
-            w.set_p1_editing_value(value);
+            let (value, is_large) = format_cell_edit_value(value);
             set_p_editing(&w, 1, row, col);
+            set_p_editing_large(&w, 1, is_large);
+            w.set_p1_editing_value(value);
         });
     }
     {
@@ -11706,18 +11767,11 @@ fn main() -> Result<(), slint::PlatformError> {
             } else {
                 SharedString::default()
             };
-            // Read-only (query result): show JSON indented so it's readable.
-            // Editable grids keep the raw text so a save writes back verbatim.
-            let value = if w.get_grid_read_only() {
-                pretty_json(value.as_str())
-                    .map(SharedString::from)
-                    .unwrap_or(value)
-            } else {
-                value
-            };
-            w.set_editing_value(value);
+            let (value, is_large) = format_cell_edit_value(value);
             w.set_editing_row(r);
             w.set_editing_col(c);
+            w.set_editing_large(is_large);
+            w.set_editing_value(value);
             let base = displayed_grid
                 .lock()
                 .unwrap()
@@ -12160,29 +12214,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let opening = !w.get_palette_open();
                 w.set_palette_open(opening);
                 if opening {
-                    let names: Vec<(
-                        String,
-                        &'static str,
-                        slint::Color,
-                        bool,
-                        SharedString,
-                        slint::Color,
-                    )> = store
-                        .borrow()
-                        .list()
-                        .iter()
-                        .map(|s| {
-                            (
-                                s.name.clone(),
-                                AnyDriver::badge(s.engine),
-                                theme::accent_or_default(s.color.as_deref().unwrap_or("")),
-                                s.color.is_some(),
-                                theme::env_tag_label(s.env_tag).into(),
-                                theme::env_tag_color(s.env_tag)
-                                    .unwrap_or_else(|| theme::accent_or_default("")),
-                            )
-                        })
-                        .collect();
+                    let names = build_palette_conn_names(&store.borrow());
                     let (items, actions) = build_palette_items(
                         &names,
                         &w,
@@ -12207,29 +12239,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let recent_queries = recent_queries.clone();
         window.on_palette_filter(move |q| {
             if let Some(w) = weak.upgrade() {
-                let names: Vec<(
-                    String,
-                    &'static str,
-                    slint::Color,
-                    bool,
-                    SharedString,
-                    slint::Color,
-                )> = store
-                    .borrow()
-                    .list()
-                    .iter()
-                    .map(|s| {
-                        (
-                            s.name.clone(),
-                            AnyDriver::badge(s.engine),
-                            theme::accent_or_default(s.color.as_deref().unwrap_or("")),
-                            s.color.is_some(),
-                            theme::env_tag_label(s.env_tag).into(),
-                            theme::env_tag_color(s.env_tag)
-                                .unwrap_or_else(|| theme::accent_or_default("")),
-                        )
-                    })
-                    .collect();
+                let names = build_palette_conn_names(&store.borrow());
                 let (items, actions) = build_palette_items(
                     &names,
                     &w,

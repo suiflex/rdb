@@ -96,6 +96,8 @@ export component ConnForm inherits Rectangle {
     visible: root.open;
     background: Tokens.veil;
 
+    TouchArea { clicked => { root.cancel(); } }
+
     if root.open: Rectangle {
         width: min(520px, parent.width - 2 * Tokens.sp4);
         // Hug the compact row layout; add scrolling only if future fields make
@@ -110,6 +112,8 @@ export component ConnForm inherits Rectangle {
         border-color: Tokens.border;
         drop-shadow-blur: 24px;
         drop-shadow-color: Tokens.text.with-alpha(0.35);
+
+        TouchArea {}
 
         vbox := VerticalLayout {
             padding: Tokens.sp4;
