@@ -11625,9 +11625,9 @@ fn main() -> Result<(), slint::PlatformError> {
             } else {
                 value
             };
-            w.set_editing_value(value);
             w.set_editing_row(r);
             w.set_editing_col(c);
+            w.set_editing_value(value);
             let base = displayed_grid
                 .lock()
                 .unwrap()

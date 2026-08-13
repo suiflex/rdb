@@ -450,8 +450,13 @@ export component TabularGrid inherits Rectangle {
                             height: parent.height - 2 * Tokens.sp1;
                             vertical-alignment: top;
                             // Read-only view: selectable + copyable, edits blocked.
+                            // Its text is the pretty-printed root.editing-value
+                            // (see main.rs on_edit_cell), same as what text-w/
+                            // editor-w below are sized from — keeps the shown
+                            // content and the box size in sync. Writable cells
+                            // show the raw cell.text and grow via `edited`.
                             read-only: root.read-only;
-                            text: cell.is-null ? "" : cell.text;
+                            text: root.read-only ? root.editing-value : (cell.is-null ? "" : cell.text);
                             edited => { root.editing-value = self.text; }
                             color: Tokens.text;
                             font-family: Tokens.mono;
