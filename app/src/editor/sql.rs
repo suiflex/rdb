@@ -35,6 +35,8 @@ pub const KEYWORDS: &[&str] = &[
     "RETURNS",
     "LANGUAGE",
     "BEGIN",
+    "COMMIT",
+    "ROLLBACK",
     "END",
     "RETURN",
     "DESC",
