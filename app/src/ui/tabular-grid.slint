@@ -385,9 +385,12 @@ export component TabularGrid inherits Rectangle {
                         width: self.editor-w;
                         // A value that fits on one line stays exactly row-height, so
                         // it doesn't cover the rows below. Rows are fixed height, so
-                        // a longer value floats taller over them (z:100) instead.
+                        // a longer value floats taller over them (z:100) instead, up
+                        // to this cap — content past it scrolls inside the Flickable
+                        // below (raised from 96px, which cut multi-line JSON off
+                        // mid-value with no way to see the rest).
                         height: self.compact-editor || self.text-w <= self.editor-w
-                            ? parent.height : 96px;
+                            ? parent.height : 280px;
                         background: Tokens.card;
                         border-width: 2px;
                         // Read-only view is a value inspector, not a pending
@@ -443,51 +446,68 @@ export component TabularGrid inherits Rectangle {
                                 }
                             }
                         }
-                        if root.read-only || (!root.is-boolean(root.columns[c].type-name) && !root.is-date(root.columns[c].type-name)): edit-input := TextInput {
+                        // A Flickable (not the std-widgets ScrollView) so its own
+                        // height stays a plain constant — sizing it off
+                        // edit-input's preferred-height while edit-input's width
+                        // comes from this same box is the cyclic dependency that
+                        // broke the read-only inspector's old ScrollView+TextInput
+                        // (see the detail-input comment below). viewport-height
+                        // still tracks the content so it scrolls once it's taller
+                        // than the capped box above.
+                        if root.read-only || (!root.is-boolean(root.columns[c].type-name) && !root.is-date(root.columns[c].type-name)): Flickable {
                             x: Tokens.sp2;
                             y: Tokens.sp1;
                             width: parent.width - 2 * Tokens.sp2;
                             height: parent.height - 2 * Tokens.sp1;
-                            vertical-alignment: top;
-                            // Read-only view: selectable + copyable, edits blocked.
-                            // Always shows root.editing-value (main.rs seeds it
-                            // pretty-printed for JSON, raw otherwise), same
-                            // value text-w/editor-w above are sized from — a
-                            // separate cell.text source here would desync the
-                            // box's size from what's actually rendered in it.
-                            read-only: root.read-only;
-                            text: root.editing-value;
-                            edited => { root.editing-value = self.text; }
-                            color: Tokens.text;
-                            font-family: Tokens.mono;
-                            font-size: Tokens.font-sm;
-                            single-line: false;
-                            wrap: word-wrap;
-                            accepted => { if (!root.read-only) { root.cell-edited(r, c, self.text); } }
-                            key-pressed(e) => {
-                                if (e.text == Key.Escape) {
-                                    root.edit-cancelled();
-                                    return accept;
+                            viewport-height: max(self.height, edit-input.preferred-height);
+                            edit-input := TextInput {
+                                width: parent.width;
+                                // Flickable doesn't lay its child out — without an
+                                // explicit height this collapsed to ~0 and the box
+                                // rendered blank. self.preferred-height is safe to
+                                // self-reference (depends on width/text, not height).
+                                height: max(parent.height, self.preferred-height);
+                                vertical-alignment: top;
+                                // Read-only view: selectable + copyable, edits blocked.
+                                // Always shows root.editing-value (main.rs seeds it
+                                // pretty-printed for JSON, raw otherwise), same
+                                // value text-w/editor-w above are sized from — a
+                                // separate cell.text source here would desync the
+                                // box's size from what's actually rendered in it.
+                                read-only: root.read-only;
+                                text: root.editing-value;
+                                edited => { root.editing-value = self.text; }
+                                color: Tokens.text;
+                                font-family: Tokens.mono;
+                                font-size: Tokens.font-sm;
+                                single-line: false;
+                                wrap: word-wrap;
+                                accepted => { if (!root.read-only) { root.cell-edited(r, c, self.text); } }
+                                key-pressed(e) => {
+                                    if (e.text == Key.Escape) {
+                                        root.edit-cancelled();
+                                        return accept;
+                                    }
+                                    // Read-only view: let selection/copy shortcuts
+                                    // through, don't commit or advance.
+                                    if (root.read-only) { return reject; }
+                                    if (e.text == Key.Return) {
+                                        root.cell-edited(r, c, self.text);
+                                        return accept;
+                                    }
+                                    if (e.text == Key.Tab || e.text == Key.Backtab) {
+                                        root.cell-advance(r, c, self.text,
+                                            e.text == Key.Tab && !e.modifiers.shift);
+                                        return accept;
+                                    }
+                                    return reject;
                                 }
-                                // Read-only view: let selection/copy shortcuts
-                                // through, don't commit or advance.
-                                if (root.read-only) { return reject; }
-                                if (e.text == Key.Return) {
-                                    root.cell-edited(r, c, self.text);
-                                    return accept;
-                                }
-                                if (e.text == Key.Tab || e.text == Key.Backtab) {
-                                    root.cell-advance(r, c, self.text,
-                                        e.text == Key.Tab && !e.modifiers.shift);
-                                    return accept;
-                                }
-                                return reject;
+                                // Not select-all: with no scroll-into-view on
+                                // TextInput, a long value auto-selected end-to-end
+                                // can lay out its cursor past the visible box,
+                                // making the box look empty. Open at the start.
+                                init => { self.focus(); self.set-selection-offsets(0, 0); }
                             }
-                            // Not select-all: with no scroll-into-view on
-                            // TextInput, a long value auto-selected end-to-end
-                            // can lay out its cursor past the visible box,
-                            // making the box look empty. Open at the start.
-                            init => { self.focus(); self.set-selection-offsets(0, 0); }
                         }
                     }
                 }
