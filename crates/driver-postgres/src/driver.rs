@@ -207,7 +207,13 @@ impl Driver for PostgresDriver {
 fn pg_err(e: &tokio_postgres::Error) -> String {
     use std::error::Error;
     if let Some(db) = e.as_db_error() {
-        let mut msg = format!("{}: {}", db.code().code(), db.message());
+        let position = match db.position() {
+            Some(tokio_postgres::error::ErrorPosition::Original(pos)) => {
+                format!("[[rdb-position:{pos}]] ")
+            }
+            _ => String::new(),
+        };
+        let mut msg = format!("{position}{}: {}", db.code().code(), db.message());
         if let Some(detail) = db.detail() {
             msg.push_str(&format!(" — {detail}"));
         }

@@ -31,7 +31,7 @@ mod update;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use slint::{Model, ModelRc, SharedString, VecModel};
 
@@ -1321,6 +1321,8 @@ struct GroupRuntime {
     // hard-cancelled. Overwritten on each run; aborting a finished task is a
     // no-op, so no clearing on completion is needed.
     query_abort: Rc<RefCell<Option<tokio::task::AbortHandle>>>,
+    // PostgreSQL reports a 1-based byte offset for syntax errors.
+    error_position: Arc<Mutex<Option<usize>>>,
 }
 
 impl GroupRuntime {
@@ -1347,6 +1349,7 @@ impl GroupRuntime {
             stream_cancel: Rc::new(RefCell::new(None)),
             stream_timer: Rc::new(RefCell::new(None)),
             query_abort: Rc::new(RefCell::new(None)),
+            error_position: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -4420,6 +4423,14 @@ fn main() -> Result<(), slint::PlatformError> {
             let folded_heads = panes[pane].folded_heads.clone();
             let ed = ed_state.borrow();
             let sel = ed.selection();
+            let error_position = *panes[pane].error_position.lock().unwrap();
+            let error_line = error_position.map(|pos| {
+                ed.text()
+                    .bytes()
+                    .take(pos.saturating_sub(1))
+                    .filter(|b| *b == b'\n')
+                    .count()
+            });
             let language = cur_engine
                 .borrow()
                 .map(rdb_connstore::Engine::language)
@@ -4438,13 +4449,19 @@ fn main() -> Result<(), slint::PlatformError> {
                             spans = editor::overlay_selection(spans, a, b);
                         }
                     }
+                    let error_line = error_line == Some(li);
                     let spans: Vec<Span> = spans
                         .into_iter()
-                        .map(|sp| Span {
-                            cols: sp.text.chars().count() as i32,
-                            text: sp.text.into(),
-                            kind: sp.kind,
-                            sel: sp.sel,
+                        .map(|mut sp| {
+                            if error_line && sp.kind == 0 {
+                                sp.kind = 6;
+                            }
+                            Span {
+                                cols: sp.text.chars().count() as i32,
+                                text: sp.text.into(),
+                                kind: sp.kind,
+                                sel: sp.sel,
+                            }
                         })
                         .collect();
                     ModelRc::from(Rc::new(VecModel::from(spans)))
@@ -4484,6 +4501,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_cursor_line(ed.line as i32);
                 w.set_cursor_visual_row(cursor_visual_row);
                 w.set_cursor_col(ed.col as i32);
+                w.set_error_line(error_line.map_or(-1, |line| line as i32));
                 // query-text mirrors the focused editor for tab persistence; the
                 // right pane's text lives in panes[1].ed_state (persisted via
                 // p1-query in a later step).
@@ -4495,6 +4513,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_p1_cursor_line(ed.line as i32);
                 w.set_p1_cursor_visual_row(cursor_visual_row);
                 w.set_p1_cursor_col(ed.col as i32);
+                w.set_p1_error_line(error_line.map_or(-1, |line| line as i32));
             }
             // Keep the caret in view on every edit/cursor move, not just a
             // find jump — typing off the bottom of the viewport otherwise
@@ -8197,6 +8216,18 @@ fn main() -> Result<(), slint::PlatformError> {
             let results = panes[pane].results.clone();
             let active_result = panes[pane].active_result.clone();
             let result_new_tab = panes[pane].result_new_tab.clone();
+            let error_position_state = panes[pane].error_position.clone();
+            // New run clears any previous error highlight right away, so a
+            // successful re-run never leaves stale red on the editor — the
+            // (view/err) branches below only re-arm it on a fresh failure.
+            *error_position_state.lock().unwrap() = None;
+            if let Some(w) = weak.upgrade() {
+                if pane == 0 {
+                    w.set_error_line(-1);
+                } else {
+                    w.set_p1_error_line(-1);
+                }
+            }
             let split_results = panes[pane].split_results.clone();
             let active_id = if pane == 1 {
                 &active_group1_tab_id
@@ -8362,6 +8393,19 @@ fn main() -> Result<(), slint::PlatformError> {
                     other => other,
                 });
                 let err = outcome.err();
+                let error_position_value = err.as_ref().and_then(|e| {
+                    e.to_string()
+                        .strip_prefix("query failed: ")
+                        .and_then(|s| s.strip_prefix("[[rdb-position:"))
+                        .and_then(|s| s.split("]] ").next())
+                        .and_then(|s| s.parse::<usize>().ok())
+                });
+                let error_line_value = error_position_value.map(|position| {
+                    sql.bytes()
+                        .take(position.saturating_sub(1))
+                        .filter(|byte| *byte == b'\n')
+                        .count() as i32
+                });
                 // A hand-typed `SELECT ... FROM t` result has no row identity by
                 // default. When it's an unambiguous single-table select (no
                 // join/union/aggregate — see single_table_name) and the table's
@@ -8431,6 +8475,12 @@ fn main() -> Result<(), slint::PlatformError> {
                         }
                         match (view, err) {
                             (Some(v), _) => {
+                                *error_position_state.lock().unwrap() = None;
+                                if pane == 0 {
+                                    w.set_error_line(-1);
+                                } else {
+                                    w.set_p1_error_line(-1);
+                                }
                                 // Run Selection over 2+ statements: store one
                                 // result tab per statement and show the first.
                                 if split && split_views.len() >= 2 {
@@ -8627,6 +8677,12 @@ fn main() -> Result<(), slint::PlatformError> {
                                     return;
                                 }
                                 *last_view.lock().unwrap() = None;
+                                *error_position_state.lock().unwrap() = error_position_value;
+                                if pane == 0 {
+                                    w.set_error_line(error_line_value.unwrap_or(-1));
+                                } else {
+                                    w.set_p1_error_line(error_line_value.unwrap_or(-1));
+                                }
                                 apply_result(
                                     &w,
                                     pane,
@@ -8667,6 +8723,14 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            // New stream clears any previous error highlight (same reset as
+            // run_sql) so a correct re-run that streams drops the stale red.
+            *panes[pane].error_position.lock().unwrap() = None;
+            if pane == 0 {
+                w.set_error_line(-1);
+            } else {
+                w.set_p1_error_line(-1);
+            }
             // Read on the UI thread now — the producer/consumer task below
             // runs off it and can't touch `w`.
             let cur_db = w.get_schema_name().to_string();
