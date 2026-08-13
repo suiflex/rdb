@@ -1,10 +1,13 @@
 ---
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import Base from "../layouts/Base.astro";
 import { REPO_LINKS } from "../config";
 
 // The real license file from the repository root, embedded at build time.
-const licenseText = readFileSync(new URL("../../../LICENSE", import.meta.url), "utf-8").trim();
+// Resolved from process.cwd() (astro build always runs from website/), not
+// import.meta.url — see changelog.astro for why.
+const licenseText = readFileSync(resolve(process.cwd(), "../LICENSE"), "utf-8").trim();
 ---
 
 <Base
