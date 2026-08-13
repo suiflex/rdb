@@ -37,6 +37,11 @@ export component TabularGrid inherits Rectangle {
     in property <int> editing-row: -1;
     in property <int> editing-col: -1;
     in-out property <string> editing-value;
+    // Set by Rust alongside editing-value: true when the value is JSON or
+    // otherwise long enough that it needs the roomy centered inspector
+    // modal instead of the row-height inline overlay (which structurally
+    // can't fit a scrollable multi-line editor — see the modal below).
+    in property <bool> editing-large: false;
     callback resize-col(int, length);      // (column index, drag delta)
     callback select-cell(int, int);        // (row, col)
     callback edit-cell(int, int);          // double-click → open inline editor
@@ -361,21 +366,22 @@ export component TabularGrid inherits Rectangle {
                         border-color: Tokens.accent;
                         background: transparent;
                     }
-                    // inline editor overlay (editable grids only; a read-only
-                    // result opens the centered inspector card instead)
-                    if r == root.editing-row && c == root.editing-col && !root.read-only: Rectangle {
+                    // inline editor overlay: short values only (editable
+                    // grids). Large/JSON values divert to the centered
+                    // inspector modal below instead — this box is exactly
+                    // row-height, on purpose, and was never meant to host a
+                    // scrollable multi-line editor (see the modal's comment
+                    // for why that doesn't work in a box this size).
+                    if r == root.editing-row && c == root.editing-col && !root.read-only && !root.editing-large: Rectangle {
                         property <bool> compact-editor: root.is-boolean(root.columns[c].type-name)
                             || root.is-date(root.columns[c].type-name);
                         // ponytail: ~7px per glyph at Tokens.font-sm in the mono
                         // face — an estimate, not a measurement, so the editor can
                         // size itself to the value without a layout round-trip.
                         // Bump the constant if short values start wrapping.
-                        // Tracks the live in-progress text (root.editing-value),
-                        // not the last-committed cell.text, so the box keeps
-                        // growing as the user types instead of clipping input.
                         property <length> text-w: root.editing-value.character-count * 7px + 2 * Tokens.sp2;
                         // Never narrower than the cell, never wider than the value
-                        // needs, still capped so a huge JSON blob can't span the pane.
+                        // needs, still capped so a huge value can't span the pane.
                         property <length> editor-w: self.compact-editor ? parent.width
                             : max(parent.width, min(self.text-w, min(520px, root.width - 2 * Tokens.sp2)));
                         property <length> visible-x: parent.x + flick.viewport-x;
@@ -383,23 +389,13 @@ export component TabularGrid inherits Rectangle {
                         x: self.compact-editor ? 0px
                             : max(-self.visible-x, min(0px, root.width - self.visible-x - self.editor-w));
                         width: self.editor-w;
-                        // A value that fits on one line stays exactly row-height, so
-                        // it doesn't cover the rows below. Rows are fixed height, so
-                        // a longer value floats taller over them (z:100) instead, up
-                        // to this cap — generous enough that ordinary pretty-printed
-                        // JSON (a handful of fields) fits with no scrolling at all,
-                        // since TextEdit's auto-scroll-to-cursor has proven unreliable
-                        // to control here; content past the cap still scrolls, it's
-                        // just not the primary way values are meant to be seen.
-                        height: self.compact-editor || self.text-w <= self.editor-w
-                            ? parent.height : min(420px, root.height - 2 * Tokens.grid-row-h);
+                        // Always exactly row-height: editing-large already
+                        // diverted anything that wouldn't fit to the modal.
+                        height: parent.height;
                         background: Tokens.card;
                         border-width: 2px;
-                        // Read-only view is a value inspector, not a pending
-                        // edit — neutral border so it doesn't mimic the orange
-                        // edit-outline cue.
-                        border-color: root.read-only ? Tokens.border-strong : Tokens.edit-outline;
-                        if !root.read-only && root.is-boolean(root.columns[c].type-name): ComboBox {
+                        border-color: Tokens.edit-outline;
+                        if root.is-boolean(root.columns[c].type-name): ComboBox {
                             x: 1px;
                             y: 1px;
                             width: parent.width - 2px;
@@ -411,7 +407,7 @@ export component TabularGrid inherits Rectangle {
                                 root.cell-edited(r, c, value);
                             }
                         }
-                        if !root.read-only && root.is-date(root.columns[c].type-name): HorizontalLayout {
+                        if root.is-date(root.columns[c].type-name): HorizontalLayout {
                             padding-left: Tokens.sp2;
                             padding-right: 2px;
                             spacing: Tokens.sp1;
@@ -448,63 +444,33 @@ export component TabularGrid inherits Rectangle {
                                 }
                             }
                         }
-                        // TextEdit, not a hand-rolled Flickable: it owns its own
-                        // viewport/scrollbar (same reason the read-only inspector's
-                        // detail-input below uses it), so a long value wraps and
-                        // scrolls reliably without a manual viewport-height that
-                        // depends on the very content it's sizing.
-                        if root.read-only || (!root.is-boolean(root.columns[c].type-name) && !root.is-date(root.columns[c].type-name)): VerticalLayout {
-                            padding-left: Tokens.sp2;
-                            padding-right: Tokens.sp2;
-                            padding-top: Tokens.sp1;
-                            padding-bottom: Tokens.sp1;
-                            edit-input := TextEdit {
-                                vertical-stretch: 1;
-                                // Read-only view: selectable + copyable, edits blocked.
-                                // Always shows root.editing-value (main.rs seeds it
-                                // pretty-printed for JSON, raw otherwise), same
-                                // value text-w/editor-w above are sized from — a
-                                // separate cell.text source here would desync the
-                                // box's size from what's actually rendered in it.
-                                read-only: root.read-only;
-                                text: root.editing-value;
-                                edited => { root.editing-value = self.text; }
-                                font-family: Tokens.mono;
-                                font-size: Tokens.font-sm;
-                                wrap: word-wrap;
-                                key-pressed(e) => {
-                                    if (e.text == Key.Escape) {
-                                        root.edit-cancelled();
-                                        return accept;
-                                    }
-                                    // Read-only view: let selection/copy shortcuts
-                                    // through, don't commit or advance.
-                                    if (root.read-only) { return reject; }
-                                    if (e.text == Key.Return) {
-                                        root.cell-edited(r, c, self.text);
-                                        return accept;
-                                    }
-                                    if (e.text == Key.Tab || e.text == Key.Backtab) {
-                                        root.cell-advance(r, c, self.text,
-                                            e.text == Key.Tab && !e.modifiers.shift);
-                                        return accept;
-                                    }
-                                    return reject;
+                        if !root.is-boolean(root.columns[c].type-name) && !root.is-date(root.columns[c].type-name): edit-input := TextInput {
+                            x: Tokens.sp2;
+                            y: Tokens.sp1;
+                            width: parent.width - 2 * Tokens.sp2;
+                            height: parent.height - 2 * Tokens.sp1;
+                            vertical-alignment: top;
+                            text: cell.is-null ? "" : cell.text;
+                            edited => { root.editing-value = self.text; }
+                            color: Tokens.text;
+                            font-family: Tokens.mono;
+                            font-size: Tokens.font-sm;
+                            single-line: false;
+                            wrap: word-wrap;
+                            accepted => { root.cell-edited(r, c, self.text); }
+                            key-pressed(e) => {
+                                if (e.text == Key.Escape) {
+                                    root.edit-cancelled();
+                                    return accept;
                                 }
-                                // TextEdit auto-scrolls to the cursor on every
-                                // position change (its internal
-                                // cursor-position-changed handler), and that has
-                                // proven to leave the viewport scrolled to the
-                                // end of the text regardless of focus/selection
-                                // ordering. Force it back to the top-left last,
-                                // overriding whatever the auto-scroll did.
-                                init => {
-                                    self.focus();
-                                    self.set-selection-offsets(0, 0);
-                                    self.viewport-x = 0px;
-                                    self.viewport-y = 0px;
+                                if (e.text == Key.Tab || e.text == Key.Backtab) {
+                                    root.cell-advance(r, c, self.text,
+                                        e.text == Key.Tab && !e.modifiers.shift);
+                                    return accept;
                                 }
+                                return reject;
                             }
+                            init => { self.focus(); self.select-all(); }
                         }
                     }
                 }
@@ -584,9 +550,15 @@ export component TabularGrid inherits Rectangle {
         }
     }
 
-    // Read-only cell inspector: a centered card with the full value, opened by
-    // double-click on a result cell. Selectable + auto-selected so ⌘C copies.
-    if root.read-only && root.editing-row >= 0 && root.editing-col >= 0: Rectangle {
+    // Cell value inspector: a centered card with the full value, opened by
+    // double-click. Read-only query results always land here (selectable +
+    // auto-selected so ⌘C copies); a writable grid also lands here for a
+    // large/JSON value (root.editing-large) instead of the row-height inline
+    // overlay above, which is too short to host TextEdit — its cupertino
+    // style has a hard 50px internal min-height, and its cursor-driven
+    // auto-scroll can't be reliably forced to a fixed position from outside.
+    // This card is spacious enough (560×360) to clear both problems.
+    if (root.read-only || root.editing-large) && root.editing-row >= 0 && root.editing-col >= 0: Rectangle {
         background: #00000088;
         // backdrop click closes
         TouchArea { clicked => { root.edit-cancelled(); } }
@@ -608,14 +580,16 @@ export component TabularGrid inherits Rectangle {
                 spacing: Tokens.sp2;
                 HorizontalLayout {
                     Text {
-                        text: "Cell value";
+                        text: root.read-only ? "Cell value" : "Edit value";
                         horizontal-stretch: 1;
                         color: Tokens.text;
                         font-weight: Tokens.weight-emphasis;
                         vertical-alignment: center;
                     }
                     Text {
-                        text: Shortcut.primary + Shortcut.separator + "C to copy · Esc to close";
+                        text: root.read-only
+                            ? Shortcut.primary + Shortcut.separator + "C to copy · Esc to close"
+                            : "Enter to save · Esc to cancel";
                         color: Tokens.text-faint;
                         font-size: Tokens.font-xs;
                         vertical-alignment: center;
@@ -626,20 +600,31 @@ export component TabularGrid inherits Rectangle {
                 // cyclic height dependency that broke scrolling on big values).
                 detail-input := TextEdit {
                     vertical-stretch: 1;
-                    read-only: true;
+                    read-only: root.read-only;
                     text: root.editing-value;
+                    edited => { root.editing-value = self.text; }
                     wrap: word-wrap;
                     font-family: Tokens.mono;
                     font-size: Tokens.font-sm;
                     init => { self.focus(); self.select-all(); }
                     key-pressed(e) => {
                         if (e.text == Key.Escape) { root.edit-cancelled(); return accept; }
+                        if (root.read-only) { return reject; }
+                        if (e.text == Key.Return) {
+                            root.cell-edited(root.editing-row, root.editing-col, self.text);
+                            return accept;
+                        }
+                        if (e.text == Key.Tab || e.text == Key.Backtab) {
+                            root.cell-advance(root.editing-row, root.editing-col, self.text,
+                                e.text == Key.Tab && !e.modifiers.shift);
+                            return accept;
+                        }
                         return reject;
                     }
                 }
                 // Say *why* this is view-only: a manual query result has no row
                 // identity, so open the table itself to edit or insert.
-                Text {
+                if root.read-only: Text {
                     text: "View-only — query results have no row identity. Open the table to edit or add rows.";
                     color: Tokens.text-faint;
                     font-size: Tokens.font-xs;
