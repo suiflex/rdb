@@ -3151,6 +3151,22 @@ enum PaletteAction {
     OpenRecent(usize),
 }
 
+/// Formats a `/`-delimited group path (e.g. `"OSS/Postgre"`) as `"Group: OSS
+/// · Subgroup: Postgre"`, or just `"Group: OSS"` with no subgroup. Empty
+/// string (no dangling separator to strip) when `group` is `None`/blank, so
+/// callers can drop the whole line rather than showing an empty group.
+fn group_sub_label(group: Option<&str>) -> String {
+    let Some(g) = group.map(str::trim).filter(|g| !g.is_empty()) else {
+        return String::new();
+    };
+    let mut parts = g.split('/').filter(|p| !p.trim().is_empty());
+    match (parts.next(), parts.collect::<Vec<_>>().join(" / ")) {
+        (Some(group), sub) if !sub.is_empty() => format!("Group: {group} · Subgroup: {sub}"),
+        (Some(group), _) => format!("Group: {group}"),
+        (None, _) => String::new(),
+    }
+}
+
 type PaletteConnName = (
     String,
     &'static str,
@@ -3227,13 +3243,12 @@ fn build_palette_items(
     if !conns.is_empty() {
         items.push(section("Connections"));
         actions.push(PaletteAction::None);
-        for (idx, (n, badge, color, has_custom_color, env_tag_label, env_tag_color, _group)) in
-            conns
+        for (idx, (n, badge, color, has_custom_color, env_tag_label, env_tag_color, group)) in conns
         {
             items.push(PaletteItem {
                 label: n.clone().into(),
                 kind: (*badge).into(),
-                sub: SharedString::default(),
+                sub: group_sub_label(Some(group.as_str())).into(),
                 local: false,
                 color: *color,
                 has_custom_color: *has_custom_color,
@@ -6027,18 +6042,11 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_sel_color(theme::accent_or_default(s.color.as_deref().unwrap_or("")));
             w.set_sel_has_custom_color(s.color.is_some());
             let label = AnyDriver::label(s.engine);
-            let sub = match s.group.as_deref().filter(|g| !g.trim().is_empty()) {
-                Some(g) => {
-                    let mut parts = g.split('/').filter(|p| !p.trim().is_empty());
-                    match (parts.next(), parts.collect::<Vec<_>>().join(" / ")) {
-                        (Some(group), sub) if !sub.is_empty() => {
-                            format!("{label} · Group: {group} · Subgroup: {sub}")
-                        }
-                        (Some(group), _) => format!("{label} · Group: {group}"),
-                        (None, _) => label.to_string(),
-                    }
-                }
-                None => label.to_string(),
+            let gsub = group_sub_label(s.group.as_deref());
+            let sub = if gsub.is_empty() {
+                label.to_string()
+            } else {
+                format!("{label} · {gsub}")
             };
             w.set_sel_sub(sub.into());
             w.set_sel_local(s.local);
