@@ -57,6 +57,7 @@ export component WorkArea inherits Rectangle {
     callback row-drag(int);
     in property <int> editing-row: -1;
     in property <int> editing-col: -1;
+    in property <bool> editing-large: false;
     in-out property <bool> show-structure: false;
     in property <[StructField]> structure-columns;
     in-out property <string> grid-filter;
@@ -188,6 +189,7 @@ export component WorkArea inherits Rectangle {
     in property <int> p1-editing-row: -1;
     in property <int> p1-editing-col: -1;
     in-out property <string> p1-editing-value;
+    in property <bool> p1-editing-large: false;
     in property <int> p1-scroll-grid-tick;
     in property <int> p1-pending-count;
     callback p1-commit-edits();
@@ -461,6 +463,7 @@ export component WorkArea inherits Rectangle {
             editing-row: root.editing-row;
             editing-col: root.editing-col;
             editing-value <=> root.editing-value;
+            editing-large: root.editing-large;
             scroll-grid-tick: root.scroll-grid-tick;
             sort-col(i) => { root.sort-col(i); }
             reorder-col(i, x) => { root.reorder-col(i, x); }
@@ -598,6 +601,7 @@ export component WorkArea inherits Rectangle {
                 editing-row: root.p1-editing-row;
                 editing-col: root.p1-editing-col;
                 editing-value <=> root.p1-editing-value;
+                editing-large: root.p1-editing-large;
                 scroll-grid-tick: root.p1-scroll-grid-tick;
                 sort-col(i) => { root.p1-sort-col(i); }
                 reorder-col(i, x) => { root.p1-reorder-col(i, x); }

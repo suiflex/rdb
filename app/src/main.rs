@@ -1979,8 +1979,8 @@ fn derive_query_name(sql: &str, existing: &[(String, String)]) -> String {
         .unwrap_or(base)
 }
 
-/// Pretty-print (indent) a JSON string for read-only display. Returns `None`
-/// when the text isn't a JSON object/array, so plain cells are shown as-is.
+/// Pretty-print (indent) a JSON string for display. Returns `None` when the
+/// text isn't a JSON object/array, so plain cells are shown as-is.
 fn pretty_json(s: &str) -> Option<String> {
     let t = s.trim();
     if !(t.starts_with('{') || t.starts_with('[')) {
@@ -1989,6 +1989,22 @@ fn pretty_json(s: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(t)
         .ok()
         .and_then(|v| serde_json::to_string_pretty(&v).ok())
+}
+
+/// Prepares a cell's raw text for the edit overlay: pretty-prints JSON (so it
+/// has real line breaks to wrap on), and flags values that should open the
+/// roomy centered inspector modal instead of the row-height inline overlay
+/// (which is too short to host a scrollable multi-line editor — see
+/// tabular-grid.slint's modal comment). JSON always qualifies as "large"
+/// since it's always going to want the formatting room regardless of length.
+fn format_cell_edit_value(value: SharedString) -> (SharedString, bool) {
+    match pretty_json(value.as_str()) {
+        Some(pretty) => (SharedString::from(pretty), true),
+        None => {
+            let is_large = value.chars().count() > 80;
+            (value, is_large)
+        }
+    }
 }
 
 /// Strip SQL line comments (`--` to end of line) and blank lines, so a
@@ -3399,6 +3415,13 @@ fn set_p_editing(w: &MainWindow, pane: usize, row: i32, col: i32) {
     } else {
         w.set_p1_editing_row(row);
         w.set_p1_editing_col(col);
+    }
+}
+fn set_p_editing_large(w: &MainWindow, pane: usize, large: bool) {
+    if pane == 0 {
+        w.set_editing_large(large);
+    } else {
+        w.set_p1_editing_large(large);
     }
 }
 fn set_p_doc_tree(w: &MainWindow, pane: usize, m: ModelRc<DocRow>) {
@@ -9700,15 +9723,10 @@ fn main() -> Result<(), slint::PlatformError> {
             } else {
                 SharedString::default()
             };
-            let value = if w.get_p1_grid_read_only() {
-                pretty_json(value.as_str())
-                    .map(SharedString::from)
-                    .unwrap_or(value)
-            } else {
-                value
-            };
-            w.set_p1_editing_value(value);
+            let (value, is_large) = format_cell_edit_value(value);
             set_p_editing(&w, 1, row, col);
+            set_p_editing_large(&w, 1, is_large);
+            w.set_p1_editing_value(value);
         });
     }
     {
@@ -11659,27 +11677,11 @@ fn main() -> Result<(), slint::PlatformError> {
             } else {
                 SharedString::default()
             };
-            // Pretty-print JSON so it has real line/whitespace break points —
-            // compact JSON (no spaces after `:`/`,`) has none, which left the
-            // TextInput's word-wrap with nowhere to break and the box
-            // rendering blank (long unbroken run laid out off-view). Applies
-            // to writable grids too: the overlay's box is sized off this same
-            // value (see tabular-grid.slint's text-w), so it must match what
-            // is shown regardless of read-only.
-            let value = pretty_json(value.as_str())
-                .map(SharedString::from)
-                .unwrap_or(value);
-            // editing_value first: the overlay element only exists once BOTH
-            // editing_row and editing_col match (its `if` condition), so
-            // whichever of those two is written last is what creates it and
-            // fires its `init`. Value must already be in place by then, or
-            // TextEdit's init runs against the previous session's stale
-            // text, and the real value arriving right after drags its
-            // auto-scroll-to-cursor to the end of the (now longer) text —
-            // this is what showed only the JSON's closing bracket.
-            w.set_editing_value(value);
+            let (value, is_large) = format_cell_edit_value(value);
             w.set_editing_row(r);
             w.set_editing_col(c);
+            w.set_editing_large(is_large);
+            w.set_editing_value(value);
             let base = displayed_grid
                 .lock()
                 .unwrap()
