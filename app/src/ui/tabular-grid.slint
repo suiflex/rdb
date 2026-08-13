@@ -386,11 +386,13 @@ export component TabularGrid inherits Rectangle {
                         // A value that fits on one line stays exactly row-height, so
                         // it doesn't cover the rows below. Rows are fixed height, so
                         // a longer value floats taller over them (z:100) instead, up
-                        // to this cap — content past it scrolls inside the Flickable
-                        // below (raised from 96px, which cut multi-line JSON off
-                        // mid-value with no way to see the rest).
+                        // to this cap — generous enough that ordinary pretty-printed
+                        // JSON (a handful of fields) fits with no scrolling at all,
+                        // since TextEdit's auto-scroll-to-cursor has proven unreliable
+                        // to control here; content past the cap still scrolls, it's
+                        // just not the primary way values are meant to be seen.
                         height: self.compact-editor || self.text-w <= self.editor-w
-                            ? parent.height : 280px;
+                            ? parent.height : min(420px, root.height - 2 * Tokens.grid-row-h);
                         background: Tokens.card;
                         border-width: 2px;
                         // Read-only view is a value inspector, not a pending
@@ -489,11 +491,19 @@ export component TabularGrid inherits Rectangle {
                                     }
                                     return reject;
                                 }
-                                // Not select-all: with no scroll-into-view on
-                                // TextInput, a long value auto-selected end-to-end
-                                // can lay out its cursor past the visible box,
-                                // making the box look empty. Open at the start.
-                                init => { self.focus(); self.set-selection-offsets(0, 0); }
+                                // TextEdit auto-scrolls to the cursor on every
+                                // position change (its internal
+                                // cursor-position-changed handler), and that has
+                                // proven to leave the viewport scrolled to the
+                                // end of the text regardless of focus/selection
+                                // ordering. Force it back to the top-left last,
+                                // overriding whatever the auto-scroll did.
+                                init => {
+                                    self.focus();
+                                    self.set-selection-offsets(0, 0);
+                                    self.viewport-x = 0px;
+                                    self.viewport-y = 0px;
+                                }
                             }
                         }
                     }
