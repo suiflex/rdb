@@ -10,6 +10,150 @@ import { AppIcon } from "icons.slint";
 import { ConnItem, KvRow, TopLevelGroup } from "structs.slint";
 import { ScrollView } from "std-widgets.slint";
 
+// Social badges: Product Hunt launch + GitHub star, plus supported-engine
+// trust badges ("Works with"). Shared between the empty state and the
+// selected-connection detail panel so both keep the bottom of the panel
+// from going empty.
+component SocialBanner {
+    callback open-url(string);
+
+    VerticalLayout {
+        spacing: Tokens.sp4;
+        // Drawn as pills (not the remote SVG, which the UI can't render).
+        HorizontalLayout {
+            alignment: center;
+            spacing: Tokens.sp2;
+            Rectangle {
+                height: 32px;
+                horizontal-stretch: 0;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: Tokens.border;
+                background: ph-ta.has-hover ? Tokens.card : transparent;
+                HorizontalLayout {
+                    padding-left: Tokens.sp3;
+                    padding-right: Tokens.sp3;
+                    spacing: Tokens.sp2;
+                    alignment: center;
+                    Text {
+                        text: "P";
+                        color: #DA552F;
+                        font-size: 15px;
+                        font-weight: 800;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: "Product Hunt";
+                        color: Tokens.text;
+                        font-size: Tokens.font-md;
+                        vertical-alignment: center;
+                    }
+                }
+                ph-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.open-url("https://www.producthunt.com/products/rdb"); }
+                }
+            }
+            Rectangle {
+                height: 32px;
+                horizontal-stretch: 0;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: Tokens.border;
+                background: gh-ta.has-hover ? Tokens.card : transparent;
+                HorizontalLayout {
+                    padding-left: Tokens.sp3;
+                    padding-right: Tokens.sp3;
+                    spacing: Tokens.sp2;
+                    alignment: center;
+                    Text {
+                        text: "★";
+                        color: Tokens.warn;
+                        font-size: 15px;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: "Star on GitHub";
+                        color: Tokens.text;
+                        font-size: Tokens.font-md;
+                        vertical-alignment: center;
+                    }
+                }
+                gh-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.open-url("https://github.com/suiflex/rdb"); }
+                }
+            }
+        }
+        // Real brand marks, full color — unlike DbBadge (the sidebar/picker
+        // badge), which is deliberately monochrome. SQL Server has no
+        // official mark shipped with the app, so it's a text label instead
+        // of a fabricated logo (same choice the website makes).
+        VerticalLayout {
+            spacing: Tokens.sp1;
+            alignment: center;
+            Text {
+                text: "Works with";
+                color: Tokens.text-faint;
+                font-size: Tokens.font-xs;
+                horizontal-alignment: center;
+            }
+            HorizontalLayout {
+                alignment: center;
+                spacing: Tokens.sp3;
+                Image {
+                    source: @image-url("icons/brand/postgres.svg");
+                    width: 18px;
+                    height: 18px;
+                    image-fit: contain;
+                }
+                Image {
+                    source: @image-url("icons/brand/mysql.svg");
+                    width: 18px;
+                    height: 18px;
+                    image-fit: contain;
+                }
+                Image {
+                    source: @image-url("icons/brand/redis.svg");
+                    width: 18px;
+                    height: 18px;
+                    image-fit: contain;
+                }
+                Image {
+                    source: @image-url("icons/brand/mongo.svg");
+                    width: 18px;
+                    height: 18px;
+                    image-fit: contain;
+                }
+                Image {
+                    source: @image-url("icons/brand/sqlite.svg");
+                    width: 18px;
+                    height: 18px;
+                    image-fit: contain;
+                }
+                Image {
+                    source: @image-url("icons/brand/cassandra.svg");
+                    width: 18px;
+                    height: 18px;
+                    image-fit: contain;
+                }
+                Image {
+                    source: @image-url("icons/brand/clickhouse.svg");
+                    width: 18px;
+                    height: 18px;
+                    image-fit: contain;
+                }
+                Text {
+                    text: "SQL Server";
+                    color: Tokens.text-faint;
+                    font-size: Tokens.font-xs;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
+
 export component ConnPicker inherits Rectangle {
     in property <[TopLevelGroup]> connections;
     in property <int> selected-conn: -1;
@@ -636,140 +780,7 @@ export component ConnPicker inherits Rectangle {
                         clicked => { root.add-clicked(); }
                     }
                 }
-                // Social badges: Product Hunt launch + GitHub star, open browser.
-                // Drawn as pills (not the remote SVG, which the UI can't render).
-                HorizontalLayout {
-                    alignment: center;
-                    spacing: Tokens.sp2;
-                    Rectangle {
-                        height: 32px;
-                        horizontal-stretch: 0;
-                        border-radius: 8px;
-                        border-width: 1px;
-                        border-color: Tokens.border;
-                        background: ph-ta.has-hover ? Tokens.card : transparent;
-                        HorizontalLayout {
-                            padding-left: Tokens.sp3;
-                            padding-right: Tokens.sp3;
-                            spacing: Tokens.sp2;
-                            alignment: center;
-                            Text {
-                                text: "P";
-                                color: #DA552F;
-                                font-size: 15px;
-                                font-weight: 800;
-                                vertical-alignment: center;
-                            }
-                            Text {
-                                text: "Product Hunt";
-                                color: Tokens.text;
-                                font-size: Tokens.font-md;
-                                vertical-alignment: center;
-                            }
-                        }
-                        ph-ta := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.open-url("https://www.producthunt.com/products/rdb"); }
-                        }
-                    }
-                    Rectangle {
-                        height: 32px;
-                        horizontal-stretch: 0;
-                        border-radius: 8px;
-                        border-width: 1px;
-                        border-color: Tokens.border;
-                        background: gh-ta.has-hover ? Tokens.card : transparent;
-                        HorizontalLayout {
-                            padding-left: Tokens.sp3;
-                            padding-right: Tokens.sp3;
-                            spacing: Tokens.sp2;
-                            alignment: center;
-                            Text {
-                                text: "★";
-                                color: Tokens.warn;
-                                font-size: 15px;
-                                vertical-alignment: center;
-                            }
-                            Text {
-                                text: "Star on GitHub";
-                                color: Tokens.text;
-                                font-size: Tokens.font-md;
-                                vertical-alignment: center;
-                            }
-                        }
-                        gh-ta := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.open-url("https://github.com/suiflex/rdb"); }
-                        }
-                    }
-                }
-                // Supported-engine trust badges: real brand marks, full
-                // color — unlike DbBadge (the sidebar/picker badge), which
-                // is deliberately monochrome. SQL Server has no official
-                // mark shipped with the app, so it's a text label instead
-                // of a fabricated logo (same choice the website makes).
-                VerticalLayout {
-                    spacing: Tokens.sp1;
-                    alignment: center;
-                    Text {
-                        text: "Works with";
-                        color: Tokens.text-faint;
-                        font-size: Tokens.font-xs;
-                        horizontal-alignment: center;
-                    }
-                    HorizontalLayout {
-                        alignment: center;
-                        spacing: Tokens.sp3;
-                        Image {
-                            source: @image-url("icons/brand/postgres.svg");
-                            width: 18px;
-                            height: 18px;
-                            image-fit: contain;
-                        }
-                        Image {
-                            source: @image-url("icons/brand/mysql.svg");
-                            width: 18px;
-                            height: 18px;
-                            image-fit: contain;
-                        }
-                        Image {
-                            source: @image-url("icons/brand/redis.svg");
-                            width: 18px;
-                            height: 18px;
-                            image-fit: contain;
-                        }
-                        Image {
-                            source: @image-url("icons/brand/mongo.svg");
-                            width: 18px;
-                            height: 18px;
-                            image-fit: contain;
-                        }
-                        Image {
-                            source: @image-url("icons/brand/sqlite.svg");
-                            width: 18px;
-                            height: 18px;
-                            image-fit: contain;
-                        }
-                        Image {
-                            source: @image-url("icons/brand/cassandra.svg");
-                            width: 18px;
-                            height: 18px;
-                            image-fit: contain;
-                        }
-                        Image {
-                            source: @image-url("icons/brand/clickhouse.svg");
-                            width: 18px;
-                            height: 18px;
-                            image-fit: contain;
-                        }
-                        Text {
-                            text: "SQL Server";
-                            color: Tokens.text-faint;
-                            font-size: Tokens.font-xs;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
+                SocialBanner { open-url(url) => { root.open-url(url); } }
             }
 
             if root.selected-conn >= 0: VerticalLayout {
@@ -902,6 +913,11 @@ export component ConnPicker inherits Rectangle {
                         alignment: start;
                         for t in root.sel-tags: TagChip { text: t; }
                     }
+
+                    // Keeps the panel from going empty below the detail
+                    // content, matching the empty-state's bottom banner.
+                    Rectangle { vertical-stretch: 1; }
+                    SocialBanner { open-url(url) => { root.open-url(url); } }
                 }
 
                 // ----- footer status -----
