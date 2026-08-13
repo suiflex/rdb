@@ -3151,20 +3151,48 @@ enum PaletteAction {
     OpenRecent(usize),
 }
 
+type PaletteConnName = (
+    String,
+    &'static str,
+    slint::Color,
+    bool,
+    SharedString,
+    slint::Color,
+    String,
+);
+
+/// Connection fields the ⌘K palette needs, including the normalized group
+/// path so its search can match group/env like the sidebar filter does
+/// (`build_conn_items`). Shared by both `on_toggle_palette` and
+/// `on_palette_filter` so their tuple shape can't drift apart.
+fn build_palette_conn_names(store: &rdb_connstore::ConnStore) -> Vec<PaletteConnName> {
+    store
+        .list()
+        .iter()
+        .map(|s| {
+            (
+                s.name.clone(),
+                AnyDriver::badge(s.engine),
+                theme::accent_or_default(s.color.as_deref().unwrap_or("")),
+                s.color.is_some(),
+                theme::env_tag_label(s.env_tag).into(),
+                theme::env_tag_color(s.env_tag).unwrap_or_else(|| theme::accent_or_default("")),
+                s.group
+                    .as_deref()
+                    .and_then(rdb_connstore::normalize_group_path)
+                    .unwrap_or_default(),
+            )
+        })
+        .collect()
+}
+
 /// Build the ⌘K palette model, grouped GitHub-style under non-selectable
 /// "section" header rows. `needle` (lowercase) filters both groups; empty
 /// shows everything. Empty groups drop their header. Returns the flat item
 /// list alongside an index-aligned action list `on_palette_choose` dispatches
 /// on.
 fn build_palette_items(
-    names: &[(
-        String,
-        &'static str,
-        slint::Color,
-        bool,
-        SharedString,
-        slint::Color,
-    )],
+    names: &[PaletteConnName],
     w: &MainWindow,
     saved_queries: &[(String, String)],
     recent_queries: &[HistoryEntry],
@@ -3189,12 +3217,19 @@ fn build_palette_items(
     let conns: Vec<_> = names
         .iter()
         .enumerate()
-        .filter(|(_, (n, ..))| needle.is_empty() || n.to_lowercase().contains(needle))
+        .filter(|(_, (n, _, _, _, env_tag_label, _, group))| {
+            needle.is_empty()
+                || n.to_lowercase().contains(needle)
+                || group.to_lowercase().contains(needle)
+                || env_tag_label.to_lowercase().contains(needle)
+        })
         .collect();
     if !conns.is_empty() {
         items.push(section("Connections"));
         actions.push(PaletteAction::None);
-        for (idx, (n, badge, color, has_custom_color, env_tag_label, env_tag_color)) in conns {
+        for (idx, (n, badge, color, has_custom_color, env_tag_label, env_tag_color, _group)) in
+            conns
+        {
             items.push(PaletteItem {
                 label: n.clone().into(),
                 kind: (*badge).into(),
@@ -12070,29 +12105,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let opening = !w.get_palette_open();
                 w.set_palette_open(opening);
                 if opening {
-                    let names: Vec<(
-                        String,
-                        &'static str,
-                        slint::Color,
-                        bool,
-                        SharedString,
-                        slint::Color,
-                    )> = store
-                        .borrow()
-                        .list()
-                        .iter()
-                        .map(|s| {
-                            (
-                                s.name.clone(),
-                                AnyDriver::badge(s.engine),
-                                theme::accent_or_default(s.color.as_deref().unwrap_or("")),
-                                s.color.is_some(),
-                                theme::env_tag_label(s.env_tag).into(),
-                                theme::env_tag_color(s.env_tag)
-                                    .unwrap_or_else(|| theme::accent_or_default("")),
-                            )
-                        })
-                        .collect();
+                    let names = build_palette_conn_names(&store.borrow());
                     let (items, actions) = build_palette_items(
                         &names,
                         &w,
@@ -12117,29 +12130,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let recent_queries = recent_queries.clone();
         window.on_palette_filter(move |q| {
             if let Some(w) = weak.upgrade() {
-                let names: Vec<(
-                    String,
-                    &'static str,
-                    slint::Color,
-                    bool,
-                    SharedString,
-                    slint::Color,
-                )> = store
-                    .borrow()
-                    .list()
-                    .iter()
-                    .map(|s| {
-                        (
-                            s.name.clone(),
-                            AnyDriver::badge(s.engine),
-                            theme::accent_or_default(s.color.as_deref().unwrap_or("")),
-                            s.color.is_some(),
-                            theme::env_tag_label(s.env_tag).into(),
-                            theme::env_tag_color(s.env_tag)
-                                .unwrap_or_else(|| theme::accent_or_default("")),
-                        )
-                    })
-                    .collect();
+                let names = build_palette_conn_names(&store.borrow());
                 let (items, actions) = build_palette_items(
                     &names,
                     &w,
