@@ -45,13 +45,17 @@ pub fn classify(ty: &Type) -> CellKind {
 pub fn extract_cell(row: &Row, idx: usize) -> Cell {
     let ty = row.columns()[idx].type_();
     match classify(ty) {
-        CellKind::Int => match row.try_get::<_, Option<i64>>(idx) {
-            Ok(Some(v)) => Cell::Int(v),
+        CellKind::Int => match row.try_get::<_, Option<i16>>(idx) {
+            Ok(Some(v)) => Cell::Int(v as i64),
             Ok(None) => Cell::Null,
             Err(_) => match row.try_get::<_, Option<i32>>(idx) {
                 Ok(Some(v)) => Cell::Int(v as i64),
                 Ok(None) => Cell::Null,
-                Err(_) => string_fallback(row, idx),
+                Err(_) => match row.try_get::<_, Option<i64>>(idx) {
+                    Ok(Some(v)) => Cell::Int(v),
+                    Ok(None) => Cell::Null,
+                    Err(_) => string_fallback(row, idx),
+                },
             },
         },
         CellKind::Float => match row.try_get::<_, Option<f64>>(idx) {
@@ -126,6 +130,12 @@ mod tests {
         assert_eq!(classify(&Type::INT2), CellKind::Int);
         assert_eq!(classify(&Type::INT4), CellKind::Int);
         assert_eq!(classify(&Type::INT8), CellKind::Int);
+    }
+
+    #[test]
+    fn postgres_integer_widths_map_to_int() {
+        let values: [i16; 1] = [7];
+        assert_eq!(values[0] as i64, 7);
     }
 
     #[test]
