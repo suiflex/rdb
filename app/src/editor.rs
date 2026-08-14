@@ -744,11 +744,13 @@ impl EditorState {
         trim_leading_comments(&stmt).to_string()
     }
 
-    /// 0-based line where the text `Run` executes starts in the full buffer.
-    /// Run sends only the selection, else the statement under the cursor, while
-    /// a driver reports an error position relative to what it was given — this
-    /// is what shifts one back into the other.
-    pub fn run_origin(&self) -> i32 {
+    /// 0-based line and column where the text `Run` executes starts in the full
+    /// buffer. Run sends only the selection, else the statement under the
+    /// cursor, while a driver reports an error position relative to what it was
+    /// given — this is what shifts one back into the other. The column matters
+    /// only for an error on the fragment's own first line; past that, the
+    /// fragment's lines and the buffer's line up.
+    pub fn run_origin(&self) -> (i32, i32) {
         let text = self.text();
         let selected = self.selection().is_some();
         let (start_char, raw) = match self.selection() {
@@ -775,7 +777,11 @@ impl EditorState {
             .char_indices()
             .nth(start_char + skipped)
             .map_or(text.len(), |(b, _)| b);
-        text[..byte].matches('\n').count() as i32
+        let line_start = text[..byte].rfind('\n').map_or(0, |i| i + 1);
+        (
+            text[..byte].matches('\n').count() as i32,
+            text[line_start..byte].chars().count() as i32,
+        )
     }
 
     /// Replace the `;`-delimited statement under the cursor with `text`,
@@ -861,6 +867,11 @@ pub struct ErrorSpot {
     /// real mistake (an unterminated statement is only noticed at the *next*
     /// one), so the whole statement is worth marking, not just `line`.
     pub stmt_lines: (i32, i32),
+    /// Column and length, in chars, of the token the engine choked on — enough
+    /// to underline just that word. `len == 0` when the engine only reported a
+    /// line number (MySQL, SQL Server), which points at no token at all.
+    pub col: i32,
+    pub len: i32,
 }
 
 /// Locate the failing line of a query error in the full editor buffer.
@@ -907,16 +918,37 @@ pub fn error_spot(err: &str, sql: &str, stmt_offsets: &[usize]) -> Option<ErrorS
         line_of(sql[..stmt_end].trim_end().len().max(base)),
     );
     if let Some(pos) = value("[[rdb-position:") {
+        let byte = (base + pos).saturating_sub(1).min(sql.len());
+        let (col, len) = token_at(sql, byte);
         return Some(ErrorSpot {
-            line: line_of((base + pos).saturating_sub(1)),
+            line: line_of(byte),
             stmt_lines,
+            col,
+            len,
         });
     }
     let line = value("[[rdb-line:")?;
     Some(ErrorSpot {
         line: line_of(base) + line.saturating_sub(1) as i32,
         stmt_lines,
+        col: 0,
+        len: 0,
     })
+}
+
+/// Column and char length of the token starting at `byte`. A word runs to the
+/// end of its identifier; anything else (an operator, a stray quote) is one
+/// char, which is still worth pointing at.
+fn token_at(sql: &str, byte: usize) -> (i32, i32) {
+    let line_start = sql[..byte].rfind('\n').map_or(0, |i| i + 1);
+    let col = sql[line_start..byte].chars().count() as i32;
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let len = match sql[byte..].chars().next() {
+        Some(c) if word(c) => sql[byte..].chars().take_while(|c| word(*c)).count(),
+        Some(_) => 1,
+        None => 0,
+    };
+    (col, len as i32)
 }
 
 /// Drop the internal `[[rdb-position:N]]` / `[[rdb-line:N]]` marker a driver
@@ -1514,10 +1546,10 @@ mod tests {
         let offsets = statement_offsets(sql);
         assert_eq!(offsets, vec![0, 11]);
 
-        // Byte-offset marker, second statement: `slect` starts at statement
-        // byte 7, so the buffer position is 11 + 8 (1-based) on line 3.
+        // Byte-offset marker, second statement: `slect` is at statement byte 9,
+        // i.e. 1-based position 10, which lands on buffer line 3.
         let spot = error_spot(
-            "query failed: statement 2/2: [[rdb-position:8]] syntax error",
+            "query failed: statement 2/2: [[rdb-position:10]] syntax error",
             sql,
             &offsets,
         )
@@ -1526,6 +1558,19 @@ mod tests {
         // The statement itself spans lines 2..3 — the engine points at line 3,
         // but the mistake started a line earlier.
         assert_eq!(spot.stmt_lines, (2, 3));
+
+        // …and the token itself: `slect` sits two spaces into its line.
+        assert_eq!((spot.col, spot.len), (2, 5));
+
+        // A non-word token (here the quote) is worth one char, not zero.
+        let quoted = "SELECT 'a";
+        let spot = error_spot(
+            "query failed: [[rdb-position:8]] unterminated string",
+            quoted,
+            &statement_offsets(quoted),
+        )
+        .unwrap();
+        assert_eq!((spot.col, spot.len), (7, 1));
 
         // Line marker, second statement: line 2 of that statement is line 3
         // of the buffer.
@@ -1536,6 +1581,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(spot.line, 3);
+        // A line-only engine points at no token, so nothing gets underlined.
+        assert_eq!(spot.len, 0);
 
         // Single statement, no `statement i/n` wrapper.
         let spot = error_spot("query failed: [[rdb-line:1]] boom", sql, &offsets).unwrap();
@@ -1552,13 +1599,13 @@ mod tests {
         // Cursor on the `SELECT` of the second statement (line 3).
         ed.line = 3;
         ed.col = 2;
-        assert_eq!(ed.run_origin(), 3);
+        assert_eq!(ed.run_origin(), (3, 0));
         assert_eq!(ed.current_statement(), "SELECT\n  2;");
 
         // Cursor in the first statement: start of buffer.
         ed.line = 0;
         ed.col = 3;
-        assert_eq!(ed.run_origin(), 0);
+        assert_eq!(ed.run_origin(), (0, 0));
     }
 
     #[test]
@@ -1572,7 +1619,7 @@ mod tests {
         ed.col = 11;
         // Run trims the selection, so the origin skips the leading spaces and
         // still lands on the selection's own line.
-        assert_eq!(ed.run_origin(), 1);
+        assert_eq!(ed.run_origin(), (1, 2));
     }
 
     // ----- mouse hit-test -----

@@ -1324,13 +1324,13 @@ struct GroupRuntime {
     // Editor error highlight: (line the engine pointed at, first line of the
     // failing statement, last line of it), 0-based in the buffer. Kept here so
     // a re-lex (any edit or cursor move) can re-apply it instead of dropping it.
-    error_mark: Arc<Mutex<Option<(i32, i32, i32)>>>,
+    error_mark: Arc<Mutex<Option<ErrorMark>>>,
     // 0-based line where the next run's text starts in the editor buffer — Run
     // sends only the statement under the cursor, so an error line reported
     // against it has to be shifted back. Taken (and reset to the top of the
     // buffer) by run_sql/run_stream, so a run that isn't editor text (saved
     // query, table browse) is unaffected.
-    pending_run_origin: Rc<Cell<i32>>,
+    pending_run_origin: Rc<Cell<(i32, i32)>>,
 }
 
 impl GroupRuntime {
@@ -1358,7 +1358,7 @@ impl GroupRuntime {
             stream_timer: Rc::new(RefCell::new(None)),
             query_abort: Rc::new(RefCell::new(None)),
             error_mark: Arc::new(Mutex::new(None)),
-            pending_run_origin: Rc::new(Cell::new(0)),
+            pending_run_origin: Rc::new(Cell::new((0, 0))),
         }
     }
 }
@@ -2940,19 +2940,52 @@ fn set_p_read_only(w: &MainWindow, pane: usize, read_only: bool) {
         w.set_p1_grid_read_only(read_only);
     }
 }
-/// Arm (or clear) the editor's error highlight: `(line, from, to)` is the line
-/// the engine pointed at plus the span of the statement it belongs to, all
-/// 0-based in the full buffer. `None` clears it.
-fn set_p_error_mark(w: &MainWindow, pane: usize, mark: Option<(i32, i32, i32)>) {
-    let (line, from, to) = mark.unwrap_or((-1, -1, -1));
+/// The editor's error highlight, all 0-based in the full buffer: the line the
+/// engine pointed at, the span of the statement it belongs to, and the token to
+/// underline (`len == 0` when the engine reported no position, only a line).
+#[derive(Clone, Copy)]
+struct ErrorMark {
+    line: i32,
+    from: i32,
+    to: i32,
+    col: i32,
+    len: i32,
+}
+
+/// Shift a driver's error spot into buffer coordinates. `origin` is where the
+/// executed fragment starts (Run sends only one statement); its column applies
+/// only on the fragment's own first line, past that the columns already line up.
+fn mark_from(spot: &editor::ErrorSpot, origin: (i32, i32)) -> ErrorMark {
+    ErrorMark {
+        line: spot.line + origin.0,
+        from: spot.stmt_lines.0 + origin.0,
+        to: spot.stmt_lines.1 + origin.0,
+        col: spot.col + if spot.line == 0 { origin.1 } else { 0 },
+        len: spot.len,
+    }
+}
+
+/// Arm (or clear) the editor's error highlight for `pane`. `None` clears it.
+fn set_p_error_mark(w: &MainWindow, pane: usize, mark: Option<ErrorMark>) {
+    let m = mark.unwrap_or(ErrorMark {
+        line: -1,
+        from: -1,
+        to: -1,
+        col: 0,
+        len: 0,
+    });
     if pane == 0 {
-        w.set_error_line(line);
-        w.set_error_from(from);
-        w.set_error_to(to);
+        w.set_error_line(m.line);
+        w.set_error_from(m.from);
+        w.set_error_to(m.to);
+        w.set_error_col(m.col);
+        w.set_error_len(m.len);
     } else {
-        w.set_p1_error_line(line);
-        w.set_p1_error_from(from);
-        w.set_p1_error_to(to);
+        w.set_p1_error_line(m.line);
+        w.set_p1_error_from(m.from);
+        w.set_p1_error_to(m.to);
+        w.set_p1_error_col(m.col);
+        w.set_p1_error_len(m.len);
     }
 }
 fn set_p_pending_count(w: &MainWindow, pane: usize, n: i32) {
@@ -4448,7 +4481,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let ed = ed_state.borrow();
             let sel = ed.selection();
             let error_mark = *panes[pane].error_mark.lock().unwrap();
-            let error_line = error_mark.map(|(line, _, _)| line as usize);
+            let error_line = error_mark.map(|m| m.line as usize);
             let language = cur_engine
                 .borrow()
                 .map(rdb_connstore::Engine::language)
@@ -8417,13 +8450,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     .and_then(|e| editor::error_spot(&e.to_string(), &sql, &stmt_offsets));
                 // `sql` is only the fragment Run sent; shift its line span back
                 // into full-buffer coordinates.
-                let error_mark_value = error_spot.as_ref().map(|s| {
-                    (
-                        s.line + run_origin,
-                        s.stmt_lines.0 + run_origin,
-                        s.stmt_lines.1 + run_origin,
-                    )
-                });
+                let error_mark_value = error_spot.as_ref().map(|s| mark_from(s, run_origin));
                 // A hand-typed `SELECT ... FROM t` result has no row identity by
                 // default. When it's an unambiguous single-table select (no
                 // join/union/aggregate — see single_table_name) and the table's
@@ -9014,13 +9041,8 @@ fn main() -> Result<(), slint::PlatformError> {
                                             &sql_for_error,
                                             &editor::statement_offsets(&sql_for_error),
                                         )
-                                        .map(|s| {
-                                            (
-                                                s.line + run_origin,
-                                                s.stmt_lines.0 + run_origin,
-                                                s.stmt_lines.1 + run_origin,
-                                            )
-                                        });
+                                        .as_ref()
+                                        .map(|s| mark_from(s, run_origin));
                                         *error_mark_state.lock().unwrap() = mark;
                                         set_p_error_mark(&w, pane, mark);
                                         apply_result(
