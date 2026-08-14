@@ -8712,7 +8712,10 @@ fn main() -> Result<(), slint::PlatformError> {
                                 apply_result(
                                     &w,
                                     pane,
-                                    model::ResultView::Affected(format!("error: {e}")),
+                                    model::ResultView::Affected(format!(
+                                        "error: {}",
+                                        editor::strip_error_marker(&e.to_string())
+                                    )),
                                 );
                             }
                             _ => {}
@@ -9023,7 +9026,10 @@ fn main() -> Result<(), slint::PlatformError> {
                                         apply_result(
                                             &w,
                                             pane,
-                                            model::ResultView::Affected(format!("error: {e}")),
+                                            model::ResultView::Affected(format!(
+                                                "error: {}",
+                                                editor::strip_error_marker(&e.to_string())
+                                            )),
                                         );
                                         set_p_query_running(&w, pane, false);
                                         set_p_streaming(&w, pane, false);
@@ -12071,7 +12077,10 @@ fn main() -> Result<(), slint::PlatformError> {
                         Err(e) => {
                             // Keep the buffer so nothing typed is lost.
                             w.set_status_error(true);
-                            w.set_result_status(SharedString::from(format!("error: {e}")));
+                            w.set_result_status(SharedString::from(format!(
+                                "error: {}",
+                                editor::strip_error_marker(&e.to_string())
+                            )));
                         }
                     }
                 });
@@ -12195,7 +12204,14 @@ fn main() -> Result<(), slint::PlatformError> {
                         Err(e) => {
                             // Keep the buffer so nothing typed is lost.
                             set_p_status_error(&w, 1, true);
-                            set_p_result_status(&w, 1, SharedString::from(format!("error: {e}")));
+                            set_p_result_status(
+                                &w,
+                                1,
+                                SharedString::from(format!(
+                                    "error: {}",
+                                    editor::strip_error_marker(&e.to_string())
+                                )),
+                            );
                         }
                     }
                 });

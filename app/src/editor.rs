@@ -818,6 +818,22 @@ pub fn statement_offsets(text: &str) -> Vec<usize> {
     out
 }
 
+/// Drop the internal `[[rdb-position:N]]` / `[[rdb-line:N]]` marker a driver
+/// prefixes onto a query error so the app can locate the failing line. It is
+/// plumbing, not something the user should ever read in the result pane.
+pub fn strip_error_marker(msg: &str) -> std::borrow::Cow<'_, str> {
+    let Some(start) = msg.find("[[rdb-") else {
+        return std::borrow::Cow::Borrowed(msg);
+    };
+    let Some(end) = msg[start..].find("]] ") else {
+        return std::borrow::Cow::Borrowed(msg);
+    };
+    let mut out = String::with_capacity(msg.len());
+    out.push_str(&msg[..start]);
+    out.push_str(&msg[start + end + "]] ".len()..]);
+    std::borrow::Cow::Owned(out)
+}
+
 pub fn split_statements(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     let mut out: Vec<String> = Vec::new();
@@ -1374,6 +1390,21 @@ mod tests {
         // '2' of `SELECT 2` sits at statement offset 7 (`SELECT `); 13 + 7.
         let mapped = offsets[1] + 7;
         assert_eq!(sql.as_bytes()[mapped], b'2');
+    }
+
+    #[test]
+    fn strip_error_marker_removes_plumbing() {
+        assert_eq!(
+            strip_error_marker("query failed: [[rdb-position:15]] 42601: syntax error"),
+            "query failed: 42601: syntax error"
+        );
+        assert_eq!(
+            strip_error_marker("statement 2/3: [[rdb-line:4]] near \"slect\""),
+            "statement 2/3: near \"slect\""
+        );
+        // No marker, and a malformed one, both pass through untouched.
+        assert_eq!(strip_error_marker("plain failure"), "plain failure");
+        assert_eq!(strip_error_marker("[[rdb-line:4 oops"), "[[rdb-line:4 oops");
     }
 
     // ----- mouse hit-test -----
