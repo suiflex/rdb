@@ -161,10 +161,12 @@ export component CodeEditor inherits Rectangle {
                                     horizontal-alignment: right;
                                     vertical-alignment: center;
                                     text: li + 1;
-                                    color: li == root.cursor-line ? Tokens.text : Tokens.text-ghost;
+                                    color: li == root.error-line ? Tokens.error
+                                        : li == root.cursor-line ? Tokens.text : Tokens.text-ghost;
                                     font-family: Tokens.mono;
                                     font-size: Tokens.font-sm;
-                                    font-weight: li == root.cursor-line ? 600 : 400;
+                                    font-weight: li == root.error-line ? 700
+                                        : li == root.cursor-line ? 600 : 400;
                                 }
                             }
                         }
