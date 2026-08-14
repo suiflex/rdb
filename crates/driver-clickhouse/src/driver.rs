@@ -57,8 +57,28 @@ async fn fetch_json(client: &Client, sql: &str) -> Result<Json> {
         .map_err(|e| RdbError::Query(e.to_string()))?
         .collect()
         .await
-        .map_err(|e| RdbError::Query(e.to_string()))?;
+        .map_err(|e| RdbError::Query(ch_err(&e.to_string())))?;
     serde_json::from_slice(&bytes).map_err(|e| RdbError::Query(e.to_string()))
+}
+
+/// ClickHouse reports a syntax error's location only in the message body
+/// ("Syntax error: failed at position 8 ('slect')"), where the position is
+/// 1-based and relative to the statement. Lift it into the
+/// `[[rdb-position:N]]` marker the UI reads to highlight the failing line in
+/// the query editor; a message without one is passed through unchanged.
+fn ch_err(msg: &str) -> String {
+    match msg
+        .split_once("failed at position ")
+        .map(|(_, tail)| {
+            tail.chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+        })
+        .filter(|digits| !digits.is_empty())
+    {
+        Some(pos) => format!("[[rdb-position:{pos}]] {msg}"),
+        None => msg.to_string(),
+    }
 }
 
 fn json_str<'a>(row: &'a Json, key: &str) -> &'a str {
@@ -136,16 +156,14 @@ impl Driver for ClickhouseDriver {
                 .query(trimmed)
                 .execute()
                 .await
-                .map_err(|e| RdbError::Query(e.to_string()))?;
+                .map_err(|e| RdbError::Query(ch_err(&e.to_string())))?;
             // ClickHouse's HTTP interface doesn't report an affected-row
             // count for DDL/INSERT — same situation as driver-cassandra and
             // driver-mssql.
             return Ok(ResultSet::Affected(0));
         }
 
-        let body = fetch_json(&self.client, &format!("{trimmed} FORMAT JSON"))
-            .await
-            .map_err(|e| RdbError::Query(e.to_string()))?;
+        let body = fetch_json(&self.client, &format!("{trimmed} FORMAT JSON")).await?;
         let meta = body["meta"].as_array().cloned().unwrap_or_default();
         let cols: Vec<Column> = meta
             .iter()
@@ -171,9 +189,7 @@ impl Driver for ClickhouseDriver {
             "SELECT count() FROM {} FORMAT JSON",
             write_sql::table_name(table)
         );
-        let body = fetch_json(&self.client, &sql)
-            .await
-            .map_err(|e| RdbError::Query(e.to_string()))?;
+        let body = fetch_json(&self.client, &sql).await?;
         let n = body["data"]
             .as_array()
             .and_then(|rows| rows.first())
@@ -237,4 +253,19 @@ async fn schema_impl(client: &Client, database: &str) -> Result<Schema> {
         })
         .collect();
     Ok(fold_rows(database, rows))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ch_err;
+
+    #[test]
+    fn ch_err_lifts_the_position_out_of_the_message() {
+        let msg = "Code: 62. DB::Exception: Syntax error: failed at position 8 ('slect')";
+        assert_eq!(ch_err(msg), format!("[[rdb-position:8]] {msg}"));
+        assert_eq!(
+            ch_err("Code: 60. Table nope doesn't exist"),
+            "Code: 60. Table nope doesn't exist"
+        );
+    }
 }
