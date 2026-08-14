@@ -160,7 +160,7 @@ impl Driver for MssqlDriver {
         let mut stream = client
             .simple_query(sql.as_str())
             .await
-            .map_err(|e| RdbError::Query(e.to_string()))?;
+            .map_err(|e| RdbError::Query(ts_err(&e)))?;
 
         let mut cols: Vec<Column> = Vec::new();
         let mut rows: Vec<Vec<Cell>> = Vec::new();
@@ -168,7 +168,7 @@ impl Driver for MssqlDriver {
         while let Some(item) = stream
             .try_next()
             .await
-            .map_err(|e| RdbError::Query(e.to_string()))?
+            .map_err(|e| RdbError::Query(ts_err(&e)))?
         {
             match item {
                 QueryItem::Metadata(meta) => {
@@ -324,4 +324,34 @@ async fn schema_impl(client: &Mutex<MssqlClient>, schema: &str) -> Result<Schema
         })
         .collect();
     Ok(fold_rows(schema, schema_rows))
+}
+
+/// SQL Server reports the batch line a failing statement sits on, but only in
+/// the typed `Server` error — the `Display` string buries it in prose. Lift it
+/// into the `[[rdb-line:N]]` marker the UI reads to highlight the failing line
+/// in the query editor. Line 0 means "not applicable" per TDS, so it is
+/// dropped.
+fn ts_err(e: &tiberius::error::Error) -> String {
+    match e {
+        tiberius::error::Error::Server(token) => with_line(&e.to_string(), token.line()),
+        _ => e.to_string(),
+    }
+}
+
+fn with_line(msg: &str, line: u32) -> String {
+    match line {
+        0 => msg.to_string(),
+        n => format!("[[rdb-line:{n}]] {msg}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::with_line;
+
+    #[test]
+    fn with_line_marks_a_real_batch_line_only() {
+        assert_eq!(with_line("boom", 4), "[[rdb-line:4]] boom");
+        assert_eq!(with_line("boom", 0), "boom");
+    }
 }
