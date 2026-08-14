@@ -1,5 +1,5 @@
 import { Tokens } from "tokens.slint";
-import { PrimaryButton, SecondaryButton, FormField, SelectBox } from "components.slint";
+import { PrimaryButton, SecondaryButton, DangerButton, FormField, SelectBox } from "components.slint";
 
 // 8 preset accent swatches — colors for UI rendering, hex strings for the Rust-side color field.
 // First entry is the app accent (Tokens.accent) so the default matches the design system.
@@ -90,10 +90,11 @@ export component ConnForm inherits Rectangle {
     callback import-url();
     callback test-conn();
     callback save();
-    callback delete-conn();
+    callback delete-requested();
+    callback delete-confirmed();
     callback cancel();
 
-    visible: root.open;
+    property <bool> delete-confirm-open: false;
     background: Tokens.veil;
 
     TouchArea { clicked => { root.cancel(); } }
@@ -388,8 +389,50 @@ export component ConnForm inherits Rectangle {
                 }
                 PrimaryButton { text: "Save"; height: 30px; clicked => { root.save(); } }
                 SecondaryButton { text: "Cancel"; height: 30px; clicked => { root.cancel(); } }
-                if root.edit-mode: SecondaryButton { text: "Delete"; height: 30px; clicked => { root.delete-conn(); } }
+                if root.edit-mode: DangerButton { text: "Delete"; height: 30px; clicked => { root.delete-requested(); } }
+            }
+        }
+        if root.delete-confirm-open: Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            background: Tokens.veil;
+            TouchArea { clicked => { root.delete-confirm-open = false; } }
+            Rectangle {
+                width: 340px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                height: confirm-box.preferred-height;
+                border-radius: Tokens.modal-radius;
+                background: Tokens.card;
+                border-width: 1px;
+                border-color: Tokens.border;
+                drop-shadow-blur: 42px;
+                drop-shadow-offset-y: 12px;
+                drop-shadow-color: #1C191426;
+                TouchArea {}
+                confirm-box := VerticalLayout {
+                    padding: Tokens.sp4;
+                    spacing: Tokens.sp3;
+                    Text { text: "Delete connection?"; color: Tokens.text; font-size: 15px; font-weight: 700; horizontal-alignment: center; }
+                    Text { text: "This removes the saved connection and its password."; color: Tokens.text-dim; font-size: Tokens.font-sm; horizontal-alignment: center; wrap: word-wrap; }
+                    HorizontalLayout {
+                        spacing: Tokens.sp2;
+                        alignment: end;
+                        SecondaryButton { text: "Cancel"; height: 30px; clicked => { root.delete-confirm-open = false; } }
+                        DangerButton {
+                            text: "Delete";
+                            height: 30px;
+                            clicked => {
+                                root.delete-confirm-open = false;
+                                root.delete-confirmed();
+                            }
+                        }
+                    }
+                }
             }
         }
     }
+    delete-requested() => { root.delete-confirm-open = true; }
 }

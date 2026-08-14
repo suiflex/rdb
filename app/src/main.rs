@@ -13124,7 +13124,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let editing_id = editing_id.clone();
         let collapsed = collapsed.clone();
         let conn_filter = conn_filter.clone();
-        window.on_form_delete(move || {
+        window.on_form_delete_confirmed(move || {
             let Some(w) = weak.upgrade() else {
                 return;
             };
