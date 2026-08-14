@@ -14,6 +14,9 @@ members = [
     "app",
 ]
 
+[workspace.package]
+license = "Apache-2.0"
+
 # Size-optimized release profile (target: binary < 15 MB).
 [profile.release]
 opt-level = "z"

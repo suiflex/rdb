@@ -7,7 +7,7 @@
     "type": "git",
     "url": "git+https://github.com/suiflex/rdb.git"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "bin": {
     "rdb": "bin/rdb.js"
   },

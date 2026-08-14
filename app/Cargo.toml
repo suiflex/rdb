@@ -2,6 +2,7 @@
 name = "rdb"
 version = "0.37.0"
 edition = "2021"
+license.workspace = true
 
 [[bin]]
 name = "rdb"
