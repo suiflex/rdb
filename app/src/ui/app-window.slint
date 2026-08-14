@@ -619,6 +619,8 @@ callback create-table-commit();
     // Auto-append alias when accepting a table name from completion in FROM/JOIN position.
     in-out property <bool> auto-table-alias: true;
     callback set-auto-table-alias(bool);
+    in-out property <bool> error-highlight: true;
+    callback set-error-highlight(bool);
     in-out property <bool> shortcuts-open: false;
     // Settings modal active section: 0 Appearance, 1 Updates, 2 About.
     in-out property <int> settings-tab: 0;
@@ -2769,6 +2771,15 @@ callback create-table-commit();
                             toggled => {
                                 root.auto-table-alias = !root.auto-table-alias;
                                 root.set-auto-table-alias(root.auto-table-alias);
+                            }
+                        }
+                        ToggleRow {
+                            label: "Highlight query errors";
+                            description: "Marks the failing line and token in the editor.";
+                            checked: root.error-highlight;
+                            toggled => {
+                                root.error-highlight = !root.error-highlight;
+                                root.set-error-highlight(root.error-highlight);
                             }
                         }
                     }
