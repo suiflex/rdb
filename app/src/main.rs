@@ -2967,6 +2967,9 @@ fn mark_from(spot: &editor::ErrorSpot, origin: (i32, i32)) -> ErrorMark {
 
 /// Arm (or clear) the editor's error highlight for `pane`. `None` clears it.
 fn set_p_error_mark(w: &MainWindow, pane: usize, mark: Option<ErrorMark>) {
+    // One gate for every caller: the mark stays in pane state either way, so
+    // turning the preference back on can re-arm it without a re-run.
+    let mark = mark.filter(|_| w.get_error_highlight());
     let m = mark.unwrap_or(ErrorMark {
         line: -1,
         from: -1,
@@ -4314,6 +4317,7 @@ fn main() -> Result<(), slint::PlatformError> {
     window.set_history_max_entries(history_cap.get() as i32);
     window.set_nosql_collection_limit(settings.borrow().get().nosql_collection_limit.max(1) as i32);
     window.set_auto_table_alias(settings.borrow().get().editor.auto_table_alias);
+    window.set_error_highlight(settings.borrow().get().editor.error_highlight);
     window.set_app_version(env!("CARGO_PKG_VERSION").into());
 
     // Fixed window size for the screenshot loop: RDB_WIN=WxH (logical px).
@@ -12494,6 +12498,25 @@ fn main() -> Result<(), slint::PlatformError> {
             let _ = settings
                 .borrow_mut()
                 .update(|s| s.editor.auto_table_alias = v);
+        });
+    }
+
+    // ----- settings: query-error-highlight toggle -----
+    {
+        let settings = settings.clone();
+        let panes = panes.clone();
+        let w = window.as_weak();
+        window.on_set_error_highlight(move |v| {
+            let _ = settings
+                .borrow_mut()
+                .update(|s| s.editor.error_highlight = v);
+            let Some(w) = w.upgrade() else { return };
+            // Repaint both panes from the marks already held in pane state so
+            // the change shows without waiting for the next failed run.
+            for pane in 0..2 {
+                let mark = *panes[pane].error_mark.lock().unwrap();
+                set_p_error_mark(&w, pane, mark);
+            }
         });
     }
 
