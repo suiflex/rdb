@@ -1323,6 +1323,12 @@ struct GroupRuntime {
     query_abort: Rc<RefCell<Option<tokio::task::AbortHandle>>>,
     // PostgreSQL reports a 1-based byte offset for syntax errors.
     error_position: Arc<Mutex<Option<usize>>>,
+    // Where the next run's text starts in the editor buffer (byte offset,
+    // 0-based line) — Run sends only the statement under the cursor, so an
+    // error position reported against it has to be shifted back. Taken (and
+    // reset to the buffer origin) by run_sql/run_stream, so a run that isn't
+    // editor text (saved query, table browse) is unaffected.
+    pending_run_origin: Rc<Cell<(usize, i32)>>,
 }
 
 impl GroupRuntime {
@@ -1350,6 +1356,7 @@ impl GroupRuntime {
             stream_timer: Rc::new(RefCell::new(None)),
             query_abort: Rc::new(RefCell::new(None)),
             error_position: Arc::new(Mutex::new(None)),
+            pending_run_origin: Rc::new(Cell::new((0, 0))),
         }
     }
 }
@@ -8217,6 +8224,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let active_result = panes[pane].active_result.clone();
             let result_new_tab = panes[pane].result_new_tab.clone();
             let error_position_state = panes[pane].error_position.clone();
+            let run_origin = panes[pane].pending_run_origin.take();
             // New run clears any previous error highlight right away, so a
             // successful re-run never leaves stale red on the editor — the
             // (view/err) branches below only re-arm it on a fresh failure.
@@ -8400,8 +8408,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 let error_spot = err
                     .as_ref()
                     .and_then(|e| editor::error_spot(&e.to_string(), &sql, &stmt_offsets));
-                let error_position_value = error_spot.as_ref().and_then(|s| s.position);
-                let error_line_value = error_spot.as_ref().map(|s| s.line);
+                // `sql` is only the fragment Run sent; shift its position/line
+                // back into full-buffer coordinates.
+                let error_position_value = error_spot
+                    .as_ref()
+                    .and_then(|s| s.position)
+                    .map(|pos| run_origin.0 + pos);
+                let error_line_value = error_spot.as_ref().map(|s| s.line + run_origin.1);
                 // A hand-typed `SELECT ... FROM t` result has no row identity by
                 // default. When it's an unambiguous single-table select (no
                 // join/union/aggregate — see single_table_name) and the table's
@@ -8725,6 +8738,9 @@ fn main() -> Result<(), slint::PlatformError> {
             // New stream clears any previous error highlight (same reset as
             // run_sql) so a correct re-run that streams drops the stale red.
             *panes[pane].error_position.lock().unwrap() = None;
+            let error_position_state = panes[pane].error_position.clone();
+            let run_origin = panes[pane].pending_run_origin.take();
+            let sql_for_error = sql.clone();
             if pane == 0 {
                 w.set_error_line(-1);
             } else {
@@ -8993,12 +9009,30 @@ fn main() -> Result<(), slint::PlatformError> {
                                         &active_tab_id
                                     };
                                     if active_id.lock().unwrap().as_deref() == Some(&target_id) {
+                                        // A streamed run fails the same way a
+                                        // buffered one does, so it arms the
+                                        // editor's error line the same way.
+                                        let spot = editor::error_spot(
+                                            &e,
+                                            &sql_for_error,
+                                            &editor::statement_offsets(&sql_for_error),
+                                        );
+                                        *error_position_state.lock().unwrap() = spot
+                                            .as_ref()
+                                            .and_then(|s| s.position)
+                                            .map(|pos| run_origin.0 + pos);
+                                        let line = spot.map_or(-1, |s| s.line + run_origin.1);
+                                        if pane == 0 {
+                                            w.set_error_line(line);
+                                        } else {
+                                            w.set_p1_error_line(line);
+                                        }
                                         apply_result(
                                             &w,
                                             pane,
                                             model::ResultView::Affected(format!(
                                                 "error: {}",
-                                                editor::strip_error_marker(&e.to_string())
+                                                editor::strip_error_marker(&e)
                                             )),
                                         );
                                         set_p_query_running(&w, pane, false);
@@ -9180,6 +9214,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 // only the one the user is editing (⌘A then Run for all).
                 let text = {
                     let ed = ed_state.borrow();
+                    // Where that text sits in the buffer, so a driver error
+                    // position reported against it maps to the right line.
+                    panes[0].pending_run_origin.set(ed.run_origin());
                     ed.selected_text()
                         .map(|s| s.trim().to_string())
                         .filter(|s| !s.is_empty())
@@ -9483,6 +9520,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let run_p1 = move || {
             let text = {
                 let ed = panes[1].ed_state.borrow();
+                panes[1].pending_run_origin.set(ed.run_origin());
                 ed.selected_text()
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
