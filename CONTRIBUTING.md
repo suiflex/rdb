@@ -118,4 +118,4 @@ Use the issue forms under **Issues → New issue**. Security vulnerabilities mus
 ## License
 
 By contributing, you agree that your contributions are licensed under the
-[MIT License](LICENSE) that covers this project.
+[Apache License 2.0](LICENSE) that covers this project.

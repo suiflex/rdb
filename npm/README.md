@@ -91,4 +91,4 @@ pub enum ResultSet {
 
 ## License
 
-MIT
+Apache-2.0
