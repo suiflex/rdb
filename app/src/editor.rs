@@ -818,6 +818,62 @@ pub fn statement_offsets(text: &str) -> Vec<usize> {
     out
 }
 
+/// Where a failed query points in the editor buffer.
+pub struct ErrorSpot {
+    /// Byte offset into the full buffer, 1-based, when the driver reports a
+    /// position. `None` for engines that only report a line number.
+    pub position: Option<usize>,
+    /// 0-based line in the full buffer.
+    pub line: i32,
+}
+
+/// Locate the failing line of a query error in the full editor buffer.
+///
+/// Drivers prefix `RdbError::Query` with either `[[rdb-position:N]]` (1-based
+/// byte offset, e.g. PostgreSQL) or `[[rdb-line:N]]` (1-based line, e.g.
+/// MySQL/SQL Server). Both are relative to the statement that failed, so a
+/// multi-statement run (`statement i/n: …`) is shifted by that statement's
+/// own offset in the buffer, taken from `statement_offsets`.
+pub fn error_spot(err: &str, sql: &str, stmt_offsets: &[usize]) -> Option<ErrorSpot> {
+    let body = err.strip_prefix("query failed: ").unwrap_or(err);
+    // multi-statement: `statement i/n: <body>`
+    let (body, stmt_idx) = match body.strip_prefix("statement ") {
+        Some(rest) => {
+            let mut it = rest.splitn(2, ": ");
+            let idx = it
+                .next()
+                .and_then(|s| {
+                    s.rsplit_once('/')
+                        .and_then(|(a, _)| a.parse::<usize>().ok())
+                })
+                .map(|i| i.saturating_sub(1));
+            (it.next().unwrap_or(body), idx)
+        }
+        None => (body, None),
+    };
+    let base = stmt_idx
+        .and_then(|i| stmt_offsets.get(i).copied())
+        .unwrap_or(0);
+    let value = |tag: &str| {
+        body.strip_prefix(tag)
+            .and_then(|s| s.split("]] ").next())
+            .and_then(|s| s.parse::<usize>().ok())
+    };
+    let line_of = |byte: usize| sql.bytes().take(byte).filter(|b| *b == b'\n').count() as i32;
+    if let Some(pos) = value("[[rdb-position:") {
+        let position = base + pos;
+        return Some(ErrorSpot {
+            position: Some(position),
+            line: line_of(position.saturating_sub(1)),
+        });
+    }
+    let line = value("[[rdb-line:")?;
+    Some(ErrorSpot {
+        position: None,
+        line: line_of(base) + line.saturating_sub(1) as i32,
+    })
+}
+
 /// Drop the internal `[[rdb-position:N]]` / `[[rdb-line:N]]` marker a driver
 /// prefixes onto a query error so the app can locate the failing line. It is
 /// plumbing, not something the user should ever read in the result pane.
@@ -1405,6 +1461,42 @@ mod tests {
         // No marker, and a malformed one, both pass through untouched.
         assert_eq!(strip_error_marker("plain failure"), "plain failure");
         assert_eq!(strip_error_marker("[[rdb-line:4 oops"), "[[rdb-line:4 oops");
+    }
+
+    #[test]
+    fn error_spot_maps_position_and_line_markers() {
+        let sql = "SELECT 1;\n\nSELECT\n  slect 2";
+        let offsets = statement_offsets(sql);
+        assert_eq!(offsets, vec![0, 11]);
+
+        // Byte-offset marker, second statement: `slect` starts at statement
+        // byte 7, so the buffer position is 11 + 8 (1-based) on line 3.
+        let spot = error_spot(
+            "query failed: statement 2/2: [[rdb-position:8]] syntax error",
+            sql,
+            &offsets,
+        )
+        .unwrap();
+        assert_eq!(spot.position, Some(19));
+        assert_eq!(spot.line, 3);
+
+        // Line marker, second statement: line 2 of that statement is line 3
+        // of the buffer.
+        let spot = error_spot(
+            "query failed: statement 2/2: [[rdb-line:2]] syntax error",
+            sql,
+            &offsets,
+        )
+        .unwrap();
+        assert_eq!(spot.position, None);
+        assert_eq!(spot.line, 3);
+
+        // Single statement, no `statement i/n` wrapper.
+        let spot = error_spot("query failed: [[rdb-line:1]] boom", sql, &offsets).unwrap();
+        assert_eq!(spot.line, 0);
+
+        // No marker at all.
+        assert!(error_spot("query failed: boom", sql, &offsets).is_none());
     }
 
     // ----- mouse hit-test -----

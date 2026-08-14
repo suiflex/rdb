@@ -8394,44 +8394,14 @@ fn main() -> Result<(), slint::PlatformError> {
                     other => other,
                 });
                 let err = outcome.err();
-                // The failing statement's error position is relative to that
-                // statement's trimmed text; shift it by the statement's own
-                // byte offset in the buffer so it lands on the right lines.
-                let error_position_value = err.as_ref().and_then(|e| {
-                    let full = e.to_string();
-                    // `query failed: [[rdb-position:…]] …`
-                    let body = full.strip_prefix("query failed: ").unwrap_or(&full);
-                    // multi-statement: `statement i/n: <body>`
-                    let (body, stmt_idx) = if let Some(rest) = body.strip_prefix("statement ") {
-                        let mut it = rest.splitn(2, ": ");
-                        let idx = it
-                            .next()
-                            .and_then(|s| {
-                                s.rsplit_once('/')
-                                    .and_then(|(a, _)| a.parse::<usize>().ok())
-                            })
-                            .map(|i| i.saturating_sub(1));
-                        (it.next().unwrap_or(body), idx)
-                    } else {
-                        (body, None)
-                    };
-                    let pos = body
-                        .strip_prefix("[[rdb-position:")
-                        .and_then(|s| s.split("]] ").next())
-                        .and_then(|s| s.parse::<usize>().ok())?;
-                    // Offset a per-statement position back to the full buffer.
-                    if let Some(i) = stmt_idx {
-                        stmt_offsets.get(i).map(|base| base + pos).or(Some(pos))
-                    } else {
-                        Some(pos)
-                    }
-                });
-                let error_line_value = error_position_value.map(|position| {
-                    sql.bytes()
-                        .take(position.saturating_sub(1))
-                        .filter(|byte| *byte == b'\n')
-                        .count() as i32
-                });
+                // The failing statement's error position/line is relative to
+                // that statement's trimmed text; `error_spot` shifts it by the
+                // statement's own byte offset so it lands on the right line.
+                let error_spot = err
+                    .as_ref()
+                    .and_then(|e| editor::error_spot(&e.to_string(), &sql, &stmt_offsets));
+                let error_position_value = error_spot.as_ref().and_then(|s| s.position);
+                let error_line_value = error_spot.as_ref().map(|s| s.line);
                 // A hand-typed `SELECT ... FROM t` result has no row identity by
                 // default. When it's an unambiguous single-table select (no
                 // join/union/aggregate — see single_table_name) and the table's
