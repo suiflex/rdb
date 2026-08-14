@@ -59,6 +59,8 @@ pub struct EditorPrefs {
     /// Auto-append a short alias when accepting a table name from completion
     /// in FROM/JOIN position. `users` → `users u`, `order_items` → `order_items oi`.
     pub auto_table_alias: bool,
+    /// Mark the failing line and token in the editor when a query errors.
+    pub error_highlight: bool,
 }
 
 impl Default for EditorPrefs {
@@ -68,6 +70,7 @@ impl Default for EditorPrefs {
             default_page_size: 100,
             history_max_entries: 50,
             auto_table_alias: true,
+            error_highlight: true,
         }
     }
 }
@@ -181,6 +184,7 @@ mod tests {
         assert_eq!(s.get().editor.default_page_size, 100);
         assert_eq!(s.get().editor.history_max_entries, 50);
         assert!(s.get().editor.auto_table_alias);
+        assert!(s.get().editor.error_highlight);
         assert_eq!(s.get().nosql_collection_limit, 200);
     }
 
@@ -220,5 +224,6 @@ mod tests {
         assert_eq!(s.get().editor.default_page_size, 100);
         assert_eq!(s.get().editor.history_max_entries, 50);
         assert!(s.get().editor.auto_table_alias);
+        assert!(s.get().editor.error_highlight);
     }
 }
