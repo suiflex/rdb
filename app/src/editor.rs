@@ -744,6 +744,40 @@ impl EditorState {
         trim_leading_comments(&stmt).to_string()
     }
 
+    /// Where the text `Run` executes starts in the full buffer: byte offset
+    /// and 0-based line. Run sends only the selection, else the statement
+    /// under the cursor, while a driver reports an error position relative to
+    /// what it was given — this is what shifts one back into the other.
+    pub fn run_origin(&self) -> (usize, i32) {
+        let text = self.text();
+        let selected = self.selection().is_some();
+        let (start_char, raw) = match self.selection() {
+            Some(((sl, sc), _)) => {
+                let mut off: usize = self.lines[..sl].iter().map(|l| l.chars().count() + 1).sum();
+                off += sc.min(self.lines[sl].chars().count());
+                (off, self.selected_text().unwrap_or_default())
+            }
+            None => {
+                let (s, e) = self.statement_bounds();
+                let chars: Vec<char> = text.chars().collect();
+                (s, chars[s..e].iter().collect())
+            }
+        };
+        // Both callers trim the fragment before running it, and the statement
+        // path also drops leading `--` comments; skip whatever that dropped.
+        let trimmed = raw.trim_start();
+        let mut skipped = raw.chars().count() - trimmed.chars().count();
+        if !selected {
+            let body = trim_leading_comments(trimmed.trim_end());
+            skipped += trimmed.trim_end().chars().count() - body.chars().count();
+        }
+        let byte = text
+            .char_indices()
+            .nth(start_char + skipped)
+            .map_or(text.len(), |(b, _)| b);
+        (byte, text[..byte].matches('\n').count() as i32)
+    }
+
     /// Replace the `;`-delimited statement under the cursor with `text`,
     /// preserving every other statement and surrounding whitespace.
     /// Rebuilds `self.lines` from the spliced full text; the caret is
@@ -1497,6 +1531,39 @@ mod tests {
 
         // No marker at all.
         assert!(error_spot("query failed: boom", sql, &offsets).is_none());
+    }
+
+    #[test]
+    fn run_origin_points_at_the_statement_under_the_cursor() {
+        let text = "SELECT 1;\n\n-- note\nSELECT\n  2;\n";
+        let mut ed = EditorState::from_text(text);
+        // Cursor on the `SELECT` of the second statement (line 3).
+        ed.line = 3;
+        ed.col = 2;
+        let (byte, line) = ed.run_origin();
+        assert_eq!(&text[byte..byte + 6], "SELECT");
+        assert_eq!(line, 3);
+        assert_eq!(ed.current_statement(), "SELECT\n  2;");
+
+        // Cursor in the first statement: start of buffer.
+        ed.line = 0;
+        ed.col = 3;
+        assert_eq!(ed.run_origin(), (0, 0));
+    }
+
+    #[test]
+    fn run_origin_follows_a_selection() {
+        let text = "SELECT 1;\n  SELECT 2;";
+        let mut ed = EditorState::from_text(text);
+        // Anchor at the start of the SQL, cursor at end of line: "SELECT 2;"
+        // with the leading indent left out on one side, in on the other.
+        ed.sel = Some((1, 0));
+        ed.line = 1;
+        ed.col = 11;
+        let (byte, line) = ed.run_origin();
+        // Run trims the selection, so the origin skips the leading spaces.
+        assert_eq!(&text[byte..], "SELECT 2;");
+        assert_eq!(line, 1);
     }
 
     // ----- mouse hit-test -----
