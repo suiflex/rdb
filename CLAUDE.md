@@ -191,6 +191,26 @@ Keep the scope specific (`app`, `driver-postgres`, `driver-mysql`, `core`,
   link instead (`InstallMethod::self_update_supported`, `app/src/update.rs`).
   Don't change that gating without a deliberate reason; it's what stops the
   app from fighting the package manager on those installs.
+- **A driver that reads `SslMode` must compile a TLS backend.** `mysql_async`
+  and `scylla` **panic** (not `Err`) when asked for TLS with no TLS feature
+  built in — `panic=abort` turns that into a process abort on a tokio worker,
+  so it never reaches `RdbError` and shows up as a crash report with no app
+  symbols. Both now carry `rustls-tls`. Wiring `SslMode` into a new driver
+  means adding the crate's TLS feature in the same commit, and new connection
+  forms default to `Disable` so an unconfigured server can't take the app
+  down.
+- **Saving a connection goes through `ConnStore::save_connection`**, not
+  `add`/`update` + `set_password`. The split version is non-atomic: metadata
+  flushed, secret write failed, and the connection came back later with
+  `using password: NO`. `save_connection` reads the password back and rolls
+  the metadata change back if it doesn't match; an empty password means
+  "keep the existing secret", not "clear it".
+- **A full-screen Slint overlay must gate `visible`, not just its children.**
+  `ConnForm` is a root `Rectangle` covering the window; its backdrop
+  `TouchArea` kept swallowing every click while the form was closed, leaving
+  the picker rendered but dead. Hiding the inner content with `if` is not
+  enough — the overlay itself needs `visible: <open>` and its dismiss
+  `TouchArea` needs the same `if`.
 
 ## Toolchain
 
