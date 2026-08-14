@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://github.com/suiflex/rdb/actions/workflows/rdb-app.yml"><img src="https://img.shields.io/github/actions/workflow/status/suiflex/rdb/rdb-app.yml?branch=develop&style=for-the-badge" alt="Build status"></a>
   <a href="https://github.com/suiflex/rdb/releases"><img src="https://img.shields.io/github/v/tag/suiflex/rdb?include_prereleases&style=for-the-badge&label=release" alt="Release"></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-4ade80.svg?style=for-the-badge" alt="MIT License"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-4ade80.svg?style=for-the-badge" alt="Apache 2.0 License"></a>
   <img src="https://img.shields.io/badge/platform-macOS_·_Linux_·_Windows-4ade80?style=for-the-badge" alt="Platforms">
   <img src="https://img.shields.io/badge/built_with-Rust-4ade80?style=for-the-badge" alt="Built with Rust">
 </p>
@@ -267,4 +267,4 @@ Active development. Ships 8 engines (PostgreSQL, MySQL, Redis, MongoDB, SQLite, 
 
 ## License
 
-MIT
+Apache-2.0
