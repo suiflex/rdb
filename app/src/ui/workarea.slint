@@ -83,6 +83,8 @@ export component WorkArea inherits Rectangle {
     in property <int> cursor-visual-row;
     in property <int> cursor-col;
     in property <int> error-line: -1;
+    in property <int> error-from: -1;
+    in property <int> error-to: -1;
     in property <int> scroll-request;
     // SQL autocomplete popup (passed down to the SQL CodeEditor)
     in property <[PaletteItem]> completion-items;
@@ -145,6 +147,8 @@ export component WorkArea inherits Rectangle {
     in property <int> p1-cursor-visual-row;
     in property <int> p1-cursor-col;
     in property <int> p1-error-line: -1;
+    in property <int> p1-error-from: -1;
+    in property <int> p1-error-to: -1;
     in property <int> p1-scroll-request;
     in-out property <bool> p1-editor-collapsed;
     in-out property <length> p1-editor-h: 340px;
@@ -428,6 +432,8 @@ export component WorkArea inherits Rectangle {
             cursor-visual-row: root.cursor-visual-row;
             cursor-col: root.cursor-col;
             error-line: root.error-line;
+            error-from: root.error-from;
+            error-to: root.error-to;
             scroll-request: root.scroll-request;
             toggle-fold(l) => { root.toggle-fold(l); }
             editor-key(t, cmd, alt, shift) => { root.editor-key(t, cmd, alt, shift) }
@@ -567,6 +573,8 @@ export component WorkArea inherits Rectangle {
                 cursor-visual-row: root.p1-cursor-visual-row;
                 cursor-col: root.p1-cursor-col;
                 error-line: root.p1-error-line;
+                error-from: root.p1-error-from;
+                error-to: root.p1-error-to;
                 scroll-request: root.p1-scroll-request;
                 toggle-fold(l) => { root.p1-toggle-fold(l); }
                 editor-key(t, cmd, alt, shift) => { root.p1-editor-key(t, cmd, alt, shift) }

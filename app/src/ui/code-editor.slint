@@ -22,6 +22,10 @@ export component CodeEditor inherits Rectangle {
     in property <int> cursor-visual-row: 0;
     in property <int> cursor-col: 0;
     in property <int> error-line: -1;
+    // Whole span of the failing statement; the engine's own line sits inside it
+    // but is usually not where the mistake started.
+    in property <int> error-from: -1;
+    in property <int> error-to: -1;
     // (key text, meta/ctrl, alt/option, shift) -> true when the editor consumed
     // the key. meta = ⌘ line/doc motions, alt = ⌥ word motions.
     callback edit-key(string, bool, bool, bool) -> bool;
@@ -95,6 +99,8 @@ export component CodeEditor inherits Rectangle {
                     clip: true;
                     visible: !root.line-hidden[li];
                     background: li == root.error-line ? Tokens.error.with-alpha(0.16)
+                        : (root.error-from >= 0 && li >= root.error-from && li <= root.error-to)
+                            ? Tokens.error.with-alpha(0.06)
                         : li == root.cursor-line ? Tokens.editor-line : transparent;
 
                     // Char column under the pointer, hit-tested from the mono
@@ -162,6 +168,8 @@ export component CodeEditor inherits Rectangle {
                                     vertical-alignment: center;
                                     text: li + 1;
                                     color: li == root.error-line ? Tokens.error
+                                        : (root.error-from >= 0 && li >= root.error-from
+                                            && li <= root.error-to) ? Tokens.error.with-alpha(0.55)
                                         : li == root.cursor-line ? Tokens.text : Tokens.text-ghost;
                                     font-family: Tokens.mono;
                                     font-size: Tokens.font-sm;
