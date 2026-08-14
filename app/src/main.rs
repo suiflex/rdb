@@ -12543,7 +12543,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_database(SharedString::default());
             w.set_f_password(SharedString::default());
             w.set_f_has_password(false);
-            w.set_f_sslmode(SharedString::from("Prefer"));
+            w.set_f_sslmode(SharedString::from("Disable"));
             w.set_f_params(SharedString::default());
             w.set_f_color(SharedString::from("#2c5fd8"));
             w.set_f_env_tag(SharedString::from("None"));
@@ -12593,7 +12593,7 @@ fn main() -> Result<(), slint::PlatformError> {
             w.set_f_database(SharedString::default());
             w.set_f_password(SharedString::default());
             w.set_f_has_password(false);
-            w.set_f_sslmode(SharedString::from("Prefer"));
+            w.set_f_sslmode(SharedString::from("Disable"));
             w.set_f_params(SharedString::default());
             w.set_f_color(SharedString::from("#2c5fd8"));
             w.set_f_env_tag(SharedString::from("None"));
@@ -13079,46 +13079,31 @@ fn main() -> Result<(), slint::PlatformError> {
 
             let result: rdb_connstore::Result<()> = (|| {
                 let mut st = store.borrow_mut();
-                let conn_id = if id.is_empty() {
-                    let mut sc = rdb_connstore::SavedConnection::new(
-                        name,
+                let mut sc = if id.is_empty() {
+                    rdb_connstore::SavedConnection::new(
+                        name.clone(),
                         engine,
-                        host,
+                        host.clone(),
                         port,
                         w.get_f_user().to_string(),
-                    );
-                    sc.database = database;
-                    sc.sslmode = sslmode;
-                    sc.color = color;
-                    sc.env_tag = env_tag;
-                    sc.group = group.clone();
-                    sc.params = params;
-                    let cid = sc.id.clone();
-                    st.add(sc)?;
-                    cid
+                    )
                 } else {
-                    let mut sc = st
-                        .get(&id)
+                    st.get(&id)
                         .cloned()
-                        .ok_or_else(|| rdb_connstore::ConnStoreError::NotFound(id.clone()))?;
-                    sc.name = name;
-                    sc.engine = engine;
-                    sc.host = host;
-                    sc.port = port;
-                    sc.user = w.get_f_user().to_string();
-                    sc.database = database;
-                    sc.sslmode = sslmode;
-                    sc.color = color;
-                    sc.env_tag = env_tag;
-                    sc.group = group.clone();
-                    sc.params = params;
-                    st.update(sc)?;
-                    id.clone()
+                        .ok_or_else(|| rdb_connstore::ConnStoreError::NotFound(id.clone()))?
                 };
-                if !password.is_empty() {
-                    st.set_password(&conn_id, &password)?;
-                }
-                Ok(())
+                sc.name = name;
+                sc.engine = engine;
+                sc.host = host;
+                sc.port = port;
+                sc.user = w.get_f_user().to_string();
+                sc.database = database;
+                sc.sslmode = sslmode;
+                sc.color = color;
+                sc.env_tag = env_tag;
+                sc.group = group;
+                sc.params = params;
+                st.save_connection(sc, Some(&password))
             })();
 
             match result {

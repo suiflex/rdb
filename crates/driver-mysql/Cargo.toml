@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 rdb-core = { path = "../core" }
 async-trait = "0.1"
-mysql_async = "0.37"
+mysql_async = { version = "0.37", features = ["rustls-tls"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]
