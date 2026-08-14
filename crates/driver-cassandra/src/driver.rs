@@ -1,9 +1,13 @@
 use async_trait::async_trait;
+use rustls::ClientConfig;
 use scylla::client::session::Session;
+use scylla::client::session::TlsContext;
 use scylla::client::session_builder::SessionBuilder;
 use scylla::value::Row;
+use std::sync::Arc;
+use webpki_roots::TLS_SERVER_ROOTS;
 
-use rdb_core::conn::ConnConfig;
+use rdb_core::conn::{ConnConfig, SslMode};
 use rdb_core::driver::Driver;
 use rdb_core::error::{RdbError, Result};
 use rdb_core::query::Query;
@@ -13,6 +17,16 @@ use rdb_core::write::{TableRef, WriteOp};
 
 use crate::type_map;
 use crate::write_cql;
+
+fn tls_context() -> TlsContext {
+    let roots = rustls::RootCertStore {
+        roots: TLS_SERVER_ROOTS.to_vec(),
+    };
+    let config = ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    TlsContext::Rustls023(Arc::new(config))
+}
 
 /// System keyspaces hidden from the schema tree.
 const SYSTEM_KEYSPACES: &[&str] = &[
@@ -31,21 +45,35 @@ pub struct CassandraDriver {
     session: Session,
 }
 
+async fn connect_session(cfg: &ConnConfig, tls: bool) -> Result<Session> {
+    let node = format!("{}:{}", cfg.host, cfg.port);
+    let mut builder = SessionBuilder::new().known_node(node);
+    if !cfg.user.is_empty() {
+        builder = builder.user(cfg.user.clone(), cfg.password.clone().unwrap_or_default());
+    }
+    if tls {
+        builder = builder.tls_context(Some(tls_context()));
+    }
+    if let Some(ks) = cfg.database.as_deref().filter(|s| !s.is_empty()) {
+        builder = builder.use_keyspace(ks.to_string(), false);
+    }
+    builder
+        .build()
+        .await
+        .map_err(|e| RdbError::Connection(e.to_string()))
+}
+
 #[async_trait]
 impl Driver for CassandraDriver {
     async fn connect(cfg: &ConnConfig) -> Result<Self> {
-        let node = format!("{}:{}", cfg.host, cfg.port);
-        let mut builder = SessionBuilder::new().known_node(node);
-        if !cfg.user.is_empty() {
-            builder = builder.user(cfg.user.clone(), cfg.password.clone().unwrap_or_default());
-        }
-        if let Some(ks) = cfg.database.as_deref().filter(|s| !s.is_empty()) {
-            builder = builder.use_keyspace(ks.to_string(), false);
-        }
-        let session = builder
-            .build()
-            .await
-            .map_err(|e| RdbError::Connection(e.to_string()))?;
+        let session = match cfg.sslmode {
+            SslMode::Disable => connect_session(cfg, false).await?,
+            SslMode::Require => connect_session(cfg, true).await?,
+            SslMode::Prefer => match connect_session(cfg, true).await {
+                Ok(session) => session,
+                Err(_) => connect_session(cfg, false).await?,
+            },
+        };
         Ok(CassandraDriver { session })
     }
 
@@ -56,10 +84,7 @@ impl Driver for CassandraDriver {
             .map_err(|e| RdbError::Connection(e.to_string()))?;
         Ok(())
     }
-
     async fn schema(&self) -> Result<Schema> {
-        // Lazy: list keyspaces only; tables/columns load per keyspace in
-        // `containers()` when the sidebar expands it (mirrors Mongo).
         let res = self
             .session
             .query_unpaged("SELECT keyspace_name FROM system_schema.keyspaces", ())
