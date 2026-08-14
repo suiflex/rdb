@@ -104,6 +104,44 @@ impl ConnStore {
         self.conns.iter().find(|c| c.id == id)
     }
 
+    /// Persist connection metadata and, when supplied, its password as one
+    /// logical operation. Metadata is rolled back if password persistence or
+    /// readback fails; an omitted password keeps any existing secret.
+    pub fn save_connection(&mut self, conn: SavedConnection, password: Option<&str>) -> Result<()> {
+        let old = self.get(&conn.id).cloned();
+        if old.is_some() {
+            self.update(conn.clone())?;
+        } else {
+            self.add(conn.clone())?;
+        }
+
+        if let Some(password) = password.filter(|p| !p.is_empty()) {
+            if let Err(err) = self.set_password(&conn.id, password) {
+                self.restore_connection(old, &conn.id);
+                return Err(err);
+            }
+            if !matches!(self.get_password(&conn.id), Ok(Some(saved)) if saved == password) {
+                self.restore_connection(old, &conn.id);
+                return Err(ConnStoreError::Secret(
+                    "password verification failed".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn restore_connection(&mut self, old: Option<SavedConnection>, id: &str) {
+        match old {
+            Some(conn) => {
+                if let Some(index) = self.index_of(id) {
+                    self.conns[index] = conn;
+                }
+            }
+            None => self.conns.retain(|conn| conn.id != id),
+        }
+        let _ = self.flush();
+    }
+
     pub fn add(&mut self, conn: SavedConnection) -> Result<()> {
         self.conns.push(conn);
         self.flush()
@@ -321,6 +359,20 @@ mod tests {
 
         store.delete_password(&id).unwrap();
         assert!(store.get_password(&id).unwrap().is_none());
+    }
+
+    #[test]
+    fn save_connection_persists_password_and_keeps_it_when_omitted() {
+        let (_dir, mut store) = temp_store();
+        let mut conn = pg("saved");
+        let id = conn.id.clone();
+        store.save_connection(conn.clone(), Some("secret")).unwrap();
+        assert_eq!(store.get_password(&id).unwrap().as_deref(), Some("secret"));
+
+        conn.name = "renamed".into();
+        store.save_connection(conn, Some("")).unwrap();
+        assert_eq!(store.get(&id).unwrap().name, "renamed");
+        assert_eq!(store.get_password(&id).unwrap().as_deref(), Some("secret"));
     }
 
     #[test]
