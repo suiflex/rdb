@@ -664,7 +664,7 @@ callback create-table-commit();
     callback form-import-url();
     callback form-test-conn();
     callback form-save();
-    callback form-delete();
+    callback form-delete-confirmed();
     callback form-cancel();
 
     // ----- layout splitters (local, no Rust binding) -----
@@ -2539,8 +2539,8 @@ callback create-table-commit();
         save() => {
             root.form-save();
         }
-        delete-conn() => {
-            root.form-delete();
+        delete-confirmed() => {
+            root.form-delete-confirmed();
         }
         cancel() => {
             root.form-cancel();
