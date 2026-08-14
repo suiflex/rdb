@@ -1321,14 +1321,16 @@ struct GroupRuntime {
     // hard-cancelled. Overwritten on each run; aborting a finished task is a
     // no-op, so no clearing on completion is needed.
     query_abort: Rc<RefCell<Option<tokio::task::AbortHandle>>>,
-    // PostgreSQL reports a 1-based byte offset for syntax errors.
-    error_position: Arc<Mutex<Option<usize>>>,
-    // Where the next run's text starts in the editor buffer (byte offset,
-    // 0-based line) — Run sends only the statement under the cursor, so an
-    // error position reported against it has to be shifted back. Taken (and
-    // reset to the buffer origin) by run_sql/run_stream, so a run that isn't
-    // editor text (saved query, table browse) is unaffected.
-    pending_run_origin: Rc<Cell<(usize, i32)>>,
+    // Editor error highlight: (line the engine pointed at, first line of the
+    // failing statement, last line of it), 0-based in the buffer. Kept here so
+    // a re-lex (any edit or cursor move) can re-apply it instead of dropping it.
+    error_mark: Arc<Mutex<Option<(i32, i32, i32)>>>,
+    // 0-based line where the next run's text starts in the editor buffer — Run
+    // sends only the statement under the cursor, so an error line reported
+    // against it has to be shifted back. Taken (and reset to the top of the
+    // buffer) by run_sql/run_stream, so a run that isn't editor text (saved
+    // query, table browse) is unaffected.
+    pending_run_origin: Rc<Cell<i32>>,
 }
 
 impl GroupRuntime {
@@ -1355,8 +1357,8 @@ impl GroupRuntime {
             stream_cancel: Rc::new(RefCell::new(None)),
             stream_timer: Rc::new(RefCell::new(None)),
             query_abort: Rc::new(RefCell::new(None)),
-            error_position: Arc::new(Mutex::new(None)),
-            pending_run_origin: Rc::new(Cell::new((0, 0))),
+            error_mark: Arc::new(Mutex::new(None)),
+            pending_run_origin: Rc::new(Cell::new(0)),
         }
     }
 }
@@ -2938,6 +2940,21 @@ fn set_p_read_only(w: &MainWindow, pane: usize, read_only: bool) {
         w.set_p1_grid_read_only(read_only);
     }
 }
+/// Arm (or clear) the editor's error highlight: `(line, from, to)` is the line
+/// the engine pointed at plus the span of the statement it belongs to, all
+/// 0-based in the full buffer. `None` clears it.
+fn set_p_error_mark(w: &MainWindow, pane: usize, mark: Option<(i32, i32, i32)>) {
+    let (line, from, to) = mark.unwrap_or((-1, -1, -1));
+    if pane == 0 {
+        w.set_error_line(line);
+        w.set_error_from(from);
+        w.set_error_to(to);
+    } else {
+        w.set_p1_error_line(line);
+        w.set_p1_error_from(from);
+        w.set_p1_error_to(to);
+    }
+}
 fn set_p_pending_count(w: &MainWindow, pane: usize, n: i32) {
     if pane == 0 {
         w.set_pending_count(n);
@@ -4430,14 +4447,8 @@ fn main() -> Result<(), slint::PlatformError> {
             let folded_heads = panes[pane].folded_heads.clone();
             let ed = ed_state.borrow();
             let sel = ed.selection();
-            let error_position = *panes[pane].error_position.lock().unwrap();
-            let error_line = error_position.map(|pos| {
-                ed.text()
-                    .bytes()
-                    .take(pos.saturating_sub(1))
-                    .filter(|b| *b == b'\n')
-                    .count()
-            });
+            let error_mark = *panes[pane].error_mark.lock().unwrap();
+            let error_line = error_mark.map(|(line, _, _)| line as usize);
             let language = cur_engine
                 .borrow()
                 .map(rdb_connstore::Engine::language)
@@ -4508,7 +4519,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_cursor_line(ed.line as i32);
                 w.set_cursor_visual_row(cursor_visual_row);
                 w.set_cursor_col(ed.col as i32);
-                w.set_error_line(error_line.map_or(-1, |line| line as i32));
+                set_p_error_mark(&w, 0, error_mark);
                 // query-text mirrors the focused editor for tab persistence; the
                 // right pane's text lives in panes[1].ed_state (persisted via
                 // p1-query in a later step).
@@ -4520,7 +4531,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_p1_cursor_line(ed.line as i32);
                 w.set_p1_cursor_visual_row(cursor_visual_row);
                 w.set_p1_cursor_col(ed.col as i32);
-                w.set_p1_error_line(error_line.map_or(-1, |line| line as i32));
+                set_p_error_mark(&w, 1, error_mark);
             }
             // Keep the caret in view on every edit/cursor move, not just a
             // find jump — typing off the bottom of the viewport otherwise
@@ -8223,18 +8234,14 @@ fn main() -> Result<(), slint::PlatformError> {
             let results = panes[pane].results.clone();
             let active_result = panes[pane].active_result.clone();
             let result_new_tab = panes[pane].result_new_tab.clone();
-            let error_position_state = panes[pane].error_position.clone();
+            let error_mark_state = panes[pane].error_mark.clone();
             let run_origin = panes[pane].pending_run_origin.take();
             // New run clears any previous error highlight right away, so a
             // successful re-run never leaves stale red on the editor — the
             // (view/err) branches below only re-arm it on a fresh failure.
-            *error_position_state.lock().unwrap() = None;
+            *error_mark_state.lock().unwrap() = None;
             if let Some(w) = weak.upgrade() {
-                if pane == 0 {
-                    w.set_error_line(-1);
-                } else {
-                    w.set_p1_error_line(-1);
-                }
+                set_p_error_mark(&w, pane, None);
             }
             let split_results = panes[pane].split_results.clone();
             let active_id = if pane == 1 {
@@ -8408,13 +8415,15 @@ fn main() -> Result<(), slint::PlatformError> {
                 let error_spot = err
                     .as_ref()
                     .and_then(|e| editor::error_spot(&e.to_string(), &sql, &stmt_offsets));
-                // `sql` is only the fragment Run sent; shift its position/line
-                // back into full-buffer coordinates.
-                let error_position_value = error_spot
-                    .as_ref()
-                    .and_then(|s| s.position)
-                    .map(|pos| run_origin.0 + pos);
-                let error_line_value = error_spot.as_ref().map(|s| s.line + run_origin.1);
+                // `sql` is only the fragment Run sent; shift its line span back
+                // into full-buffer coordinates.
+                let error_mark_value = error_spot.as_ref().map(|s| {
+                    (
+                        s.line + run_origin,
+                        s.stmt_lines.0 + run_origin,
+                        s.stmt_lines.1 + run_origin,
+                    )
+                });
                 // A hand-typed `SELECT ... FROM t` result has no row identity by
                 // default. When it's an unambiguous single-table select (no
                 // join/union/aggregate — see single_table_name) and the table's
@@ -8484,12 +8493,8 @@ fn main() -> Result<(), slint::PlatformError> {
                         }
                         match (view, err) {
                             (Some(v), _) => {
-                                *error_position_state.lock().unwrap() = None;
-                                if pane == 0 {
-                                    w.set_error_line(-1);
-                                } else {
-                                    w.set_p1_error_line(-1);
-                                }
+                                *error_mark_state.lock().unwrap() = None;
+                                set_p_error_mark(&w, pane, None);
                                 // Run Selection over 2+ statements: store one
                                 // result tab per statement and show the first.
                                 if split && split_views.len() >= 2 {
@@ -8686,12 +8691,8 @@ fn main() -> Result<(), slint::PlatformError> {
                                     return;
                                 }
                                 *last_view.lock().unwrap() = None;
-                                *error_position_state.lock().unwrap() = error_position_value;
-                                if pane == 0 {
-                                    w.set_error_line(error_line_value.unwrap_or(-1));
-                                } else {
-                                    w.set_p1_error_line(error_line_value.unwrap_or(-1));
-                                }
+                                *error_mark_state.lock().unwrap() = error_mark_value;
+                                set_p_error_mark(&w, pane, error_mark_value);
                                 apply_result(
                                     &w,
                                     pane,
@@ -8737,15 +8738,11 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             // New stream clears any previous error highlight (same reset as
             // run_sql) so a correct re-run that streams drops the stale red.
-            *panes[pane].error_position.lock().unwrap() = None;
-            let error_position_state = panes[pane].error_position.clone();
+            *panes[pane].error_mark.lock().unwrap() = None;
+            let error_mark_state = panes[pane].error_mark.clone();
             let run_origin = panes[pane].pending_run_origin.take();
             let sql_for_error = sql.clone();
-            if pane == 0 {
-                w.set_error_line(-1);
-            } else {
-                w.set_p1_error_line(-1);
-            }
+            set_p_error_mark(&w, pane, None);
             // Read on the UI thread now — the producer/consumer task below
             // runs off it and can't touch `w`.
             let cur_db = w.get_schema_name().to_string();
@@ -9012,21 +9009,20 @@ fn main() -> Result<(), slint::PlatformError> {
                                         // A streamed run fails the same way a
                                         // buffered one does, so it arms the
                                         // editor's error line the same way.
-                                        let spot = editor::error_spot(
+                                        let mark = editor::error_spot(
                                             &e,
                                             &sql_for_error,
                                             &editor::statement_offsets(&sql_for_error),
-                                        );
-                                        *error_position_state.lock().unwrap() = spot
-                                            .as_ref()
-                                            .and_then(|s| s.position)
-                                            .map(|pos| run_origin.0 + pos);
-                                        let line = spot.map_or(-1, |s| s.line + run_origin.1);
-                                        if pane == 0 {
-                                            w.set_error_line(line);
-                                        } else {
-                                            w.set_p1_error_line(line);
-                                        }
+                                        )
+                                        .map(|s| {
+                                            (
+                                                s.line + run_origin,
+                                                s.stmt_lines.0 + run_origin,
+                                                s.stmt_lines.1 + run_origin,
+                                            )
+                                        });
+                                        *error_mark_state.lock().unwrap() = mark;
+                                        set_p_error_mark(&w, pane, mark);
                                         apply_result(
                                             &w,
                                             pane,

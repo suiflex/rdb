@@ -744,11 +744,11 @@ impl EditorState {
         trim_leading_comments(&stmt).to_string()
     }
 
-    /// Where the text `Run` executes starts in the full buffer: byte offset
-    /// and 0-based line. Run sends only the selection, else the statement
-    /// under the cursor, while a driver reports an error position relative to
-    /// what it was given — this is what shifts one back into the other.
-    pub fn run_origin(&self) -> (usize, i32) {
+    /// 0-based line where the text `Run` executes starts in the full buffer.
+    /// Run sends only the selection, else the statement under the cursor, while
+    /// a driver reports an error position relative to what it was given — this
+    /// is what shifts one back into the other.
+    pub fn run_origin(&self) -> i32 {
         let text = self.text();
         let selected = self.selection().is_some();
         let (start_char, raw) = match self.selection() {
@@ -775,7 +775,7 @@ impl EditorState {
             .char_indices()
             .nth(start_char + skipped)
             .map_or(text.len(), |(b, _)| b);
-        (byte, text[..byte].matches('\n').count() as i32)
+        text[..byte].matches('\n').count() as i32
     }
 
     /// Replace the `;`-delimited statement under the cursor with `text`,
@@ -854,11 +854,13 @@ pub fn statement_offsets(text: &str) -> Vec<usize> {
 
 /// Where a failed query points in the editor buffer.
 pub struct ErrorSpot {
-    /// Byte offset into the full buffer, 1-based, when the driver reports a
-    /// position. `None` for engines that only report a line number.
-    pub position: Option<usize>,
     /// 0-based line in the full buffer.
     pub line: i32,
+    /// First and last 0-based line of the statement that failed. The engine
+    /// points at the token it choked on, which is often a line or two past the
+    /// real mistake (an unterminated statement is only noticed at the *next*
+    /// one), so the whole statement is worth marking, not just `line`.
+    pub stmt_lines: (i32, i32),
 }
 
 /// Locate the failing line of a query error in the full editor buffer.
@@ -894,17 +896,26 @@ pub fn error_spot(err: &str, sql: &str, stmt_offsets: &[usize]) -> Option<ErrorS
             .and_then(|s| s.parse::<usize>().ok())
     };
     let line_of = |byte: usize| sql.bytes().take(byte).filter(|b| *b == b'\n').count() as i32;
+    // The failing statement runs from its own offset to the next one's (or the
+    // end of the text), minus whatever trailing whitespace sits between them.
+    let stmt_end = stmt_idx
+        .and_then(|i| stmt_offsets.get(i + 1).copied())
+        .unwrap_or(sql.len())
+        .min(sql.len());
+    let stmt_lines = (
+        line_of(base),
+        line_of(sql[..stmt_end].trim_end().len().max(base)),
+    );
     if let Some(pos) = value("[[rdb-position:") {
-        let position = base + pos;
         return Some(ErrorSpot {
-            position: Some(position),
-            line: line_of(position.saturating_sub(1)),
+            line: line_of((base + pos).saturating_sub(1)),
+            stmt_lines,
         });
     }
     let line = value("[[rdb-line:")?;
     Some(ErrorSpot {
-        position: None,
         line: line_of(base) + line.saturating_sub(1) as i32,
+        stmt_lines,
     })
 }
 
@@ -1511,8 +1522,10 @@ mod tests {
             &offsets,
         )
         .unwrap();
-        assert_eq!(spot.position, Some(19));
         assert_eq!(spot.line, 3);
+        // The statement itself spans lines 2..3 — the engine points at line 3,
+        // but the mistake started a line earlier.
+        assert_eq!(spot.stmt_lines, (2, 3));
 
         // Line marker, second statement: line 2 of that statement is line 3
         // of the buffer.
@@ -1522,7 +1535,6 @@ mod tests {
             &offsets,
         )
         .unwrap();
-        assert_eq!(spot.position, None);
         assert_eq!(spot.line, 3);
 
         // Single statement, no `statement i/n` wrapper.
@@ -1540,15 +1552,13 @@ mod tests {
         // Cursor on the `SELECT` of the second statement (line 3).
         ed.line = 3;
         ed.col = 2;
-        let (byte, line) = ed.run_origin();
-        assert_eq!(&text[byte..byte + 6], "SELECT");
-        assert_eq!(line, 3);
+        assert_eq!(ed.run_origin(), 3);
         assert_eq!(ed.current_statement(), "SELECT\n  2;");
 
         // Cursor in the first statement: start of buffer.
         ed.line = 0;
         ed.col = 3;
-        assert_eq!(ed.run_origin(), (0, 0));
+        assert_eq!(ed.run_origin(), 0);
     }
 
     #[test]
@@ -1560,10 +1570,9 @@ mod tests {
         ed.sel = Some((1, 0));
         ed.line = 1;
         ed.col = 11;
-        let (byte, line) = ed.run_origin();
-        // Run trims the selection, so the origin skips the leading spaces.
-        assert_eq!(&text[byte..], "SELECT 2;");
-        assert_eq!(line, 1);
+        // Run trims the selection, so the origin skips the leading spaces and
+        // still lands on the selection's own line.
+        assert_eq!(ed.run_origin(), 1);
     }
 
     // ----- mouse hit-test -----
