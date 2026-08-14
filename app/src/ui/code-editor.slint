@@ -26,6 +26,10 @@ export component CodeEditor inherits Rectangle {
     // but is usually not where the mistake started.
     in property <int> error-from: -1;
     in property <int> error-to: -1;
+    // Token the engine choked on, on `error-line`: column + length in chars.
+    // len 0 = the engine reported only a line, so there is nothing to underline.
+    in property <int> error-col: 0;
+    in property <int> error-len: 0;
     // (key text, meta/ctrl, alt/option, shift) -> true when the editor consumed
     // the key. meta = ⌘ line/doc motions, alt = ⌥ word motions.
     callback edit-key(string, bool, bool, bool) -> bool;
@@ -208,6 +212,17 @@ export component CodeEditor inherits Rectangle {
                             }
                         }
                         Rectangle { horizontal-stretch: 1; }
+                    }
+
+                    // squiggle under the token that failed
+                    if li == root.error-line && root.error-len > 0: Image {
+                        x: root.gutter-w + Tokens.sp3 + root.error-col * root.charw;
+                        y: root.line-h - 4px;
+                        width: root.error-len * root.charw;
+                        height: 3px;
+                        source: @image-url("icons/squiggle.svg");
+                        horizontal-tiling: repeat;
+                        colorize: Tokens.error;
                     }
 
                     // caret
