@@ -95,9 +95,10 @@ export component ConnForm inherits Rectangle {
     callback cancel();
 
     property <bool> delete-confirm-open: false;
-    background: Tokens.veil;
+    visible: root.open || root.delete-confirm-open;
+    background: root.open || root.delete-confirm-open ? Tokens.veil : transparent;
 
-    TouchArea { clicked => { root.cancel(); } }
+    if root.open: TouchArea { clicked => { root.cancel(); } }
 
     if root.open: Rectangle {
         width: min(520px, parent.width - 2 * Tokens.sp4);
