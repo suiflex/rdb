@@ -182,7 +182,7 @@ fn is_row_returning(sql: &str) -> bool {
 
 fn run_sql(c: &Connection, sql: &str) -> Result<ResultSet> {
     if is_row_returning(sql) {
-        let mut stmt = c.prepare(sql).map_err(|e| RdbError::Query(e.to_string()))?;
+        let mut stmt = c.prepare(sql).map_err(|e| RdbError::Query(sq_err(&e)))?;
         let cols: Vec<Column> = stmt
             .column_names()
             .into_iter()
@@ -206,7 +206,7 @@ fn run_sql(c: &Connection, sql: &str) -> Result<ResultSet> {
     } else {
         let n = c
             .execute(sql, [])
-            .map_err(|e| RdbError::Query(e.to_string()))?;
+            .map_err(|e| RdbError::Query(sq_err(&e)))?;
         Ok(ResultSet::Affected(n as u64))
     }
 }
@@ -291,4 +291,47 @@ fn primary_key_impl(c: &Connection, table: &str) -> Result<Vec<String>> {
     }
     pk.sort_by_key(|(_, ord)| *ord);
     Ok(pk.into_iter().map(|(name, _)| name).collect())
+}
+
+/// SQLite pinpoints a bad token by byte offset, but only in the typed
+/// `SqlInputError`, whose `Display` echoes the entire statement back. Keep the
+/// message alone and move the offset into the `[[rdb-position:N]]` marker the
+/// UI reads to highlight the failing line (the marker is 1-based, SQLite's
+/// offset is not).
+fn sq_err(e: &rusqlite::Error) -> String {
+    match e {
+        rusqlite::Error::SqlInputError { msg, offset, .. } if *offset >= 0 => {
+            format!("[[rdb-position:{}]] {msg}", *offset as usize + 1)
+        }
+        _ => e.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sq_err;
+
+    #[test]
+    fn sq_err_marks_the_bad_token_offset() {
+        let c = rusqlite::Connection::open_in_memory().unwrap();
+        let sql = "SELECT\n  slect 2";
+        let e = c.prepare(sql).unwrap_err();
+        let msg = sq_err(&e);
+        // 1-based byte offset of the token SQLite chokes on (`slect` parses
+        // as an alias, so the complaint lands on the `2` after it).
+        let want = sql.rfind('2').unwrap() + 1;
+        assert!(
+            msg.starts_with(&format!("[[rdb-position:{want}]] ")),
+            "{msg}"
+        );
+        // The whole statement is no longer echoed back at the user.
+        assert!(!msg.contains("SELECT\n"), "{msg}");
+    }
+
+    #[test]
+    fn sq_err_passes_other_errors_through() {
+        let c = rusqlite::Connection::open_in_memory().unwrap();
+        let e = c.prepare("SELECT * FROM nope").unwrap_err();
+        assert!(!sq_err(&e).contains("[[rdb-"), "{}", sq_err(&e));
+    }
 }
