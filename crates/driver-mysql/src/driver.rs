@@ -115,7 +115,7 @@ impl Driver for MysqlDriver {
         let mut result = conn
             .query_iter(sql.as_str())
             .await
-            .map_err(|e| RdbError::Query(e.to_string()))?;
+            .map_err(|e| RdbError::Query(my_err(&e.to_string())))?;
 
         // A statement with no result set (INSERT/UPDATE/DELETE/DDL) reports
         // affected rows and yields no columns.
@@ -237,5 +237,44 @@ impl Driver for MysqlDriver {
             .await
             .map_err(|e| RdbError::Connection(e.to_string()))?;
         Ok(())
+    }
+}
+
+/// MySQL reports a syntax error's location only inside the message text
+/// ("... near 'slect' at line 2"), where the line is relative to the statement
+/// it was given. Lift it into the `[[rdb-line:N]]` marker the UI reads to
+/// highlight the failing line in the query editor; a message without one is
+/// passed through unchanged.
+fn my_err(msg: &str) -> String {
+    match msg
+        .rsplit_once(" at line ")
+        .map(|(_, tail)| tail.trim_start())
+        .map(|tail| {
+            tail.chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+        })
+        .filter(|digits| !digits.is_empty())
+    {
+        Some(line) => format!("[[rdb-line:{line}]] {msg}"),
+        None => msg.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::my_err;
+
+    #[test]
+    fn my_err_lifts_the_line_out_of_the_message() {
+        assert_eq!(
+            my_err("You have an error in your SQL syntax; ... near 'slect' at line 3"),
+            "[[rdb-line:3]] You have an error in your SQL syntax; ... near 'slect' at line 3"
+        );
+        assert_eq!(
+            my_err("Table 'db.nope' doesn't exist"),
+            "Table 'db.nope' doesn't exist"
+        );
+        assert_eq!(my_err("weird at line abc"), "weird at line abc");
     }
 }
