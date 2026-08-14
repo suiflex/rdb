@@ -89,8 +89,22 @@ fn json_str<'a>(row: &'a Json, key: &str) -> &'a str {
 impl Driver for ClickhouseDriver {
     async fn connect(cfg: &ConnConfig) -> Result<Self> {
         let client = build_client(cfg);
-        // Eagerly validate the connection so connect() fails fast.
-        fetch_json(&client, "SELECT 1 FORMAT JSON").await?;
+        // Prefer attempts HTTPS first, then falls back to plaintext when the
+        // server does not expose TLS. Require never falls back.
+        if matches!(cfg.sslmode, SslMode::Prefer) {
+            if fetch_json(&client, "SELECT 1 FORMAT JSON").await.is_err() {
+                let mut plain_cfg = cfg.clone();
+                plain_cfg.sslmode = SslMode::Disable;
+                let plain = build_client(&plain_cfg);
+                fetch_json(&plain, "SELECT 1 FORMAT JSON").await?;
+                return Ok(ClickhouseDriver {
+                    client: plain,
+                    database: cfg.database.clone(),
+                });
+            }
+        } else {
+            fetch_json(&client, "SELECT 1 FORMAT JSON").await?;
+        }
         Ok(ClickhouseDriver {
             client,
             database: cfg.database.clone(),

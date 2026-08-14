@@ -233,8 +233,8 @@ export component ConnForm inherits Rectangle {
                 }
             }
 
-            // SSL mode only applies to the SQL engines.
-            if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL" || root.f-engine == "SQL Server" || root.f-engine == "ClickHouse": HorizontalLayout {
+            // SSL mode applies to network engines with transport encryption.
+            if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL" || root.f-engine == "SQL Server" || root.f-engine == "ClickHouse" || root.f-engine == "Cassandra": HorizontalLayout {
                 height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "SSL mode"; }
