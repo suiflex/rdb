@@ -331,12 +331,7 @@ pub fn generate_alias(table: &str) -> String {
         }
     }
     if alias.is_empty() {
-        // Fallback: first char of the whole name.
-        table
-            .chars()
-            .next()
-            .map(|c| c.to_ascii_lowercase().to_string())
-            .unwrap_or_default()
+        String::new()
     } else {
         alias
     }
