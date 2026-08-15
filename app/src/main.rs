@@ -4243,6 +4243,149 @@ mod fmt_tests {
     }
 }
 
+/// Reset the connection form to "new connection" defaults and open it.
+/// `parent` is the top-level group to pre-nest under ("New Subgroup" on the
+/// picker's group context menu): `Some(g)` starts Group on `g` and Subgroup on
+/// "+ New subgroup…" so the user only types the leaf name; `None` starts both
+/// on "None". Engine defaults come from `rdb_connstore::ENGINES`.
+fn open_add_form(w: &MainWindow, store: &rdb_connstore::ConnStore, parent: Option<&str>) {
+    let engine = rdb_connstore::Engine::Postgres;
+    w.set_form_edit_mode(false);
+    w.set_f_name(SharedString::default());
+    w.set_f_engine(SharedString::from(engine.display()));
+    w.set_f_host(SharedString::from("localhost"));
+    w.set_f_port(SharedString::from(engine.default_port()));
+    w.set_f_user(SharedString::default());
+    w.set_f_database(SharedString::default());
+    w.set_f_password(SharedString::default());
+    w.set_f_has_password(false);
+    w.set_f_sslmode(SharedString::from("Disable"));
+    w.set_f_params(SharedString::default());
+    w.set_f_color(SharedString::from("#2c5fd8"));
+    w.set_f_env_tag(SharedString::from("None"));
+    w.set_f_new_group_text(SharedString::default());
+    w.set_f_new_subgroup_text(SharedString::default());
+    w.set_group_options(ModelRc::from(Rc::new(VecModel::from(
+        group_picker_options(store)
+            .into_iter()
+            .map(SharedString::from)
+            .collect::<Vec<_>>(),
+    ))));
+    match parent {
+        Some(parent) => {
+            w.set_f_group_display(SharedString::from(parent));
+            w.set_f_subgroup_display(SharedString::from("+ New subgroup…"));
+            w.set_subgroup_options(ModelRc::from(Rc::new(VecModel::from(
+                subgroup_picker_options(store, parent)
+                    .into_iter()
+                    .map(SharedString::from)
+                    .collect::<Vec<_>>(),
+            ))));
+        }
+        None => {
+            w.set_f_group_display(SharedString::from("None"));
+            w.set_f_subgroup_display(SharedString::from("None"));
+            w.set_subgroup_options(ModelRc::from(Rc::new(VecModel::from(vec![
+                SharedString::from("None"),
+                SharedString::from("+ New subgroup…"),
+            ]))));
+        }
+    }
+    w.set_f_import_url(SharedString::default());
+    w.set_form_error(SharedString::default());
+    w.set_test_result(SharedString::default());
+    w.set_test_ok(false);
+    w.set_test_busy(false);
+    w.set_form_open(true);
+}
+
+// Both of these read the engine picker's display label. They resolve through
+// `rdb_connstore::ENGINES` rather than their own string tables, so adding an
+// engine is one row there instead of two matches here that nothing
+// cross-checks. An unrecognized label still has to answer something; Postgres
+// stays the fallback, as before.
+fn default_port(engine_label: &str) -> &'static str {
+    label_to_engine(engine_label).default_port()
+}
+
+fn label_to_engine(label: &str) -> rdb_connstore::Engine {
+    rdb_connstore::Engine::from_display(label).unwrap_or(rdb_connstore::Engine::Postgres)
+}
+
+/// The connection fields the form holds, already validated and normalized.
+/// Shared by Test Connection and Save, which used to carry byte-identical
+/// copies of this parsing — including the SSL-mode comment below — and only
+/// differed in where the error text lands.
+struct FormConn {
+    engine: rdb_connstore::Engine,
+    host: String,
+    port: u16,
+    user: String,
+    database: Option<String>,
+    password: Option<String>,
+    params: Option<String>,
+    sslmode: rdb_core::conn::SslMode,
+}
+
+/// Read the connection form into a validated `FormConn`, or the message to
+/// show the user. Empty optional fields normalize to `None`; for the password
+/// that means "keep the stored secret", which `ConnStore::save_connection`
+/// relies on.
+fn read_conn_form(w: &MainWindow) -> Result<FormConn, &'static str> {
+    let engine = label_to_engine(w.get_f_engine().as_ref());
+    // SQLite is a local file: no host/port, the file path lives in database.
+    let (host, port) = if engine == rdb_connstore::Engine::Sqlite {
+        if w.get_f_database().to_string().trim().is_empty() {
+            return Err("file path is required");
+        }
+        (String::new(), 0u16)
+    } else {
+        let host = w.get_f_host().to_string();
+        if host.trim().is_empty() {
+            return Err("host is required");
+        }
+        let port: u16 = match w.get_f_port().to_string().parse() {
+            Ok(p) if p != 0 => p,
+            _ => return Err("port must be a number 1-65535"),
+        };
+        (host, port)
+    };
+    let sslmode = match w.get_f_sslmode().to_string().as_str() {
+        "Require" => rdb_core::conn::SslMode::Require,
+        "Prefer" => rdb_core::conn::SslMode::Prefer,
+        // Empty/unset (the SSL mode field is hidden for engines like Redis
+        // that never populate `f-sslmode`) must not silently become `Prefer`
+        // — that maps to `rediss://` and hangs a TLS handshake against a
+        // plain server instead of failing fast or connecting at all.
+        _ => rdb_core::conn::SslMode::Disable,
+    };
+    let non_empty = |s: String| if s.trim().is_empty() { None } else { Some(s) };
+    Ok(FormConn {
+        engine,
+        host,
+        port,
+        user: w.get_f_user().to_string(),
+        database: {
+            let d = w.get_f_database().to_string();
+            if d.is_empty() {
+                None
+            } else {
+                Some(d)
+            }
+        },
+        password: {
+            let p = w.get_f_password().to_string();
+            if p.is_empty() {
+                None
+            } else {
+                Some(p)
+            }
+        },
+        params: non_empty(w.get_f_params().to_string()),
+        sslmode,
+    })
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     // tokio multi-thread runtime on background threads; the Slint event loop
     // owns the main thread. Async results return via invoke_from_event_loop.
@@ -12531,17 +12674,6 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     // ----- connection form (add / edit / delete) -----
-    // Both of these read the engine picker's display label. They resolve
-    // through `rdb_connstore::ENGINES` rather than their own string tables, so
-    // adding an engine is one row there instead of two matches here that
-    // nothing cross-checks. An unrecognized label still has to answer
-    // something; Postgres stays the fallback, as before.
-    fn default_port(engine_label: &str) -> &'static str {
-        label_to_engine(engine_label).default_port()
-    }
-    fn label_to_engine(label: &str) -> rdb_connstore::Engine {
-        rdb_connstore::Engine::from_display(label).unwrap_or(rdb_connstore::Engine::Postgres)
-    }
     let editing_id: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
 
     // open add form
@@ -12554,46 +12686,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             *editing_id.borrow_mut() = String::new();
-            w.set_form_edit_mode(false);
-            w.set_f_name(SharedString::default());
-            w.set_f_engine(SharedString::from("PostgreSQL"));
-            w.set_f_host(SharedString::from("localhost"));
-            w.set_f_port(SharedString::from("5432"));
-            w.set_f_user(SharedString::default());
-            w.set_f_database(SharedString::default());
-            w.set_f_password(SharedString::default());
-            w.set_f_has_password(false);
-            w.set_f_sslmode(SharedString::from("Disable"));
-            w.set_f_params(SharedString::default());
-            w.set_f_color(SharedString::from("#2c5fd8"));
-            w.set_f_env_tag(SharedString::from("None"));
-            w.set_f_group_display(SharedString::from("None"));
-            w.set_f_new_group_text(SharedString::default());
-            w.set_f_subgroup_display(SharedString::from("None"));
-            w.set_f_new_subgroup_text(SharedString::default());
-            w.set_group_options(ModelRc::from(Rc::new(VecModel::from(
-                group_picker_options(&store.borrow())
-                    .into_iter()
-                    .map(SharedString::from)
-                    .collect::<Vec<_>>(),
-            ))));
-            w.set_subgroup_options(ModelRc::from(Rc::new(VecModel::from(vec![
-                SharedString::from("None"),
-                SharedString::from("+ New subgroup…"),
-            ]))));
-            w.set_f_import_url(SharedString::default());
-            w.set_form_error(SharedString::default());
-            w.set_test_result(SharedString::default());
-            w.set_test_ok(false);
-            w.set_test_busy(false);
-            w.set_form_open(true);
+            open_add_form(&w, &store.borrow(), None);
         });
     }
     // open add form, pre-nested under an existing top-level group ("New
     // Subgroup" on the picker's group context menu, only offered on
-    // top-level headers — see picker.slint) — same as open-add-form, except
-    // Group starts on `parent` and Subgroup starts on "+ New subgroup…"
-    // with an empty text field, so the user only has to type the leaf name.
+    // top-level headers — see picker.slint).
     {
         let weak = window.as_weak();
         let store = store.clone();
@@ -12602,43 +12700,8 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let parent = parent.to_string();
             *editing_id.borrow_mut() = String::new();
-            w.set_form_edit_mode(false);
-            w.set_f_name(SharedString::default());
-            w.set_f_engine(SharedString::from("PostgreSQL"));
-            w.set_f_host(SharedString::from("localhost"));
-            w.set_f_port(SharedString::from("5432"));
-            w.set_f_user(SharedString::default());
-            w.set_f_database(SharedString::default());
-            w.set_f_password(SharedString::default());
-            w.set_f_has_password(false);
-            w.set_f_sslmode(SharedString::from("Disable"));
-            w.set_f_params(SharedString::default());
-            w.set_f_color(SharedString::from("#2c5fd8"));
-            w.set_f_env_tag(SharedString::from("None"));
-            w.set_f_group_display(SharedString::from(parent.clone()));
-            w.set_f_new_group_text(SharedString::default());
-            w.set_f_subgroup_display(SharedString::from("+ New subgroup…"));
-            w.set_f_new_subgroup_text(SharedString::default());
-            w.set_group_options(ModelRc::from(Rc::new(VecModel::from(
-                group_picker_options(&store.borrow())
-                    .into_iter()
-                    .map(SharedString::from)
-                    .collect::<Vec<_>>(),
-            ))));
-            w.set_subgroup_options(ModelRc::from(Rc::new(VecModel::from(
-                subgroup_picker_options(&store.borrow(), &parent)
-                    .into_iter()
-                    .map(SharedString::from)
-                    .collect::<Vec<_>>(),
-            ))));
-            w.set_f_import_url(SharedString::default());
-            w.set_form_error(SharedString::default());
-            w.set_test_result(SharedString::default());
-            w.set_test_ok(false);
-            w.set_test_busy(false);
-            w.set_form_open(true);
+            open_add_form(&w, &store.borrow(), Some(parent.as_ref()));
         });
     }
     // open edit form
@@ -12905,74 +12968,23 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let engine = label_to_engine(w.get_f_engine().as_ref());
-            // SQLite is a local file: no host/port, the file path lives in database.
-            let (host, port) = if engine == rdb_connstore::Engine::Sqlite {
-                if w.get_f_database().to_string().trim().is_empty() {
+            let f = match read_conn_form(&w) {
+                Ok(f) => f,
+                Err(msg) => {
                     w.set_test_ok(false);
-                    w.set_test_result(SharedString::from("file path is required"));
+                    w.set_test_result(SharedString::from(msg));
                     return;
                 }
-                (String::new(), 0u16)
-            } else {
-                let host = w.get_f_host().to_string();
-                if host.trim().is_empty() {
-                    w.set_test_ok(false);
-                    w.set_test_result(SharedString::from("host is required"));
-                    return;
-                }
-                let port: u16 = match w.get_f_port().to_string().parse() {
-                    Ok(p) if p != 0 => p,
-                    _ => {
-                        w.set_test_ok(false);
-                        w.set_test_result(SharedString::from("port must be a number 1-65535"));
-                        return;
-                    }
-                };
-                (host, port)
             };
-            let sslmode = match w.get_f_sslmode().to_string().as_str() {
-                "Require" => rdb_core::conn::SslMode::Require,
-                "Prefer" => rdb_core::conn::SslMode::Prefer,
-                // Empty/unset (the SSL mode field is hidden for engines
-                // like Redis that never populate `f-sslmode`) must not
-                // silently become `Prefer` — that maps to `rediss://` and
-                // hangs a TLS handshake against a plain server instead of
-                // failing fast or connecting at all.
-                _ => rdb_core::conn::SslMode::Disable,
-            };
-            let database = {
-                let d = w.get_f_database().to_string();
-                if d.is_empty() {
-                    None
-                } else {
-                    Some(d)
-                }
-            };
-            let password = {
-                let p = w.get_f_password().to_string();
-                if p.is_empty() {
-                    None
-                } else {
-                    Some(p)
-                }
-            };
-            let params = {
-                let p = w.get_f_params().to_string();
-                if p.trim().is_empty() {
-                    None
-                } else {
-                    Some(p)
-                }
-            };
+            let engine = f.engine;
             let cfg = rdb_core::conn::ConnConfig {
-                host,
-                port,
-                user: w.get_f_user().to_string(),
-                database,
-                password,
-                sslmode,
-                params,
+                host: f.host,
+                port: f.port,
+                user: f.user,
+                database: f.database,
+                password: f.password,
+                sslmode: f.sslmode,
+                params: f.params,
             };
 
             w.set_test_busy(true);
@@ -13028,51 +13040,30 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let name = w.get_f_name().to_string();
-            let engine = label_to_engine(w.get_f_engine().as_ref());
             if name.trim().is_empty() {
                 w.set_form_error(SharedString::from("name is required"));
                 return;
             }
-            // SQLite is a local file: no host/port, the file path lives in database.
-            let (host, port) = if engine == rdb_connstore::Engine::Sqlite {
-                if w.get_f_database().to_string().trim().is_empty() {
-                    w.set_form_error(SharedString::from("file path is required"));
+            let f = match read_conn_form(&w) {
+                Ok(f) => f,
+                Err(msg) => {
+                    w.set_form_error(SharedString::from(msg));
                     return;
                 }
-                (String::new(), 0u16)
-            } else {
-                let host = w.get_f_host().to_string();
-                if host.trim().is_empty() {
-                    w.set_form_error(SharedString::from("name and host are required"));
-                    return;
-                }
-                let port: u16 = match w.get_f_port().to_string().parse() {
-                    Ok(p) if p != 0 => p,
-                    _ => {
-                        w.set_form_error(SharedString::from("port must be a number 1-65535"));
-                        return;
-                    }
-                };
-                (host, port)
             };
-            let sslmode = match w.get_f_sslmode().to_string().as_str() {
-                "Require" => rdb_core::conn::SslMode::Require,
-                "Prefer" => rdb_core::conn::SslMode::Prefer,
-                // Empty/unset (the SSL mode field is hidden for engines
-                // like Redis that never populate `f-sslmode`) must not
-                // silently become `Prefer` — that maps to `rediss://` and
-                // hangs a TLS handshake against a plain server instead of
-                // failing fast or connecting at all.
-                _ => rdb_core::conn::SslMode::Disable,
-            };
-            let database = {
-                let d = w.get_f_database().to_string();
-                if d.is_empty() {
-                    None
-                } else {
-                    Some(d)
-                }
-            };
+            let FormConn {
+                engine,
+                host,
+                port,
+                user,
+                database,
+                password,
+                params,
+                sslmode,
+            } = f;
+            // An empty box means "keep the stored secret" — see
+            // `ConnStore::save_connection`.
+            let password = password.unwrap_or_default();
             let color = Some(w.get_f_color().to_string());
             let env_tag = rdb_connstore::EnvTag::parse(w.get_f_env_tag().as_ref());
             let group = {
@@ -13091,15 +13082,6 @@ fn main() -> Result<(), slint::PlatformError> {
                     .find(|e| e.eq_ignore_ascii_case(&g))
                     .unwrap_or(g)
             });
-            let params = {
-                let p = w.get_f_params().to_string();
-                if p.trim().is_empty() {
-                    None
-                } else {
-                    Some(p)
-                }
-            };
-            let password = w.get_f_password().to_string();
             let id = editing_id.borrow().clone();
 
             let result: rdb_connstore::Result<()> = (|| {
@@ -13110,7 +13092,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         engine,
                         host.clone(),
                         port,
-                        w.get_f_user().to_string(),
+                        user.clone(),
                     )
                 } else {
                     st.get(&id)
@@ -13121,7 +13103,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 sc.engine = engine;
                 sc.host = host;
                 sc.port = port;
-                sc.user = w.get_f_user().to_string();
+                sc.user = user;
                 sc.database = database;
                 sc.sslmode = sslmode;
                 sc.color = color;
