@@ -14,7 +14,7 @@ pub use error::{ConnStoreError, Result};
 pub use group_path::{
     group_ancestors, group_leaf, group_parent, is_descendant, normalize_group_path,
 };
-pub use model::{Engine, EnvTag, QueryLanguage, SavedConnection};
+pub use model::{Engine, EngineMeta, EnvTag, QueryLanguage, SavedConnection, ENGINES};
 pub use secret::{EncryptedFileBackend, KeyringBackend, SecretBackend};
 pub use settings::{AppSettings, EditorPrefs, SettingsStore, ThemeMode, UiState};
 pub use store::ConnStore;
