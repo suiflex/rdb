@@ -84,6 +84,23 @@ Keep the scope specific (`app`, `driver-postgres`, `driver-mysql`, `core`,
 ## Architecture
 
 - `app/` — Slint UI binary (main entry point)
+  - `app/src/main.rs` — builds the state, builds the shared closures, calls the
+    wiring modules, runs the event loop. It used to hold all of it; keep new
+    callbacks out of it.
+  - `app/src/wire/*.rs` — one module per area (connect, picker, query, runner,
+    browse, tabs, edit, grid, split_pane, editor, find, schema, settings,
+    conn_form, update). Each exposes `wire(&MainWindow, &AppState, …)` and
+    installs that area's callbacks. `runner` and `editor` are the exceptions:
+    they *build* closures (`run_sql`/`run_stream`, `sync_editor`/
+    `load_editor_text`) that `main` hands on to the others.
+  - `AppState` / `AppFns` (`main.rs`) — the shared `Rc`/`Arc` state, and the
+    long-lived closures built from it. A wiring module destructures what it
+    needs from these instead of `main` cloning handles per callback.
+    `AppState` is deliberately `!Send`: anything crossing onto a tokio task
+    clones the specific `Arc` it needs.
+  - `app/src/pane.rs` — the `set_p_*`/`get_p_*` accessors. The window exposes a
+    separate property per result pane (`cells` / `p1_cells`), so these wrap the
+    `pane == 0` fork once each.
 - `crates/core/` — `Driver` trait, `Query`, `ResultSet`, `Schema`, `RdbError`
 - `crates/connstore/` — saved connections + OS keychain / AES-GCM
 - `crates/driver-postgres/` — tokio-postgres
@@ -139,19 +156,22 @@ Keep the scope specific (`app`, `driver-postgres`, `driver-mysql`, `core`,
 
   **Full checklist for a new `Engine` variant** (driver-mssql's addition is
   the reference — a step here got missed and had to be backfilled twice):
-  1. `crates/connstore/src/model.rs` — `Engine` variant + `Engine::language()` arm.
+  1. `crates/connstore/src/model.rs` — `Engine` variant **plus a row in
+     `ENGINES`** (display label, badge key, URL scheme, default port, query
+     language). `Engine::language()`, `display()`, `key()`, `scheme()` and
+     `default_port()` all read that row, so this is the only place the strings
+     live. `every_engine_has_a_row` fails if a variant has no row.
   2. `crates/connstore/src/conn_url.rs` — scheme(s) → engine in `scheme_to_engine`.
   3. New `driver-*` crate + `app/src/dispatch.rs` — `AnyDriver` variant (box it
      if the driver struct is large — `cargo clippy` catches this via
      `large_enum_variant`) + `write_statements`. Then run `cargo build -p rdb`
      and add an arm everywhere it complains — the compiler enumerates every
      exhaustive `Engine`/`Query` match site for you; don't hand-audit.
-  4. **String-keyed lookups the compiler can NOT catch** (grep the engine's
-     display label, e.g. `"SQL Server"`, across `app/src/main.rs`): the
-     connection-form's `label_to_engine`/`default_port` — `label_to_engine`
-     has a wildcard arm that silently defaults an unmatched label to
-     `Engine::Postgres`, so a missed entry here misroutes a new-connection
-     save to the wrong driver instead of failing to compile.
+  4. Nothing. This step used to list six hand-written string tables
+     (`label_to_engine`/`default_port` in the connection form, `label`/`badge`
+     in `dispatch.rs`, label/scheme in `export.rs`) that had to be edited by
+     hand and that no compiler checked — a missed entry silently routed a saved
+     connection to Postgres. They all derive from the `ENGINES` row now.
   5. UI: `app/src/ui/conn-form.slint` (engine picker `model`, import-URL
      placeholder ternary, field-visibility `if` conditions e.g. SSL mode) and
      `app/src/ui/app-window.slint`'s Settings → About tab (static engine list
@@ -211,6 +231,52 @@ Keep the scope specific (`app`, `driver-postgres`, `driver-mysql`, `core`,
   the picker rendered but dead. Hiding the inner content with `if` is not
   enough — the overlay itself needs `visible: <open>` and its dismiss
   `TouchArea` needs the same `if`.
+
+## Driving the app (tests, screenshots, harnesses)
+
+Everything here is env-var driven; there are no CLI flags.
+
+| Variable | Effect |
+| --- | --- |
+| `RDB_STORE_DIR=<dir>` | Connection store, settings **and** query tabs move to `<dir>`. The isolation switch for any harness — without it a run reads and overwrites the developer's real store. |
+| `RDB_MOCK=1` | Seeded in-memory data and an in-process driver, no network. Needs `--features mock`. |
+| `RDB_WIN=WxH` | Fixed logical window size, for deterministic screenshots. |
+| `RDB_SCREEN=<name>` | Auto-drives the UI to a named screen (mock mode only). |
+| `RDB_SHOT=<path.bmp>` | Screenshot after `RDB_SHOT_DELAY_MS` (default 1200), then quit. Needs `--features mock`. |
+
+**`RDB_MOCK` disables persistence.** `save_query_tabs` and the startup restore
+both no-op under it, deliberately, so the screenshot harness never touches the
+developer's tabs. A persistence test written in mock mode passes without testing
+anything — use `RDB_STORE_DIR` with a real (SQLite is easiest) connection.
+
+**Driving the UI from outside** — Slint 1.17 embeds an MCP server in the app:
+
+    make fe-run-mcp                      # SLINT_EMIT_DEBUG_INFO=1 SLINT_MCP_PORT=8080
+
+`SLINT_EMIT_DEBUG_INFO=1` is what keeps element ids (`Component::element-id`) in
+the compiled UI; without it introspection finds nothing. Ids are
+component-scoped, so `PrimaryButton::ta` matches every instance — address a
+specific one by its accessible label. `find_elements_by_id` searches descendants
+only, so a window's own root id never matches; go through
+`get_window_properties`.
+
+**A plain `cargo build -p rdb` silently replaces the MCP-enabled binary** and the
+port stops opening, which looks like the app is broken. Rebuild with
+`--features slint/mcp` (that is what `make fe-run-mcp` does).
+
+**A failing test aborts instead of reporting.** `panic=abort` turns a failed
+assertion into `SIGABRT` with no message and no test name. Re-run with
+`cargo test -p rdb --bin rdb -- --test-threads=1` — the last test printed is the
+one that failed.
+
+## Demo and test data
+
+Fixtures, doc examples and test queries use **neutral sample names**. This
+repository is public: schema, database and group names, hostnames and example
+connection strings have all leaked real deployment details before. Sample hosts
+use the RFC 5737 documentation ranges (`203.0.113.0/24`), not real addresses.
+Never paste a real connection string, schema name or dataset into a fixture,
+even a passing one.
 
 ## Toolchain
 
