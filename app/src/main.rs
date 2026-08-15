@@ -1227,7 +1227,10 @@ struct GridState {
 
 #[derive(Clone)]
 struct StoredResult {
-    view: model::ResultView,
+    /// Shared, never mutated in place: a tab keeps every result it has run and
+    /// the active pane mirrors that list, so cloning a `StoredResult` used to
+    /// deep-copy a whole grid per stored result on every query completion.
+    view: Arc<model::ResultView>,
     meta: String,
     latency: String,
     grid: GridState,
@@ -1262,7 +1265,7 @@ mod result_tab_tests {
 
     fn result(name: &str) -> StoredResult {
         StoredResult {
-            view: model::ResultView::Affected(name.into()),
+            view: Arc::new(model::ResultView::Affected(name.into())),
             meta: String::new(),
             latency: String::new(),
             grid: GridState::default(),
@@ -1280,7 +1283,7 @@ mod result_tab_tests {
         let mut active = 1;
         store_result(&mut results, &mut active, result("replacement"), false);
         assert_eq!(results.len(), 2);
-        assert!(matches!(&results[1].view, model::ResultView::Affected(v) if v == "replacement"));
+        assert!(matches!(&*results[1].view, model::ResultView::Affected(v) if v == "replacement"));
 
         store_result(&mut results, &mut active, result("third"), true);
         assert_eq!(results.len(), 3);
@@ -3157,7 +3160,7 @@ fn restore_grid_state(w: &MainWindow, pane: usize, g: &GroupRuntime, sr: &Stored
     if st.col_order.is_empty() {
         return;
     }
-    let ncols = match &sr.view {
+    let ncols = match &*sr.view {
         model::ResultView::Table(grid) => grid.columns.len(),
         model::ResultView::Documents(d) => d.grid.columns.len(),
         _ => return,
@@ -3215,7 +3218,7 @@ fn restore_grid_state(w: &MainWindow, pane: usize, g: &GroupRuntime, sr: &Stored
         st.sort.1,
     );
     *g.displayed_grid.lock().unwrap() = view_grid(&filtered);
-    apply_result(w, pane, filtered);
+    apply_result(w, pane, &filtered);
 }
 /// What activating (choose/double-click) a non-section palette row does.
 /// Index-aligned with the `Vec<PaletteItem>` `build_palette_items` returns —
@@ -3965,12 +3968,12 @@ fn push_doc_tree(
 
 /// Push a `ResultView` into the window, selecting the per-kind result region
 /// via `result-kind` (0 Table, 1 Documents, 3 Affected).
-fn apply_result(w: &MainWindow, pane: usize, view: model::ResultView) {
+fn apply_result(w: &MainWindow, pane: usize, view: &model::ResultView) {
     match view {
         model::ResultView::Table(g) => {
             set_p_result_kind(w, pane, 0);
             w.set_doc_json(SharedString::default());
-            push_grid(w, pane, &g);
+            push_grid(w, pane, g);
             set_p_result_status(
                 w,
                 pane,
@@ -3979,7 +3982,7 @@ fn apply_result(w: &MainWindow, pane: usize, view: model::ResultView) {
         }
         model::ResultView::Documents(d) => {
             set_p_result_kind(w, pane, 1);
-            w.set_doc_json(SharedString::from(d.json));
+            w.set_doc_json(SharedString::from(d.json.clone()));
             push_grid(w, pane, &d.grid);
             set_p_result_status(
                 w,
@@ -3988,13 +3991,13 @@ fn apply_result(w: &MainWindow, pane: usize, view: model::ResultView) {
             );
             let collapsed = model::default_doc_collapsed(&d.tree);
             push_doc_tree(w, pane, &d.tree, &collapsed);
-            DOC_TREES.with(|s| s.borrow_mut()[pane] = (d.tree, collapsed));
+            DOC_TREES.with(|s| s.borrow_mut()[pane] = (d.tree.clone(), collapsed));
         }
         model::ResultView::Affected(status) => {
             set_p_result_kind(w, pane, 3);
             w.set_doc_json(SharedString::default());
             clear_grid(w, pane);
-            set_p_result_status(w, pane, SharedString::from(status));
+            set_p_result_status(w, pane, SharedString::from(status.clone()));
         }
     }
 }
@@ -4007,7 +4010,7 @@ fn apply_result(w: &MainWindow, pane: usize, view: model::ResultView) {
 fn present_view(
     w: &MainWindow,
     pane: usize,
-    v: model::ResultView,
+    v: &model::ResultView,
     meta: &str,
     latency: &str,
     last_view: &Arc<std::sync::Mutex<Option<model::ResultView>>>,
@@ -4019,12 +4022,12 @@ fn present_view(
     edit_buf: &Arc<std::sync::Mutex<model::EditBuffer>>,
     browse: &Arc<std::sync::Mutex<BrowseState>>,
 ) {
-    let ncols = match &v {
+    let ncols = match v {
         model::ResultView::Table(g) => g.columns.len(),
         model::ResultView::Documents(d) => d.grid.columns.len(),
         _ => 0,
     };
-    let shown = match &v {
+    let shown = match v {
         model::ResultView::Table(g) => g.rows.len(),
         model::ResultView::Documents(d) => d.grid.rows.len(),
         model::ResultView::Affected(_) => 0,
@@ -4044,7 +4047,7 @@ fn present_view(
             ncols
         ]))),
     );
-    let colnames: Vec<SharedString> = match &v {
+    let colnames: Vec<SharedString> = match v {
         model::ResultView::Table(g) => g
             .columns
             .iter()
@@ -4076,7 +4079,7 @@ fn present_view(
     if pane == 0 {
         w.set_all_columns(ModelRc::from(Rc::new(VecModel::from(colnames))));
     }
-    *displayed_grid.lock().unwrap() = view_grid(&v);
+    *displayed_grid.lock().unwrap() = view_grid(v);
     {
         let st = browse.lock().unwrap();
         let mut b = edit_buf.lock().unwrap();
@@ -4089,7 +4092,7 @@ fn present_view(
     set_p_status_error(w, pane, false);
     w.set_status_latency(SharedString::from(latency));
     set_p_results_meta(w, pane, SharedString::from(meta));
-    let widths: Vec<f32> = match &v {
+    let widths: Vec<f32> = match v {
         model::ResultView::Table(g) => g
             .columns
             .iter()
@@ -4098,7 +4101,7 @@ fn present_view(
         _ => vec![140.0; ncols],
     };
     set_p_col_widths(w, pane, ModelRc::from(Rc::new(VecModel::from(widths))));
-    let bars: Vec<ChartBar> = match &v {
+    let bars: Vec<ChartBar> = match v {
         model::ResultView::Table(g) => model::chart_data(g)
             .into_iter()
             .map(|(label, value, frac)| ChartBar {
@@ -6600,7 +6603,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         )
                     });
                 tab.view = last_view.lock().unwrap().clone().map(|view| StoredResult {
-                    view,
+                    view: Arc::new(view),
                     meta: w.get_results_meta().to_string(),
                     latency: w.get_status_latency().to_string(),
                     grid: GridState::default(),
@@ -6742,7 +6745,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 present_view(
                     w,
                     pane,
-                    stored.view,
+                    &stored.view,
                     &stored.meta,
                     &stored.latency,
                     &last_view,
@@ -7368,7 +7371,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
             );
             *displayed_grid.lock().unwrap() = view_grid(&filtered);
-            apply_result(&w, 0, filtered);
+            apply_result(&w, 0, &filtered);
         });
     }
 
@@ -7465,7 +7468,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if let model::ResultView::Table(g) = &filtered {
                 set_grid_cells_only(&w, 0, g);
             } else {
-                apply_result(&w, 0, filtered);
+                apply_result(&w, 0, &filtered);
             }
         });
     }
@@ -7530,7 +7533,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
             );
             *displayed_grid.lock().unwrap() = view_grid(&sorted);
-            apply_result(&w, 0, sorted);
+            apply_result(&w, 0, &sorted);
         });
     }
 
@@ -7633,7 +7636,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 v, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
             );
             *displayed_grid.lock().unwrap() = view_grid(&transformed);
-            apply_result(&w, 0, transformed);
+            apply_result(&w, 0, &transformed);
         });
     }
 
@@ -7707,7 +7710,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(widths))));
             }
             *displayed_grid.lock().unwrap() = view_grid(&transformed);
-            apply_result(&w, 0, transformed);
+            apply_result(&w, 0, &transformed);
         });
     }
 
@@ -8561,7 +8564,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                                 other => other.clone(),
                                             };
                                             StoredResult {
-                                                view: vw,
+                                                view: Arc::new(vw),
                                                 meta: query_timing_meta(
                                                     rows, 1, elapsed_ms, queue_ms, driver_ms,
                                                     model_ms,
@@ -8598,7 +8601,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                     present_view(
                                         &w,
                                         pane,
-                                        first.view,
+                                        &first.view,
                                         &first.meta,
                                         &first.latency,
                                         &last_view,
@@ -8622,7 +8625,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 );
                                 let latency = model::format_latency(elapsed_ms);
                                 let sr = StoredResult {
-                                    view: v.clone(),
+                                    view: Arc::new(v.clone()),
                                     meta: meta.clone(),
                                     latency: latency.clone(),
                                     grid: GridState::default(),
@@ -8690,7 +8693,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 present_view(
                                     &w,
                                     pane,
-                                    v,
+                                    &v,
                                     &meta,
                                     &latency,
                                     &last_view,
@@ -8734,7 +8737,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                 apply_result(
                                     &w,
                                     pane,
-                                    model::ResultView::Affected(format!(
+                                    &model::ResultView::Affected(format!(
                                         "error: {}",
                                         editor::strip_error_marker(&e.to_string())
                                     )),
@@ -8941,7 +8944,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                         "{n} rows{} · {latency}",
                                         if capped { " (capped)" } else { "" }
                                     );
-                                    let view = model::ResultView::Table(g);
+                                    let view = Arc::new(model::ResultView::Table(g));
                                     let sr = StoredResult {
                                         view: view.clone(),
                                         meta: meta.clone(),
@@ -8990,7 +8993,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                         present_view(
                                             &w,
                                             pane,
-                                            view,
+                                            &view,
                                             &meta,
                                             &latency,
                                             &last_view,
@@ -9059,7 +9062,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                         apply_result(
                                             &w,
                                             pane,
-                                            model::ResultView::Affected(format!(
+                                            &model::ResultView::Affected(format!(
                                                 "error: {}",
                                                 editor::strip_error_marker(&e)
                                             )),
@@ -9783,7 +9786,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 &view, "", "", "", &filters, &hidden, &order, sort_col, ascending,
             );
             *panes[1].displayed_grid.lock().unwrap() = view_grid(&reordered);
-            apply_result(&w, 1, reordered);
+            apply_result(&w, 1, &reordered);
         });
     }
 
@@ -10016,7 +10019,7 @@ fn main() -> Result<(), slint::PlatformError> {
             );
             *panes[1].displayed_grid.lock().unwrap() = view_grid(&sorted);
             set_p_grid_sort(&w, 1, display_col, ascending);
-            apply_result(&w, 1, sorted);
+            apply_result(&w, 1, &sorted);
         });
     }
     {
@@ -10056,7 +10059,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 &view, "", "", "", &filters, &hidden, &order, sort_col, ascending,
             );
             *panes[1].displayed_grid.lock().unwrap() = view_grid(&filtered);
-            apply_result(&w, 1, filtered);
+            apply_result(&w, 1, &filtered);
         });
     }
     // ----- right pane: filter row Apply (client-side, mirrors group 0) -----
@@ -10075,7 +10078,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(view) = view else {
                 return;
             };
-            if matches!(view, model::ResultView::Affected(_)) {
+            if matches!(*view, model::ResultView::Affected(_)) {
                 return;
             }
             let needle = w.get_p1_grid_filter().to_string().to_lowercase();
@@ -10094,7 +10097,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 &view, &needle, &fcol, &fop, &cfilters, &hidden, &order, scol, sasc,
             );
             *panes[1].displayed_grid.lock().unwrap() = view_grid(&filtered);
-            apply_result(&w, 1, filtered);
+            apply_result(&w, 1, &filtered);
         });
     }
     // ----- right pane: Copy result grid as TSV -----
@@ -11236,7 +11239,7 @@ fn main() -> Result<(), slint::PlatformError> {
             present_view(
                 &w,
                 0,
-                sr.view.clone(),
+                &sr.view,
                 &sr.meta,
                 &sr.latency,
                 &last_view,
@@ -11298,7 +11301,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 Some(sr) => present_view(
                     &w,
                     0,
-                    sr.view,
+                    &sr.view,
                     &sr.meta,
                     &sr.latency,
                     &last_view,
@@ -11355,7 +11358,7 @@ fn main() -> Result<(), slint::PlatformError> {
             present_view(
                 &w,
                 1,
-                sr.view.clone(),
+                &sr.view,
                 &sr.meta,
                 &sr.latency,
                 &last_view,
@@ -11409,7 +11412,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 Some(sr) => present_view(
                     &w,
                     1,
-                    sr.view,
+                    &sr.view,
                     &sr.meta,
                     &sr.latency,
                     &last_view,
