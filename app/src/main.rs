@@ -3606,20 +3606,47 @@ fn get_p_cursor(w: &MainWindow, pane: usize) -> (usize, usize) {
     }
 }
 
-/// Return a copy of `g` keeping only rows where some cell matches `needle`
-/// (already lowercased). An empty needle keeps every row.
-fn filter_grid(g: &model::GridModel, needle: &str) -> model::GridModel {
+/// Does any cell of `row` contain `needle` (already lowercased)? An empty
+/// needle matches every row.
+fn row_contains(row: &[model::VmCell], needle: &str) -> bool {
+    needle.is_empty() || row.iter().any(|c| contains_ci(&c.text, needle))
+}
+
+/// Case-insensitive `contains`; `needle` must already be lowercase. The
+/// all-ASCII case — which is nearly every cell — compares bytes in place
+/// instead of allocating a lowercased copy of the haystack, and this runs once
+/// per cell per keystroke of the filter box.
+fn contains_ci(haystack: &str, needle: &str) -> bool {
     if needle.is_empty() {
-        return g.clone();
+        return true;
     }
-    model::GridModel {
-        columns: g.columns.clone(),
-        rows: g
-            .rows
-            .iter()
-            .filter(|row| row.iter().any(|c| c.text.to_lowercase().contains(needle)))
-            .cloned()
-            .collect(),
+    if haystack.is_ascii() && needle.is_ascii() {
+        let (h, n) = (haystack.as_bytes(), needle.as_bytes());
+        n.len() <= h.len() && h.windows(n.len()).any(|w| w.eq_ignore_ascii_case(n))
+    } else {
+        haystack.to_lowercase().contains(needle)
+    }
+}
+
+/// Case-insensitive equality against an already-lowercased `needle`, ASCII
+/// fast path as in [`contains_ci`].
+fn eq_ci(haystack: &str, needle: &str) -> bool {
+    if haystack.is_ascii() && needle.is_ascii() {
+        haystack.len() == needle.len() && haystack.eq_ignore_ascii_case(needle)
+    } else {
+        haystack.to_lowercase() == needle
+    }
+}
+
+/// Case-insensitive ordering against an already-lowercased `needle`.
+fn cmp_ci(haystack: &str, needle: &str) -> std::cmp::Ordering {
+    if haystack.is_ascii() && needle.is_ascii() {
+        haystack
+            .bytes()
+            .map(|b| b.to_ascii_lowercase())
+            .cmp(needle.bytes())
+    } else {
+        haystack.to_lowercase().as_str().cmp(needle)
     }
 }
 
@@ -3668,12 +3695,12 @@ fn cell_matches(cell: &model::VmCell, op: &str, needle: &str) -> bool {
     match op {
         "is null" | "IS NULL" => cell.is_null,
         "not null" | "IS NOT NULL" => !cell.is_null,
-        "=" => cell.text.to_lowercase() == needle,
-        "≠" | "!=" | "<>" => cell.text.to_lowercase() != needle,
+        "=" => eq_ci(&cell.text, needle),
+        "≠" | "!=" | "<>" => !eq_ci(&cell.text, needle),
         ">" | "<" | ">=" | "<=" => {
             let ord = match (cell.text.parse::<f64>(), needle.parse::<f64>()) {
                 (Ok(a), Ok(b)) => a.partial_cmp(&b),
-                _ => Some(cell.text.to_lowercase().as_str().cmp(needle)),
+                _ => Some(cmp_ci(&cell.text, needle)),
             };
             match ord {
                 Some(Ordering::Greater) => op == ">" || op == ">=",
@@ -3686,109 +3713,15 @@ fn cell_matches(cell: &model::VmCell, op: &str, needle: &str) -> bool {
             .trim()
             .trim_matches(['(', ')'])
             .split(',')
-            .map(|v| v.trim().trim_matches(['\'', '"']).to_lowercase())
-            .any(|v| v == cell.text.to_lowercase()),
-        "LIKE" | "ILIKE" => cell
-            .text
-            .to_lowercase()
-            .contains(needle.trim().trim_matches(['\'', '"']).trim_matches('%')),
-        _ => cell.text.to_lowercase().contains(needle),
+            .any(|v| eq_ci(&cell.text, v.trim().trim_matches(['\'', '"']))),
+        "LIKE" | "ILIKE" => contains_ci(
+            &cell.text,
+            needle.trim().trim_matches(['\'', '"']).trim_matches('%'),
+        ),
+        _ => contains_ci(&cell.text, needle),
     }
 }
 
-/// Row filter with an optional column + operator condition (`needle` already
-/// lowercased). `col: None` falls back to the all-cell contains filter.
-fn filter_grid_cond(
-    g: &model::GridModel,
-    needle: &str,
-    col: Option<usize>,
-    op: &str,
-) -> model::GridModel {
-    let Some(c) = col else {
-        return filter_grid(g, needle);
-    };
-    // null checks ignore the value box; other operators with an empty value
-    // keep every row (matches the plain filter's behavior)
-    if needle.is_empty()
-        && op != "is null"
-        && op != "not null"
-        && op != "IS NULL"
-        && op != "IS NOT NULL"
-    {
-        return g.clone();
-    }
-    model::GridModel {
-        columns: g.columns.clone(),
-        rows: g
-            .rows
-            .iter()
-            .filter(|r| r.get(c).is_some_and(|cell| cell_matches(cell, op, needle)))
-            .cloned()
-            .collect(),
-    }
-}
-
-/// Sort rows by column `col` (an ORIGINAL column index). Numeric when both
-/// cells parse as f64, else case-insensitive text. Nulls always sort last,
-/// regardless of direction. `col < 0` or out of range leaves the grid as-is.
-fn sort_grid(g: &model::GridModel, col: i32, asc: bool) -> model::GridModel {
-    if col < 0 || col as usize >= g.columns.len() {
-        return g.clone();
-    }
-    let c = col as usize;
-    let mut rows = g.rows.clone();
-    rows.sort_by(|a, b| {
-        use std::cmp::Ordering;
-        let (x, y) = (&a[c], &b[c]);
-        match (x.is_null, y.is_null) {
-            (true, true) => return Ordering::Equal,
-            (true, false) => return Ordering::Greater,
-            (false, true) => return Ordering::Less,
-            _ => {}
-        }
-        let ord = match (x.text.parse::<f64>(), y.text.parse::<f64>()) {
-            (Ok(m), Ok(n)) => m.partial_cmp(&n).unwrap_or(Ordering::Equal),
-            _ => x.text.to_lowercase().cmp(&y.text.to_lowercase()),
-        };
-        if asc {
-            ord
-        } else {
-            ord.reverse()
-        }
-    });
-    model::GridModel {
-        columns: g.columns.clone(),
-        rows,
-    }
-}
-
-/// Project `g`'s columns into display order `order` (ORIGINAL column indices),
-/// dropping any index in `hidden`. Both columns and each row are projected the
-/// same way, so this subsumes hide + reorder in one pass.
-fn project_cols(
-    g: &model::GridModel,
-    order: &[usize],
-    hidden: &HashSet<usize>,
-) -> model::GridModel {
-    let idx: Vec<usize> = order
-        .iter()
-        .copied()
-        .filter(|i| *i < g.columns.len() && !hidden.contains(i))
-        .collect();
-    model::GridModel {
-        columns: idx.iter().map(|&i| g.columns[i].clone()).collect(),
-        rows: g
-            .rows
-            .iter()
-            .map(|row| idx.iter().map(|&i| row[i].clone()).collect())
-            .collect(),
-    }
-}
-
-/// Build the on-screen grid from a base result grid: filter rows, sort rows,
-/// then project columns (hide + reorder). Column index arguments are ORIGINAL
-/// indices into `base`.
-#[allow(clippy::too_many_arguments)]
 /// Parse one per-column filter box into `(op, needle)`. A leading operator
 /// (`>=`,`<=`,`!=`,`>`,`<`,`=`) picks the comparison; anything else is a
 /// case-insensitive `contains`. Blank input means "no filter" (None).
@@ -3810,32 +3743,6 @@ fn parse_col_filter(raw: &str) -> Option<(&'static str, String)> {
     Some(("contains", t.to_lowercase()))
 }
 
-/// Drop rows failing any non-empty per-column filter (`col_filters` indexed by
-/// ORIGINAL column). Conditions combine with AND.
-fn apply_col_filters(g: &model::GridModel, col_filters: &[String]) -> model::GridModel {
-    let parsed: Vec<(usize, &'static str, String)> = col_filters
-        .iter()
-        .enumerate()
-        .filter_map(|(ci, raw)| parse_col_filter(raw).map(|(op, n)| (ci, op, n)))
-        .collect();
-    if parsed.is_empty() {
-        return g.clone();
-    }
-    model::GridModel {
-        columns: g.columns.clone(),
-        rows: g
-            .rows
-            .iter()
-            .filter(|row| {
-                parsed
-                    .iter()
-                    .all(|(ci, op, n)| row.get(*ci).is_some_and(|cell| cell_matches(cell, op, n)))
-            })
-            .cloned()
-            .collect(),
-    }
-}
-
 /// Per-column filter box values in DISPLAY order (visible columns only), for
 /// feeding the grid's filter-row inputs.
 fn display_col_filters(
@@ -3851,6 +3758,15 @@ fn display_col_filters(
         .collect()
 }
 
+/// Build the on-screen grid from a base result grid: keep the rows passing the
+/// global filter and every per-column filter, order them by `sort_col`, then
+/// project columns into `order` minus `hidden`. Column index arguments are
+/// ORIGINAL indices into `base`.
+///
+/// One pass over row indices, materializing cells exactly once at the end.
+/// This used to be four chained helpers, each deep-copying the entire grid —
+/// four full copies of the result on every keystroke in a filter box, every
+/// header click, and every column hide or reorder.
 #[allow(clippy::too_many_arguments)]
 fn build_grid(
     base: &model::GridModel,
@@ -3863,15 +3779,106 @@ fn build_grid(
     sort_col: i32,
     sort_asc: bool,
 ) -> model::GridModel {
-    let col = if fcol == "any column" {
+    let gcol = if fcol == "any column" {
         None
     } else {
         base.columns.iter().position(|c| c.name == fcol)
     };
-    let filtered = filter_grid_cond(base, needle, col, fop);
-    let per_col = apply_col_filters(&filtered, col_filters);
-    let sorted = sort_grid(&per_col, sort_col, sort_asc);
-    project_cols(&sorted, order, hidden)
+    // null checks ignore the value box; other operators with an empty value
+    // keep every row (matches the plain filter's behavior)
+    let global_off = gcol.is_some()
+        && needle.is_empty()
+        && !matches!(fop, "is null" | "not null" | "IS NULL" | "IS NOT NULL");
+
+    let per_col: Vec<(usize, &'static str, String)> = col_filters
+        .iter()
+        .enumerate()
+        .filter_map(|(ci, raw)| parse_col_filter(raw).map(|(op, n)| (ci, op, n)))
+        .collect();
+
+    let mut keep: Vec<usize> = (0..base.rows.len())
+        .filter(|&r| {
+            let row = &base.rows[r];
+            let global_ok = global_off
+                || match gcol {
+                    Some(c) => row
+                        .get(c)
+                        .is_some_and(|cell| cell_matches(cell, fop, needle)),
+                    None => row_contains(row, needle),
+                };
+            global_ok
+                && per_col
+                    .iter()
+                    .all(|(ci, op, n)| row.get(*ci).is_some_and(|cell| cell_matches(cell, op, n)))
+        })
+        .collect();
+
+    if sort_col >= 0 && (sort_col as usize) < base.columns.len() {
+        let c = sort_col as usize;
+        // Decorate-sort-undecorate: the numeric parse and the lowercased text
+        // are computed once per row instead of once per comparison.
+        let mut keyed: Vec<(SortKey, usize)> = keep
+            .into_iter()
+            .map(|r| (SortKey::of(&base.rows[r][c]), r))
+            .collect();
+        keyed.sort_by(|a, b| {
+            let ord = a.0.cmp(&b.0);
+            // Nulls always sort last, regardless of direction, so they are
+            // kept out of the reversal.
+            match (a.0.is_null(), b.0.is_null()) {
+                (true, true) => std::cmp::Ordering::Equal,
+                (true, false) => std::cmp::Ordering::Greater,
+                (false, true) => std::cmp::Ordering::Less,
+                _ if sort_asc => ord,
+                _ => ord.reverse(),
+            }
+        });
+        keep = keyed.into_iter().map(|(_, r)| r).collect();
+    }
+
+    let idx: Vec<usize> = order
+        .iter()
+        .copied()
+        .filter(|i| *i < base.columns.len() && !hidden.contains(i))
+        .collect();
+
+    model::GridModel {
+        columns: idx.iter().map(|&i| base.columns[i].clone()).collect(),
+        rows: keep
+            .into_iter()
+            .map(|r| idx.iter().map(|&c| base.rows[r][c].clone()).collect())
+            .collect(),
+    }
+}
+
+/// Sort key for one cell, computed once per row. Numeric cells order before
+/// text cells so a mixed column still gets a total order; nulls carry their own
+/// variant because they always sort last.
+#[derive(PartialEq, PartialOrd)]
+enum SortKey {
+    Num(f64),
+    Text(String),
+    Null,
+}
+
+impl SortKey {
+    fn of(cell: &model::VmCell) -> Self {
+        if cell.is_null {
+            SortKey::Null
+        } else if let Ok(n) = cell.text.parse::<f64>() {
+            SortKey::Num(n)
+        } else {
+            SortKey::Text(cell.text.to_lowercase())
+        }
+    }
+
+    fn is_null(&self) -> bool {
+        matches!(self, SortKey::Null)
+    }
+
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other).unwrap_or(std::cmp::Ordering::Equal)
+    }
 }
 
 /// Derive the displayed `ResultView` from a cached base view by applying the
@@ -13407,6 +13414,154 @@ fn main() -> Result<(), slint::PlatformError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn grid(cols: &[&str], rows: &[&[&str]]) -> model::GridModel {
+        model::GridModel {
+            columns: cols
+                .iter()
+                .map(|n| model::VmColumn {
+                    name: (*n).to_string(),
+                    ..Default::default()
+                })
+                .collect(),
+            rows: rows
+                .iter()
+                .map(|r| {
+                    r.iter()
+                        .map(|t| model::VmCell {
+                            text: (*t).to_string(),
+                            is_null: *t == "NULL",
+                        })
+                        .collect()
+                })
+                .collect(),
+        }
+    }
+
+    fn texts(g: &model::GridModel) -> Vec<Vec<&str>> {
+        g.rows
+            .iter()
+            .map(|r| r.iter().map(|c| c.text.as_str()).collect())
+            .collect()
+    }
+
+    /// One pass has to reproduce what the old filter -> per-column filter ->
+    /// sort -> project chain produced.
+    #[test]
+    fn build_grid_filters_sorts_and_projects() {
+        let base = grid(
+            &["id", "name", "note"],
+            &[
+                &["2", "Bob", "x"],
+                &["10", "alice", "y"],
+                &["1", "Carol", "x"],
+                &["3", "dave", "z"],
+            ],
+        );
+        let no_filters = vec![String::new(); 3];
+        let all = HashSet::new();
+
+        // global "contains" filter is case-insensitive across every cell
+        let g = build_grid(
+            &base,
+            "car",
+            "any column",
+            "contains",
+            &no_filters,
+            &all,
+            &[0, 1, 2],
+            -1,
+            true,
+        );
+        assert_eq!(texts(&g), vec![vec!["1", "Carol", "x"]]);
+
+        // numeric sort, not lexicographic: 10 comes after 3
+        let g = build_grid(
+            &base,
+            "",
+            "any column",
+            "contains",
+            &no_filters,
+            &all,
+            &[0, 1, 2],
+            0,
+            true,
+        );
+        assert_eq!(
+            g.rows
+                .iter()
+                .map(|r| r[0].text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["1", "2", "3", "10"]
+        );
+
+        // per-column filter (AND) plus hide + reorder in one go
+        let mut col_filters = vec![String::new(); 3];
+        col_filters[2] = "x".to_string();
+        let mut hidden = HashSet::new();
+        hidden.insert(2);
+        let g = build_grid(
+            &base,
+            "",
+            "any column",
+            "contains",
+            &col_filters,
+            &hidden,
+            &[1, 0, 2],
+            0,
+            false,
+        );
+        assert_eq!(
+            g.columns
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["name", "id"]
+        );
+        assert_eq!(texts(&g), vec![vec!["Bob", "2"], vec!["Carol", "1"]]);
+    }
+
+    /// Nulls sort last in both directions, and the column-scoped operators
+    /// still work off the shared `cell_matches`.
+    #[test]
+    fn build_grid_nulls_sort_last_and_column_ops_apply() {
+        let base = grid(&["n"], &[&["5"], &["NULL"], &["1"], &["9"]]);
+        let none = vec![String::new()];
+        let all = HashSet::new();
+
+        for asc in [true, false] {
+            let g = build_grid(
+                &base,
+                "",
+                "any column",
+                "contains",
+                &none,
+                &all,
+                &[0],
+                0,
+                asc,
+            );
+            assert_eq!(g.rows.last().unwrap()[0].text, "NULL", "asc={asc}");
+        }
+
+        // `>` compares text when either side is not numeric, so a NULL cell
+        // ("null" > "4") stays in — long-standing behavior of `cell_matches`,
+        // pinned here so the single-pass rewrite did not quietly change it.
+        let g = build_grid(&base, "4", "n", ">", &none, &all, &[0], 0, true);
+        assert_eq!(texts(&g), vec![vec!["5"], vec!["9"], vec!["NULL"]]);
+
+        let g = build_grid(&base, "", "n", "is null", &none, &all, &[0], -1, true);
+        assert_eq!(texts(&g), vec![vec!["NULL"]]);
+    }
+
+    #[test]
+    fn ci_helpers_handle_non_ascii() {
+        assert!(contains_ci("Grüße", "grüße"));
+        assert!(contains_ci("HELLO world", "lo wor"));
+        assert!(!contains_ci("hello", "zz"));
+        assert!(eq_ci("ÄPFEL", "äpfel"));
+        assert!(!eq_ci("apple", "apples"));
+    }
 
     #[test]
     fn create_table_sql_quotes_and_pk() {
