@@ -8,6 +8,7 @@ pub(crate) mod browse;
 pub(crate) mod conn_form;
 pub(crate) mod connect;
 pub(crate) mod edit;
+pub(crate) mod editor;
 pub(crate) mod find;
 pub(crate) mod grid;
 pub(crate) mod picker;
