@@ -1257,6 +1257,14 @@ callback create-table-commit();
                             for tab[i] in root.tabs: Rectangle {
                                 width: min(170px, tab-content.preferred-width + 2 * Tokens.sp3);
                                 height: Tokens.doc-tab-h;
+                                // Which tab is selected is otherwise only a
+                                // background colour, so nothing outside the
+                                // process can tell. A desktop test has to be
+                                // able to assert it after a restart.
+                                accessible-role: AccessibleRole.tab;
+                                accessible-label: tab.title;
+                                accessible-checkable: true;
+                                accessible-checked: i == root.active-tab;
                                 background: i == root.active-tab ? Tokens.card
                                     : (tab-ta.has-hover ? Tokens.card.with-alpha(0.5) : transparent);
                                 border-radius: Tokens.radius;
@@ -1459,6 +1467,11 @@ callback create-table-commit();
                             for tab[i] in root.p1-tabs: Rectangle {
                                 width: min(170px, p1-tab-content.preferred-width + 2 * Tokens.sp3);
                                 height: Tokens.doc-tab-h;
+                                // Same reasoning as the left group above.
+                                accessible-role: AccessibleRole.tab;
+                                accessible-label: tab.title;
+                                accessible-checkable: true;
+                                accessible-checked: i == root.p1-active-tab;
                                 background: i == root.p1-active-tab ? Tokens.card
                                     : (p1-tab-ta.has-hover ? Tokens.card.with-alpha(0.5) : transparent);
                                 border-radius: Tokens.radius;
