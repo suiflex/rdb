@@ -223,11 +223,8 @@ jobs:
           dl() { gh release download "$TAG" -R "$REPO" -p "$1" -O "$1" --clobber; }
           sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
 
-          dl "rdb-aarch64-apple-darwin.tar.gz"
-          dl "rdb-x86_64-apple-darwin.tar.gz"
+          # The formula is Linux-only; macOS is served by the cask below.
           dl "rdb-x86_64-unknown-linux-gnu.tar.gz"
-          arm_sha="$(sha rdb-aarch64-apple-darwin.tar.gz)"
-          intel_sha="$(sha rdb-x86_64-apple-darwin.tar.gz)"
           linux_sha="$(sha rdb-x86_64-unknown-linux-gnu.tar.gz)"
 
           # DMGs carry the signed RDB.app for the GUI cask.
@@ -240,8 +237,6 @@ jobs:
           mkdir -p tap/Formula tap/Casks
           sed -e "s|@VERSION@|${VERSION}|g" \
               -e "s|@BASE@|${base}|g" \
-              -e "s|@ARM_SHA@|${arm_sha}|g" \
-              -e "s|@INTEL_SHA@|${intel_sha}|g" \
               -e "s|@LINUX_SHA@|${linux_sha}|g" \
               packaging/rdb.rb.tmpl > tap/Formula/rdb.rb
           sed -e "s|@VERSION@|${VERSION}|g" \

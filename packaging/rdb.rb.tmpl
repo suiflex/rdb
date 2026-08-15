@@ -1,33 +1,30 @@
 # Rendered by .github/workflows/release-build.yml into suiflex/homebrew-tap.
-# Placeholders (@VERSION@, @BASE@, @ARM_SHA@, @INTEL_SHA@, @LINUX_SHA@) are
-# filled in via sed on each release. Edit the template, not the generated file.
+# Placeholders (@VERSION@, @BASE@, @LINUX_SHA@) are filled in via sed on each
+# release. Edit the template, not the generated file.
+#
+# Linux only. RDB is a GUI app, so macOS installs go through the `rdb` cask
+# (rdb-cask.rb.tmpl), which drops RDB.app into /Applications. Homebrew resolves
+# a bare `brew install rdb` to the formula, so keeping a macOS formula here
+# meant Mac users got the GUI binary dumped on $PATH instead of the app.
 class Rdb < Formula
   desc "Native cross-platform database manager (PostgreSQL, MySQL, Redis, MongoDB)"
   homepage "https://github.com/suiflex/rdb"
   version "@VERSION@"
   license "Apache-2.0"
 
-  on_macos do
-    on_arm do
-      url "@BASE@/rdb-aarch64-apple-darwin.tar.gz"
-      sha256 "@ARM_SHA@"
-    end
-    on_intel do
-      url "@BASE@/rdb-x86_64-apple-darwin.tar.gz"
-      sha256 "@INTEL_SHA@"
-    end
-  end
+  depends_on :linux
 
-  on_linux do
-    url "@BASE@/rdb-x86_64-unknown-linux-gnu.tar.gz"
-    sha256 "@LINUX_SHA@"
-  end
+  url "@BASE@/rdb-x86_64-unknown-linux-gnu.tar.gz"
+  sha256 "@LINUX_SHA@"
 
   def install
     bin.install "rdb"
   end
 
+  # No `test do` block: rdb parses no arguments at all, so `rdb --version`
+  # opens a window rather than printing anything. A launch-the-GUI test would
+  # just hang on a headless machine.
   test do
-    assert_match "rdb", shell_output("#{bin}/rdb --version")
+    assert_predicate bin/"rdb", :executable?
   end
 end
