@@ -181,10 +181,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 (sc, cfg)
             };
             *current_connection_id.lock().unwrap() = Some(sc.id.clone());
-            // First connect of the session (or a database switch) restores the
-            // persisted SQL scratch tabs; a later switch to another connection
-            // keeps the SQL scratch tabs so the user can hop between connections
-            // without losing their queries.
+            // Fallback restore: `main` already loads the persisted SQL scratch
+            // tabs at startup, so in practice this takes the keep-what-is-open
+            // branch. It still runs the disk read when startup found nothing to
+            // restore. Either way a connection switch keeps the SQL scratch tabs
+            // so the user can hop between connections without losing queries.
             let restore = should_restore_query_tabs(tabs_restored.get());
             tabs_restored.set(true);
             let (init_tabs, init_active, init_active_p1, init_active_group) = if restore {

@@ -2260,9 +2260,11 @@ fn default_split_ratio() -> f32 {
     0.5
 }
 
-/// Disk restore is only for the first connection of an app session. Reconnecting
-/// with a different database must keep the in-memory workspace: it contains tabs
-/// and results that may have been created since the last persistence write.
+/// Whether a connect should read the tabs back off disk. False once anything
+/// has already restored them — normally `main` at startup, so the very first
+/// connect of a session takes the keep-what-is-in-memory path like every
+/// later one. Reconnecting must never re-read the file: the in-memory
+/// workspace holds tabs and results created since the last persistence write.
 fn should_restore_query_tabs(tabs_restored: bool) -> bool {
     !tabs_restored
 }
@@ -4456,6 +4458,37 @@ fn main() -> Result<(), slint::PlatformError> {
     let (sync_editor, load_editor_text) = wire::editor::wire(&window, &state);
     let ed_state = panes[0].ed_state.clone();
 
+    // Query tabs are documents, not connection state: show them as soon as the
+    // window opens rather than making the user connect first. `wire::connect`
+    // then sees `tabs_restored` already true and keeps this in-memory set
+    // across the first connect instead of re-reading the file.
+    //
+    // Skipped in mock mode, where the screenshot harness must not pick up
+    // whatever the developer left on disk.
+    if !mock::mock_mode() {
+        let (tabs, active, active_p1, active_group, max_number) = load_query_tabs();
+        if !tabs.is_empty() {
+            // Never let a freshly-minted tab reuse a number a restored tab
+            // already holds — `fetch_max` only ever raises the counter.
+            query_number.fetch_max(max_number, std::sync::atomic::Ordering::Relaxed);
+            let init_text = active
+                .as_deref()
+                .and_then(|id| {
+                    tabs.iter()
+                        .find(|t| t.id == id)
+                        .map(|t| t.query_text.clone())
+                })
+                .unwrap_or_default();
+            set_workspace_tabs(&window, &tabs, active.as_deref());
+            window.set_active_pane(active_group as i32);
+            *workspace_tabs.lock().unwrap() = tabs;
+            *active_tab_id.lock().unwrap() = active;
+            *active_group1_tab_id.lock().unwrap() = active_p1;
+            load_editor_text(0, &init_text);
+            tabs_restored.set(true);
+        }
+    }
+
     let save_active_tab: Rc<dyn Fn(&MainWindow)> = {
         let tabs = workspace_tabs.clone();
         let active_id = active_tab_id.clone();
@@ -5065,8 +5098,10 @@ mod tests {
         assert!(build_create_table(None, "t", &no_type, rdb_connstore::Engine::Postgres).is_err());
     }
 
+    /// Startup restores the tabs and flips the flag, so connect must not read
+    /// the file a second time and clobber anything opened in between.
     #[test]
-    fn query_tabs_restore_only_on_first_connection() {
+    fn query_tabs_restore_once_per_session() {
         assert!(should_restore_query_tabs(false));
         assert!(!should_restore_query_tabs(true));
     }
