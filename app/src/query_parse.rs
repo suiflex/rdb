@@ -39,8 +39,8 @@ pub fn parse_query(engine: Engine, text: &str) -> Result<Query, String> {
 /// workspace, so this is a conservative text heuristic: anything ambiguous
 /// returns `None` and the result just stays read-only, same as before this
 /// existed. Returns `(qualifier, table)` — `qualifier` is the part before
-/// the dot when the query names it explicitly (e.g. `"oss_rba_common"` for
-/// `oss_rba_common.step_journal`), left for the caller to apply as
+/// the dot when the query names it explicitly (e.g. `"analytics_core"` for
+/// `analytics_core.event_journal`), left for the caller to apply as
 /// `TableRef.schema` (Postgres) or `.database` (MySQL/Sqlite), falling back
 /// to the active connection's selection when the query didn't qualify it.
 pub fn single_table_name(sql: &str) -> Option<(Option<String>, String)> {
@@ -629,8 +629,8 @@ mod tests {
     #[test]
     fn single_table_select_extracts_schema_qualified_table() {
         assert_eq!(
-            single_table_name("select * from oss_rba_common.step_journal where x = 1"),
-            Some((Some("oss_rba_common".into()), "step_journal".into()))
+            single_table_name("select * from analytics_core.event_journal where x = 1"),
+            Some((Some("analytics_core".into()), "event_journal".into()))
         );
         assert_eq!(
             single_table_name("SELECT * FROM \"public\".\"Users\";"),
@@ -643,12 +643,12 @@ mod tests {
         // Run sends the whole statement span, commented-out lines included.
         assert_eq!(
             single_table_name(
-                "-- update oss_rba_perizinan.t_permohonan_izin\n\
+                "-- update analytics_orders.t_order_request\n\
                  -- set status_respon = '50'\n\
-                 -- where id_permohonan_izin = 'I-1';\n\
-                 select * from oss_rba_common.step_config ;"
+                 -- where id_order_request = 'I-1';\n\
+                 select * from analytics_core.job_config ;"
             ),
-            Some((Some("oss_rba_common".into()), "step_config".into()))
+            Some((Some("analytics_core".into()), "job_config".into()))
         );
         // A reject keyword that only appears inside a comment doesn't count.
         assert_eq!(

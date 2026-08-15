@@ -274,16 +274,16 @@ mod tests {
 
     #[test]
     fn conn_url_embeds_password_per_engine() {
-        let mut c = SavedConnection::new("c", Engine::Postgres, "10.2.238.22", 5432, "app");
-        c.database = Some("oss_rba".into());
+        let mut c = SavedConnection::new("c", Engine::Postgres, "203.0.113.22", 5432, "app");
+        c.database = Some("analytics".into());
         assert_eq!(
             conn_to_url(&c, Some("secret")),
-            "postgresql://app:secret@10.2.238.22:5432/oss_rba"
+            "postgresql://app:secret@203.0.113.22:5432/analytics"
         );
 
         // No stored password → bare `user@`, still re-importable.
-        let m = SavedConnection::new("m", Engine::Mongo, "10.2.238.111", 27017, "root");
-        assert_eq!(conn_to_url(&m, None), "mongodb://root@10.2.238.111:27017");
+        let m = SavedConnection::new("m", Engine::Mongo, "203.0.113.111", 27017, "root");
+        assert_eq!(conn_to_url(&m, None), "mongodb://root@203.0.113.111:27017");
     }
 
     #[test]

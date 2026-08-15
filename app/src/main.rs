@@ -2269,6 +2269,19 @@ fn should_restore_query_tabs(tabs_restored: bool) -> bool {
     !tabs_restored
 }
 
+/// Where the open query tabs are persisted.
+///
+/// `RDB_STORE_DIR` wins when set, the same way it overrides the connection and
+/// settings stores. Without this the e2e harness would isolate connections and
+/// settings but still read and overwrite the developer's real tabs, since
+/// `ConnStore::query_tabs_path` resolves the platform config dir directly.
+fn query_tabs_path() -> Option<std::path::PathBuf> {
+    if let Ok(dir) = std::env::var("RDB_STORE_DIR") {
+        return Some(std::path::PathBuf::from(dir).join("query_tabs.json"));
+    }
+    rdb_connstore::ConnStore::query_tabs_path().ok()
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 struct PersistedTabs {
     tabs: Vec<PersistedTab>,
@@ -2287,7 +2300,7 @@ fn save_query_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active: Option<&str>) 
     if mock::mock_mode() {
         return;
     }
-    let Ok(path) = rdb_connstore::ConnStore::query_tabs_path() else {
+    let Some(path) = query_tabs_path() else {
         return;
     };
     let sql: Vec<PersistedTab> = tabs
@@ -2349,7 +2362,7 @@ fn load_query_tabs() -> (
     usize,
     usize,
 ) {
-    let Ok(path) = rdb_connstore::ConnStore::query_tabs_path() else {
+    let Some(path) = query_tabs_path() else {
         return (Vec::new(), None, None, 0, 0);
     };
     let Some(payload): Option<PersistedTabs> = std::fs::read_to_string(path)
@@ -4237,9 +4250,9 @@ fn main() -> Result<(), slint::PlatformError> {
     // Set of group labels the user has collapsed in the sidebar.
     let collapsed: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
     if mock::mock_mode() {
-        // Reference boots with only PROFIN expanded.
+        // Reference boots with only ACME expanded.
         let mut c = collapsed.borrow_mut();
-        for g in ["OSS", "LOCAL", "SPMB", UNGROUPED] {
+        for g in ["CORE", "LOCAL", "EDGE", UNGROUPED] {
             c.insert(g.to_string());
         }
     } else {
