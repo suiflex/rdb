@@ -7,9 +7,11 @@
 pub(crate) mod browse;
 pub(crate) mod conn_form;
 pub(crate) mod edit;
+pub(crate) mod find;
 pub(crate) mod grid;
 pub(crate) mod picker;
 pub(crate) mod query;
+pub(crate) mod schema;
 pub(crate) mod settings;
 pub(crate) mod split_pane;
 pub(crate) mod tabs;
