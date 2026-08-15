@@ -16,31 +16,13 @@ fn csv_esc(s: &str) -> String {
 }
 
 fn engine_label(e: Engine) -> &'static str {
-    match e {
-        Engine::Postgres => "postgres",
-        Engine::MySql => "mysql",
-        Engine::Redis => "redis",
-        Engine::Mongo => "mongo",
-        Engine::Sqlite => "sqlite",
-        Engine::Cassandra => "cassandra",
-        Engine::Mssql => "mssql",
-        Engine::Clickhouse => "clickhouse",
-    }
+    e.key()
 }
 
 /// URI scheme for a connection-string URL. Distinct from `engine_label`:
 /// postgres/mongo use the canonical `postgresql`/`mongodb` schemes.
 fn engine_scheme(e: Engine) -> &'static str {
-    match e {
-        Engine::Postgres => "postgresql",
-        Engine::MySql => "mysql",
-        Engine::Redis => "redis",
-        Engine::Mongo => "mongodb",
-        Engine::Sqlite => "sqlite",
-        Engine::Cassandra => "cassandra",
-        Engine::Mssql => "sqlserver",
-        Engine::Clickhouse => "clickhouse",
-    }
+    e.scheme()
 }
 
 /// Percent-encode a URL userinfo component (RFC 3986 unreserved set kept as-is,
