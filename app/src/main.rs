@@ -12531,29 +12531,16 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     // ----- connection form (add / edit / delete) -----
+    // Both of these read the engine picker's display label. They resolve
+    // through `rdb_connstore::ENGINES` rather than their own string tables, so
+    // adding an engine is one row there instead of two matches here that
+    // nothing cross-checks. An unrecognized label still has to answer
+    // something; Postgres stays the fallback, as before.
     fn default_port(engine_label: &str) -> &'static str {
-        match engine_label {
-            "MySQL" => "3306",
-            "Redis" => "6379",
-            "MongoDB" => "27017",
-            "SQLite" => "0", // file-based: port unused
-            "Cassandra" => "9042",
-            "SQL Server" => "1433",
-            "ClickHouse" => "8123",
-            _ => "5432",
-        }
+        label_to_engine(engine_label).default_port()
     }
     fn label_to_engine(label: &str) -> rdb_connstore::Engine {
-        match label {
-            "MySQL" => rdb_connstore::Engine::MySql,
-            "Redis" => rdb_connstore::Engine::Redis,
-            "MongoDB" => rdb_connstore::Engine::Mongo,
-            "SQLite" => rdb_connstore::Engine::Sqlite,
-            "Cassandra" => rdb_connstore::Engine::Cassandra,
-            "SQL Server" => rdb_connstore::Engine::Mssql,
-            "ClickHouse" => rdb_connstore::Engine::Clickhouse,
-            _ => rdb_connstore::Engine::Postgres,
-        }
+        rdb_connstore::Engine::from_display(label).unwrap_or(rdb_connstore::Engine::Postgres)
     }
     let editing_id: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
 
@@ -12770,7 +12757,12 @@ fn main() -> Result<(), slint::PlatformError> {
         window.on_form_engine_changed(move |label| {
             if let Some(w) = weak.upgrade() {
                 let cur = w.get_f_port().to_string();
-                if cur.is_empty() || ["5432", "3306", "6379", "27017"].contains(&cur.as_str()) {
+                // "did the user customize the port?" — any engine's default
+                // counts as untouched, read off ENGINES so a new engine's
+                // default is included automatically. The old hardcoded list
+                // had gone stale and missed Cassandra/SQL Server/ClickHouse.
+                let is_a_default = rdb_connstore::ENGINES.iter().any(|m| m.default_port == cur);
+                if cur.is_empty() || is_a_default {
                     w.set_f_port(SharedString::from(default_port(&label)));
                 }
             }

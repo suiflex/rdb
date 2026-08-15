@@ -42,30 +42,12 @@ pub enum AnyDriver {
 impl AnyDriver {
     /// Human label for an engine (used in the sidebar + palette).
     pub fn label(engine: Engine) -> &'static str {
-        match engine {
-            Engine::Postgres => "PostgreSQL",
-            Engine::MySql => "MySQL",
-            Engine::Redis => "Redis",
-            Engine::Mongo => "MongoDB",
-            Engine::Sqlite => "SQLite",
-            Engine::Cassandra => "Cassandra",
-            Engine::Mssql => "SQL Server",
-            Engine::Clickhouse => "ClickHouse",
-        }
+        engine.display()
     }
 
     /// Stable lowercase key the UI's `DbBadge` switches on.
     pub fn badge(engine: Engine) -> &'static str {
-        match engine {
-            Engine::Postgres => "postgres",
-            Engine::MySql => "mysql",
-            Engine::Redis => "redis",
-            Engine::Mongo => "mongo",
-            Engine::Sqlite => "sqlite",
-            Engine::Cassandra => "cassandra",
-            Engine::Mssql => "mssql",
-            Engine::Clickhouse => "clickhouse",
-        }
+        engine.key()
     }
 
     /// Connect using the concrete driver for `engine`.
