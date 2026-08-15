@@ -123,13 +123,13 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let fill_detail = fill_detail.clone();
         window.on_select_conn(fill_detail);
     }
-    // Mock mode boots with the reference selection ("bot ai tele").
+    // Mock mode boots with the reference selection ("chat bot").
     if mock::mock_mode() {
         let idx = store
             .borrow()
             .list()
             .iter()
-            .position(|s| s.name == "bot ai tele")
+            .position(|s| s.name == "chat bot")
             .map(|i| i as i32)
             .unwrap_or(-1);
         fill_detail(idx);
@@ -143,7 +143,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             .borrow()
             .list()
             .iter()
-            .position(|s| s.name == "bot ai tele")
+            .position(|s| s.name == "chat bot")
             .map(|i| i as i32)
             .unwrap_or(0);
         // "connections" IS the pre-connect screen; connecting would swap it
@@ -207,7 +207,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                                 w.invoke_open_add_form();
                                 w.set_f_engine("MongoDB".into());
                                 w.set_f_port("27017".into());
-                                w.set_f_import_url("mongodb://root:secret@10.1.237.31:32343/admin?authMechanism=DEFAULT&replicaSet=production-rs".into());
+                                w.set_f_import_url("mongodb://root:secret@203.0.113.31:32343/admin?authMechanism=DEFAULT&replicaSet=rs0".into());
                             }
                             "palette" => w.invoke_toggle_palette(),
                             _ => w.invoke_open_function("uuid_generate_v3".into()),

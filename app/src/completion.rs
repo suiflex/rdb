@@ -468,7 +468,7 @@ mod tests {
         };
         vec![
             mk("public", "database"),
-            mk("step_config", "table"),
+            mk("job_config", "table"),
             mk("config_id", "field"),
             mk("name", "field"),
             mk("users", "table"),
@@ -604,7 +604,7 @@ mod tests {
     #[test]
     fn from_prefix_suggests_matching_table() {
         let (n, c) = sug(
-            "select * from ste",
+            "select * from job",
             &nodes(),
             "public",
             rdb_connstore::QueryLanguage::Sql,
@@ -612,14 +612,14 @@ mod tests {
         assert_eq!(n, 3);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
-            ["step_config"]
+            ["job_config"]
         );
     }
 
     #[test]
     fn dot_suggests_that_tables_columns() {
         let (n, c) = sug(
-            "select * from step_config where step_config.",
+            "select * from job_config where job_config.",
             &nodes(),
             "public",
             rdb_connstore::QueryLanguage::Sql,
@@ -807,13 +807,13 @@ mod tests {
     #[test]
     fn cql_from_prefix_suggests_matching_table() {
         let (n, c) = sug(
-            "select * from ste",
+            "select * from job",
             &nodes(),
             "public",
             rdb_connstore::QueryLanguage::Cql,
         );
         assert_eq!(n, 3);
-        assert!(c.iter().any(|x| x.label == "step_config"));
+        assert!(c.iter().any(|x| x.label == "job_config"));
     }
 
     /// Typing a mid-word `_` segment finds the identifier, and a true prefix
@@ -862,14 +862,14 @@ mod tests {
             mk("public", "database"),
             mk("users", "table"),
             mk("id", "field"),
-            mk("oss_rba_common", "database"),
-            mk("step_journal", "table"),
+            mk("analytics_core", "database"),
+            mk("event_journal", "table"),
             mk("step_id", "field"),
             mk("journal_id", "field"),
         ];
-        // Active schema is public; the query reads oss_rba_common.step_journal.
+        // Active schema is public; the query reads analytics_core.event_journal.
         let (_, c) = sug(
-            "select * from oss_rba_common.step_journal where step",
+            "select * from analytics_core.event_journal where step",
             &two,
             "public",
             rdb_connstore::QueryLanguage::Sql,
@@ -879,8 +879,8 @@ mod tests {
         // A prior statement's tables can't leak in: the caller scopes `stmt` to
         // the statement under the cursor (`EditorState::current_statement`).
         let (_, c2) = suggest(
-            "select * from users;\nselect * from oss_rba_common.step_journal where step",
-            "select * from oss_rba_common.step_journal where step",
+            "select * from users;\nselect * from analytics_core.event_journal where step",
+            "select * from analytics_core.event_journal where step",
             &two,
             "public",
             rdb_connstore::QueryLanguage::Sql,
@@ -902,14 +902,14 @@ mod tests {
             mk("public", "database"),
             mk("users", "table"),
             mk("id", "field"),
-            mk("oss_rba_common", "database"),
-            mk("step_config", "table"),
+            mk("analytics_core", "database"),
+            mk("job_config", "table"),
             mk("config_id", "field"),
             mk("taint", "field"),
         ];
         let (n, c) = suggest(
             "select con",
-            "select con from oss_rba_common.step_config",
+            "select con from analytics_core.job_config",
             &two,
             "public",
             rdb_connstore::QueryLanguage::Sql,
@@ -923,7 +923,7 @@ mod tests {
     fn alias_dot_resolves_an_alias_declared_after_the_cursor() {
         let (_, c) = suggest(
             "select a.",
-            "select a. from step_config a",
+            "select a. from job_config a",
             &nodes(),
             "public",
             rdb_connstore::QueryLanguage::Sql,
@@ -941,30 +941,30 @@ mod tests {
             kind: k.into(),
         };
         let n = vec![
-            mk("oss_rba_common", "database"),
-            mk("step_config", "table"),
+            mk("analytics_core", "database"),
+            mk("job_config", "table"),
             mk("config_id", "field"),
         ];
         // Schema name typed without its underscores.
         let (_, c) = sug(
-            "select * from ossrbacommon",
+            "select * from analyticscore",
             &n,
-            "oss_rba_common",
+            "analytics_core",
             rdb_connstore::QueryLanguage::Sql,
         );
-        assert!(c.iter().any(|x| x.label == "oss_rba_common"));
+        assert!(c.iter().any(|x| x.label == "analytics_core"));
         // Not schemas only — tables and columns too.
         let (_, c) = sug(
-            "select * from stepconfig",
+            "select * from jobconfig",
             &n,
-            "oss_rba_common",
+            "analytics_core",
             rdb_connstore::QueryLanguage::Sql,
         );
-        assert!(c.iter().any(|x| x.label == "step_config"));
+        assert!(c.iter().any(|x| x.label == "job_config"));
         let (_, c) = sug(
-            "select * from step_config where configid",
+            "select * from job_config where configid",
             &n,
-            "oss_rba_common",
+            "analytics_core",
             rdb_connstore::QueryLanguage::Sql,
         );
         assert!(c.iter().any(|x| x.label == "config_id"));
@@ -978,18 +978,18 @@ mod tests {
         };
         let n = vec![
             mk("public", "database"),
-            mk("stepconfig", "table"),
-            mk("step_config", "table"),
+            mk("jobconfig", "table"),
+            mk("job_config", "table"),
         ];
         let (_, c) = sug(
-            "select * from stepc",
+            "select * from jobc",
             &n,
             "public",
             rdb_connstore::QueryLanguage::Sql,
         );
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
-            ["stepconfig", "step_config"]
+            ["jobconfig", "job_config"]
         );
     }
 
@@ -1024,7 +1024,7 @@ mod tests {
     #[test]
     fn alias_dot_resolves_to_table_columns() {
         let (_, c) = sug(
-            "select * from step_config sc where sc.",
+            "select * from job_config sc where sc.",
             &nodes(),
             "public",
             rdb_connstore::QueryLanguage::Sql,
@@ -1039,13 +1039,13 @@ mod tests {
     /// to its own table's columns (regression for empty suggestions on joins).
     #[test]
     fn schema_qualified_alias_join_resolves_columns() {
-        let a = "select * from public.step_config a left join public.users b on a.";
+        let a = "select * from public.job_config a left join public.users b on a.";
         let (_, c) = sug(a, &nodes(), "public", rdb_connstore::QueryLanguage::Sql);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["config_id", "name"]
         );
-        let b = "select * from public.step_config a left join public.users b on b.";
+        let b = "select * from public.job_config a left join public.users b on b.";
         let (_, c) = sug(b, &nodes(), "public", rdb_connstore::QueryLanguage::Sql);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -1057,7 +1057,7 @@ mod tests {
     /// later line (before_cursor spans the whole statement).
     #[test]
     fn multiline_join_alias_resolves_columns() {
-        let sql = "select * from public.step_config a\nleft join public.users b on a.";
+        let sql = "select * from public.job_config a\nleft join public.users b on a.";
         let (_, c) = sug(sql, &nodes(), "public", rdb_connstore::QueryLanguage::Sql);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -1088,7 +1088,7 @@ mod tests {
         assert_eq!(n, 0);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
-            ["step_config", "users"]
+            ["job_config", "users"]
         );
     }
 
@@ -1160,7 +1160,7 @@ mod tests {
             mk("users", "table"),
             mk("id", "field"),
             mk("analytics", "database"),
-            mk("step_config", "table"),
+            mk("job_config", "table"),
             mk("cfg_id", "field"),
         ]
     }
@@ -1193,7 +1193,7 @@ mod tests {
         assert_eq!(n, 0);
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
-            ["step_config"]
+            ["job_config"]
         );
     }
 

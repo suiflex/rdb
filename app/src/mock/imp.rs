@@ -24,7 +24,7 @@ fn conn(
 }
 
 /// The connection list from design/1-connections.png: OSS 3 · LOCAL 4 ·
-/// PROFIN 5 · SPMB 6 · UNGROUPED 9.
+/// ACME 5 · EDGE 6 · UNGROUPED 9.
 pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
     let _ = std::fs::create_dir_all(&dir);
     // File backend only: demo mode must never touch the OS keychain.
@@ -32,15 +32,15 @@ pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
         Box::new(rdb_connstore::EncryptedFileBackend::new(&dir).expect("file secret backend"));
     let mut store = ConnStore::new(dir.join("connections.json"), backend);
 
-    let host = "128.199.74.52";
+    let host = "203.0.113.52";
     let mut add = |c: SavedConnection| {
         let _ = store.add(c);
     };
 
     for (name, db) in [
-        ("oss rba", "oss_rba_master"),
-        ("jdih bkpm", "jdih_bkpm_2025"),
-        ("primbon", "primbon"),
+        ("analytics", "analytics_master"),
+        ("catalog", "catalog_2025"),
+        ("almanac", "almanac"),
     ] {
         add(conn(
             name,
@@ -48,7 +48,7 @@ pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
             host,
             5432,
             Some(db),
-            "OSS",
+            "CORE",
             false,
         ));
     }
@@ -60,37 +60,37 @@ pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
     ] {
         add(conn(name, engine, "127.0.0.1", port, db, "LOCAL", true));
     }
-    // PROFIN — the expanded group in the reference.
+    // ACME — the expanded group in the reference.
     add(conn(
         "portfolio",
         Engine::Postgres,
         host,
         5432,
         Some("portfolio"),
-        "PROFIN",
+        "ACME",
         false,
     ));
     {
         let mut c = conn(
-            "bot ai tele",
+            "chat bot",
             Engine::Postgres,
             host,
             5432,
-            Some("ai_bot_fintech"),
-            "PROFIN",
+            Some("chat_bot_demo"),
+            "ACME",
             true,
         );
         c.sslmode = rdb_core::conn::SslMode::Require;
-        c.tags = vec!["profin".into(), "fintech".into()];
+        c.tags = vec!["acme".into(), "fintech".into()];
         add(c);
     }
     add(conn(
-        "profin",
+        "acme",
         Engine::Postgres,
         host,
         5432,
-        Some("profin"),
-        "PROFIN",
+        Some("acme"),
+        "ACME",
         false,
     ));
     add(conn(
@@ -99,7 +99,7 @@ pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
         host,
         5432,
         Some("pos"),
-        "PROFIN",
+        "ACME",
         false,
     ));
     add(conn(
@@ -108,17 +108,17 @@ pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
         host,
         6379,
         None,
-        "PROFIN",
+        "ACME",
         false,
     ));
 
     for (name, db) in [
-        ("spmb pusat", "spmb"),
-        ("spmb jabar", "spmb_jabar"),
-        ("spmb jatim", "spmb_jatim"),
-        ("spmb banten", "spmb_banten"),
-        ("spmb dki", "spmb_dki"),
-        ("spmb diy", "spmb_diy"),
+        ("edge pusat", "edge"),
+        ("edge jabar", "edge_jabar"),
+        ("edge jatim", "edge_jatim"),
+        ("edge banten", "edge_banten"),
+        ("edge dki", "edge_dki"),
+        ("edge west", "edge_west"),
     ] {
         add(conn(
             name,
@@ -126,14 +126,14 @@ pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
             host,
             5432,
             Some(db),
-            "SPMB",
+            "EDGE",
             false,
         ));
     }
     for (name, engine, port, db) in [
         ("suitest", Engine::Postgres, 5432, Some("suitest")),
         ("suitest test", Engine::Postgres, 5432, Some("suitest_test")),
-        ("rtmanagement", Engine::Postgres, 5432, Some("rtmanagement")),
+        ("assets", Engine::Postgres, 5432, Some("assets")),
         ("analytics", Engine::MySql, 3306, Some("analytics")),
         ("billing", Engine::MySql, 3306, Some("billing")),
         ("cache edge", Engine::Redis, 6379, None),
@@ -581,7 +581,7 @@ impl Driver for MockDriver {
         ];
         Ok(Schema {
             databases: vec![Database {
-                name: "ai_bot_fintech".into(),
+                name: "chat_bot_demo".into(),
                 containers,
                 functions,
             }],
