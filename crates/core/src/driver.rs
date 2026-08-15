@@ -92,11 +92,21 @@ pub trait Driver: Send + Sync {
                 if sink.send(StreamItem::Meta(cols)).await.is_err() {
                     return Ok(());
                 }
-                for chunk in rows.chunks(batch) {
+                // ponytail: the rows are already buffered, so hand them over by
+                // move — `chunks().to_vec()` used to clone the whole result a
+                // second time. The buffering itself is the real ceiling; the
+                // upgrade path is a per-driver `query_stream` override with a
+                // server cursor, the way driver-postgres does it.
+                let mut rows = rows.into_iter();
+                loop {
                     if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                         break;
                     }
-                    if sink.send(StreamItem::Batch(chunk.to_vec())).await.is_err() {
+                    let chunk: Vec<_> = rows.by_ref().take(batch).collect();
+                    if chunk.is_empty() {
+                        break;
+                    }
+                    if sink.send(StreamItem::Batch(chunk)).await.is_err() {
                         break;
                     }
                 }
