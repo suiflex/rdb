@@ -32,20 +32,143 @@ pub enum QueryLanguage {
     Mongo,
 }
 
+/// Everything about an engine that is otherwise re-spelled as a string
+/// somewhere in the app: the display label, the badge key, the URL scheme, the
+/// default port, and the query dialect.
+///
+/// One row per engine here replaces the half-dozen independent `match`
+/// tables these used to live in — none of which the compiler could
+/// cross-check, and two of which silently fell back to Postgres on an
+/// unrecognized label.
+pub struct EngineMeta {
+    pub engine: Engine,
+    /// Shown in the UI (engine picker, sidebar, palette).
+    pub display: &'static str,
+    /// Stable lowercase key the UI's `DbBadge` and the export header use.
+    pub key: &'static str,
+    /// Canonical URI scheme for an exported connection string. Differs from
+    /// `key` where the ecosystem spells it differently
+    /// (`postgres`/`postgresql`, `mongo`/`mongodb`, `mssql`/`sqlserver`).
+    pub scheme: &'static str,
+    /// Port prefilled by the connection form. `"0"` for file-based engines.
+    pub default_port: &'static str,
+    pub language: QueryLanguage,
+}
+
+/// Every supported engine. Adding a driver means adding a row here — see
+/// `Engine::meta`, which every string lookup goes through.
+pub const ENGINES: &[EngineMeta] = &[
+    EngineMeta {
+        engine: Engine::Postgres,
+        display: "PostgreSQL",
+        key: "postgres",
+        scheme: "postgresql",
+        default_port: "5432",
+        language: QueryLanguage::Sql,
+    },
+    EngineMeta {
+        engine: Engine::MySql,
+        display: "MySQL",
+        key: "mysql",
+        scheme: "mysql",
+        default_port: "3306",
+        language: QueryLanguage::Sql,
+    },
+    EngineMeta {
+        engine: Engine::Redis,
+        display: "Redis",
+        key: "redis",
+        scheme: "redis",
+        default_port: "6379",
+        language: QueryLanguage::Command,
+    },
+    EngineMeta {
+        engine: Engine::Mongo,
+        display: "MongoDB",
+        key: "mongo",
+        scheme: "mongodb",
+        default_port: "27017",
+        language: QueryLanguage::Mongo,
+    },
+    EngineMeta {
+        engine: Engine::Sqlite,
+        display: "SQLite",
+        key: "sqlite",
+        scheme: "sqlite",
+        // file-based: port unused
+        default_port: "0",
+        language: QueryLanguage::Sql,
+    },
+    EngineMeta {
+        engine: Engine::Cassandra,
+        display: "Cassandra",
+        key: "cassandra",
+        scheme: "cassandra",
+        default_port: "9042",
+        language: QueryLanguage::Cql,
+    },
+    EngineMeta {
+        engine: Engine::Mssql,
+        display: "SQL Server",
+        key: "mssql",
+        scheme: "sqlserver",
+        default_port: "1433",
+        language: QueryLanguage::Sql,
+    },
+    EngineMeta {
+        engine: Engine::Clickhouse,
+        display: "ClickHouse",
+        key: "clickhouse",
+        scheme: "clickhouse",
+        default_port: "8123",
+        language: QueryLanguage::Sql,
+    },
+];
+
 impl Engine {
+    /// This engine's row in [`ENGINES`]. Panics only if a variant was added
+    /// without a row, which `every_engine_has_a_row` catches in CI.
+    pub fn meta(self) -> &'static EngineMeta {
+        ENGINES
+            .iter()
+            .find(|m| m.engine == self)
+            .expect("every Engine variant needs a row in ENGINES")
+    }
+
     /// The query dialect this engine's editor tab speaks. Single source of
     /// truth for completion/lexer/format dispatch — see `QueryLanguage`.
     pub fn language(self) -> QueryLanguage {
-        match self {
-            Engine::Postgres
-            | Engine::MySql
-            | Engine::Sqlite
-            | Engine::Mssql
-            | Engine::Clickhouse => QueryLanguage::Sql,
-            Engine::Cassandra => QueryLanguage::Cql,
-            Engine::Redis => QueryLanguage::Command,
-            Engine::Mongo => QueryLanguage::Mongo,
-        }
+        self.meta().language
+    }
+
+    /// Human label shown in the UI.
+    pub fn display(self) -> &'static str {
+        self.meta().display
+    }
+
+    /// Stable lowercase key (badge icons, export header).
+    pub fn key(self) -> &'static str {
+        self.meta().key
+    }
+
+    /// Canonical URI scheme for an exported connection string.
+    pub fn scheme(self) -> &'static str {
+        self.meta().scheme
+    }
+
+    /// Port the connection form prefills.
+    pub fn default_port(self) -> &'static str {
+        self.meta().default_port
+    }
+
+    /// Resolve a UI display label back to its engine. `None` for an unknown
+    /// label — the old lookup silently answered Postgres, which routed a
+    /// mistyped label's connection to the wrong driver.
+    pub fn from_display(label: &str) -> Option<Engine> {
+        ENGINES
+            .iter()
+            .find(|m| m.display == label)
+            .map(|m| m.engine)
     }
 }
 
@@ -261,5 +384,53 @@ mod tests {
         assert_eq!(Engine::Mongo.language(), QueryLanguage::Mongo);
         assert_eq!(Engine::Mssql.language(), QueryLanguage::Sql);
         assert_eq!(Engine::Clickhouse.language(), QueryLanguage::Sql);
+    }
+
+    /// The lookup panics if a variant has no row, so this is the guard that
+    /// makes adding an `Engine` without an `ENGINES` entry a test failure
+    /// rather than a runtime panic. The `match` is exhaustive on purpose: a
+    /// new variant stops compiling here until it is listed.
+    #[test]
+    fn every_engine_has_a_row() {
+        let all = [
+            Engine::Postgres,
+            Engine::MySql,
+            Engine::Redis,
+            Engine::Mongo,
+            Engine::Sqlite,
+            Engine::Cassandra,
+            Engine::Mssql,
+            Engine::Clickhouse,
+        ];
+        for e in all {
+            let m = e.meta();
+            assert_eq!(m.engine, e);
+            assert!(!m.display.is_empty());
+            assert!(!m.key.is_empty());
+            assert!(!m.scheme.is_empty());
+            assert_eq!(Engine::from_display(m.display), Some(e));
+        }
+        assert_eq!(all.len(), ENGINES.len(), "ENGINES has an unlisted row");
+        for e in all {
+            // Keeps the array above honest against the enum: a new variant
+            // fails to compile here until it is added to `all`.
+            let _: () = match e {
+                Engine::Postgres
+                | Engine::MySql
+                | Engine::Redis
+                | Engine::Mongo
+                | Engine::Sqlite
+                | Engine::Cassandra
+                | Engine::Mssql
+                | Engine::Clickhouse => (),
+            };
+        }
+    }
+
+    #[test]
+    fn unknown_display_label_resolves_to_none() {
+        assert_eq!(Engine::from_display("Postgres"), None);
+        assert_eq!(Engine::from_display(""), None);
+        assert_eq!(Engine::from_display("SQL Server"), Some(Engine::Mssql));
     }
 }
