@@ -1,7 +1,7 @@
 # Build
 /target
 **/*.rs.bk
-Cargo.lock.bak
+*.bak
 
 # OS
 .DS_Store
@@ -23,6 +23,10 @@ docs/superpowers
 .env
 .env.*
 !.env.example
+
+# Local test harness (holds API keys and a local run database)
+.suitest/
+suitest.config.json
 
 # Logs & temp
 *.log
