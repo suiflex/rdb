@@ -4,6 +4,7 @@
 //! installs the callbacks for one part of the window. `main` builds the state
 //! and calls them in order; the handler bodies themselves are unchanged.
 
+pub(crate) mod browse;
 pub(crate) mod conn_form;
 pub(crate) mod edit;
 pub(crate) mod grid;
