@@ -5,3 +5,4 @@
 //! and calls them in order; the handler bodies themselves are unchanged.
 
 pub(crate) mod conn_form;
+pub(crate) mod update;
