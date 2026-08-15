@@ -33,6 +33,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         restore_p1_tab,
         guard_pending,
         run_sql,
+        ..
     } = fns.clone();
     let browse = panes[0].browse.clone();
     let edit_buf = panes[0].edit_buf.clone();

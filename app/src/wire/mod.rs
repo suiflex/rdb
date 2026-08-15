@@ -8,6 +8,7 @@ pub(crate) mod browse;
 pub(crate) mod conn_form;
 pub(crate) mod edit;
 pub(crate) mod grid;
+pub(crate) mod query;
 pub(crate) mod settings;
 pub(crate) mod split_pane;
 pub(crate) mod tabs;
