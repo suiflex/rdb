@@ -25,37 +25,38 @@ pub fn fold_rows(rows: Vec<SchemaRow>) -> Schema {
     let mut databases: Vec<Database> = Vec::new();
 
     for (db_name, table, col, type_name, nullable, pk, fk) in rows {
-        let db = match databases.iter_mut().find(|d| d.name == db_name) {
-            Some(d) => d,
-            None => {
+        // `last_mut()` rather than a `find()` scan: the ORDER BY keeps every
+        // database's (and every table's) rows contiguous, so the group being
+        // filled is always the one at the end. The scan version was
+        // O(rows * tables), which bites on servers with thousands of tables.
+        let db = match databases.last_mut() {
+            Some(d) if d.name == db_name => d,
+            _ => {
                 databases.push(Database {
                     functions: Vec::new(),
-                    name: db_name.clone(),
+                    name: db_name,
                     containers: Vec::new(),
                 });
                 databases.last_mut().unwrap()
             }
         };
 
-        let container = match db.containers.iter_mut().find(|c| c.name == table) {
-            Some(c) => c,
-            None => {
-                db.containers.push(Container {
-                    name: table.clone(),
-                    kind: ContainerKind::Table,
-                    fields: Vec::new(),
-                });
-                db.containers.last_mut().unwrap()
-            }
-        };
-
-        container.fields.push(Field {
+        let field = Field {
             name: col,
             type_name,
             nullable,
             pk,
             fk,
-        });
+        };
+
+        match db.containers.last_mut() {
+            Some(c) if c.name == table => c.fields.push(field),
+            _ => db.containers.push(Container {
+                name: table,
+                kind: ContainerKind::Table,
+                fields: vec![field],
+            }),
+        }
     }
 
     Schema { databases }
@@ -113,5 +114,34 @@ mod tests {
         assert_eq!(users.kind, ContainerKind::Table);
         assert_eq!(users.fields.len(), 2);
         assert!(users.fields.iter().any(|f| f.name == "name" && f.nullable));
+    }
+
+    /// The fold walks the rows once and only ever appends to the last group,
+    /// so the database boundary has to be picked up from the ORDER BY.
+    #[test]
+    fn fold_rows_separates_consecutive_databases() {
+        let row = |db: &str, table: &str, col: &str| {
+            (
+                db.to_string(),
+                table.to_string(),
+                col.to_string(),
+                "int".to_string(),
+                false,
+                false,
+                false,
+            )
+        };
+        let schema = fold_rows(vec![
+            row("app", "users", "id"),
+            row("app", "users", "email"),
+            row("shop", "users", "id"),
+        ]);
+        assert_eq!(schema.databases.len(), 2);
+        assert_eq!(schema.databases[0].name, "app");
+        assert_eq!(schema.databases[0].containers.len(), 1);
+        assert_eq!(schema.databases[0].containers[0].fields.len(), 2);
+        assert_eq!(schema.databases[1].name, "shop");
+        assert_eq!(schema.databases[1].containers.len(), 1);
+        assert_eq!(schema.databases[1].containers[0].fields.len(), 1);
     }
 }

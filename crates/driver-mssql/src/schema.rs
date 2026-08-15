@@ -42,24 +42,24 @@ pub fn fold_rows(schema_name: &str, rows: Vec<SchemaRow>) -> Schema {
     let mut containers: Vec<Container> = Vec::new();
 
     for (table, col, type_name, nullable, pk, fk) in rows {
-        let container = match containers.iter_mut().find(|c| c.name == table) {
-            Some(c) => c,
-            None => {
-                containers.push(Container {
-                    name: table,
-                    kind: ContainerKind::Table,
-                    fields: Vec::new(),
-                });
-                containers.last_mut().unwrap()
-            }
-        };
-        container.fields.push(Field {
+        let field = Field {
             name: col,
             type_name,
             nullable,
             pk,
             fk,
-        });
+        };
+        // `last_mut()` rather than a `find()` scan: COLUMNS_QUERY's ORDER BY
+        // keeps a table's columns contiguous, so the container being filled is
+        // always the last one. The scan version was O(rows * tables).
+        match containers.last_mut() {
+            Some(c) if c.name == table => c.fields.push(field),
+            _ => containers.push(Container {
+                name: table,
+                kind: ContainerKind::Table,
+                fields: vec![field],
+            }),
+        }
     }
 
     Schema {
