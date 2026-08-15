@@ -28,6 +28,7 @@ mod self_update;
 mod shot;
 mod theme;
 mod update;
+mod wire;
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -4042,6 +4043,36 @@ fn read_conn_form(w: &MainWindow) -> Result<FormConn, &'static str> {
     })
 }
 
+/// The live driver behind an `Arc` so callers clone it out of the mutex and run
+/// queries/pings lock-free: the mutex only guards the slot swap, never a whole
+/// query. Drivers are `&self`, internally pooled and cheap to clone, so this
+/// removes query-vs-ping (and query-vs-query) serialization.
+type DriverSlot = Arc<tokio::sync::Mutex<Option<(rdb_connstore::Engine, Arc<AnyDriver>)>>>;
+
+/// Slot holding the "re-run the current browse query" closure. Set once the
+/// browse view knows what it is browsing; `None` before that.
+type BrowseTrigger = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
+
+/// Shared state handed to the wiring modules in `wire`.
+///
+/// Each field is already an `Rc`/`Arc`, so cloning the struct is a handful of
+/// refcount bumps — the point is that a handler no longer opens with a stack of
+/// individual `let x = x.clone();` lines naming exactly what it captures, which
+/// is what kept every one of them pinned inside `main`. Fields are added as
+/// each cluster of handlers moves out.
+///
+/// Deliberately `!Send` (the `Rc` fields): anything crossing onto a tokio task
+/// still has to clone the specific `Arc` handles it needs, which is what the
+/// spawning callbacks already did.
+#[derive(Clone)]
+struct AppState {
+    rt: Arc<tokio::runtime::Runtime>,
+    store: Rc<RefCell<rdb_connstore::ConnStore>>,
+    collapsed: Rc<RefCell<HashSet<String>>>,
+    conn_filter: Rc<RefCell<String>>,
+    editing_id: Rc<RefCell<String>>,
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     // tokio multi-thread runtime on background threads; the Slint event loop
     // owns the main thread. Async results return via invoke_from_event_loop.
@@ -4143,7 +4174,6 @@ fn main() -> Result<(), slint::PlatformError> {
     // queries/pings lock-free: the mutex only guards the slot swap, never a whole
     // query. Drivers are `&self`, internally pooled and cheap to clone, so this
     // removes query↔ping (and query↔query) serialization.
-    type DriverSlot = Arc<tokio::sync::Mutex<Option<(rdb_connstore::Engine, Arc<AnyDriver>)>>>;
     let current: DriverSlot = Arc::new(tokio::sync::Mutex::new(None));
 
     // Set of group labels the user has collapsed in the sidebar.
@@ -4253,6 +4283,78 @@ fn main() -> Result<(), slint::PlatformError> {
     let cur_engine: Rc<RefCell<Option<rdb_connstore::Engine>>> = Rc::new(RefCell::new(None));
 
     // Reusable sidebar rebuild: buckets the store's list into grouped rows.
+    // Shared UI state that outlives every callback. Declared together so
+    // `AppState` below can be built in one place; each of these used to be
+    // introduced next to the first handler that happened to need it.
+    let conn_modal_map: Rc<RefCell<Vec<i32>>> = Rc::new(RefCell::new(Vec::new()));
+    let table_cols: Rc<VecModel<TableCol>> = Rc::new(VecModel::default());
+    window.set_table_cols(ModelRc::from(table_cols.clone()));
+    let last_view: Arc<std::sync::Mutex<Option<model::ResultView>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let browse_trigger: BrowseTrigger = Rc::new(RefCell::new(None));
+    let connect_handle: Rc<RefCell<Option<tokio::task::JoinHandle<()>>>> =
+        Rc::new(RefCell::new(None));
+    let editing_id: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
+    // ----- saved/recent queries (sidebar Queries tab) -----
+    // User-curated saved queries: seeded on first run, then editable (delete)
+    // and persisted to disk. Mock mode always shows the seed and never writes.
+    let saved_queries: Rc<RefCell<Vec<(String, String)>>> =
+        Rc::new(RefCell::new(if mock::mock_mode() {
+            default_saved()
+        } else {
+            load_saved()
+        }));
+    // Live history: filled as queries run; mock mode seeds a few for the
+    // screenshot harness.
+    let recent_queries: Rc<RefCell<Vec<HistoryEntry>>> =
+        Rc::new(RefCell::new(if mock::mock_mode() {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            vec![
+                HistoryEntry {
+                    sql: "SELECT * FROM emiten LIMIT 100;".into(),
+                    ran_at: now,
+                    engine: Some("postgres".into()),
+                    color: None,
+                },
+                HistoryEntry {
+                    sql: "INSERT INTO sectors (name) VALUES ('Technology');".into(),
+                    ran_at: now,
+                    engine: Some("postgres".into()),
+                    color: None,
+                },
+                HistoryEntry {
+                    sql: "UPDATE emiten SET updated_at = now() WHERE code = '93344';".into(),
+                    ran_at: now,
+                    engine: Some("postgres".into()),
+                    color: None,
+                },
+            ]
+        } else {
+            let mut recent = load_recent();
+            recent.truncate(history_cap.get());
+            recent
+        }));
+    // Date-bucket headers in the History tab (e.g. "Today"/"Yesterday") that
+    // the user has folded. Kept separate from `collapsed_categories` (the
+    // Items-tree schema headers) so toggling one never touches the other.
+    let collapsed_history_groups: Rc<RefCell<HashSet<String>>> =
+        Rc::new(RefCell::new(HashSet::new()));
+    // ----- function definitions captured at connect (name → CREATE source) -----
+    let fn_defs: Arc<std::sync::Mutex<std::collections::HashMap<String, String>>> =
+        Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+
+    // One bundle handed to every wiring module below; see `AppState`.
+    let state = AppState {
+        rt: rt.clone(),
+        store: store.clone(),
+        collapsed: collapsed.clone(),
+        conn_filter: conn_filter.clone(),
+        editing_id: editing_id.clone(),
+    };
+
     let rebuild_sidebar = {
         let weak = window.as_weak();
         let store = store.clone();
@@ -5085,53 +5187,6 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     }
 
-    // ----- saved/recent queries (sidebar Queries tab) -----
-    // User-curated saved queries: seeded on first run, then editable (delete)
-    // and persisted to disk. Mock mode always shows the seed and never writes.
-    let saved_queries: Rc<RefCell<Vec<(String, String)>>> =
-        Rc::new(RefCell::new(if mock::mock_mode() {
-            default_saved()
-        } else {
-            load_saved()
-        }));
-    // Live history: filled as queries run; mock mode seeds a few for the
-    // screenshot harness.
-    let recent_queries: Rc<RefCell<Vec<HistoryEntry>>> =
-        Rc::new(RefCell::new(if mock::mock_mode() {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            vec![
-                HistoryEntry {
-                    sql: "SELECT * FROM emiten LIMIT 100;".into(),
-                    ran_at: now,
-                    engine: Some("postgres".into()),
-                    color: None,
-                },
-                HistoryEntry {
-                    sql: "INSERT INTO sectors (name) VALUES ('Technology');".into(),
-                    ran_at: now,
-                    engine: Some("postgres".into()),
-                    color: None,
-                },
-                HistoryEntry {
-                    sql: "UPDATE emiten SET updated_at = now() WHERE code = '93344';".into(),
-                    ran_at: now,
-                    engine: Some("postgres".into()),
-                    color: None,
-                },
-            ]
-        } else {
-            let mut recent = load_recent();
-            recent.truncate(history_cap.get());
-            recent
-        }));
-    // Date-bucket headers in the History tab (e.g. "Today"/"Yesterday") that
-    // the user has folded. Kept separate from `collapsed_categories` (the
-    // Items-tree schema headers) so toggling one never touches the other.
-    let collapsed_history_groups: Rc<RefCell<HashSet<String>>> =
-        Rc::new(RefCell::new(HashSet::new()));
     let rebuild_query_tree = {
         let weak = window.as_weak();
         let saved = saved_queries.clone();
@@ -5284,9 +5339,6 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // ----- function definitions captured at connect (name → CREATE source) -----
-    let fn_defs: Arc<std::sync::Mutex<std::collections::HashMap<String, String>>> =
-        Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
     {
         let weak = window.as_weak();
         let fn_defs = fn_defs.clone();
@@ -5372,7 +5424,6 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     // ----- Open database (⌘⇧O) / Open Connection (⌘O) modals -----
-    let conn_modal_map: Rc<RefCell<Vec<i32>>> = Rc::new(RefCell::new(Vec::new()));
     {
         let weak = window.as_weak();
         window.on_open_db_modal(move || {
@@ -5694,8 +5745,6 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     // ----- new-table designer: Rust owns the column rows so add/remove go
     // through callbacks; the dialog inputs two-way bind into the row fields -----
-    let table_cols: Rc<VecModel<TableCol>> = Rc::new(VecModel::default());
-    window.set_table_cols(ModelRc::from(table_cols.clone()));
     {
         let weak = window.as_weak();
         let cur_engine = cur_engine.clone();
@@ -6345,8 +6394,6 @@ fn main() -> Result<(), slint::PlatformError> {
     // Last result view kept in memory so the client-side filter (Feature C)
     // can re-derive the visible rows without re-querying. Arc<Mutex<>> (not Rc)
     // so it can cross into the Send event-loop closure from the query task.
-    let last_view: Arc<std::sync::Mutex<Option<model::ResultView>>> =
-        Arc::new(std::sync::Mutex::new(None));
 
     let save_active_tab: Rc<dyn Fn(&MainWindow)> = {
         let tabs = workspace_tabs.clone();
@@ -7124,8 +7171,6 @@ fn main() -> Result<(), slint::PlatformError> {
     // browse mode re-query the DB, but this handler is wired before run_browse
     // exists. Filled in once run_browse is built, below.
     #[allow(clippy::type_complexity)]
-    let browse_trigger: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
-
     // ----- apply client-side row filter to the last result (Feature C) -----
     {
         let weak = window.as_weak();
@@ -7514,8 +7559,6 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     // Handle of the in-flight connect task, so the Cancel button can abort it.
-    let connect_handle: Rc<RefCell<Option<tokio::task::JoinHandle<()>>>> =
-        Rc::new(RefCell::new(None));
 
     // ----- connect: spawn driver work on tokio, push schema back to UI -----
     {
@@ -12329,488 +12372,7 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // ----- connection form (add / edit / delete) -----
-    let editing_id: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
-
-    // open add form
-    {
-        let weak = window.as_weak();
-        let store = store.clone();
-        let editing_id = editing_id.clone();
-        window.on_open_add_form(move || {
-            let Some(w) = weak.upgrade() else {
-                return;
-            };
-            *editing_id.borrow_mut() = String::new();
-            open_add_form(&w, &store.borrow(), None);
-        });
-    }
-    // open add form, pre-nested under an existing top-level group ("New
-    // Subgroup" on the picker's group context menu, only offered on
-    // top-level headers — see picker.slint).
-    {
-        let weak = window.as_weak();
-        let store = store.clone();
-        let editing_id = editing_id.clone();
-        window.on_open_add_form_in_group(move |parent| {
-            let Some(w) = weak.upgrade() else {
-                return;
-            };
-            *editing_id.borrow_mut() = String::new();
-            open_add_form(&w, &store.borrow(), Some(parent.as_ref()));
-        });
-    }
-    // open edit form
-    {
-        let weak = window.as_weak();
-        let store = store.clone();
-        let editing_id = editing_id.clone();
-        window.on_open_edit_form(move |idx| {
-            let Some(w) = weak.upgrade() else {
-                return;
-            };
-            let st = store.borrow();
-            let Some(sc) = st.list().get(idx as usize).cloned() else {
-                return;
-            };
-            *editing_id.borrow_mut() = sc.id.clone();
-            // The stored secret is never shown; expose only whether one exists so
-            // the form can prompt "leave blank to keep" instead of looking empty.
-            let has_pw = st
-                .get_password(&sc.id)
-                .ok()
-                .flatten()
-                .is_some_and(|s| !s.is_empty());
-            w.set_form_edit_mode(true);
-            w.set_f_name(SharedString::from(sc.name));
-            w.set_f_engine(SharedString::from(AnyDriver::label(sc.engine)));
-            w.set_f_host(SharedString::from(sc.host));
-            w.set_f_port(SharedString::from(sc.port.to_string()));
-            w.set_f_user(SharedString::from(sc.user));
-            w.set_f_database(SharedString::from(sc.database.unwrap_or_default()));
-            w.set_f_password(SharedString::default());
-            w.set_f_has_password(has_pw);
-            w.set_f_sslmode(SharedString::from(match sc.sslmode {
-                rdb_core::conn::SslMode::Disable => "Disable",
-                rdb_core::conn::SslMode::Prefer => "Prefer",
-                rdb_core::conn::SslMode::Require => "Require",
-            }));
-            w.set_f_params(SharedString::from(sc.params.unwrap_or_default()));
-            w.set_f_color(SharedString::from(
-                sc.color.unwrap_or_else(|| "#2c5fd8".into()),
-            ));
-            w.set_f_env_tag(SharedString::from(sc.env_tag.as_str()));
-            w.set_f_new_group_text(SharedString::default());
-            match sc.group.as_deref() {
-                None => {
-                    w.set_f_group_display(SharedString::from("None"));
-                    w.set_f_subgroup_display(SharedString::from("None"));
-                    w.set_f_new_subgroup_text(SharedString::default());
-                    w.set_subgroup_options(ModelRc::from(Rc::new(VecModel::from(vec![
-                        SharedString::from("None"),
-                        SharedString::from("+ New subgroup…"),
-                    ]))));
-                }
-                Some(g) => {
-                    let top = g.split('/').next().unwrap_or(g).to_string();
-                    let rest = g[top.len()..].trim_start_matches('/').to_string();
-                    let sub_opts = subgroup_picker_options(&st, &top);
-                    w.set_f_group_display(SharedString::from(top));
-                    if rest.is_empty() {
-                        w.set_f_subgroup_display(SharedString::from("None"));
-                        w.set_f_new_subgroup_text(SharedString::default());
-                    } else if sub_opts.iter().any(|o| o == &rest) {
-                        w.set_f_subgroup_display(SharedString::from(rest));
-                        w.set_f_new_subgroup_text(SharedString::default());
-                    } else {
-                        // A deeper/irregular path than the guided picker
-                        // covers — surface it as free text so editing never
-                        // silently truncates it.
-                        w.set_f_subgroup_display(SharedString::from("+ New subgroup…"));
-                        w.set_f_new_subgroup_text(SharedString::from(rest));
-                    }
-                    w.set_subgroup_options(ModelRc::from(Rc::new(VecModel::from(
-                        sub_opts
-                            .into_iter()
-                            .map(SharedString::from)
-                            .collect::<Vec<_>>(),
-                    ))));
-                }
-            }
-            w.set_group_options(ModelRc::from(Rc::new(VecModel::from(
-                group_picker_options(&st)
-                    .into_iter()
-                    .map(SharedString::from)
-                    .collect::<Vec<_>>(),
-            ))));
-            w.set_f_import_url(SharedString::default());
-            w.set_form_error(SharedString::default());
-            w.set_test_result(SharedString::default());
-            w.set_test_ok(false);
-            w.set_test_busy(false);
-            w.set_form_open(true);
-        });
-    }
-    // Group dropdown changed -> recompute the Subgroup dropdown's options
-    // for the newly-picked parent.
-    {
-        let weak = window.as_weak();
-        let store = store.clone();
-        window.on_form_group_changed(move |top| {
-            let Some(w) = weak.upgrade() else {
-                return;
-            };
-            let opts = if top == "None" || top == "+ New group…" {
-                vec!["None".to_string(), "+ New subgroup…".to_string()]
-            } else {
-                subgroup_picker_options(&store.borrow(), &top)
-            };
-            w.set_subgroup_options(ModelRc::from(Rc::new(VecModel::from(
-                opts.into_iter().map(SharedString::from).collect::<Vec<_>>(),
-            ))));
-        });
-    }
-    // engine changed -> default port if port empty/default-ish
-    {
-        let weak = window.as_weak();
-        window.on_form_engine_changed(move |label| {
-            if let Some(w) = weak.upgrade() {
-                let cur = w.get_f_port().to_string();
-                // "did the user customize the port?" — any engine's default
-                // counts as untouched, read off ENGINES so a new engine's
-                // default is included automatically. The old hardcoded list
-                // had gone stale and missed Cassandra/SQL Server/ClickHouse.
-                let is_a_default = rdb_connstore::ENGINES.iter().any(|m| m.default_port == cur);
-                if cur.is_empty() || is_a_default {
-                    w.set_f_port(SharedString::from(default_port(&label)));
-                }
-            }
-        });
-    }
-    // import URL -> parse and fill form fields for review.
-    {
-        let weak = window.as_weak();
-        window.on_form_import_url(move || {
-            let Some(w) = weak.upgrade() else {
-                return;
-            };
-            let raw = w.get_f_import_url().to_string();
-            match rdb_connstore::parse_conn_url(&raw) {
-                Ok(parsed) => {
-                    if let Some(engine) = parsed.engine {
-                        w.set_f_engine(SharedString::from(AnyDriver::label(engine)));
-                    }
-                    if let Some(host) = parsed.host {
-                        w.set_f_host(SharedString::from(host));
-                    }
-                    // Port from the URL wins; otherwise apply the engine default
-                    // (mirrors form_engine_changed) without clobbering a URL port.
-                    if let Some(port) = parsed.port {
-                        w.set_f_port(SharedString::from(port.to_string()));
-                    } else if let Some(engine) = parsed.engine {
-                        w.set_f_port(SharedString::from(default_port(AnyDriver::label(engine))));
-                    }
-                    if let Some(user) = parsed.user {
-                        w.set_f_user(SharedString::from(user));
-                    }
-                    if let Some(password) = parsed.password {
-                        w.set_f_password(SharedString::from(password));
-                    }
-                    if let Some(database) = parsed.database {
-                        w.set_f_database(SharedString::from(database));
-                    }
-                    if let Some(sslmode) = parsed.sslmode {
-                        w.set_f_sslmode(SharedString::from(match sslmode {
-                            rdb_core::conn::SslMode::Disable => "Disable",
-                            rdb_core::conn::SslMode::Prefer => "Prefer",
-                            rdb_core::conn::SslMode::Require => "Require",
-                        }));
-                    }
-                    w.set_form_error(SharedString::default());
-                }
-                Err(e) => {
-                    w.set_form_error(SharedString::from(format!("import failed: {e}")));
-                }
-            }
-        });
-    }
-    // cancel
-    {
-        let weak = window.as_weak();
-        window.on_form_cancel(move || {
-            if let Some(w) = weak.upgrade() {
-                // Clear any in-flight test state so the form is never stuck on
-                // "Testing connection…" when reopened.
-                w.set_test_busy(false);
-                w.set_test_result(SharedString::default());
-                w.set_form_open(false);
-            }
-        });
-    }
-    // export saved connections. The URL embeds the real (percent-encoded)
-    // password so the file is a re-usable backup — it is sensitive. 0=JSON, 1=CSV.
-    {
-        let weak = window.as_weak();
-        let store = store.clone();
-        window.on_export_conns(move |fmt| {
-            let Some(w) = weak.upgrade() else {
-                return;
-            };
-            let st = store.borrow();
-            // Real passwords are embedded so the export can be re-imported.
-            let pw_for = |c: &rdb_connstore::SavedConnection| st.get_password(&c.id).ok().flatten();
-            let (ext, contents) = if fmt == 1 {
-                ("csv", export::conns_to_csv(st.list(), pw_for))
-            } else {
-                ("json", export::conns_to_json(st.list(), pw_for))
-            };
-            save_via_dialog(
-                &w,
-                format!("rdb-connections.{ext}"),
-                ext.to_uppercase(),
-                ext.to_string(),
-                contents,
-                |w, msg| w.set_sel_footer(SharedString::from(msg)),
-            );
-        });
-    }
-    // quick test from the picker detail pane: saved config, result in the
-    // detail footer line.
-    {
-        let weak = window.as_weak();
-        let rt = rt.clone();
-        let store = store.clone();
-        window.on_test_conn_quick(move |idx| {
-            let Some(w) = weak.upgrade() else {
-                return;
-            };
-            let (engine, cfg) = {
-                let st = store.borrow();
-                let Some(sc) = st.list().get(idx.max(0) as usize) else {
-                    return;
-                };
-                match st.conn_config_for(&sc.id) {
-                    Ok(c) => (sc.engine, c),
-                    Err(e) => {
-                        w.set_sel_footer(SharedString::from(format!("connection failed: {e}")));
-                        return;
-                    }
-                }
-            };
-            w.set_sel_footer(SharedString::from("Testing connection…"));
-            let weak2 = weak.clone();
-            rt.spawn(async move {
-                let result = try_connect(engine, cfg).await;
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(w) = weak2.upgrade() {
-                        w.set_sel_footer(SharedString::from(match result {
-                            Ok(ms) => format!("connection ok · {}", model::format_latency(ms)),
-                            // `RdbError`'s own `Display` already reads
-                            // "connection failed: …" — don't prefix it again.
-                            Err(e) => format!("{e}"),
-                        }));
-                    }
-                });
-            });
-        });
-    }
-    // test connection: build a config straight from the form fields (not the
-    // store) so unsaved edits are exercised, open a real connection, then drop
-    // it. Result reported in the form's test-result line.
-    {
-        let weak = window.as_weak();
-        let rt = rt.clone();
-        window.on_form_test_conn(move || {
-            let Some(w) = weak.upgrade() else {
-                return;
-            };
-            let f = match read_conn_form(&w) {
-                Ok(f) => f,
-                Err(msg) => {
-                    w.set_test_ok(false);
-                    w.set_test_result(SharedString::from(msg));
-                    return;
-                }
-            };
-            let engine = f.engine;
-            let cfg = rdb_core::conn::ConnConfig {
-                host: f.host,
-                port: f.port,
-                user: f.user,
-                database: f.database,
-                password: f.password,
-                sslmode: f.sslmode,
-                params: f.params,
-            };
-
-            w.set_test_busy(true);
-            w.set_test_ok(false);
-            w.set_test_result(SharedString::default());
-            w.set_form_error(SharedString::default());
-
-            let weak2 = weak.clone();
-            rt.spawn(async move {
-                let result = try_connect(engine, cfg).await;
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(w) = weak2.upgrade() {
-                        w.set_test_busy(false);
-                        match result {
-                            Ok(_) => {
-                                w.set_test_ok(true);
-                                w.set_test_result(SharedString::from("connection ok"));
-                            }
-                            Err(e) => {
-                                w.set_test_ok(false);
-                                // `RdbError`'s own `Display` already reads
-                                // "connection failed: …" — don't prefix it again.
-                                w.set_test_result(SharedString::from(format!("{e}")));
-                            }
-                        }
-                    }
-                });
-            });
-        });
-    }
-    // save (add or update)
-    {
-        let weak = window.as_weak();
-        let store = store.clone();
-        let editing_id = editing_id.clone();
-        let rebuild = {
-            let weak = window.as_weak();
-            let store = store.clone();
-            let collapsed = collapsed.clone();
-            let conn_filter = conn_filter.clone();
-            move || {
-                if let Some(w) = weak.upgrade() {
-                    w.set_connections(build_sidebar_model(
-                        &store.borrow(),
-                        &collapsed.borrow(),
-                        &conn_filter.borrow(),
-                    ));
-                }
-            }
-        };
-        window.on_form_save(move || {
-            let Some(w) = weak.upgrade() else {
-                return;
-            };
-            let name = w.get_f_name().to_string();
-            if name.trim().is_empty() {
-                w.set_form_error(SharedString::from("name is required"));
-                return;
-            }
-            let f = match read_conn_form(&w) {
-                Ok(f) => f,
-                Err(msg) => {
-                    w.set_form_error(SharedString::from(msg));
-                    return;
-                }
-            };
-            let FormConn {
-                engine,
-                host,
-                port,
-                user,
-                database,
-                password,
-                params,
-                sslmode,
-            } = f;
-            // An empty box means "keep the stored secret" — see
-            // `ConnStore::save_connection`.
-            let password = password.unwrap_or_default();
-            let color = Some(w.get_f_color().to_string());
-            let env_tag = rdb_connstore::EnvTag::parse(w.get_f_env_tag().as_ref());
-            let group = {
-                let g = w.get_f_group().to_string().trim().to_string();
-                if g.is_empty() {
-                    None
-                } else {
-                    Some(g)
-                }
-            };
-            // A freshly-typed group ("+ New group…") that only differs in case
-            // from an existing one joins it instead of spawning a duplicate.
-            let group = group.map(|g| {
-                existing_groups(&store.borrow())
-                    .into_iter()
-                    .find(|e| e.eq_ignore_ascii_case(&g))
-                    .unwrap_or(g)
-            });
-            let id = editing_id.borrow().clone();
-
-            let result: rdb_connstore::Result<()> = (|| {
-                let mut st = store.borrow_mut();
-                let mut sc = if id.is_empty() {
-                    rdb_connstore::SavedConnection::new(
-                        name.clone(),
-                        engine,
-                        host.clone(),
-                        port,
-                        user.clone(),
-                    )
-                } else {
-                    st.get(&id)
-                        .cloned()
-                        .ok_or_else(|| rdb_connstore::ConnStoreError::NotFound(id.clone()))?
-                };
-                sc.name = name;
-                sc.engine = engine;
-                sc.host = host;
-                sc.port = port;
-                sc.user = user;
-                sc.database = database;
-                sc.sslmode = sslmode;
-                sc.color = color;
-                sc.env_tag = env_tag;
-                sc.group = group;
-                sc.params = params;
-                st.save_connection(sc, Some(&password))
-            })();
-
-            match result {
-                Ok(()) => {
-                    w.set_form_open(false);
-                    rebuild();
-                }
-                Err(e) => {
-                    w.set_form_error(SharedString::from(format!("save failed: {e}")));
-                }
-            }
-        });
-    }
-    // delete
-    {
-        let weak = window.as_weak();
-        let store = store.clone();
-        let editing_id = editing_id.clone();
-        let collapsed = collapsed.clone();
-        let conn_filter = conn_filter.clone();
-        window.on_form_delete_confirmed(move || {
-            let Some(w) = weak.upgrade() else {
-                return;
-            };
-            let id = editing_id.borrow().clone();
-            if id.is_empty() {
-                w.set_form_open(false);
-                return;
-            }
-            {
-                let mut st = store.borrow_mut();
-                let _ = st.delete_password(&id);
-                let _ = st.remove(&id);
-            }
-            w.set_form_open(false);
-            w.set_selected_conn(-1);
-            w.set_schema_tree(ModelRc::from(Rc::new(VecModel::<TreeNode>::default())));
-            w.set_connections(build_sidebar_model(
-                &store.borrow(),
-                &collapsed.borrow(),
-                &conn_filter.borrow(),
-            ));
-        });
-    }
+    wire::conn_form::wire(&window, &state);
 
     // Whether the in-app swap-and-relaunch flow applies to this exact
     // install; false in mock mode so screenshot tests never depend on the
