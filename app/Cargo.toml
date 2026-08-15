@@ -14,7 +14,11 @@ path = "src/main.rs"
 mock = []
 
 [dependencies]
-slint = { version = "1.8", default-features = false, features = ["compat-1-2", "std", "backend-winit", "renderer-femtovg", "renderer-software", "raw-window-handle-06"] }
+# 1.17 is the floor, not a nicety: it is the first release with Slint's own
+# embedded MCP server, which is how the UI is driven under test. Enable it with
+# `--features slint/mcp` on the command line — Slint's own docs are explicit
+# that it must not go in this file's `[features]`.
+slint = { version = "1.17", default-features = false, features = ["compat-1-2", "std", "backend-winit", "renderer-femtovg", "renderer-software", "raw-window-handle-06"] }
 rdb-core = { path = "../crates/core" }
 rdb-connstore = { path = "../crates/connstore" }
 rdb-driver-postgres = { path = "../crates/driver-postgres" }
@@ -57,7 +61,7 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std"
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData"] }
 
 [build-dependencies]
-slint-build = "1.8"
+slint-build = "1.17"
 
 [dev-dependencies]
 tempfile = "3"
