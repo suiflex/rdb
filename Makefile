@@ -32,6 +32,16 @@ fe-run: ## Run the rdb UI binary
 fe-run-mock: ## Run the UI with the seeded design-mock data (RDB_MOCK=1)
 	RDB_MOCK=1 cargo run -p $(FE_PKG) --features mock
 
+# Slint's own embedded MCP server, for driving the UI from a test harness.
+# SLINT_EMIT_DEBUG_INFO=1 is what keeps element metadata in the compiled UI —
+# without it the introspection tools have nothing to find. `slint/mcp` has to be
+# passed here rather than declared in app/Cargo.toml; Slint's docs are explicit
+# about that. Override the port with `make fe-run-mcp SLINT_MCP_PORT=9001`.
+SLINT_MCP_PORT ?= 8080
+fe-run-mcp: ## Run the UI with Slint's MCP server on SLINT_MCP_PORT (default 8080)
+	SLINT_EMIT_DEBUG_INFO=1 SLINT_MCP_PORT=$(SLINT_MCP_PORT) \
+		cargo run -p $(FE_PKG) --features slint/mcp
+
 fe-build-run: ## Build the rdb UI then launch it (GUI shows after build)
 	cargo build -p $(FE_PKG)
 	./$(FE_BIN)
