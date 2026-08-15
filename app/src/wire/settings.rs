@@ -10,7 +10,7 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::*;
 
-pub(crate) fn wire(window: &MainWindow, state: &AppState, rebuild_query_tree: &Rc<dyn Fn(&str)>) {
+pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
     let AppState {
         store,
         settings,
@@ -26,7 +26,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, rebuild_query_tree: &R
         loaded_dbs,
         ..
     } = state.clone();
-    let rebuild_query_tree = rebuild_query_tree.clone();
+    let rebuild_query_tree = fns.rebuild_query_tree.clone();
 
     // ----- palette toggle -----
     {
