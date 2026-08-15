@@ -4579,6 +4579,11 @@ fn main() -> Result<(), slint::PlatformError> {
     let save_p1_tab: Rc<dyn Fn(&MainWindow)> = {
         let tabs = workspace_tabs.clone();
         let active_id = active_group1_tab_id.clone();
+        // The left group's active tab is needed only to hand it back to
+        // `save_query_tabs`, which rewrites the whole file: passing `None` here
+        // erased it, so any right-pane action left the workspace with no active
+        // tab on the left and the next launch restored it unfocused.
+        let left_active_id = active_tab_id.clone();
         let panes = panes.clone();
         Rc::new(move |w| {
             let Some(id) = active_id.lock().unwrap().clone() else {
@@ -4594,7 +4599,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 tab.results = panes[1].results.lock().unwrap().clone();
                 tab.active_result = *panes[1].active_result.lock().unwrap();
             }
-            save_query_tabs(w, &tabs, None);
+            let left_active = left_active_id.lock().unwrap().clone();
+            save_query_tabs(w, &tabs, left_active.as_deref());
         })
     };
 
@@ -4905,8 +4911,13 @@ fn main() -> Result<(), slint::PlatformError> {
     #[cfg(feature = "mock")]
     shot::install(&window);
     let run_result = window.run();
-    // On exit, capture the active tab's latest text (edits made without a tab
-    // switch) and persist, so a plain type-then-quit is not lost.
+    // On exit, capture each pane's active tab (edits made without a tab switch)
+    // and persist, so a plain type-then-quit is not lost. Both panes: quitting
+    // used to save only the left one, so anything typed into the right pane
+    // since its last tab switch was gone on the next launch. The left one goes
+    // last because each call rewrites the whole file and only this one carries
+    // the left group's active tab id.
+    save_p1_tab(&window);
     save_active_tab(&window);
     run_result
 }
