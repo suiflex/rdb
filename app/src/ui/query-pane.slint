@@ -936,6 +936,19 @@ export component QueryPane inherits Rectangle {
                                             font-family: Tokens.mono;
                                             font-size: Tokens.font-sm;
                                             edited => { root.stage-cell(root.selected-row, c, self.text); }
+                                            // Enter must not land a newline in the value. `edited`
+                                            // has already staged every keystroke and the buffer is
+                                            // committed with the Save shortcut, so plain Enter has
+                                            // nothing left to do here — without this it silently
+                                            // appended a line to the cell on every press. Shift+Enter
+                                            // still inserts one, for text/JSON columns that really
+                                            // do hold multiple lines.
+                                            key-pressed(e) => {
+                                                if (e.text == Key.Return && !e.modifiers.shift) {
+                                                    return accept;
+                                                }
+                                                return reject;
+                                            }
                                         }
                                     }
                                 }
