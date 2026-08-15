@@ -32,7 +32,11 @@ impl InstallMethod {
             return InstallMethod::Other;
         };
         let s = p.to_string_lossy().to_lowercase();
-        if s.contains("/cellar/") || s.contains("/homebrew/") {
+        // `/caskroom/` matters on its own: an Intel Mac stages casks under
+        // `/usr/local/Caskroom`, which matches neither of the other two
+        // needles, so the cask-installed app would otherwise look like a
+        // plain `.app` we are free to self-update out from under Homebrew.
+        if s.contains("/cellar/") || s.contains("/caskroom/") || s.contains("/homebrew/") {
             InstallMethod::Homebrew
         } else if s.contains("/scoop/apps/") || s.contains("\\scoop\\apps\\") {
             InstallMethod::Scoop
@@ -44,6 +48,8 @@ impl InstallMethod {
     /// One-line upgrade instruction to show in the banner.
     pub fn upgrade_hint(self) -> &'static str {
         match self {
+            // macOS is served by the cask (RDB.app), Linux by the formula.
+            InstallMethod::Homebrew if cfg!(target_os = "macos") => "Run: brew upgrade --cask rdb",
             InstallMethod::Homebrew => "Run: brew upgrade rdb",
             InstallMethod::Scoop => "Run: scoop update rdb",
             InstallMethod::Other => "Open the download page",
@@ -126,6 +132,13 @@ mod tests {
         let brew = PathBuf::from("/opt/homebrew/Cellar/rdb/1.0.0/bin/rdb");
         assert_eq!(
             InstallMethod::from_exe_path(Some(&brew)),
+            InstallMethod::Homebrew
+        );
+        // Intel-Mac cask staging dir: matches neither `/cellar/` nor
+        // `/homebrew/`, so it used to fall through to `Other`.
+        let cask = PathBuf::from("/usr/local/Caskroom/rdb/1.0.0/RDB.app/Contents/MacOS/rdb");
+        assert_eq!(
+            InstallMethod::from_exe_path(Some(&cask)),
             InstallMethod::Homebrew
         );
         let scoop = PathBuf::from(r"C:\Users\me\scoop\apps\rdb\current\rdb.exe");
