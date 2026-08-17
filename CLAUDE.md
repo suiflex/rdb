@@ -33,16 +33,15 @@ cargo build --release -p rdb   # release binary
 
 One GitHub Actions workflow per component in `.github/workflows/` — `rdb-app`
 plus one per crate: `rdb-core`, `rdb-connstore`, `rdb-driver-postgres`,
-`rdb-driver-mysql`, `rdb-driver-redis`, `rdb-driver-mongo`, `rdb-driver-mssql`,
+`rdb-driver-mysql`, `rdb-driver-redis`, `rdb-driver-mongo`,
+`rdb-driver-sqlite`, `rdb-driver-cassandra`, `rdb-driver-mssql`,
 `rdb-driver-clickhouse`.
 Each has a `paths:` filter, so editing one component only runs that
 component's CI (lean).
 
-- **Known gap**: `rdb-driver-sqlite` and `rdb-driver-cassandra` have no
-  dedicated workflow yet, and the root `Makefile`'s `BE_PKGS` (used by
-  `be-build`/`be-test`/`be-check`) doesn't include them either — use
-  `cargo build/test -p rdb-driver-sqlite` (or `-cassandra`) directly until
-  that's wired up.
+- All ten backend crates are in the root `Makefile`'s `BE_PKGS` (used by
+  `be-build`/`be-test`/`be-check`), so the make targets and CI agree on scope.
+  Adding a crate means adding it to both.
 - Dependents also watch `crates/core/**`, so a `core` change fans out to retest
   core + all dependents (connstore, drivers, app). Other crates stay independent.
 - Backend jobs run `cargo {fmt,clippy} -p <pkg>` and `cargo test -p <pkg> --lib`
