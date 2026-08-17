@@ -98,20 +98,16 @@ Run `make all` before opening a pull request. Each driver crate also carries
 `tests/integration.rs`, which needs Docker and runs locally via `make test-it`;
 those are intentionally kept out of CI.
 
-### Two crates CI does not cover yet
+### What CI covers
 
-`rdb-driver-sqlite` and `rdb-driver-cassandra` have **no dedicated CI workflow**
-and are **not** in the `Makefile`'s `BE_PKGS` list. That means neither
-`make be-test` nor CI touches them — a green run tells you nothing about those
-two crates.
+Every backend crate has its own workflow in `.github/workflows/`, and all ten
+are in the `Makefile`'s `BE_PKGS`, so `make be-test` and CI agree on scope.
+Each workflow also watches `crates/core/**`, so a change to `core` fans out and
+retests its dependents.
 
-If your change touches either, test them explicitly and say so in your PR's
-test plan:
-
-```bash
-cargo test -p rdb-driver-sqlite
-cargo test -p rdb-driver-cassandra
-```
+Backend jobs run `cargo fmt -p <pkg> --check`, `cargo clippy -p <pkg>
+--all-targets -- -D warnings`, and `cargo test -p <pkg> --lib`. The `--lib`
+matters: the Docker-backed integration tests are not part of that run.
 
 ## Running and testing the app
 
@@ -249,10 +245,8 @@ Example release notes from commit headers:
 - Fill the test plan honestly: tick what you actually ran, leave the rest
   unchecked. An unchecked box is information; a wrongly ticked one wastes a
   review cycle.
-- CI runs a scoped workflow per component, with two exceptions noted in
-  [Two crates CI does not cover yet](#two-crates-ci-does-not-cover-yet). A
-  `core` change also retests its dependents. Make sure `make all` passes
-  locally first.
+- CI runs a scoped workflow per component — see [What CI covers](#what-ci-covers).
+  Make sure `make all` passes locally first.
 
 ### AI-assisted pull requests
 
@@ -260,9 +254,9 @@ AI-assisted PRs are welcome — plenty of good contributions start that way. We
 don't ask you to label them. We do ask for two things:
 
 - **Evidence.** Say which commands you ran and what they produced. "`make all`
-  passes" plus the driver-specific tests for anything CI skips is enough. The
-  code and CI get reviewed either way; the PR body is where you make that easy
-  to follow.
+  passes", plus `make test-it` if you touched a driver's wire protocol, is
+  enough. The code and CI get reviewed either way; the PR body is where you
+  make that easy to follow.
 - **Understand what you're submitting.** If a reviewer asks why a line is
   there, you should be able to answer. PRs whose author can't are the ones that
   stall.
