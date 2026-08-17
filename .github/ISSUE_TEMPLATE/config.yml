@@ -1,1 +1,8 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Question or setup help
+    url: https://github.com/suiflex/rdb/discussions
+    about: Ask in Discussions — installing RDB, connecting to an engine, or checking whether something is a bug before filing one.
+  - name: Report a security vulnerability
+    url: https://github.com/suiflex/rdb/security/policy
+    about: Do not open a public issue for security problems. Follow the security policy instead.
