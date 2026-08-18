@@ -139,4 +139,3 @@ mod tests {
         assert_eq!(ssh.key_path.as_deref(), Some("~/.ssh/id_ed25519"));
     }
 }
-

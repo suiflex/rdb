@@ -457,9 +457,17 @@ mod tests {
         conn.ssh_auth_mode = rdb_core::conn::SshAuthMode::Password;
         let id = conn.id.clone();
 
-        store.save_connection_with_ssh(conn, Some("db-secret"), Some("ssh-secret")).unwrap();
-        assert_eq!(store.get_password(&id).unwrap().as_deref(), Some("db-secret"));
-        assert_eq!(store.get_ssh_secret(&id).unwrap().as_deref(), Some("ssh-secret"));
+        store
+            .save_connection_with_ssh(conn, Some("db-secret"), Some("ssh-secret"))
+            .unwrap();
+        assert_eq!(
+            store.get_password(&id).unwrap().as_deref(),
+            Some("db-secret")
+        );
+        assert_eq!(
+            store.get_ssh_secret(&id).unwrap().as_deref(),
+            Some("ssh-secret")
+        );
 
         let cfg = store.conn_config_for(&id).unwrap();
         assert_eq!(cfg.password.as_deref(), Some("db-secret"));

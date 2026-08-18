@@ -1,10 +1,10 @@
-use std::path::PathBuf;
-use std::sync::Arc;
 use rdb_core::conn::{SshAuthMode, SshTunnelConfig};
 use rdb_core::error::{RdbError, Result};
 use russh::client::Handle;
 use russh_keys::agent::client::AgentClient;
 use russh_keys::decode_secret_key;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::forwarder::ClientHandler;
 
@@ -47,8 +47,9 @@ pub async fn authenticate(
             let key_content = std::fs::read_to_string(&key_path)
                 .map_err(|e| RdbError::Connection(format!("Failed to read SSH key file: {e}")))?;
             let passphrase = cfg.passphrase.as_deref();
-            let key_pair = decode_secret_key(&key_content, passphrase)
-                .map_err(|e| RdbError::Connection(format!("Failed to parse SSH private key: {e}")))?;
+            let key_pair = decode_secret_key(&key_content, passphrase).map_err(|e| {
+                RdbError::Connection(format!("Failed to parse SSH private key: {e}"))
+            })?;
 
             let auth_res = session
                 .authenticate_publickey(&cfg.user, Arc::new(key_pair))
@@ -70,10 +71,9 @@ pub async fn authenticate(
                     )));
                 }
             };
-            let identities = agent
-                .request_identities()
-                .await
-                .map_err(|e| RdbError::Connection(format!("SSH agent request_identities error: {e}")))?;
+            let identities = agent.request_identities().await.map_err(|e| {
+                RdbError::Connection(format!("SSH agent request_identities error: {e}"))
+            })?;
 
             if identities.is_empty() {
                 return Err(RdbError::Connection(
@@ -83,9 +83,8 @@ pub async fn authenticate(
 
             let mut authenticated = false;
             for pubkey in identities {
-                let (agent_back, auth_res) = session
-                    .authenticate_future(&cfg.user, pubkey, agent)
-                    .await;
+                let (agent_back, auth_res) =
+                    session.authenticate_future(&cfg.user, pubkey, agent).await;
                 agent = agent_back;
                 if let Ok(true) = auth_res {
                     authenticated = true;

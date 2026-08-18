@@ -1,8 +1,8 @@
+use async_trait::async_trait;
+use russh::client::{self, Handle, Handler};
+use russh::keys::key::PublicKey;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use async_trait::async_trait;
-use russh::client::{self, Handler, Handle};
-use russh::keys::key::PublicKey;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -22,7 +22,11 @@ pub struct ClientHandler {
 
 impl ClientHandler {
     pub fn new(host: String, port: u16, key_error: Arc<std::sync::Mutex<Option<String>>>) -> Self {
-        Self { host, port, key_error }
+        Self {
+            host,
+            port,
+            key_error,
+        }
     }
 }
 
@@ -111,9 +115,9 @@ impl SshTunnel {
         let session = Self::connect_and_auth(cfg).await?;
 
         // Bind ephemeral local port on loopback
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .map_err(|e| RdbError::Connection(format!("Failed to bind local loopback listener: {e}")))?;
+        let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| {
+            RdbError::Connection(format!("Failed to bind local loopback listener: {e}"))
+        })?;
 
         let local_addr: SocketAddr = listener
             .local_addr()
