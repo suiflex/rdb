@@ -8,11 +8,43 @@
 //!
 //! Split out of `main`; the handler bodies are unchanged.
 
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::*;
+
+/// `folded_heads` stores fold state as raw line indices, but edits that add
+/// or remove lines above a fold (Enter, Backspace/Delete merges, multi-line
+/// paste) don't otherwise touch it — so a stale index stops matching the
+/// head `fold_regions` recomputes on the next repaint, and the block reads
+/// as open again. Re-anchor every head at or past the edit point by the
+/// line-count delta so a fold stays glued to its statement.
+fn shift_folded_heads(
+    folded_heads: &RefCell<HashSet<usize>>,
+    old_line: usize,
+    old_len: usize,
+    new_line: usize,
+    new_len: usize,
+) {
+    if new_len == old_len {
+        return;
+    }
+    let anchor = old_line.min(new_line) + 1;
+    let diff = new_len as isize - old_len as isize;
+    let mut folded = folded_heads.borrow_mut();
+    let shifted: Vec<usize> = folded.drain().collect();
+    for h in shifted {
+        let h = if h >= anchor {
+            (h as isize + diff).max(anchor as isize - 1) as usize
+        } else {
+            h
+        };
+        folded.insert(h);
+    }
+}
 
 pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn) {
     let AppState {
@@ -447,7 +479,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                     // window shortcut scope (⌘S commit, ⌘R refresh, …).
                     let handled = {
                         let mut ed = ed_state.borrow_mut();
-                        match text.as_str() {
+                        let (old_line, old_len) = (ed.line, ed.lines.len());
+                        let handled = match text.as_str() {
                             "a" => {
                                 ed.select_all();
                                 true
@@ -490,7 +523,20 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                                 true
                             }
                             _ => false,
+                        };
+                        // Only cut/paste splice lines in a way `fold_regions`
+                        // will re-derive predictably; undo/redo restore an
+                        // arbitrary prior buffer and are left alone.
+                        if matches!(text.as_str(), "x" | "v") {
+                            shift_folded_heads(
+                                &panes[pane].folded_heads,
+                                old_line,
+                                old_len,
+                                ed.line,
+                                ed.lines.len(),
+                            );
                         }
+                        handled
                     };
                     if handled {
                         sync_editor(pane);
@@ -499,6 +545,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                 }
                 let handled = {
                     let mut ed = ed_state.borrow_mut();
+                    let (old_line, old_len) = (ed.line, ed.lines.len());
                     // movement keys: shift extends the selection, plain drops it
                     if matches!(
                         text.as_str(),
@@ -507,7 +554,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                         ed.set_selecting(shift);
                     }
                     let mut it = text.chars();
-                    match (it.next(), it.next()) {
+                    let handled = match (it.next(), it.next()) {
                         (Some(c), None) => match c {
                             '\u{8}' => {
                                 // Delete both sides of an empty pair in one
@@ -605,7 +652,15 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                             true
                         }
                         _ => false,
-                    }
+                    };
+                    shift_folded_heads(
+                        &panes[pane].folded_heads,
+                        old_line,
+                        old_len,
+                        ed.line,
+                        ed.lines.len(),
+                    );
+                    handled
                 };
                 if handled {
                     sync_editor(pane);
