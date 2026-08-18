@@ -395,13 +395,17 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     };
                     Ok::<_, rdb_core::error::RdbError>((driver, schema, scoped_db))
                 };
-                let result =
-                    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), attempt).await {
-                        Ok(r) => r,
-                        Err(_) => Err(rdb_core::error::RdbError::Connection(
-                            "connection timed out".into(),
-                        )),
-                    };
+                let result = match tokio::time::timeout(
+                    std::time::Duration::from_secs(timeout_secs),
+                    attempt,
+                )
+                .await
+                {
+                    Ok(r) => r,
+                    Err(_) => Err(rdb_core::error::RdbError::Connection(
+                        "connection timed out".into(),
+                    )),
+                };
 
                 match result {
                     Ok((driver, schema, scoped_db)) => {

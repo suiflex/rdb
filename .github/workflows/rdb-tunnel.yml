@@ -1,0 +1,37 @@
+name: rdb-tunnel
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - crates/tunnel/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/rdb-tunnel.yml
+  pull_request:
+    paths:
+      - crates/tunnel/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/rdb-tunnel.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rdb-tunnel
+      - run: cargo fmt -p rdb-tunnel --check
+      - run: cargo clippy -p rdb-tunnel --all-targets -- -D warnings
+      - run: cargo test -p rdb-tunnel --lib

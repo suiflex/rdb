@@ -1,16 +1,12 @@
-use std::path::PathBuf;
-use russh::keys::key::PublicKey;
 use rdb_core::error::{RdbError, Result};
+use russh::keys::key::PublicKey;
+use std::path::PathBuf;
 
 pub fn default_known_hosts_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".ssh").join("known_hosts"))
 }
 
-pub fn check_known_host(
-    host: &str,
-    port: u16,
-    pubkey: &PublicKey,
-) -> Result<bool> {
+pub fn check_known_host(host: &str, port: u16, pubkey: &PublicKey) -> Result<bool> {
     let path = match default_known_hosts_path() {
         Some(p) => p,
         None => return Ok(true), // No home dir, accept key
@@ -40,7 +36,12 @@ pub fn check_known_hosts_at_path(
                 let _ = std::fs::create_dir_all(parent);
             }
             let _ = russh_keys::learn_known_hosts_path(host, port, pubkey, path);
-            log::info!("Learned new SSH host key for {}:{} in {:?}", host, port, path);
+            log::info!(
+                "Learned new SSH host key for {}:{} in {:?}",
+                host,
+                port,
+                path
+            );
             Ok(true)
         }
         Err(russh_keys::Error::KeyChanged { line }) => {
@@ -53,7 +54,12 @@ pub fn check_known_hosts_at_path(
         Err(e) => {
             // Other error reading known_hosts (e.g. unparseable line or hashed format):
             // Attempt learning and proceed with TOFU.
-            log::warn!("Could not check known_hosts for {}:{}: {}. Proceeding with TOFU.", host, port, e);
+            log::warn!(
+                "Could not check known_hosts for {}:{}: {}. Proceeding with TOFU.",
+                host,
+                port,
+                e
+            );
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }

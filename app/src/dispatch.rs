@@ -76,7 +76,9 @@ impl AnyDriver {
         };
 
         let inner = match engine {
-            Engine::Postgres => AnyDriverInner::Postgres(PostgresDriver::connect(&target_cfg).await?),
+            Engine::Postgres => {
+                AnyDriverInner::Postgres(PostgresDriver::connect(&target_cfg).await?)
+            }
             Engine::MySql => AnyDriverInner::Mysql(MysqlDriver::connect(&target_cfg).await?),
             Engine::Redis => AnyDriverInner::Redis(RedisDriver::connect(&target_cfg).await?),
             Engine::Mongo => AnyDriverInner::Mongo(MongoDriver::connect(&target_cfg).await?),
@@ -84,11 +86,18 @@ impl AnyDriver {
             Engine::Cassandra => {
                 AnyDriverInner::Cassandra(Box::new(CassandraDriver::connect(&target_cfg).await?))
             }
-            Engine::Mssql => AnyDriverInner::Mssql(Box::new(MssqlDriver::connect(&target_cfg).await?)),
-            Engine::Clickhouse => AnyDriverInner::Clickhouse(ClickhouseDriver::connect(&target_cfg).await?),
+            Engine::Mssql => {
+                AnyDriverInner::Mssql(Box::new(MssqlDriver::connect(&target_cfg).await?))
+            }
+            Engine::Clickhouse => {
+                AnyDriverInner::Clickhouse(ClickhouseDriver::connect(&target_cfg).await?)
+            }
         };
 
-        Ok(AnyDriver { inner, _tunnel: tunnel })
+        Ok(AnyDriver {
+            inner,
+            _tunnel: tunnel,
+        })
     }
 
     /// Push the user's NoSQL collection cap onto a live connection. Only NoSQL
@@ -204,7 +213,9 @@ impl AnyDriver {
             AnyDriverInner::Sqlite(d) => d.sample_fields(database, container, sample_size).await,
             AnyDriverInner::Cassandra(d) => d.sample_fields(database, container, sample_size).await,
             AnyDriverInner::Mssql(d) => d.sample_fields(database, container, sample_size).await,
-            AnyDriverInner::Clickhouse(d) => d.sample_fields(database, container, sample_size).await,
+            AnyDriverInner::Clickhouse(d) => {
+                d.sample_fields(database, container, sample_size).await
+            }
             #[cfg(feature = "mock")]
             AnyDriverInner::Mock(d) => d.sample_fields(database, container, sample_size).await,
         }
