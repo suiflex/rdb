@@ -33,6 +33,7 @@ async fn connect_query_schema_commit_against_real_mssql() {
         password: Some(MssqlServer::DEFAULT_SA_PASSWORD.into()),
         sslmode: SslMode::Disable,
         params: None,
+        ssh: None,
     };
 
     let driver = MssqlDriver::connect(&cfg).await.unwrap();

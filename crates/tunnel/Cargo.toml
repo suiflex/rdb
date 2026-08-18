@@ -1,0 +1,14 @@
+[package]
+name = "rdb-tunnel"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+
+[dependencies]
+rdb-core = { path = "../core" }
+russh = "0.45"
+russh-keys = "0.45"
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+dirs = "5"
+log = "0.4"

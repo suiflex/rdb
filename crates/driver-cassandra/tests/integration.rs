@@ -20,6 +20,7 @@ fn cfg() -> ConnConfig {
         password: None,
         sslmode: SslMode::Disable,
         params: None,
+        ssh: None,
     }
 }
 

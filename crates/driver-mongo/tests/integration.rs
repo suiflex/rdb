@@ -25,6 +25,7 @@ async fn connect_insert_find_aggregate_schema_against_real_mongo() {
         password: None,
         sslmode: SslMode::Disable,
         params: None,
+        ssh: None,
     };
 
     let driver = MongoDriver::connect(&cfg).await.unwrap();

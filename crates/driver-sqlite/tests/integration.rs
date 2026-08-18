@@ -17,6 +17,7 @@ fn cfg(path: &str) -> ConnConfig {
         password: None,
         sslmode: SslMode::Disable,
         params: None,
+        ssh: None,
     }
 }
 

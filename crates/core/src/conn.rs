@@ -9,6 +9,54 @@ pub enum SslMode {
     Require,
 }
 
+/// Authentication mode for SSH tunnel bastion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SshAuthMode {
+    #[default]
+    Agent,
+    KeyFile,
+    Password,
+}
+
+impl SshAuthMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SshAuthMode::Agent => "Agent",
+            SshAuthMode::KeyFile => "KeyFile",
+            SshAuthMode::Password => "Password",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "KeyFile" | "key_file" | "key" => SshAuthMode::KeyFile,
+            "Password" | "password" => SshAuthMode::Password,
+            _ => SshAuthMode::Agent,
+        }
+    }
+}
+
+/// SSH tunnel configuration for routing a connection through a jump host / bastion.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SshTunnelConfig {
+    pub host: String,
+    #[serde(default = "default_ssh_port")]
+    pub port: u16,
+    pub user: String,
+    #[serde(default)]
+    pub auth_mode: SshAuthMode,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub key_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub password: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub passphrase: Option<String>,
+}
+
+fn default_ssh_port() -> u16 {
+    22
+}
+
 /// Everything needed to open a connection. `password` is injected at connect
 /// time from the keychain — it is never persisted as part of saved config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +75,9 @@ pub struct ConnConfig {
     /// drivers ignore it.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub params: Option<String>,
+    /// Optional SSH tunnel configuration to route through an SSH bastion.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub ssh: Option<SshTunnelConfig>,
 }
 
 #[cfg(test)]
@@ -48,11 +99,44 @@ mod tests {
             password: None,
             sslmode: SslMode::Require,
             params: None,
+            ssh: None,
         };
         let json = serde_json::to_string(&cfg).unwrap();
         assert!(json.contains("\"host\":\"localhost\""));
         let back: ConnConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(back.port, 5432);
         assert_eq!(back.sslmode, SslMode::Require);
+        assert!(back.ssh.is_none());
+    }
+
+    #[test]
+    fn conn_config_roundtrips_with_ssh() {
+        let cfg = ConnConfig {
+            host: "db.internal".into(),
+            port: 5432,
+            user: "postgres".into(),
+            database: Some("app".into()),
+            password: None,
+            sslmode: SslMode::Require,
+            params: None,
+            ssh: Some(SshTunnelConfig {
+                host: "bastion.example.com".into(),
+                port: 22,
+                user: "jumpuser".into(),
+                auth_mode: SshAuthMode::KeyFile,
+                key_path: Some("~/.ssh/id_ed25519".into()),
+                password: None,
+                passphrase: None,
+            }),
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: ConnConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.host, "db.internal");
+        let ssh = back.ssh.unwrap();
+        assert_eq!(ssh.host, "bastion.example.com");
+        assert_eq!(ssh.port, 22);
+        assert_eq!(ssh.auth_mode, SshAuthMode::KeyFile);
+        assert_eq!(ssh.key_path.as_deref(), Some("~/.ssh/id_ed25519"));
     }
 }
+

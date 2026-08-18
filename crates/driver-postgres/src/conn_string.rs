@@ -46,6 +46,7 @@ mod tests {
             password: Some("secret".into()),
             sslmode: SslMode::Prefer,
             params: None,
+            ssh: None,
         }
     }
 

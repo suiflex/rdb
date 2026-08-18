@@ -30,11 +30,13 @@ async fn start_pg() -> (ContainerAsync<Postgres>, ConnConfig) {
         password: Some("postgres".into()),
         sslmode: SslMode::Disable,
         params: None,
+        ssh: None,
     };
     (container, cfg)
 }
 
 #[tokio::test]
+#[ignore = "requires docker"]
 async fn connect_ping_close() {
     let (_container, cfg) = start_pg().await;
     let driver = PostgresDriver::connect(&cfg).await.expect("connect");
@@ -43,6 +45,7 @@ async fn connect_ping_close() {
 }
 
 #[tokio::test]
+#[ignore = "requires docker"]
 async fn select_returns_tabular_rows() {
     use rdb_core::query::Query;
     use rdb_core::result::{Cell, ResultSet};
@@ -88,6 +91,7 @@ async fn select_returns_tabular_rows() {
 }
 
 #[tokio::test]
+#[ignore = "requires docker"]
 async fn non_sql_queries_are_unsupported() {
     use rdb_core::error::RdbError;
     use rdb_core::query::{MongoKind, MongoOp, Query};
@@ -116,6 +120,7 @@ async fn non_sql_queries_are_unsupported() {
 }
 
 #[tokio::test]
+#[ignore = "requires docker"]
 async fn schema_lists_created_table_and_fields() {
     use rdb_core::query::Query;
     use rdb_core::schema::ContainerKind;

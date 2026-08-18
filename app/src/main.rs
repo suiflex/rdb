@@ -423,6 +423,7 @@ fn emit_group_subtree(
         group: path.into(),
         subline: SharedString::default(),
         local: false,
+        ssh_enabled: false,
         count: subtree_conn_count(path, child_folders, direct_conns),
         favorite: false,
         env_tag_label: SharedString::default(),
@@ -473,6 +474,7 @@ fn emit_group_subtree(
                 group: path.into(),
                 subline: subline.into(),
                 local: s.local,
+                ssh_enabled: s.ssh_enabled,
                 count: 0,
                 favorite: s.favorite,
                 env_tag_label: theme::env_tag_label(s.env_tag).into(),
@@ -577,6 +579,7 @@ fn build_conn_items(
                         group: UNGROUPED.into(),
                         subline: subline.into(),
                         local: s.local,
+                        ssh_enabled: s.ssh_enabled,
                         count: 0,
                         favorite: s.favorite,
                         env_tag_label: theme::env_tag_label(s.env_tag).into(),
@@ -791,6 +794,7 @@ mod row_group_at_y_tests {
             group: group.into(),
             subline: SharedString::default(),
             local: false,
+            ssh_enabled: false,
             count: 1,
             favorite: false,
             env_tag_label: SharedString::default(),
@@ -1733,12 +1737,13 @@ async fn try_connect(
     cfg: rdb_core::conn::ConnConfig,
 ) -> Result<u64, rdb_core::error::RdbError> {
     let t0 = std::time::Instant::now();
+    let timeout_secs = if cfg.ssh.is_some() { 25 } else { 10 };
     let attempt = async {
         let driver = AnyDriver::connect(engine, &cfg).await?;
         driver.ping().await?;
         Ok::<_, rdb_core::error::RdbError>(())
     };
-    match tokio::time::timeout(std::time::Duration::from_secs(8), attempt).await {
+    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), attempt).await {
         Ok(Ok(())) => Ok(t0.elapsed().as_millis().max(1) as u64),
         Ok(Err(e)) => Err(e),
         Err(_) => Err(rdb_core::error::RdbError::Connection(
@@ -3935,6 +3940,15 @@ fn open_add_form(w: &MainWindow, store: &rdb_connstore::ConnStore, parent: Optio
     w.set_f_params(SharedString::default());
     w.set_f_color(SharedString::from("#2c5fd8"));
     w.set_f_env_tag(SharedString::from("None"));
+    w.set_f_ssh_enabled(false);
+    w.set_f_ssh_host(SharedString::default());
+    w.set_f_ssh_port(SharedString::from("22"));
+    w.set_f_ssh_user(SharedString::default());
+    w.set_f_ssh_auth_mode(SharedString::from("Agent"));
+    w.set_f_ssh_key_path(SharedString::default());
+    w.set_f_ssh_password(SharedString::default());
+    w.set_f_ssh_passphrase(SharedString::default());
+    w.set_f_has_ssh_secret(false);
     w.set_f_new_group_text(SharedString::default());
     w.set_f_new_subgroup_text(SharedString::default());
     w.set_group_options(ModelRc::from(Rc::new(VecModel::from(
@@ -3997,6 +4011,14 @@ struct FormConn {
     password: Option<String>,
     params: Option<String>,
     sslmode: rdb_core::conn::SslMode,
+    ssh_enabled: bool,
+    ssh_host: Option<String>,
+    ssh_port: Option<u16>,
+    ssh_user: Option<String>,
+    ssh_auth_mode: rdb_core::conn::SshAuthMode,
+    ssh_key_path: Option<String>,
+    ssh_password: Option<String>,
+    ssh_passphrase: Option<String>,
 }
 
 /// Read the connection form into a validated `FormConn`, or the message to
@@ -4032,6 +4054,25 @@ fn read_conn_form(w: &MainWindow) -> Result<FormConn, &'static str> {
         _ => rdb_core::conn::SslMode::Disable,
     };
     let non_empty = |s: String| if s.trim().is_empty() { None } else { Some(s) };
+
+    let ssh_enabled = w.get_f_ssh_enabled();
+    let ssh_host = non_empty(w.get_f_ssh_host().to_string());
+    let ssh_port: Option<u16> = w.get_f_ssh_port().to_string().parse().ok();
+    let ssh_user = non_empty(w.get_f_ssh_user().to_string());
+    let ssh_auth_mode = rdb_core::conn::SshAuthMode::parse(w.get_f_ssh_auth_mode().as_ref());
+    let ssh_key_path = non_empty(w.get_f_ssh_key_path().to_string());
+    let ssh_password = non_empty(w.get_f_ssh_password().to_string());
+    let ssh_passphrase = non_empty(w.get_f_ssh_passphrase().to_string());
+
+    if ssh_enabled && engine != rdb_connstore::Engine::Sqlite {
+        if ssh_host.is_none() {
+            return Err("SSH host is required when SSH tunnel is enabled");
+        }
+        if ssh_user.is_none() {
+            return Err("SSH user is required when SSH tunnel is enabled");
+        }
+    }
+
     Ok(FormConn {
         engine,
         host,
@@ -4055,6 +4096,14 @@ fn read_conn_form(w: &MainWindow) -> Result<FormConn, &'static str> {
         },
         params: non_empty(w.get_f_params().to_string()),
         sslmode,
+        ssh_enabled,
+        ssh_host,
+        ssh_port,
+        ssh_user,
+        ssh_auth_mode,
+        ssh_key_path,
+        ssh_password,
+        ssh_passphrase,
     })
 }
 

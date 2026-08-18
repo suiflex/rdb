@@ -1,5 +1,5 @@
 import { Tokens } from "tokens.slint";
-import { PrimaryButton, SecondaryButton, DangerButton, FormField, SelectBox } from "components.slint";
+import { PrimaryButton, SecondaryButton, DangerButton, FormField, SelectBox, Toggle } from "components.slint";
 
 // 8 preset accent swatches — colors for UI rendering, hex strings for the Rust-side color field.
 // First entry is the app accent (Tokens.accent) so the default matches the design system.
@@ -57,6 +57,15 @@ export component ConnForm inherits Rectangle {
     in-out property <string> f-params;     // Mongo options query string or full URI
     in-out property <string> f-color;      // selected hex
     in-out property <string> f-env-tag;    // "None"|"Local"|"Dev"|"Staging"|"Testing"|"Production"
+    in-out property <bool> f-ssh-enabled;
+    in-out property <string> f-ssh-host;
+    in-out property <string> f-ssh-port;
+    in-out property <string> f-ssh-user;
+    in-out property <string> f-ssh-auth-mode;
+    in-out property <string> f-ssh-key-path;
+    in-out property <string> f-ssh-password;
+    in-out property <string> f-ssh-passphrase;
+    in-out property <bool> f-has-ssh-secret;
     // Derived, not written to directly (see below) — the two dropdowns and
     // their free-text fallbacks are the actual source of truth.
     out property <string> f-group: root.f-group-display == "None" ? ""
@@ -88,6 +97,7 @@ export component ConnForm inherits Rectangle {
 
     callback engine-changed(string);
     callback import-url();
+    callback browse-ssh-key();
     callback test-conn();
     callback save();
     callback delete-requested();
@@ -257,6 +267,95 @@ export component ConnForm inherits Rectangle {
                     horizontal-stretch: 1;
                     text <=> root.f-params;
                     placeholder: "replicaSet=rs0&authSource=admin";
+                }
+            }
+
+            if root.f-engine != "SQLite": Rectangle { height: Tokens.sp3; }
+            if root.f-engine != "SQLite": HorizontalLayout {
+                height: 24px;
+                alignment: space-between;
+                SectionLabel { text: "SSH TUNNEL"; vertical-alignment: center; }
+                Toggle {
+                    checked: root.f-ssh-enabled;
+                    toggled => { root.f-ssh-enabled = !root.f-ssh-enabled; }
+                }
+            }
+            if root.f-engine != "SQLite": Rectangle { height: 1px; background: Tokens.border; }
+            if root.f-engine != "SQLite": Rectangle { height: Tokens.sp1; }
+
+            if root.f-engine != "SQLite" && root.f-ssh-enabled: HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: "SSH Host"; }
+                FormField { horizontal-stretch: 1; text <=> root.f-ssh-host; placeholder: "bastion.example.com"; }
+                Text {
+                    width: 32px;
+                    text: "Port";
+                    color: Tokens.text-dim;
+                    font-size: Tokens.font-sm;
+                    vertical-alignment: center;
+                }
+                FormField { width: 94px; text <=> root.f-ssh-port; }
+            }
+
+            if root.f-engine != "SQLite" && root.f-ssh-enabled: HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: "SSH User"; }
+                FormField { horizontal-stretch: 1; text <=> root.f-ssh-user; placeholder: "ubuntu"; }
+                Text {
+                    width: 44px;
+                    text: "Auth";
+                    color: Tokens.text-dim;
+                    font-size: Tokens.font-sm;
+                    vertical-alignment: center;
+                }
+                SelectBox {
+                    width: 140px;
+                    model: ["Agent", "KeyFile", "Password"];
+                    current-value <=> root.f-ssh-auth-mode;
+                }
+            }
+
+            if root.f-engine != "SQLite" && root.f-ssh-enabled && root.f-ssh-auth-mode == "KeyFile": HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: "Key File"; }
+                FormField {
+                    horizontal-stretch: 1;
+                    min-width: 0px;
+                    text <=> root.f-ssh-key-path;
+                    placeholder: "~/.ssh/id_ed25519";
+                }
+                SecondaryButton {
+                    text: "Browse";
+                    height: 30px;
+                    tooltip: "Choose private key file";
+                    clicked => { root.browse-ssh-key(); }
+                }
+            }
+
+            if root.f-engine != "SQLite" && root.f-ssh-enabled && root.f-ssh-auth-mode == "KeyFile": HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: "Passphrase"; }
+                FormField {
+                    horizontal-stretch: 1;
+                    text <=> root.f-ssh-passphrase;
+                    input-type: InputType.password;
+                    placeholder: root.f-has-ssh-secret ? "•••••• stored — leave blank to keep" : "Optional";
+                }
+            }
+
+            if root.f-engine != "SQLite" && root.f-ssh-enabled && root.f-ssh-auth-mode == "Password": HorizontalLayout {
+                height: 30px;
+                spacing: Tokens.sp2;
+                FormLabel { text: "SSH Pass"; }
+                FormField {
+                    horizontal-stretch: 1;
+                    text <=> root.f-ssh-password;
+                    input-type: InputType.password;
+                    placeholder: root.f-has-ssh-secret ? "•••••• stored — leave blank to keep" : "";
                 }
             }
 

@@ -28,6 +28,7 @@ async fn connect_query_schema_commit_against_real_clickhouse() {
         password: None,
         sslmode: SslMode::Disable,
         params: None,
+        ssh: None,
     };
 
     let driver = ClickhouseDriver::connect(&cfg).await.unwrap();

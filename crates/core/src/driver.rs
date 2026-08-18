@@ -190,6 +190,7 @@ mod tests {
             password: None,
             sslmode: Default::default(),
             params: None,
+            ssh: None,
         };
         let d = FakeDriver::connect(&cfg).await.unwrap();
         d.ping().await.unwrap();

@@ -1,4 +1,4 @@
-use rdb_core::conn::{ConnConfig, SslMode};
+use rdb_core::conn::{ConnConfig, SslMode, SshAuthMode, SshTunnelConfig};
 use serde::{Deserialize, Serialize};
 
 /// Database engine of a saved connection. The MVP ships four; the variant set
@@ -255,6 +255,24 @@ pub struct SavedConnection {
     /// rendered as a colored pill. See `EnvTag`.
     #[serde(default)]
     pub env_tag: EnvTag,
+    /// Whether to route this connection through an SSH tunnel.
+    #[serde(default)]
+    pub ssh_enabled: bool,
+    /// Hostname or IP of the SSH bastion.
+    #[serde(default)]
+    pub ssh_host: Option<String>,
+    /// Port of the SSH bastion (default 22).
+    #[serde(default)]
+    pub ssh_port: Option<u16>,
+    /// Username on the SSH bastion.
+    #[serde(default)]
+    pub ssh_user: Option<String>,
+    /// Authentication mode for the SSH bastion.
+    #[serde(default)]
+    pub ssh_auth_mode: SshAuthMode,
+    /// Path to the SSH private key file (when auth_mode is KeyFile).
+    #[serde(default)]
+    pub ssh_key_path: Option<String>,
 }
 
 impl SavedConnection {
@@ -283,12 +301,51 @@ impl SavedConnection {
             favorite: false,
             order: 0,
             env_tag: EnvTag::None,
+            ssh_enabled: false,
+            ssh_host: None,
+            ssh_port: None,
+            ssh_user: None,
+            ssh_auth_mode: SshAuthMode::default(),
+            ssh_key_path: None,
         }
     }
 
     /// Rebuild a `rdb-core::ConnConfig`, injecting the password fetched from the
     /// secret backend. The password is the only secret that ever lives in memory.
     pub fn to_conn_config(&self, password: Option<String>) -> ConnConfig {
+        self.to_conn_config_with_ssh(password, None)
+    }
+
+    /// Rebuild a `rdb-core::ConnConfig`, injecting both the DB password and SSH secret
+    /// (SSH password or key passphrase) fetched from the secret backend.
+    pub fn to_conn_config_with_ssh(
+        &self,
+        password: Option<String>,
+        ssh_secret: Option<String>,
+    ) -> ConnConfig {
+        let ssh = if self.ssh_enabled {
+            if let (Some(host), Some(user)) = (&self.ssh_host, &self.ssh_user) {
+                let (ssh_pw, ssh_passphrase) = match self.ssh_auth_mode {
+                    SshAuthMode::Password => (ssh_secret, None),
+                    SshAuthMode::KeyFile => (None, ssh_secret),
+                    SshAuthMode::Agent => (None, None),
+                };
+                Some(SshTunnelConfig {
+                    host: host.clone(),
+                    port: self.ssh_port.unwrap_or(22),
+                    user: user.clone(),
+                    auth_mode: self.ssh_auth_mode,
+                    key_path: self.ssh_key_path.clone(),
+                    password: ssh_pw,
+                    passphrase: ssh_passphrase,
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         ConnConfig {
             host: self.host.clone(),
             port: self.port,
@@ -297,6 +354,7 @@ impl SavedConnection {
             password,
             sslmode: self.sslmode,
             params: self.params.clone(),
+            ssh,
         }
     }
 }
@@ -323,6 +381,12 @@ mod tests {
             favorite: false,
             order: 0,
             env_tag: EnvTag::Production,
+            ssh_enabled: false,
+            ssh_host: None,
+            ssh_port: None,
+            ssh_user: None,
+            ssh_auth_mode: SshAuthMode::Agent,
+            ssh_key_path: None,
         }
     }
 
@@ -372,6 +436,29 @@ mod tests {
     fn to_conn_config_without_password_is_none() {
         let cfg = sample().to_conn_config(None);
         assert!(cfg.password.is_none());
+        assert!(cfg.ssh.is_none());
+    }
+
+    #[test]
+    fn to_conn_config_with_ssh_injects_ssh_config_and_secrets() {
+        let mut conn = sample();
+        conn.ssh_enabled = true;
+        conn.ssh_host = Some("ssh.bastion.net".into());
+        conn.ssh_port = Some(2222);
+        conn.ssh_user = Some("jumpadmin".into());
+        conn.ssh_auth_mode = SshAuthMode::KeyFile;
+        conn.ssh_key_path = Some("~/.ssh/id_rsa".into());
+
+        let cfg = conn.to_conn_config_with_ssh(Some("dbpass".into()), Some("keypass".into()));
+        assert_eq!(cfg.password.as_deref(), Some("dbpass"));
+        let ssh = cfg.ssh.expect("ssh config should be present");
+        assert_eq!(ssh.host, "ssh.bastion.net");
+        assert_eq!(ssh.port, 2222);
+        assert_eq!(ssh.user, "jumpadmin");
+        assert_eq!(ssh.auth_mode, SshAuthMode::KeyFile);
+        assert_eq!(ssh.key_path.as_deref(), Some("~/.ssh/id_rsa"));
+        assert_eq!(ssh.passphrase.as_deref(), Some("keypass"));
+        assert!(ssh.password.is_none());
     }
 
     #[test]

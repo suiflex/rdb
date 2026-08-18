@@ -108,6 +108,7 @@ mod tests {
             password: pw.map(|s| s.to_string()),
             sslmode: SslMode::Disable,
             params: None,
+            ssh: None,
         }
     }
 
