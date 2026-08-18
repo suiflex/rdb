@@ -939,6 +939,20 @@ callback create-table-commit();
                             vertical-alignment: center;
                         }
                     }
+                    // Switching connections/database reuses connect-clicked
+                    // without unmounting ConnPicker (root.connected stays
+                    // true), so its Cancel button isn't reachable — give the
+                    // in-progress state its own cancel affordance here.
+                    if root.conn-status == "connecting": VerticalLayout {
+                        alignment: center;
+                        GlyphButton {
+                            glyph: "✕";
+                            glyph-size: Tokens.font-sm;
+                            danger-hover: true;
+                            tooltip: "Cancel connecting";
+                            clicked => { root.cancel-connect(); }
+                        }
+                    }
                     // one-click reconnect when the live connection dropped
                     if root.conn-status == "error": VerticalLayout {
                         alignment: center;
