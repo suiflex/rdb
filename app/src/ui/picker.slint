@@ -168,6 +168,7 @@ export component ConnPicker inherits Rectangle {
     in property <bool> sel-has-custom-color;
     in property <string> sel-sub;      // "PostgreSQL · Group: OSS · Subgroup: Postgre"
     in property <bool> sel-local;
+    in property <bool> sel-ssh-enabled;
     in property <string> sel-env-tag-label;
     in property <color> sel-env-tag-color;
     in property <[KvRow]> sel-rows;
@@ -600,6 +601,10 @@ export component ConnPicker inherits Rectangle {
                                         alignment: center;
                                         OutlineChip { text: "LOCAL"; }
                                     }
+                                    if item.ssh-enabled: VerticalLayout {
+                                        alignment: center;
+                                        OutlineChip { text: "SSH"; tint: #38bdf8; }
+                                    }
                                     if item.env-tag-label != "": VerticalLayout {
                                         alignment: center;
                                         OutlineChip { text: item.env-tag-label; tint: item.env-tag-color; }
@@ -818,6 +823,10 @@ export component ConnPicker inherits Rectangle {
                                 if root.sel-local: VerticalLayout {
                                     alignment: center;
                                     OutlineChip { text: "LOCAL"; }
+                                }
+                                if root.sel-ssh-enabled: VerticalLayout {
+                                    alignment: center;
+                                    OutlineChip { text: "SSH"; tint: #38bdf8; }
                                 }
                                 if root.sel-env-tag-label != "": VerticalLayout {
                                     alignment: center;

@@ -69,6 +69,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             };
             w.set_sel_sub(sub.into());
             w.set_sel_local(s.local);
+            w.set_sel_ssh_enabled(s.ssh_enabled);
             w.set_sel_env_tag_label(theme::env_tag_label(s.env_tag).into());
             w.set_sel_env_tag_color(
                 theme::env_tag_color(s.env_tag).unwrap_or_else(|| theme::accent_or_default("")),
@@ -88,6 +89,16 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     v: s.port.to_string().into(),
                 },
             ];
+            if s.ssh_enabled {
+                if let Some(host) = &s.ssh_host {
+                    let port = s.ssh_port.unwrap_or(22);
+                    let user = s.ssh_user.as_deref().unwrap_or("");
+                    rows.push(KvRow {
+                        k: "SSH".into(),
+                        v: format!("{user}@{host}:{port} ({})", s.ssh_auth_mode.as_str()).into(),
+                    });
+                }
+            }
             if let Some(db) = &s.database {
                 rows.push(KvRow {
                     k: "Database".into(),

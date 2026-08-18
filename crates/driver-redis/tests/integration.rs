@@ -26,6 +26,7 @@ async fn connect_command_schema_against_real_redis() {
         password: None,
         sslmode: SslMode::Disable,
         params: None,
+        ssh: None,
     };
 
     let driver = RedisDriver::connect(&cfg).await.unwrap();

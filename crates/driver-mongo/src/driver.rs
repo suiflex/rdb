@@ -479,6 +479,7 @@ mod tests {
             password: Some("p".into()),
             sslmode: ssl,
             params: params.map(Into::into),
+            ssh: None,
         }
     }
 

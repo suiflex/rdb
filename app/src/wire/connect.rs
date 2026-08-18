@@ -367,7 +367,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     Some(g) => g,
                     None => store_driver.clone().lock_owned().await,
                 };
-                *slot = None;
+                let timeout_secs = if cfg.as_ref().ok().and_then(|c| c.ssh.as_ref()).is_some() {
+                    25
+                } else {
+                    15
+                };
                 // Bound the attempt so an unreachable host can't spin forever;
                 // the Cancel button aborts sooner.
                 let attempt = async {
@@ -392,7 +396,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     Ok::<_, rdb_core::error::RdbError>((driver, schema, scoped_db))
                 };
                 let result =
-                    match tokio::time::timeout(std::time::Duration::from_secs(15), attempt).await {
+                    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), attempt).await {
                         Ok(r) => r,
                         Err(_) => Err(rdb_core::error::RdbError::Connection(
                             "connection timed out".into(),

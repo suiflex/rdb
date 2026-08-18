@@ -72,6 +72,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 .ok()
                 .flatten()
                 .is_some_and(|s| !s.is_empty());
+            let has_ssh_sec = st
+                .get_ssh_secret(&sc.id)
+                .ok()
+                .flatten()
+                .is_some_and(|s| !s.is_empty());
             w.set_form_edit_mode(true);
             w.set_f_name(SharedString::from(sc.name));
             w.set_f_engine(SharedString::from(AnyDriver::label(sc.engine)));
@@ -91,6 +96,15 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 sc.color.unwrap_or_else(|| "#2c5fd8".into()),
             ));
             w.set_f_env_tag(SharedString::from(sc.env_tag.as_str()));
+            w.set_f_ssh_enabled(sc.ssh_enabled);
+            w.set_f_ssh_host(SharedString::from(sc.ssh_host.unwrap_or_default()));
+            w.set_f_ssh_port(SharedString::from(sc.ssh_port.unwrap_or(22).to_string()));
+            w.set_f_ssh_user(SharedString::from(sc.ssh_user.unwrap_or_default()));
+            w.set_f_ssh_auth_mode(SharedString::from(sc.ssh_auth_mode.as_str()));
+            w.set_f_ssh_key_path(SharedString::from(sc.ssh_key_path.unwrap_or_default()));
+            w.set_f_ssh_password(SharedString::default());
+            w.set_f_ssh_passphrase(SharedString::default());
+            w.set_f_has_ssh_secret(has_ssh_sec);
             w.set_f_new_group_text(SharedString::default());
             match sc.group.as_deref() {
                 None => {
@@ -305,12 +319,36 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             });
         });
     }
+    // browse SSH private key file
+    {
+        let weak = window.as_weak();
+        let rt = rt.clone();
+        window.on_form_browse_ssh_key(move || {
+            let Some(_w) = weak.upgrade() else {
+                return;
+            };
+            let weak2 = weak.clone();
+            rt.spawn(async move {
+                let dialog = rfd::AsyncFileDialog::new().set_title("Select SSH Private Key");
+                if let Some(file) = dialog.pick_file().await {
+                    let path = file.path().to_string_lossy().to_string();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = weak2.upgrade() {
+                            w.set_f_ssh_key_path(SharedString::from(path));
+                        }
+                    });
+                }
+            });
+        });
+    }
     // test connection: build a config straight from the form fields (not the
     // store) so unsaved edits are exercised, open a real connection, then drop
     // it. Result reported in the form's test-result line.
     {
         let weak = window.as_weak();
         let rt = rt.clone();
+        let store = store.clone();
+        let editing_id = editing_id.clone();
         window.on_form_test_conn(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -324,6 +362,49 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 }
             };
             let engine = f.engine;
+            let ssh = if f.ssh_enabled && f.engine != rdb_connstore::Engine::Sqlite {
+                if let (Some(host), Some(user)) = (&f.ssh_host, &f.ssh_user) {
+                    let (ssh_pw, ssh_passphrase) = match f.ssh_auth_mode {
+                        rdb_core::conn::SshAuthMode::Password => {
+                            let pw = f.ssh_password.or_else(|| {
+                                let id = editing_id.borrow();
+                                if !id.is_empty() {
+                                    store.borrow().get_ssh_secret(&id).ok().flatten()
+                                } else {
+                                    None
+                                }
+                            });
+                            (pw, None)
+                        }
+                        rdb_core::conn::SshAuthMode::KeyFile => {
+                            let pass = f.ssh_passphrase.or_else(|| {
+                                let id = editing_id.borrow();
+                                if !id.is_empty() {
+                                    store.borrow().get_ssh_secret(&id).ok().flatten()
+                                } else {
+                                    None
+                                }
+                            });
+                            (None, pass)
+                        }
+                        rdb_core::conn::SshAuthMode::Agent => (None, None),
+                    };
+                    Some(rdb_core::conn::SshTunnelConfig {
+                        host: host.clone(),
+                        port: f.ssh_port.unwrap_or(22),
+                        user: user.clone(),
+                        auth_mode: f.ssh_auth_mode,
+                        key_path: f.ssh_key_path.clone(),
+                        password: ssh_pw,
+                        passphrase: ssh_passphrase,
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             let cfg = rdb_core::conn::ConnConfig {
                 host: f.host,
                 port: f.port,
@@ -332,6 +413,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 password: f.password,
                 sslmode: f.sslmode,
                 params: f.params,
+                ssh,
             };
 
             w.set_test_busy(true);
@@ -407,6 +489,14 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 password,
                 params,
                 sslmode,
+                ssh_enabled,
+                ssh_host,
+                ssh_port,
+                ssh_user,
+                ssh_auth_mode,
+                ssh_key_path,
+                ssh_password,
+                ssh_passphrase,
             } = f;
             // An empty box means "keep the stored secret" — see
             // `ConnStore::save_connection`.
@@ -457,7 +547,20 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 sc.env_tag = env_tag;
                 sc.group = group;
                 sc.params = params;
-                st.save_connection(sc, Some(&password))
+                sc.ssh_enabled = ssh_enabled;
+                sc.ssh_host = ssh_host;
+                sc.ssh_port = ssh_port;
+                sc.ssh_user = ssh_user;
+                sc.ssh_auth_mode = ssh_auth_mode;
+                sc.ssh_key_path = ssh_key_path;
+
+                let ssh_secret = match ssh_auth_mode {
+                    rdb_core::conn::SshAuthMode::Password => ssh_password,
+                    rdb_core::conn::SshAuthMode::KeyFile => ssh_passphrase,
+                    rdb_core::conn::SshAuthMode::Agent => None,
+                };
+
+                st.save_connection_with_ssh(sc, Some(&password), ssh_secret.as_deref())
             })();
 
             match result {

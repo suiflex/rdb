@@ -107,7 +107,21 @@ impl ConnStore {
     /// Persist connection metadata and, when supplied, its password as one
     /// logical operation. Metadata is rolled back if password persistence or
     /// readback fails; an omitted password keeps any existing secret.
+    /// Persist connection metadata and, when supplied, its password as one
+    /// logical operation. Metadata is rolled back if password persistence or
+    /// readback fails; an omitted password keeps any existing secret.
     pub fn save_connection(&mut self, conn: SavedConnection, password: Option<&str>) -> Result<()> {
+        self.save_connection_with_ssh(conn, password, None)
+    }
+
+    /// Persist connection metadata and, when supplied, its database password and SSH secret
+    /// (SSH password or key passphrase) as one logical operation.
+    pub fn save_connection_with_ssh(
+        &mut self,
+        conn: SavedConnection,
+        password: Option<&str>,
+        ssh_secret: Option<&str>,
+    ) -> Result<()> {
         let old = self.get(&conn.id).cloned();
         if old.is_some() {
             self.update(conn.clone())?;
@@ -124,6 +138,19 @@ impl ConnStore {
                 self.restore_connection(old, &conn.id);
                 return Err(ConnStoreError::Secret(
                     "password verification failed".into(),
+                ));
+            }
+        }
+
+        if let Some(ssh_secret) = ssh_secret.filter(|s| !s.is_empty()) {
+            if let Err(err) = self.set_ssh_secret(&conn.id, ssh_secret) {
+                self.restore_connection(old, &conn.id);
+                return Err(err);
+            }
+            if !matches!(self.get_ssh_secret(&conn.id), Ok(Some(saved)) if saved == ssh_secret) {
+                self.restore_connection(old, &conn.id);
+                return Err(ConnStoreError::Secret(
+                    "SSH secret verification failed".into(),
                 ));
             }
         }
@@ -161,6 +188,8 @@ impl ConnStore {
         match self.index_of(id) {
             Some(i) => {
                 self.conns.remove(i);
+                let _ = self.delete_password(id);
+                let _ = self.delete_ssh_secret(id);
                 self.flush()
             }
             None => Err(ConnStoreError::NotFound(id.to_string())),
@@ -216,14 +245,38 @@ impl ConnStore {
         self.secrets.delete(id)
     }
 
+    /// Store SSH password or key passphrase in the secret backend.
+    /// Errors if the connection id is unknown.
+    pub fn set_ssh_secret(&self, id: &str, secret: &str) -> Result<()> {
+        self.index_of(id)
+            .ok_or_else(|| ConnStoreError::NotFound(id.to_string()))?;
+        self.secrets.set(&format!("{}:ssh", id), secret)
+    }
+
+    /// Fetch the SSH secret for a connection from the secret backend, if any.
+    pub fn get_ssh_secret(&self, id: &str) -> Result<Option<String>> {
+        self.secrets.get(&format!("{}:ssh", id))
+    }
+
+    /// Remove the SSH secret from the secret backend.
+    /// Idempotent: succeeds even if no SSH secret was stored.
+    pub fn delete_ssh_secret(&self, id: &str) -> Result<()> {
+        self.secrets.delete(&format!("{}:ssh", id))
+    }
+
     /// Build a `rdb-core::ConnConfig` for a saved connection with its stored
-    /// password injected. Errors if the connection id is unknown.
+    /// password and SSH secret injected. Errors if the connection id is unknown.
     pub fn conn_config_for(&self, id: &str) -> Result<rdb_core::conn::ConnConfig> {
         let conn = self
             .get(id)
             .ok_or_else(|| ConnStoreError::NotFound(id.to_string()))?;
         let password = self.get_password(id)?;
-        Ok(conn.to_conn_config(password))
+        let ssh_secret = if conn.ssh_enabled {
+            self.get_ssh_secret(id)?
+        } else {
+            None
+        };
+        Ok(conn.to_conn_config_with_ssh(password, ssh_secret))
     }
 }
 
@@ -392,6 +445,31 @@ mod tests {
         let cfg = store.conn_config_for(&id).unwrap();
         assert_eq!(cfg.password.as_deref(), Some("pw"));
         assert_eq!(cfg.port, 5432);
+    }
+
+    #[test]
+    fn save_connection_with_ssh_persists_both_secrets() {
+        let (_dir, mut store) = temp_store();
+        let mut conn = pg("with-ssh");
+        conn.ssh_enabled = true;
+        conn.ssh_host = Some("ssh.host.com".into());
+        conn.ssh_user = Some("ubuntu".into());
+        conn.ssh_auth_mode = rdb_core::conn::SshAuthMode::Password;
+        let id = conn.id.clone();
+
+        store.save_connection_with_ssh(conn, Some("db-secret"), Some("ssh-secret")).unwrap();
+        assert_eq!(store.get_password(&id).unwrap().as_deref(), Some("db-secret"));
+        assert_eq!(store.get_ssh_secret(&id).unwrap().as_deref(), Some("ssh-secret"));
+
+        let cfg = store.conn_config_for(&id).unwrap();
+        assert_eq!(cfg.password.as_deref(), Some("db-secret"));
+        let ssh = cfg.ssh.unwrap();
+        assert_eq!(ssh.host, "ssh.host.com");
+        assert_eq!(ssh.password.as_deref(), Some("ssh-secret"));
+
+        store.remove(&id).unwrap();
+        assert!(store.get_password(&id).unwrap().is_none());
+        assert!(store.get_ssh_secret(&id).unwrap().is_none());
     }
 
     #[test]

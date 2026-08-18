@@ -26,6 +26,7 @@ async fn connect_query_schema_against_real_mysql() {
         password: None,
         sslmode: SslMode::Disable,
         params: None,
+        ssh: None,
     };
 
     let driver = MysqlDriver::connect(&cfg).await.unwrap();
