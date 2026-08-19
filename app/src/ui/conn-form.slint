@@ -158,7 +158,7 @@ export component ConnForm inherits Rectangle {
                 SelectBox {
                     horizontal-stretch: 1;
                     show-logo: true;
-                    model: ["PostgreSQL", "MySQL", "Redis", "MongoDB", "SQLite", "Cassandra", "SQL Server", "ClickHouse"];
+                    model: ["PostgreSQL", "MySQL", "MariaDB", "Redis", "Valkey", "MongoDB", "SQLite", "Cassandra", "SQL Server", "ClickHouse"];
                     current-value <=> root.f-engine;
                     selected(v) => { root.engine-changed(v); }
                 }
@@ -173,7 +173,9 @@ export component ConnForm inherits Rectangle {
                     min-width: 0px;
                     text <=> root.f-import-url;
                     placeholder: root.f-engine == "MySQL" ? "mysql://user:pass@host:3306/db"
+                        : root.f-engine == "MariaDB" ? "mariadb://user:pass@host:3306/db"
                         : root.f-engine == "Redis" ? "redis://user:pass@host:6379"
+                        : root.f-engine == "Valkey" ? "valkey://user:pass@host:6379"
                         : root.f-engine == "MongoDB" ? "mongodb://user:pass@host:27017/db"
                         : root.f-engine == "Cassandra" ? "cassandra://user:pass@host:9042/keyspace"
                         : root.f-engine == "SQLite" ? "sqlite:///path/to/database.db"
@@ -217,8 +219,8 @@ export component ConnForm inherits Rectangle {
                 FormField { width: 94px; text <=> root.f-port; }
             }
 
-            // Redis has no user/database concept — hide those for it (and SQLite).
-            if root.f-engine != "Redis" && root.f-engine != "SQLite": HorizontalLayout {
+            // Redis/Valkey have no user/database concept — hide those (and SQLite).
+            if root.f-engine != "Redis" && root.f-engine != "Valkey" && root.f-engine != "SQLite": HorizontalLayout {
                 height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "User"; }
@@ -246,7 +248,7 @@ export component ConnForm inherits Rectangle {
             }
 
             // SSL mode applies to network engines with transport encryption.
-            if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL" || root.f-engine == "SQL Server" || root.f-engine == "ClickHouse" || root.f-engine == "Cassandra": HorizontalLayout {
+            if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL" || root.f-engine == "MariaDB" || root.f-engine == "SQL Server" || root.f-engine == "ClickHouse" || root.f-engine == "Cassandra": HorizontalLayout {
                 height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "SSL mode"; }
