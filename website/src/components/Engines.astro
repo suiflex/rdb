@@ -2,6 +2,7 @@
 import {
   siPostgresql,
   siMysql,
+  siMariadb,
   siRedis,
   siMongodb,
   siSqlite,
@@ -11,11 +12,14 @@ import {
 import { REPO_LINKS } from "../config";
 
 // simple-icons has no Microsoft SQL Server mark (it only covers open brands),
-// so that entry renders without an `icon` — see the conditional <svg> below.
+// and no Valkey mark yet (requested upstream, not shipped) — both render
+// without an `icon`, see the conditional <svg> below.
 const engines = [
   { icon: siPostgresql, name: "PostgreSQL", detail: "via tokio-postgres" },
-  { icon: siMysql, name: "MySQL / MariaDB", detail: "via mysql_async" },
+  { icon: siMysql, name: "MySQL", detail: "via mysql_async" },
+  { icon: siMariadb, name: "MariaDB", detail: "via mysql_async (MySQL-compatible)" },
   { icon: siRedis, name: "Redis", detail: "commands and key browsing" },
+  { icon: null, name: "Valkey", detail: "via the redis crate (RESP-compatible)" },
   { icon: siMongodb, name: "MongoDB", detail: "JSON document queries" },
   { icon: siSqlite, name: "SQLite", detail: "local files, zero setup" },
   { icon: siApachecassandra, name: "Cassandra", detail: "via the scylla driver" },
@@ -44,7 +48,7 @@ const engines = [
   }
 </ul>
 <p class="mt-4 text-sm text-fg-3">
-  All eight ship in the current release. BigQuery and Oracle are
+  All ten ship in the current release. BigQuery and Oracle are
   <a
     href={REPO_LINKS.vision}
     rel="noopener"

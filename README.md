@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <strong>Native cross-platform database manager.<br>PostgreSQL · MySQL · Redis · MongoDB · SQLite · Cassandra · SQL Server · ClickHouse — one binary, no Electron.</strong>
+  <strong>Native cross-platform database manager.<br>PostgreSQL · MySQL · MariaDB · Redis · Valkey · MongoDB · SQLite · Cassandra · SQL Server · ClickHouse — one binary, no Electron.</strong>
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@ A native, lightweight, cross-platform database manager built with Rust and Slint
 
 ## Features
 
-- **Multi-engine** — PostgreSQL, MySQL/MariaDB, Redis, MongoDB, SQLite, Cassandra, SQL Server, ClickHouse in one app
+- **Multi-engine** — PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite, Cassandra, SQL Server, ClickHouse in one app
 - **Native UI** — GPU-rendered via Slint (no webview, no Chromium, no Electron)
 - **Fast & light** — no GC, no runtime; aggressive release optimization (LTO, `opt-level=z`, `panic=abort`)
 - **Secure connections** — passwords stored in OS keychain (macOS Keychain, libsecret) with AES-GCM encrypted-file fallback
@@ -42,8 +42,10 @@ A native, lightweight, cross-platform database manager built with Rust and Slint
 | Engine | Protocol | Result type |
 |--------|----------|-------------|
 | PostgreSQL | `tokio-postgres` | Tabular |
-| MySQL / MariaDB | `mysql_async` | Tabular |
+| MySQL | `mysql_async` | Tabular |
+| MariaDB | `mysql_async` (MySQL-protocol-compatible) | Tabular |
 | Redis | `redis` crate | Key-value / raw |
+| Valkey | `redis` crate (RESP-compatible) | Key-value / raw |
 | MongoDB | `mongodb` crate | Documents (JSON) |
 | SQLite | `rusqlite` | Tabular |
 | Cassandra | `scylla` | Tabular |
@@ -77,9 +79,9 @@ pub trait Driver: Send + Sync {
 
 ```rust
 pub enum Query {
-    Sql(String),           // PostgreSQL, MySQL, SQLite, SQL Server, ClickHouse
+    Sql(String),           // PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, ClickHouse
     Cql(String),           // Cassandra/ScyllaDB
-    Command(Vec<String>),  // Redis: ["GET", "key"]
+    Command(Vec<String>),  // Redis/Valkey: ["GET", "key"]
     Mongo(MongoOp),        // find / insert / aggregate
 }
 ```
@@ -229,9 +231,9 @@ The release binary lands at `target/release/rdb`.
 
 | Engine | Language | Example |
 | --- | --- | --- |
-| PostgreSQL, MySQL, SQLite, SQL Server, ClickHouse | SQL | `SELECT * FROM users` |
+| PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, ClickHouse | SQL | `SELECT * FROM users` |
 | Cassandra | CQL (no JOIN/subquery/HAVING) | `SELECT * FROM keyspace.table` |
-| Redis | command tokens | `GET user:1`, `SET user:1 value` |
+| Redis, Valkey | command tokens | `GET user:1`, `SET user:1 value` |
 | MongoDB | mongosh chain, or a JSON envelope | `db.users.find({ age: { $gt: 20 } }).limit(5)`<br>`{"collection":"users","op":"find","body":{}}` |
 
 More detail (including MongoDB's supported methods/modifiers) is on the
@@ -247,7 +249,7 @@ Type in the **Filter** box above the grid — filters rows client-side without r
 
 ## Project status
 
-Active development. Ships 8 engines (PostgreSQL, MySQL, Redis, MongoDB, SQLite, Cassandra, SQL Server, ClickHouse); planned expansion to ~20 (BigQuery, Oracle, and more).
+Active development. Ships 10 engines (PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite, Cassandra, SQL Server, ClickHouse); planned expansion to ~20 (BigQuery, Oracle, and more).
 
 ## Crate overview
 
@@ -258,7 +260,7 @@ Active development. Ships 8 engines (PostgreSQL, MySQL, Redis, MongoDB, SQLite, 
 | `rdb-connstore` | Saved connections — JSON on disk + OS keychain / AES-GCM file |
 | `rdb-driver-postgres` | PostgreSQL driver via `tokio-postgres` |
 | `rdb-driver-mysql` | MySQL/MariaDB driver via `mysql_async` |
-| `rdb-driver-redis` | Redis driver via `redis` crate |
+| `rdb-driver-redis` | Redis/Valkey driver via `redis` crate |
 | `rdb-driver-mongo` | MongoDB driver via `mongodb` crate |
 | `rdb-driver-sqlite` | SQLite driver via `rusqlite` |
 | `rdb-driver-cassandra` | Cassandra driver via `scylla` |
