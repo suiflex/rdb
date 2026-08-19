@@ -945,10 +945,9 @@ callback create-table-commit();
                     // in-progress state its own cancel affordance here.
                     if root.conn-status == "connecting": VerticalLayout {
                         alignment: center;
-                        GlyphButton {
-                            glyph: "✕";
-                            glyph-size: Tokens.font-sm;
-                            danger-hover: true;
+                        IconButton {
+                            icon: "close";
+                            icon-size: Tokens.icon-sm;
                             tooltip: "Cancel connecting";
                             clicked => { root.cancel-connect(); }
                         }
