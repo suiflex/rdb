@@ -18,6 +18,12 @@ pub enum Engine {
     /// ClickHouse (analytics/OLAP), HTTP interface; `database` holds the
     /// default database. Insert-only write-back (no row-level UPDATE/DELETE).
     Clickhouse,
+    /// MariaDB: MySQL wire-protocol-compatible fork, dispatched through
+    /// the same `MysqlDriver` as `Engine::MySql`.
+    MariaDb,
+    /// Valkey: RESP-compatible fork of Redis, dispatched through the same
+    /// `RedisDriver` as `Engine::Redis`.
+    Valkey,
 }
 
 /// The query dialect an engine's editor tab speaks. Drives completion, syntax
@@ -122,6 +128,22 @@ pub const ENGINES: &[EngineMeta] = &[
         scheme: "clickhouse",
         default_port: "8123",
         language: QueryLanguage::Sql,
+    },
+    EngineMeta {
+        engine: Engine::MariaDb,
+        display: "MariaDB",
+        key: "mariadb",
+        scheme: "mariadb",
+        default_port: "3306",
+        language: QueryLanguage::Sql,
+    },
+    EngineMeta {
+        engine: Engine::Valkey,
+        display: "Valkey",
+        key: "valkey",
+        scheme: "valkey",
+        default_port: "6379",
+        language: QueryLanguage::Command,
     },
 ];
 
@@ -488,6 +510,8 @@ mod tests {
             Engine::Cassandra,
             Engine::Mssql,
             Engine::Clickhouse,
+            Engine::MariaDb,
+            Engine::Valkey,
         ];
         for e in all {
             let m = e.meta();
@@ -509,7 +533,9 @@ mod tests {
                 | Engine::Sqlite
                 | Engine::Cassandra
                 | Engine::Mssql
-                | Engine::Clickhouse => (),
+                | Engine::Clickhouse
+                | Engine::MariaDb
+                | Engine::Valkey => (),
             };
         }
     }
