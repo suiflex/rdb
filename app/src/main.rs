@@ -1133,7 +1133,7 @@ fn filter_operators(engine: rdb_connstore::Engine) -> Vec<SharedString> {
             "IS NULL",
             "IS NOT NULL",
         ],
-        Engine::MySql | Engine::Sqlite | Engine::Mssql | Engine::Clickhouse => &[
+        Engine::MySql | Engine::MariaDb | Engine::Sqlite | Engine::Mssql | Engine::Clickhouse => &[
             "=",
             "<>",
             ">",
@@ -1156,7 +1156,7 @@ fn filter_operators(engine: rdb_connstore::Engine) -> Vec<SharedString> {
             "IS NULL",
             "IS NOT NULL",
         ],
-        Engine::Redis | Engine::Mongo => &[
+        Engine::Redis | Engine::Valkey | Engine::Mongo => &[
             "=",
             "<>",
             ">",
@@ -2514,7 +2514,7 @@ fn browse_text(
                 q(&table.name)
             )
         }
-        rdb_connstore::Engine::MySql => {
+        rdb_connstore::Engine::MySql | rdb_connstore::Engine::MariaDb => {
             let where_sql = sql_where(
                 col_filters,
                 |c| format!("`{}`", c.replace('`', "``")),
@@ -2564,7 +2564,7 @@ fn browse_text(
                 table.name
             )
         }
-        rdb_connstore::Engine::Redis => {
+        rdb_connstore::Engine::Redis | rdb_connstore::Engine::Valkey => {
             format!("BROWSE {} {offset} {limit}", table.name)
         }
         rdb_connstore::Engine::Mssql => {
