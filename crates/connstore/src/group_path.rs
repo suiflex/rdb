@@ -1,5 +1,5 @@
 //! Pure helpers for treating `SavedConnection.group` as a `/`-delimited
-//! nested path (`"OSS/Production"`) instead of a flat name. No new storage
+//! nested path (`"Work/Production"`) instead of a flat name. No new storage
 //! or entity: a depth-1 path is exactly today's flat group name, so every
 //! existing `connections.json` is already valid input here.
 
@@ -63,52 +63,52 @@ mod tests {
 
     #[test]
     fn normalize_trims_and_collapses() {
-        assert_eq!(normalize_group_path("OSS"), Some("OSS".into()));
+        assert_eq!(normalize_group_path("Work"), Some("Work".into()));
         assert_eq!(
-            normalize_group_path("/OSS/Production/"),
-            Some("OSS/Production".into())
+            normalize_group_path("/Work/Production/"),
+            Some("Work/Production".into())
         );
         assert_eq!(
-            normalize_group_path("OSS// Production "),
-            Some("OSS/Production".into())
+            normalize_group_path("Work// Production "),
+            Some("Work/Production".into())
         );
         assert_eq!(
-            normalize_group_path(" OSS / Production / DB "),
-            Some("OSS/Production/DB".into())
+            normalize_group_path(" Work / Production / DB "),
+            Some("Work/Production/DB".into())
         );
     }
 
     #[test]
     fn parent_and_leaf() {
-        assert_eq!(group_parent("OSS"), None);
-        assert_eq!(group_parent("OSS/Production"), Some("OSS"));
-        assert_eq!(group_parent("OSS/Production/DB"), Some("OSS/Production"));
+        assert_eq!(group_parent("Work"), None);
+        assert_eq!(group_parent("Work/Production"), Some("Work"));
+        assert_eq!(group_parent("Work/Production/DB"), Some("Work/Production"));
 
-        assert_eq!(group_leaf("OSS"), "OSS");
-        assert_eq!(group_leaf("OSS/Production"), "Production");
-        assert_eq!(group_leaf("OSS/Production/DB"), "DB");
+        assert_eq!(group_leaf("Work"), "Work");
+        assert_eq!(group_leaf("Work/Production"), "Production");
+        assert_eq!(group_leaf("Work/Production/DB"), "DB");
     }
 
     #[test]
     fn ancestors_are_shallowest_first_and_exclude_self() {
         assert_eq!(
-            group_ancestors("OSS").collect::<Vec<_>>(),
+            group_ancestors("Work").collect::<Vec<_>>(),
             Vec::<&str>::new()
         );
         assert_eq!(
-            group_ancestors("OSS/Production/DB").collect::<Vec<_>>(),
-            vec!["OSS", "OSS/Production"]
+            group_ancestors("Work/Production/DB").collect::<Vec<_>>(),
+            vec!["Work", "Work/Production"]
         );
     }
 
     #[test]
     fn descendant_check() {
-        assert!(is_descendant("OSS", "OSS"));
-        assert!(is_descendant("OSS/Production", "OSS"));
-        assert!(is_descendant("OSS/Production/DB", "OSS"));
-        assert!(is_descendant("OSS/Production/DB", "OSS/Production"));
-        assert!(!is_descendant("OSS", "OSS/Production"));
-        assert!(!is_descendant("OSSLegacy", "OSS"));
-        assert!(!is_descendant("Other", "OSS"));
+        assert!(is_descendant("Work", "Work"));
+        assert!(is_descendant("Work/Production", "Work"));
+        assert!(is_descendant("Work/Production/DB", "Work"));
+        assert!(is_descendant("Work/Production/DB", "Work/Production"));
+        assert!(!is_descendant("Work", "Work/Production"));
+        assert!(!is_descendant("WorkLegacy", "Work"));
+        assert!(!is_descendant("Other", "Work"));
     }
 }
