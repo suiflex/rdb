@@ -339,6 +339,14 @@ callback create-table-commit();
     in property <[IndexRow]> index-rows;
     callback apply-filter();
     callback apply-mongo-filter();
+    // Filter-box autocomplete. One shared candidate list for every filter field
+    // in the window — only the focused field paints it — with the pane index
+    // carried as an argument rather than a `p1-` twin.
+    in property <[PaletteItem]> filter-completion-items;
+    in property <int> filter-completion-selected;
+    callback filter-completion-choose(int, int);
+    callback filter-completion-key(int, string) -> bool;
+    callback mongo-filter-edited(int, string);
     callback resize-grid-col(int, length);
 
     // ----- SQL editor (lexer-highlighted) -----
@@ -1876,6 +1884,11 @@ callback create-table-commit();
                         structure-columns: root.structure-columns;
                         grid-filter <=> root.grid-filter;
                         mongo-filter <=> root.mongo-filter;
+                        filter-completion-items: root.filter-completion-items;
+                        filter-completion-selected: root.filter-completion-selected;
+                        filter-completion-choose(p, i) => { root.filter-completion-choose(p, i); }
+                        filter-completion-key(p, k) => { root.filter-completion-key(p, k) }
+                        mongo-filter-edited(p, t) => { root.mongo-filter-edited(p, t); }
                         active-table: root.active-table;
                         page-start: root.page-start;
                         page-end: root.page-end;
