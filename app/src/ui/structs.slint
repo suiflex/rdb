@@ -95,3 +95,27 @@ export struct Span { text: string, kind: int, sel: bool, cols: int }
 export struct ChartBar { label: string, value: string, frac: float }
 // One row of the Indexes view: index name + definition/columns.
 export struct IndexRow { name: string, definition: string }
+
+// `kind` picks the leading icon: "database" | "group" | engine badge keys
+// ("postgres"…) | "table" | "function" | "command". `sub` is the mono second
+// line (host : db); `local` appends the green "(local)" tag.
+export struct PaletteItem {
+    label: string,
+    kind: string,
+    sub: string,
+    local: bool,
+    // Per-connection custom accent (connection rows only; ignored elsewhere).
+    color: color,
+    has-custom-color: bool,
+    // Environment tag pill (empty label => no pill rendered).
+    env-tag-label: string,
+    env-tag-color: color,
+    // Group rows only: raw-case group key (for toggling) and current
+    // expand state (drives the caret rotation).
+    group: string,
+    expanded: bool,
+    // Last row of a group's visible block — rounds the card's bottom corners.
+    is-group-end: bool,
+    // Nesting depth of this row's group (0 = top-level). Mirrors `ConnItem.depth`.
+    depth: int,
+}
