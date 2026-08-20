@@ -7,6 +7,9 @@
 //! already stringifies anything that could lose precision as plain JSON, so
 //! one generic parse covers every query shape — see `convert::json_value_to_cell`.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
 use async_trait::async_trait;
 use clickhouse::Client;
 use serde_json::Value as Json;
@@ -29,6 +32,38 @@ use crate::write_sql;
 pub struct ClickhouseDriver {
     client: Client,
     database: Option<String>,
+    /// `query_id` of the user query currently in flight, if any.
+    ///
+    /// ClickHouse cancels over a *separate* HTTP request (`KILL QUERY`), which
+    /// needs the victim's `query_id`. The server generates one per request by
+    /// default and never tells us what it was, so the driver assigns its own
+    /// and records it here for `cancel_running` to name.
+    in_flight: Arc<Mutex<Option<String>>>,
+}
+
+/// Clears the in-flight `query_id` on drop, so an aborted query future cannot
+/// leave a stale id behind for the next cancel to kill by mistake.
+struct InFlightGuard(Arc<Mutex<Option<String>>>);
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = None;
+        }
+    }
+}
+
+/// Process-unique `query_id`. The counter disambiguates queries started inside
+/// the same nanosecond tick; the `rdb-` prefix makes RDB's queries obvious in
+/// `system.query_log`.
+fn new_query_id() -> String {
+    static N: AtomicU64 = AtomicU64::new(0);
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("rdb-{nanos:x}-{n:x}")
 }
 
 fn build_client(cfg: &ConnConfig) -> Client {
@@ -51,8 +86,17 @@ fn build_client(cfg: &ConnConfig) -> Client {
 /// Run `sql` (which must itself end in `FORMAT JSON` for data-returning
 /// statements) and parse the response body as JSON.
 async fn fetch_json(client: &Client, sql: &str) -> Result<Json> {
-    let bytes = client
-        .query(sql)
+    fetch_json_tagged(client, sql, None).await
+}
+
+/// As [`fetch_json`], but stamps the request with a caller-chosen `query_id` so
+/// `cancel_running` has a handle to `KILL`.
+async fn fetch_json_tagged(client: &Client, sql: &str, query_id: Option<&str>) -> Result<Json> {
+    let mut q = client.query(sql);
+    if let Some(id) = query_id {
+        q = q.with_setting("query_id", id);
+    }
+    let bytes = q
         .fetch_bytes("JSON")
         .map_err(|e| RdbError::Query(e.to_string()))?
         .collect()
@@ -100,6 +144,7 @@ impl Driver for ClickhouseDriver {
                 return Ok(ClickhouseDriver {
                     client: plain,
                     database: cfg.database.clone(),
+                    in_flight: Arc::new(Mutex::new(None)),
                 });
             }
         } else {
@@ -108,7 +153,29 @@ impl Driver for ClickhouseDriver {
         Ok(ClickhouseDriver {
             client,
             database: cfg.database.clone(),
+            in_flight: Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// `KILL QUERY` is an ordinary statement issued over a second HTTP request,
+    /// so it goes through while the first request is still streaming. It
+    /// matches zero rows when the query already finished, which is success
+    /// under the trait's best-effort contract.
+    async fn cancel_running(&self) -> Result<()> {
+        let Some(id) = self.in_flight.lock().ok().and_then(|s| s.clone()) else {
+            return Ok(());
+        };
+        // The id is driver-generated (`rdb-<hex>-<hex>`), so it needs no
+        // escaping beyond rejecting anything unexpected.
+        if !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+            return Ok(());
+        }
+        self.client
+            .query(&format!("KILL QUERY WHERE query_id = '{id}'"))
+            .execute()
+            .await
+            .map_err(|e| RdbError::Query(ch_err(&e.to_string())))?;
+        Ok(())
     }
 
     async fn ping(&self) -> Result<()> {
@@ -165,9 +232,20 @@ impl Driver for ClickhouseDriver {
             .iter()
             .any(|kw| upper.starts_with(kw));
 
+        // Tag the user's query so cancel has something to name, and clear the
+        // tag however this function leaves — including an abort mid-await.
+        let query_id = new_query_id();
+        let _in_flight = {
+            if let Ok(mut slot) = self.in_flight.lock() {
+                *slot = Some(query_id.clone());
+            }
+            InFlightGuard(self.in_flight.clone())
+        };
+
         if !returns_rows {
             self.client
                 .query(trimmed)
+                .with_setting("query_id", &query_id)
                 .execute()
                 .await
                 .map_err(|e| RdbError::Query(ch_err(&e.to_string())))?;
@@ -177,7 +255,12 @@ impl Driver for ClickhouseDriver {
             return Ok(ResultSet::Affected(0));
         }
 
-        let body = fetch_json(&self.client, &format!("{trimmed} FORMAT JSON")).await?;
+        let body = fetch_json_tagged(
+            &self.client,
+            &format!("{trimmed} FORMAT JSON"),
+            Some(&query_id),
+        )
+        .await?;
         let meta = body["meta"].as_array().cloned().unwrap_or_default();
         let cols: Vec<Column> = meta
             .iter()

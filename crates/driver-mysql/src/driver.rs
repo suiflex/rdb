@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 use mysql_async::{OptsBuilder, Pool, Row, SslOpts};
@@ -17,6 +19,29 @@ use crate::write_sql;
 /// MySQL / MariaDB driver backed by a small mysql_async pool.
 pub struct MysqlDriver {
     pool: Pool,
+    /// Connection id of the query currently in flight, if any.
+    ///
+    /// MySQL has no out-of-band cancel: `KILL QUERY` is an ordinary statement
+    /// that must name the *connection* running the victim query. Because
+    /// queries are served from a pool, the id is not known until a connection
+    /// is checked out, so `query` records it here for `cancel_running` to read.
+    in_flight: Arc<Mutex<Option<u32>>>,
+}
+
+/// Clears the in-flight connection id on drop.
+///
+/// Cancelling the UI's query task drops the `query` future mid-await, so a
+/// plain clear at the end of `query` would never run and a stale id would leak
+/// into the next `cancel_running` — killing an unrelated query. Drop always
+/// runs, aborted or not.
+struct InFlightGuard(Arc<Mutex<Option<u32>>>);
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = None;
+        }
+    }
 }
 
 fn build_opts(cfg: &ConnConfig) -> OptsBuilder {
@@ -50,7 +75,29 @@ impl Driver for MysqlDriver {
             .await
             .map_err(|e| RdbError::Connection(e.to_string()))?;
         drop(conn.ping().await);
-        Ok(MysqlDriver { pool })
+        Ok(MysqlDriver {
+            pool,
+            in_flight: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    /// `KILL QUERY <id>` aborts the running statement but leaves the connection
+    /// itself usable, unlike a bare `KILL`. It needs a second connection from
+    /// the pool, since the victim's own connection is busy.
+    async fn cancel_running(&self) -> Result<()> {
+        let Some(id) = self.in_flight.lock().ok().and_then(|s| *s) else {
+            // Nothing running — success by the trait's best-effort contract.
+            return Ok(());
+        };
+        let mut conn = self
+            .pool
+            .get_conn()
+            .await
+            .map_err(|e| RdbError::Connection(e.to_string()))?;
+        conn.query_drop(format!("KILL QUERY {id}"))
+            .await
+            .map_err(|e| RdbError::Query(my_err(&e.to_string())))?;
+        Ok(())
     }
 
     async fn ping(&self) -> Result<()> {
@@ -111,6 +158,15 @@ impl Driver for MysqlDriver {
             .get_conn()
             .await
             .map_err(|e| RdbError::Connection(e.to_string()))?;
+
+        // Publish this connection's id so `cancel_running` has something to
+        // KILL, and clear it however this function leaves — including an abort.
+        let _in_flight = {
+            if let Ok(mut slot) = self.in_flight.lock() {
+                *slot = Some(conn.id());
+            }
+            InFlightGuard(self.in_flight.clone())
+        };
 
         let mut result = conn
             .query_iter(sql.as_str())

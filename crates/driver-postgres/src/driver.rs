@@ -15,6 +15,19 @@ use rdb_core::write::{TableRef, WriteOp};
 use crate::conn_string::build_conn_string;
 use crate::write_sql;
 
+/// Build the permissive native-TLS connector used for both the main
+/// connection and the out-of-band cancel request. Accepts any certificate, so
+/// managed (DigitalOcean/Supabase/RDS) and self-signed servers both work —
+/// matching libpq's `require` semantics: encrypt, don't validate.
+fn tls_connector() -> Result<MakeTlsConnector> {
+    let tls = TlsConnector::builder()
+        .danger_accept_invalid_certs(true)
+        .danger_accept_invalid_hostnames(true)
+        .build()
+        .map_err(|e| RdbError::Connection(e.to_string()))?;
+    Ok(MakeTlsConnector::new(tls))
+}
+
 /// A `Driver` backed by tokio-postgres over a single connection.
 ///
 /// TLS: `SslMode::Disable` uses a plaintext `NoTls` connection. `Prefer` and
@@ -26,6 +39,10 @@ pub struct PostgresDriver {
     client: Client,
     /// Handle to the spawned connection-driver task; aborted on `close`.
     conn_task: JoinHandle<()>,
+    /// Kept so `cancel_running` can dial the cancel request the same way the
+    /// original connection was dialed — a Postgres cancel is a whole new
+    /// connection, so it has to redo the TLS decision.
+    sslmode: SslMode,
 }
 
 #[async_trait]
@@ -44,12 +61,7 @@ impl Driver for PostgresDriver {
             });
             (client, conn_task)
         } else {
-            let tls = TlsConnector::builder()
-                .danger_accept_invalid_certs(true)
-                .danger_accept_invalid_hostnames(true)
-                .build()
-                .map_err(|e| RdbError::Connection(e.to_string()))?;
-            let connector = MakeTlsConnector::new(tls);
+            let connector = tls_connector()?;
             let (client, connection) = tokio_postgres::connect(&conn_str, connector)
                 .await
                 .map_err(|e| RdbError::Connection(pg_err(&e)))?;
@@ -58,7 +70,26 @@ impl Driver for PostgresDriver {
             });
             (client, conn_task)
         };
-        Ok(PostgresDriver { client, conn_task })
+        Ok(PostgresDriver {
+            client,
+            conn_task,
+            sslmode: cfg.sslmode,
+        })
+    }
+
+    /// Postgres cancellation is a separate, short-lived connection carrying the
+    /// backend PID and secret key — it does not travel over the busy socket, so
+    /// it works even while `query` is blocked. The server silently ignores a
+    /// cancel for a backend that is idle, which is exactly the best-effort
+    /// contract the trait asks for.
+    async fn cancel_running(&self) -> Result<()> {
+        let token = self.client.cancel_token();
+        let res = if matches!(self.sslmode, SslMode::Disable) {
+            token.cancel_query(NoTls).await
+        } else {
+            token.cancel_query(tls_connector()?).await
+        };
+        res.map_err(|e| RdbError::Connection(pg_err(&e)))
     }
 
     async fn ping(&self) -> Result<()> {
@@ -193,7 +224,9 @@ impl Driver for PostgresDriver {
     async fn close(self) -> Result<()> {
         // Drop the client first so the connection future can complete, then
         // abort the connection task to release the spawned future promptly.
-        let PostgresDriver { client, conn_task } = self;
+        let PostgresDriver {
+            client, conn_task, ..
+        } = self;
         drop(client);
         conn_task.abort();
         Ok(())
