@@ -57,6 +57,32 @@ fn default_ssh_port() -> u16 {
     22
 }
 
+/// Process-wide client identity, e.g. `"RDB 0.40.0"`.
+///
+/// Drivers send this to the server on connect so RDB shows up by name in
+/// `pg_stat_activity`, `SHOW PROCESSLIST`, `currentOp` and friends — the way
+/// DBeaver and TablePlus do — instead of appearing as an anonymous client
+/// nobody can attribute when a query misbehaves.
+///
+/// ponytail: a write-once global rather than a `ConnConfig` field. The identity
+/// really is process-wide (one app, one name), and threading it through
+/// `ConnConfig` would touch every construction site and every driver's test
+/// fixtures to carry a value none of them vary. Make it a field if a
+/// connection ever needs its own name.
+static CLIENT_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Register the client identity. Called once by the app at startup; later calls
+/// are ignored, so a driver can never race a half-built name onto the wire.
+pub fn set_client_id(id: impl Into<String>) {
+    let _ = CLIENT_ID.set(id.into());
+}
+
+/// The registered client identity, or a bare `"RDB"` when nothing registered
+/// one — which is the case for the driver crates' own tests.
+pub fn client_id() -> &'static str {
+    CLIENT_ID.get().map(String::as_str).unwrap_or("RDB")
+}
+
 /// How long a driver waits for a TCP connect / handshake before giving up.
 ///
 /// Deliberately shorter than the app-level connect timeout that wraps it, so
