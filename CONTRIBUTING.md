@@ -13,12 +13,25 @@ agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
 - **Where RDB is headed** — [VISION.md](VISION.md)
 - **Security policy** — [SECURITY.md](SECURITY.md)
 - **Code of Conduct** — [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- **Contributor License Agreement** — [CLA.md](CLA.md)
 - **Bugs & feature requests** — [Issues](https://github.com/suiflex/rdb/issues/new/choose)
 - **Questions & setup help** — [Discussions](https://github.com/suiflex/rdb/discussions)
 
 Reading [VISION.md](VISION.md) first is worth the two minutes — it explains
 what RDB is deliberately *not* trying to be, which is the fastest way to tell
 whether an idea fits before you spend time on it.
+
+## Contributor License Agreement (CLA)
+
+Before your first pull request can be merged, you must sign our
+[Contributor License Agreement](CLA.md). It is a one-time step: when you open
+your first PR, the CLA bot comments with instructions and you sign by replying
+with a single comment on the PR. Your signature is recorded on the
+`cla-signatures` branch and covers all future contributions.
+
+The CLA keeps the project's licensing flexible (see [CLA.md](CLA.md) § 4)
+while guaranteeing your contributions always remain available under the
+[Apache License 2.0](LICENSE).
 
 ## How to contribute
 
@@ -268,5 +281,7 @@ Use the issue forms under **Issues → New issue**. Security vulnerabilities mus
 
 ## License
 
-By contributing, you agree that your contributions are licensed under the
-[Apache License 2.0](LICENSE) that covers this project.
+The project is licensed under the [Apache License 2.0](LICENSE). By
+contributing, you agree to the terms of the
+[Contributor License Agreement](CLA.md), which licenses your contributions
+under Apache 2.0 and grants the maintainer the rights described there.
