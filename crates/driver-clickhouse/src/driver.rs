@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use clickhouse::Client;
 use serde_json::Value as Json;
 
-use rdb_core::conn::{ConnConfig, SslMode};
+use rdb_core::conn::{client_id, ConnConfig, SslMode};
 use rdb_core::driver::Driver;
 use rdb_core::error::{RdbError, Result};
 use rdb_core::query::Query;
@@ -73,7 +73,10 @@ fn build_client(cfg: &ConnConfig) -> Client {
     };
     let mut client = Client::default()
         .with_url(format!("{scheme}://{}:{}", cfg.host, cfg.port))
-        .with_user(&cfg.user);
+        .with_user(&cfg.user)
+        // ClickHouse has no application_name; log_comment is the documented
+        // way to tag a client, and it lands in system.query_log.
+        .with_setting("log_comment", client_id());
     if let Some(pass) = &cfg.password {
         client = client.with_password(pass);
     }

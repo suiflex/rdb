@@ -1,4 +1,4 @@
-use rdb_core::conn::{ConnConfig, SslMode, CONNECT_TIMEOUT, KEEPALIVE_INTERVAL};
+use rdb_core::conn::{client_id, ConnConfig, SslMode, CONNECT_TIMEOUT, KEEPALIVE_INTERVAL};
 
 /// Map our `SslMode` to a libpq `sslmode` token.
 ///
@@ -31,6 +31,9 @@ pub fn build_conn_string(cfg: &ConnConfig) -> String {
     parts.push(format!("sslmode={}", sslmode_token(cfg.sslmode)));
     // Bound the handshake, and keep probing an idle socket so a silently
     // dropped link surfaces as an error instead of parking a query forever.
+    // Names RDB in pg_stat_activity. Spaces are legal inside a libpq value
+    // only when quoted, and the identity contains one ("RDB 0.40.0").
+    parts.push(format!("application_name='{}'", client_id()));
     parts.push(format!("connect_timeout={}", CONNECT_TIMEOUT.as_secs()));
     parts.push("keepalives=1".to_string());
     parts.push(format!("keepalives_idle={}", KEEPALIVE_INTERVAL.as_secs()));
