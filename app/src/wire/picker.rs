@@ -949,12 +949,16 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             w.set_status_latency(SharedString::default());
             w.set_schema_tree(ModelRc::from(Rc::new(VecModel::<TreeNode>::default())));
             w.set_structure_columns(ModelRc::from(Rc::new(VecModel::<StructField>::default())));
-            // Keep the SQL scratch tabs (they are connection-agnostic) so a later
-            // reconnect can restore them; drop only the connection-scoped table /
-            // function tabs whose data belongs to the connection being left.
+            // Keep every tab. Table and collection tabs are connection-scoped,
+            // but each records the `connection_id` it was opened against, so
+            // reconnecting to the same connection can pick them straight back
+            // up. Dropping them here is what made a collection tab vanish when
+            // the user switched connections — a switch is a disconnect followed
+            // by a connect, so this path ran and took the tab with it. The rows
+            // already fetched stay readable while disconnected; only the
+            // spinner is cleared, since nothing is loading any more.
             {
                 let mut tabs = workspace_tabs.lock().unwrap();
-                tabs.retain(|t| t.kind == "sql");
                 for t in tabs.iter_mut() {
                     t.loading = false;
                 }
