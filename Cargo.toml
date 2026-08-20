@@ -25,3 +25,11 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Dev builds: keep target/ small. Backtraces still show file:line.
+[profile.dev]
+debug = "line-tables-only"
+
+# Dependencies rarely need stepping through — no debug info at all.
+[profile.dev.package."*"]
+debug = false
