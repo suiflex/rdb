@@ -195,6 +195,11 @@ const QUERY_OPS: &[&str] = &[
     "$elemMatch",
 ];
 
+/// Query operators as completion candidates, for the standalone filter box.
+pub fn query_ops() -> Vec<Candidate> {
+    keyword_candidates(QUERY_OPS)
+}
+
 /// Update operators, offered as the top-level keys of an update document.
 const UPDATE_OPS: &[&str] = &[
     "$set",
