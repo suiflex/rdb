@@ -7,7 +7,7 @@ use scylla::value::Row;
 use std::sync::Arc;
 use webpki_roots::TLS_SERVER_ROOTS;
 
-use rdb_core::conn::{ConnConfig, SslMode};
+use rdb_core::conn::{ConnConfig, SslMode, CONNECT_TIMEOUT, KEEPALIVE_INTERVAL};
 use rdb_core::driver::Driver;
 use rdb_core::error::{RdbError, Result};
 use rdb_core::query::Query;
@@ -47,7 +47,14 @@ pub struct CassandraDriver {
 
 async fn connect_session(cfg: &ConnConfig, tls: bool) -> Result<Session> {
     let node = format!("{}:{}", cfg.host, cfg.port);
-    let mut builder = SessionBuilder::new().known_node(node);
+    let mut builder = SessionBuilder::new()
+        .known_node(node)
+        // Bound the handshake, and keep both the TCP socket and the CQL
+        // connection probed so a silently dropped link surfaces as an error
+        // rather than parking a query forever.
+        .connection_timeout(CONNECT_TIMEOUT)
+        .tcp_keepalive_interval(KEEPALIVE_INTERVAL)
+        .keepalive_interval(KEEPALIVE_INTERVAL);
     if !cfg.user.is_empty() {
         builder = builder.user(cfg.user.clone(), cfg.password.clone().unwrap_or_default());
     }

@@ -57,6 +57,22 @@ fn default_ssh_port() -> u16 {
     22
 }
 
+/// How long a driver waits for a TCP connect / handshake before giving up.
+///
+/// Deliberately shorter than the app-level connect timeout that wraps it, so
+/// the driver's own error (which names the engine and the failure) wins the
+/// race against the generic "connection timed out" the UI would otherwise
+/// report.
+pub const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// TCP keepalive probe interval for long-lived connections.
+///
+/// This is what stops a query from parking forever when the network drops
+/// silently — a NAT/VPN/firewall idle reap leaves the socket looking healthy to
+/// the client, so without keepalive probes a read on a dead connection never
+/// returns and the query task hangs with no way back except a hard abort.
+pub const KEEPALIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Everything needed to open a connection. `password` is injected at connect
 /// time from the keychain — it is never persisted as part of saved config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
