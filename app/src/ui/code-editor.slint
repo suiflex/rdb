@@ -5,6 +5,7 @@ import { Tokens } from "tokens.slint";
 import { Span, PaletteItem } from "structs.slint";
 import { AppIcon } from "icons.slint";
 import { ScrollView } from "std-widgets.slint";
+import { CompletionList } from "components.slint";
 
 export component CodeEditor inherits Rectangle {
     in property <[[Span]]> lines;
@@ -267,14 +268,14 @@ export component CodeEditor inherits Rectangle {
     }
 
     // ----- autocomplete popup (overlays the editor, under the caret) -----
-    if root.completion-visible && root.completion-items.length > 0: Rectangle {
+    if root.completion-visible && root.completion-items.length > 0: CompletionList {
         // Anchor to the caret's *visual* position: the caret lives inside the
         // scrolled line list, so the popup (a sibling of the scroll view) has to
         // fold in the padding and the scroll offset — otherwise a restored tab,
         // whose cursor lands on the last line, paints the popup far below the
         // viewport and it never shows. Below the caret by default; flip above when
         // that would clip past the editor's bottom edge.
-        property <length> pop-h: min(root.completion-items.length * 22px + 8px, 200px);
+        //
         // Clamp the caret anchor into the editor's own height so the popup stays
         // on-screen even when the scroll offset can't be read precisely (a short,
         // scrolled editor otherwise threw the anchor a thousand px down).
@@ -282,73 +283,11 @@ export component CodeEditor inherits Rectangle {
         // coordinate, rather than clamping a stale content-space coordinate.
         property <length> caret-y: clamp(Tokens.sp2 + root.cursor-visual-row * root.line-h + edit-scroll.viewport-y, Tokens.sp2, root.height - root.line-h);
         property <length> below-y: caret-y + root.line-h + 6px;
-        property <length> above-y: caret-y - self.pop-h - 6px;
+        property <length> above-y: caret-y - self.natural-height - 6px;
+        items: root.completion-items;
+        selected: root.completion-selected;
+        choose(i) => { root.completion-choose(i); }
         x: min(root.gutter-w + Tokens.sp3 + root.cursor-col * root.charw + edit-scroll.viewport-x, root.width - self.width - Tokens.sp2);
-        y: below-y + self.pop-h > root.height && above-y > 0 ? above-y : below-y;
-        width: 360px;
-        height: pop-h;
-        border-radius: Tokens.radius;
-        border-width: 1px;
-        border-color: Tokens.border-strong;
-        background: Tokens.card;
-        drop-shadow-blur: 12px;
-        drop-shadow-color: Tokens.text.with-alpha(0.25);
-        clip: true;
-        ScrollView {
-            // Keep the keyboard-selected row visible: scroll only when the
-            // selection would fall outside the viewport (rows are 22px, +4px
-            // list padding). Clamped so the top rows sit at 0 and wrap-around
-            // (last -> first) snaps back up.
-            viewport-y: -clamp(
-                root.completion-selected * 22px - self.visible-height + 22px + 8px,
-                0,
-                max(0, root.completion-items.length * 22px + 8px - self.visible-height));
-            VerticalLayout {
-                padding: 4px;
-                for it[i] in root.completion-items: Rectangle {
-                height: 22px;
-                border-radius: Tokens.radius;
-                background: i == root.completion-selected ? Tokens.accent-tint
-                    : cta.has-hover ? Tokens.chrome : transparent;
-                HorizontalLayout {
-                    padding-left: Tokens.sp2;
-                    padding-right: Tokens.sp2;
-                    spacing: Tokens.sp2;
-                    VerticalLayout {
-                        alignment: center;
-                        AppIcon {
-                            name: it.kind == "field" ? "field"
-                                : it.kind == "table" ? "table"
-                                : it.kind == "database" ? "database" : "keyword";
-                            size: 13px;
-                            color: it.kind == "table" ? Tokens.db-pg
-                                : it.kind == "field" ? Tokens.text-dim : Tokens.accent;
-                        }
-                    }
-                    Text {
-                        // The label is the identity the user picks — give it all
-                        // the slack so a long schema.table stays readable; the
-                        // secondary `sub` yields first.
-                        horizontal-stretch: 1;
-                        text: it.label;
-                        color: Tokens.text;
-                        font-family: Tokens.mono;
-                        font-size: Tokens.font-sm;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                    Text {
-                        text: it.sub;
-                        color: Tokens.text-faint;
-                        font-family: Tokens.mono;
-                        font-size: Tokens.font-xs;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                }
-                cta := TouchArea { clicked => { root.completion-choose(i); } }
-                }
-            }
-        }
+        y: below-y + self.natural-height > root.height && above-y > 0 ? above-y : below-y;
     }
 }
