@@ -4194,6 +4194,13 @@ struct AppFns {
 }
 
 fn main() -> Result<(), slint::PlatformError> {
+    // Name this build to every server it connects to, so RDB is attributable in
+    // pg_stat_activity / SHOW PROCESSLIST / currentOp rather than showing up as
+    // an anonymous client. Set before any connection can be opened. The version
+    // has to come from here: rdb-core carries its own crate version, which is
+    // not the one release-please bumps.
+    rdb_core::conn::set_client_id(format!("RDB {}", env!("CARGO_PKG_VERSION")));
+
     // tokio multi-thread runtime on background threads; the Slint event loop
     // owns the main thread. Async results return via invoke_from_event_loop.
     let rt = tokio::runtime::Builder::new_multi_thread()
