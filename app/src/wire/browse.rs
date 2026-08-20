@@ -31,6 +31,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         last_view,
         browse_trigger,
         collapsed_history_groups,
+        completion_nodes,
         ..
     } = state.clone();
     let AppFns {
@@ -523,6 +524,162 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             }
             run_browse(1);
         });
+    }
+
+    // ----- Mongo filter box autocomplete -----
+    //
+    // The filter box holds a bare filter document, so it can't reuse the
+    // editor's completion path (see `completion::suggest_mongo_filter` for
+    // why). State is single-copy across both panes because only the focused
+    // field can be typing, and `FilterField` paints its list only while
+    // focused.
+    //
+    // ponytail: the whole field text is treated as "before the cursor".
+    // `TextInput` does expose `cursor-position`, but plumbing it up three
+    // component layers buys correctness only for editing mid-string, and
+    // filters are typed left to right. Pass the caret through if that changes.
+    {
+        // Char length of the partial word to replace on accept, plus the
+        // candidate labels currently on offer.
+        let ctx: Rc<RefCell<(usize, Vec<String>)>> = Rc::new(RefCell::new((0, Vec::new())));
+
+        let set_items = {
+            let ctx = ctx.clone();
+            move |w: &MainWindow, word_len: usize, cands: Vec<completion::Candidate>| {
+                if cands.is_empty() {
+                    *ctx.borrow_mut() = (0, Vec::new());
+                    w.set_filter_completion_items(ModelRc::from(Rc::new(
+                        VecModel::<PaletteItem>::default(),
+                    )));
+                    return;
+                }
+                let items: Vec<PaletteItem> = cands
+                    .iter()
+                    .map(|c| PaletteItem {
+                        label: c.label.clone().into(),
+                        kind: c.kind.clone().into(),
+                        sub: c.sub.clone().into(),
+                        local: false,
+                        color: theme::accent_or_default(""),
+                        has_custom_color: false,
+                        env_tag_label: SharedString::default(),
+                        env_tag_color: theme::accent_or_default(""),
+                        group: SharedString::default(),
+                        expanded: false,
+                        is_group_end: false,
+                        depth: 0,
+                    })
+                    .collect();
+                *ctx.borrow_mut() = (word_len, cands.iter().map(|c| c.label.clone()).collect());
+                w.set_filter_completion_items(ModelRc::from(Rc::new(VecModel::from(items))));
+                w.set_filter_completion_selected(0);
+            }
+        };
+
+        // Splice the chosen candidate over the partial word and close the popup.
+        let apply_choice = {
+            let ctx = ctx.clone();
+            move |w: &MainWindow, pane: usize, idx: i32| {
+                let (word_len, labels) = ctx.borrow().clone();
+                let Some(label) = labels.get(idx.max(0) as usize).cloned() else {
+                    return;
+                };
+                let text = if pane == 0 {
+                    w.get_mongo_filter().to_string()
+                } else {
+                    w.get_p1_mongo_filter().to_string()
+                };
+                let keep: String = text
+                    .chars()
+                    .take(text.chars().count().saturating_sub(word_len))
+                    .collect();
+                let next = SharedString::from(format!("{keep}{label}"));
+                if pane == 0 {
+                    w.set_mongo_filter(next);
+                } else {
+                    w.set_p1_mongo_filter(next);
+                }
+                *ctx.borrow_mut() = (0, Vec::new());
+                w.set_filter_completion_items(ModelRc::from(Rc::new(
+                    VecModel::<PaletteItem>::default(),
+                )));
+            }
+        };
+
+        {
+            let weak = window.as_weak();
+            let panes = panes.clone();
+            let completion_nodes = completion_nodes.clone();
+            let set_items = set_items.clone();
+            window.on_mongo_filter_edited(move |pane, text| {
+                let Some(w) = weak.upgrade() else {
+                    return;
+                };
+                let pane = pane.max(0) as usize;
+                // Fields come from the collection this pane is browsing.
+                let collection = panes[pane]
+                    .browse
+                    .lock()
+                    .unwrap()
+                    .table
+                    .as_ref()
+                    .map(|t| t.name.clone())
+                    .unwrap_or_default();
+                let (word_len, cands) = completion::suggest_mongo_filter(
+                    text.as_str(),
+                    &completion_nodes.lock().unwrap(),
+                    &collection,
+                );
+                set_items(&w, word_len, cands);
+            });
+        }
+
+        {
+            let weak = window.as_weak();
+            let apply_choice = apply_choice.clone();
+            window.on_filter_completion_choose(move |pane, idx| {
+                if let Some(w) = weak.upgrade() {
+                    apply_choice(&w, pane.max(0) as usize, idx);
+                }
+            });
+        }
+
+        {
+            let weak = window.as_weak();
+            window.on_filter_completion_key(move |pane, key| {
+                let Some(w) = weak.upgrade() else {
+                    return false;
+                };
+                let n = w.get_filter_completion_items().row_count() as i32;
+                if n == 0 {
+                    return false;
+                }
+                let sel = w.get_filter_completion_selected();
+                match key.as_str() {
+                    // Wrap around, matching the editor popup.
+                    "\u{f700}" => {
+                        w.set_filter_completion_selected((sel - 1).rem_euclid(n));
+                        true
+                    }
+                    "\u{f701}" => {
+                        w.set_filter_completion_selected((sel + 1).rem_euclid(n));
+                        true
+                    }
+                    "\t" | "\n" | "\r" => {
+                        w.invoke_filter_completion_choose(pane, sel);
+                        true
+                    }
+                    "\u{1b}" => {
+                        w.set_filter_completion_items(ModelRc::from(Rc::new(VecModel::<
+                            PaletteItem,
+                        >::default(
+                        ))));
+                        true
+                    }
+                    _ => false,
+                }
+            });
+        }
     }
 
     // ----- Mongo browse filter bar (Compass-style filter document) -----

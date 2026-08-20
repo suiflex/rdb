@@ -62,6 +62,14 @@ export component WorkArea inherits Rectangle {
     in property <[StructField]> structure-columns;
     in-out property <string> grid-filter;
     in-out property <string> mongo-filter;   // Compass-style Mongo filter document
+    // Filter-box autocomplete, shared by both panes (only the focused field
+    // paints its list). The pane index travels as an argument instead of a
+    // `p1-` twin, so the state stays single-copy.
+    in property <[PaletteItem]> filter-completion-items;
+    in property <int> filter-completion-selected;
+    callback filter-completion-choose(int, int);
+    callback filter-completion-key(int, string) -> bool;
+    callback mongo-filter-edited(int, string);
     callback apply-mongo-filter();
     in property <string> active-table;
     in property <string> sort-text;      // e.g. "sort: id ↑"
@@ -392,6 +400,11 @@ export component WorkArea inherits Rectangle {
             browse-editor-open <=> root.browse-editor-open;
             sort-text: root.sort-text;
             mongo-filter <=> root.mongo-filter;
+            filter-completion-items: root.filter-completion-items;
+            filter-completion-selected: root.filter-completion-selected;
+            filter-completion-choose(i) => { root.filter-completion-choose(0, i); }
+            filter-completion-key(k) => { root.filter-completion-key(0, k) }
+            mongo-filter-edited(t) => { root.mongo-filter-edited(0, t); }
             apply-mongo-filter() => { root.apply-mongo-filter(); }
             add-row() => { root.add-row(); }
             mark-delete() => { root.mark-delete(); }
@@ -534,6 +547,11 @@ export component WorkArea inherits Rectangle {
                 writable: false;
                 sort-text: root.p1-sort-text;
                 mongo-filter <=> root.p1-mongo-filter;
+                filter-completion-items: root.filter-completion-items;
+                filter-completion-selected: root.filter-completion-selected;
+                filter-completion-choose(i) => { root.filter-completion-choose(1, i); }
+                filter-completion-key(k) => { root.filter-completion-key(1, k) }
+                mongo-filter-edited(t) => { root.mongo-filter-edited(1, t); }
                 apply-mongo-filter() => { root.p1-apply-mongo-filter(); }
                 add-row() => { root.p1-add-row(); }
                 mark-delete() => { root.p1-mark-delete(); }

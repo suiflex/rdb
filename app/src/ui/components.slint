@@ -859,6 +859,16 @@ export component FilterField inherits Rectangle {
     in property <string> trailing-cap: "";
     callback edited(string);
     callback submitted;
+    // Autocomplete. The candidate list is supplied by the owner (Rust fills it
+    // on `edited`); an empty list means no popup, so nothing else needs a
+    // separate "open" flag. Only the focused field paints its list, which lets
+    // several filter fields share one set of window-level properties.
+    in property <[PaletteItem]> completion-items;
+    in property <int> completion-selected;
+    callback completion-choose(int);
+    // Navigation keys while the popup is up. Returns true when consumed, so an
+    // unhandled key still reaches the TextInput.
+    callback completion-key(string) -> bool;
     public function focus-input() { input.focus(); }
     height: 30px;
     border-radius: Tokens.radius;
@@ -895,6 +905,20 @@ export component FilterField inherits Rectangle {
                 single-line: true;
                 accepted => { root.submitted(); }
                 edited => { root.edited(self.text); }
+                // Intercepted before the TextInput sees them, so Up/Down move
+                // the popup selection instead of the caret and Enter accepts a
+                // candidate rather than submitting a half-typed filter. With no
+                // popup up, every one of these falls through untouched.
+                key-pressed(e) => {
+                    if (root.completion-items.length > 0
+                        && (e.text == Key.UpArrow || e.text == Key.DownArrow
+                            || e.text == Key.Tab || e.text == Key.Escape
+                            || e.text == Key.Return)
+                        && root.completion-key(e.text)) {
+                        return accept;
+                    }
+                    return reject;
+                }
                 cursor-position-changed(cursor-position) => {
                     if cursor-position.x + self.x < 4px {
                         self.x = -cursor-position.x + 4px;
@@ -916,5 +940,15 @@ export component FilterField inherits Rectangle {
         font-size: Tokens.font-sm;
         vertical-alignment: center;
         height: 100%;
+    }
+    // Hangs under the field. Gated on focus so that when several filter fields
+    // share one window-level candidate list, only the one being typed in shows
+    // it.
+    if root.completion-items.length > 0 && input.has-focus: CompletionList {
+        x: 0;
+        y: root.height + 4px;
+        items: root.completion-items;
+        selected: root.completion-selected;
+        choose(i) => { root.completion-choose(i); }
     }
 }
