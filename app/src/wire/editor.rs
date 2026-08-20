@@ -513,6 +513,19 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                                 ed.undo();
                                 true
                             }
+                            // ⌘⌫ / ⌘⌦ delete to the start / end of the line.
+                            // Without these the key falls through to the window
+                            // scope, where Backspace toggles the delete mark on
+                            // the selected results row — so this was not just
+                            // missing, it was actively dangerous.
+                            "\u{8}" => {
+                                ed.delete_to_line_start();
+                                true
+                            }
+                            "\u{7f}" => {
+                                ed.delete_to_line_end();
+                                true
+                            }
                             "/" => {
                                 // Comment marker follows the connected engine's query
                                 // language; default to SQL when not yet connected.
@@ -527,7 +540,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                         // Only cut/paste splice lines in a way `fold_regions`
                         // will re-derive predictably; undo/redo restore an
                         // arbitrary prior buffer and are left alone.
-                        if matches!(text.as_str(), "x" | "v") {
+                        if matches!(text.as_str(), "x" | "v" | "\u{8}" | "\u{7f}") {
                             shift_folded_heads(
                                 &panes[pane].folded_heads,
                                 old_line,
@@ -540,6 +553,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                     };
                     if handled {
                         sync_editor(pane);
+                        // ⌘⌫/⌘⌦ change the text around the caret, so the
+                        // completion context moved with it. The other cmd
+                        // combos here don't edit, or replace the buffer whole.
+                        if matches!(text.as_str(), "\u{8}" | "\u{7f}") {
+                            refresh_completion(pane);
+                        }
                     }
                     return handled;
                 }
@@ -556,6 +575,13 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                     let mut it = text.chars();
                     let handled = match (it.next(), it.next()) {
                         (Some(c), None) => match c {
+                            // ⌥⌫ deletes the previous word. Checked before the
+                            // pair handling below: with alt held the user is
+                            // deleting a word, not unwrapping an empty pair.
+                            '\u{8}' if alt => {
+                                ed.delete_word_left();
+                                true
+                            }
                             '\u{8}' => {
                                 // Delete both sides of an empty pair in one
                                 // keystroke, mirroring the auto-close below.
