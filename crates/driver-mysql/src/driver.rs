@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
 use mysql_async::{OptsBuilder, Pool, Row, SslOpts};
 
-use rdb_core::conn::{ConnConfig, SslMode};
+use rdb_core::conn::{ConnConfig, SslMode, KEEPALIVE_INTERVAL};
 use rdb_core::driver::Driver;
 use rdb_core::error::{RdbError, Result};
 use rdb_core::query::Query;
@@ -49,7 +49,10 @@ fn build_opts(cfg: &ConnConfig) -> OptsBuilder {
         .ip_or_hostname(cfg.host.clone())
         .tcp_port(cfg.port)
         .user(Some(cfg.user.clone()))
-        .pass(cfg.password.clone());
+        .pass(cfg.password.clone())
+        // Probe an idle socket so a silently dropped link fails the query
+        // instead of parking it forever waiting on a read that never returns.
+        .tcp_keepalive(Some(KEEPALIVE_INTERVAL));
 
     if let Some(db) = &cfg.database {
         opts = opts.db_name(Some(db.clone()));
