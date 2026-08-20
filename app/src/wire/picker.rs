@@ -919,9 +919,19 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 return;
             };
             // Stop any in-flight query first: disconnecting must not leave a query
-            // running on the server. Fire the same cancels the Cancel buttons use
-            // for both panes — aborting the task drops its Arc<AnyDriver> clone so
-            // the connection closes and the server terminates the query.
+            // running on the server. Dropping the driver is not enough on its own
+            // — the server only reaps the statement once it notices the socket is
+            // gone, which is exactly the lag that kept load high after a
+            // disconnect — so ask it to cancel before tearing the connection down.
+            {
+                let current = current.clone();
+                rt.spawn(async move {
+                    let driver = { current.lock().await.as_ref().map(|(_, d)| d.clone()) };
+                    if let Some(d) = driver {
+                        let _ = d.cancel_running().await;
+                    }
+                });
+            }
             for p in [0usize, 1] {
                 if let Some(c) = panes[p].stream_cancel.borrow().as_ref() {
                     c.store(true, std::sync::atomic::Ordering::SeqCst);

@@ -11,7 +11,9 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use crate::*;
 
 pub(crate) fn wire(window: &MainWindow, state: &AppState) {
-    let AppState { panes, .. } = state.clone();
+    let AppState {
+        panes, rt, current, ..
+    } = state.clone();
     let displayed_grid = panes[0].displayed_grid.clone();
 
     // ----- Details panel: copy one field value to the clipboard -----
@@ -117,30 +119,45 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         });
     }
 
-    // ----- Cancel a running buffered query (hard abort of the tokio task) -----
-    {
+    // ----- Cancel a running buffered query -----
+    //
+    // Two halves, and both are needed. Aborting the tokio task frees the pane
+    // and the connection guard immediately, which is what the user sees. But
+    // the abort only drops the client end of the socket: the statement keeps
+    // running on the server, still holding locks and burning CPU, until the
+    // server notices. `cancel_running` is the half that actually stops it.
+    //
+    // The server-side request has to be fired before the abort, and off the UI
+    // thread, since it does its own I/O (Postgres dials a second connection,
+    // MySQL and ClickHouse issue a KILL, Mongo walks currentOp). It is
+    // best-effort by contract, so its outcome is not reported: the pane is
+    // already free and a failure here means the statement was gone anyway, or
+    // the user lacks the privilege — neither is worth a modal over.
+    for pane in 0..2 {
         let weak = window.as_weak();
         let panes = panes.clone();
-        window.on_cancel_query(move || {
-            if let Some(h) = panes[0].query_abort.borrow_mut().take() {
+        let rt = rt.clone();
+        let current = current.clone();
+        let cancel = move || {
+            let current = current.clone();
+            rt.spawn(async move {
+                let driver = { current.lock().await.as_ref().map(|(_, d)| d.clone()) };
+                if let Some(d) = driver {
+                    let _ = d.cancel_running().await;
+                }
+            });
+            if let Some(h) = panes[pane].query_abort.borrow_mut().take() {
                 h.abort();
             }
             if let Some(w) = weak.upgrade() {
-                set_p_query_running(&w, 0, false);
+                set_p_query_running(&w, pane, false);
             }
-        });
-    }
-    {
-        let weak = window.as_weak();
-        let panes = panes.clone();
-        window.on_p1_cancel_query(move || {
-            if let Some(h) = panes[1].query_abort.borrow_mut().take() {
-                h.abort();
-            }
-            if let Some(w) = weak.upgrade() {
-                set_p_query_running(&w, 1, false);
-            }
-        });
+        };
+        if pane == 0 {
+            window.on_cancel_query(cancel);
+        } else {
+            window.on_p1_cancel_query(cancel);
+        }
     }
     {
         let weak = window.as_weak();
