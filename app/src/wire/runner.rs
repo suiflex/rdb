@@ -525,10 +525,11 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                     }
                 });
             });
-            // ponytail: task-abort is a client-side cancel — it frees the pane and
-            // the connection guard immediately; the server statement may keep
-            // running until the connection notices. Add Client::cancel_token() for
-            // a true server-side cancel if that ever matters.
+            // Task-abort is only the client-side half of cancel: it frees the
+            // pane and the connection guard immediately. The server-side half
+            // lives in `wire::split_pane`'s cancel handlers, which call
+            // `AnyDriver::cancel_running` before aborting so the statement
+            // actually stops instead of running on unwatched.
             *panes[pane].query_abort.borrow_mut() = Some(jh.abort_handle());
         })
     };
