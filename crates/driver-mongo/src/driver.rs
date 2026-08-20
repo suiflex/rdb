@@ -8,7 +8,7 @@ use mongodb::bson::{doc, Bson, Document};
 use mongodb::options::{ClientOptions, ServerMonitoringMode};
 use mongodb::{Client, Collection};
 
-use rdb_core::conn::{ConnConfig, SslMode};
+use rdb_core::conn::{client_id, ConnConfig, SslMode};
 use rdb_core::driver::Driver;
 use rdb_core::error::{RdbError, Result};
 use rdb_core::query::{MongoKind, MongoOp, Query};
@@ -142,6 +142,8 @@ impl Driver for MongoDriver {
             .map_err(|e| RdbError::Connection(e.to_string()))?;
         // Fail fast on an unreachable host/replica set instead of the 30s default
         // server-selection hang.
+        // Reported in currentOp / serverStatus and the Atlas client list.
+        options.app_name = Some(client_id().to_string());
         options.server_selection_timeout = Some(Duration::from_secs(8));
         options.connect_timeout = Some(Duration::from_secs(8));
         // The driver's default streaming (awaitable isMaster) SDAM monitor

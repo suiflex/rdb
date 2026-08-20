@@ -7,7 +7,7 @@ use scylla::value::Row;
 use std::sync::Arc;
 use webpki_roots::TLS_SERVER_ROOTS;
 
-use rdb_core::conn::{ConnConfig, SslMode, CONNECT_TIMEOUT, KEEPALIVE_INTERVAL};
+use rdb_core::conn::{client_id, ConnConfig, SslMode, CONNECT_TIMEOUT, KEEPALIVE_INTERVAL};
 use rdb_core::driver::Driver;
 use rdb_core::error::{RdbError, Result};
 use rdb_core::query::Query;
@@ -52,6 +52,11 @@ async fn connect_session(cfg: &ConnConfig, tls: bool) -> Result<Session> {
         // Bound the handshake, and keep both the TCP socket and the CQL
         // connection probed so a silently dropped link surfaces as an error
         // rather than parking a query forever.
+        // Sent as the APPLICATION_NAME startup option; visible in
+        // system_views.clients and the driver-side connection metadata.
+        .custom_identity(
+            scylla::client::SelfIdentity::new().with_application_name(client_id().to_string()),
+        )
         .connection_timeout(CONNECT_TIMEOUT)
         .tcp_keepalive_interval(KEEPALIVE_INTERVAL)
         .keepalive_interval(KEEPALIVE_INTERVAL);

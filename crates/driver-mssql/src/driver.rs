@@ -15,7 +15,7 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 
-use rdb_core::conn::{ConnConfig, SslMode, CONNECT_TIMEOUT};
+use rdb_core::conn::{client_id, ConnConfig, SslMode, CONNECT_TIMEOUT};
 use rdb_core::driver::Driver;
 use rdb_core::error::{RdbError, Result};
 use rdb_core::query::Query;
@@ -48,6 +48,8 @@ fn build_config(cfg: &ConnConfig) -> Config {
     if let Some(db) = &cfg.database {
         config.database(db);
     }
+    // Shows as program_name in sys.dm_exec_sessions and SQL Server Profiler.
+    config.application_name(client_id());
     match cfg.sslmode {
         SslMode::Disable => {
             config.encryption(EncryptionLevel::NotSupported);
