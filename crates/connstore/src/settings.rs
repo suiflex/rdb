@@ -12,27 +12,40 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{ConnStoreError, Result};
 
-/// Which color scheme the UI should start in. Matches the app's single
-/// light/dark toggle (`Theme.dark`); default light mirrors `tokens.slint`.
+/// Which color scheme the UI uses.
+///
+/// `System` defers to the OS appearance and is the default, so a machine set to
+/// switch automatically — light by day, dark at night — carries the app with
+/// it. The app never resolves this to a colour itself: it hands the mode to
+/// Slint, which derives darkness from it and from the live platform value (see
+/// `Tokens.dark` in `tokens.slint`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ThemeMode {
     #[default]
+    System,
     Light,
     Dark,
 }
 
 impl ThemeMode {
-    /// The app renders theme as a single `dark` bool.
-    pub fn is_dark(self) -> bool {
-        matches!(self, ThemeMode::Dark)
+    /// Slint has no enum on the Rust side of the generated API, so the mode
+    /// crosses as a small int. Keep in step with `Tokens.theme-mode`.
+    pub fn to_index(self) -> i32 {
+        match self {
+            ThemeMode::System => 0,
+            ThemeMode::Light => 1,
+            ThemeMode::Dark => 2,
+        }
     }
 
-    pub fn from_dark(dark: bool) -> Self {
-        if dark {
-            ThemeMode::Dark
-        } else {
-            ThemeMode::Light
+    /// Anything unrecognised falls back to following the system, which is the
+    /// safe default rather than silently pinning a colour.
+    pub fn from_index(i: i32) -> Self {
+        match i {
+            1 => ThemeMode::Light,
+            2 => ThemeMode::Dark,
+            _ => ThemeMode::System,
         }
     }
 }
@@ -178,7 +191,7 @@ mod tests {
     #[test]
     fn defaults_when_file_absent() {
         let s = SettingsStore::load(tmp()).unwrap();
-        assert_eq!(s.get().theme, ThemeMode::Light);
+        assert_eq!(s.get().theme, ThemeMode::System);
         assert!(s.get().update_check);
         assert_eq!(s.get().last_update_check, None);
         assert_eq!(s.get().editor.default_page_size, 100);
@@ -211,6 +224,43 @@ mod tests {
         assert_eq!(reloaded.get().ui_state.last_filter, "pg");
         assert_eq!(reloaded.get().editor.font_size, 16);
         assert_eq!(reloaded.get().editor.history_max_entries, 100);
+    }
+
+    #[test]
+    fn system_round_trips_as_a_lowercase_wire_value() {
+        // The on-disk format is a bare lowercase string, so the new variant has
+        // to serialise as "system" for older/newer builds to agree.
+        let path = tmp();
+        let mut s = SettingsStore::load(path.clone()).unwrap();
+        s.update(|s| s.theme = ThemeMode::System).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains(r#""theme": "system""#), "got: {raw}");
+        assert_eq!(
+            SettingsStore::load(path).unwrap().get().theme,
+            ThemeMode::System
+        );
+    }
+
+    #[test]
+    fn theme_mode_index_round_trips() {
+        for m in [ThemeMode::System, ThemeMode::Light, ThemeMode::Dark] {
+            assert_eq!(ThemeMode::from_index(m.to_index()), m);
+        }
+        // An index the UI never sends must not pin a colour by accident.
+        assert_eq!(ThemeMode::from_index(99), ThemeMode::System);
+        assert_eq!(ThemeMode::from_index(-1), ThemeMode::System);
+    }
+
+    #[test]
+    fn a_settings_file_written_before_system_existed_still_loads() {
+        // Files from before the System variant pin light or dark explicitly;
+        // adding a variant must not silently reset anyone's choice.
+        let path = tmp();
+        std::fs::write(&path, r#"{"theme":"light"}"#).unwrap();
+        assert_eq!(
+            SettingsStore::load(path).unwrap().get().theme,
+            ThemeMode::Light
+        );
     }
 
     #[test]
