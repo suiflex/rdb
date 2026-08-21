@@ -1,7 +1,8 @@
 # @suiflex/rdb
 
-Native cross-platform database manager — PostgreSQL, MySQL, Redis, MongoDB,
-SQLite, Cassandra, SQL Server, ClickHouse in one binary. No Electron.
+Native cross-platform database manager — PostgreSQL, MySQL, MariaDB, Redis,
+Valkey, MongoDB, SQLite, Cassandra, SQL Server, ClickHouse in one binary. No
+Electron.
 
 ## Install
 
@@ -19,7 +20,7 @@ rdb
 
 ## Features
 
-- **Multi-engine** — PostgreSQL, MySQL/MariaDB, Redis, MongoDB, SQLite, Cassandra, SQL Server, ClickHouse in one app
+- **Multi-engine** — PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite, Cassandra, SQL Server, ClickHouse in one app
 - **Native UI** — GPU-rendered via Slint (no webview, no Chromium, no Electron)
 - **Fast & light** — no GC, no runtime; aggressive release optimization (LTO, `opt-level=z`, `panic=abort`)
 - **Secure connections** — passwords stored in OS keychain (macOS Keychain, libsecret) with AES-GCM encrypted-file fallback
@@ -36,8 +37,10 @@ rdb
 | Engine | Protocol | Result type |
 |--------|----------|-------------|
 | PostgreSQL | `tokio-postgres` | Tabular |
-| MySQL / MariaDB | `mysql_async` | Tabular |
+| MySQL | `mysql_async` | Tabular |
+| MariaDB | `mysql_async` (MySQL-protocol-compatible) | Tabular |
 | Redis | `redis` crate | Key-value / raw |
+| Valkey | `redis` crate (RESP-compatible) | Key-value / raw |
 | MongoDB | `mongodb` crate | Documents (JSON) |
 | SQLite | `rusqlite` | Tabular |
 | Cassandra | `scylla` | Tabular |
@@ -71,9 +74,9 @@ pub trait Driver: Send + Sync {
 
 ```rust
 pub enum Query {
-    Sql(String),           // PostgreSQL, MySQL, SQLite, SQL Server, ClickHouse
+    Sql(String),           // PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, ClickHouse
     Cql(String),           // Cassandra/ScyllaDB
-    Command(Vec<String>),  // Redis: ["GET", "key"]
+    Command(Vec<String>),  // Redis/Valkey: ["GET", "key"]
     Mongo(MongoOp),        // find / insert / aggregate
 }
 ```

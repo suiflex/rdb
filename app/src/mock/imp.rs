@@ -23,7 +23,7 @@ fn conn(
     c
 }
 
-/// The connection list from design/1-connections.png: OSS 3 · LOCAL 4 ·
+/// The connection list from design/1-connections.png: WORK 3 · LOCAL 4 ·
 /// ACME 5 · EDGE 6 · UNGROUPED 9.
 pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
     let _ = std::fs::create_dir_all(&dir);

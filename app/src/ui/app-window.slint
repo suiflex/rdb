@@ -440,6 +440,8 @@ callback create-table-commit();
     callback mark-delete();
     callback commit-edits();
     callback discard-edits();
+    // Pending edits as SQL text, to the clipboard, without writing anything.
+    callback copy-edit-sql();
     // Tab / Shift+Tab while editing: store the cell, edit the neighbour.
     callback cell-advance(int, int, string, bool);
 
@@ -937,6 +939,19 @@ callback create-table-commit();
                             color: root.conn-status == "error" ? Tokens.error : Tokens.warn;
                             font-size: Tokens.font-sm;
                             vertical-alignment: center;
+                        }
+                    }
+                    // Switching connections/database reuses connect-clicked
+                    // without unmounting ConnPicker (root.connected stays
+                    // true), so its Cancel button isn't reachable — give the
+                    // in-progress state its own cancel affordance here.
+                    if root.conn-status == "connecting": VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: "close";
+                            icon-size: Tokens.icon-sm;
+                            tooltip: "Cancel connecting";
+                            clicked => { root.cancel-connect(); }
                         }
                     }
                     // one-click reconnect when the live connection dropped
@@ -1947,6 +1962,9 @@ callback create-table-commit();
                         commit-edits() => {
                             root.commit-edits();
                         }
+                        copy-edit-sql() => {
+                            root.copy-edit-sql();
+                        }
                         p1-commit-edits() => {
                             root.p1-commit-edits();
                         }
@@ -2939,7 +2957,7 @@ callback create-table-commit();
                         wrap: word-wrap;
                     }
                     Text {
-                        text: "PostgreSQL · MySQL · Redis · MongoDB · SQLite · Cassandra · SQL Server · ClickHouse";
+                        text: "PostgreSQL · MySQL · MariaDB · Redis · Valkey · MongoDB · SQLite · Cassandra · SQL Server · ClickHouse";
                         color: Tokens.text-faint;
                         font-size: Tokens.font-xs;
                         horizontal-alignment: center;

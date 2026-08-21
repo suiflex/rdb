@@ -277,21 +277,21 @@ mod group_cascade_tests {
 
     #[test]
     fn delete_direct_member_promotes_to_parent() {
-        assert_eq!(cascade_delete_group("OSS", "OSS"), None);
+        assert_eq!(cascade_delete_group("Work", "Work"), None);
         assert_eq!(
-            cascade_delete_group("OSS/Production", "OSS/Production"),
-            Some("OSS".to_string())
+            cascade_delete_group("Work/Production", "Work/Production"),
+            Some("Work".to_string())
         );
     }
 
     #[test]
     fn delete_descendant_splices_out_the_deleted_segment() {
         assert_eq!(
-            cascade_delete_group("OSS/Production", "OSS/Production/DB"),
-            Some("OSS/DB".to_string())
+            cascade_delete_group("Work/Production", "Work/Production/DB"),
+            Some("Work/DB".to_string())
         );
         assert_eq!(
-            cascade_delete_group("OSS", "OSS/Production/DB"),
+            cascade_delete_group("Work", "Work/Production/DB"),
             Some("Production/DB".to_string())
         );
     }
@@ -299,16 +299,16 @@ mod group_cascade_tests {
     #[test]
     fn rename_direct_member_and_descendant_suffix() {
         assert_eq!(
-            cascade_rename_group("OSS", "OSS-Legacy", "OSS"),
-            "OSS-Legacy"
+            cascade_rename_group("Work", "Work-Legacy", "Work"),
+            "Work-Legacy"
         );
         assert_eq!(
-            cascade_rename_group("OSS", "OSS-Legacy", "OSS/Production"),
-            "OSS-Legacy/Production"
+            cascade_rename_group("Work", "Work-Legacy", "Work/Production"),
+            "Work-Legacy/Production"
         );
         assert_eq!(
-            cascade_rename_group("OSS/Production", "OSS/Prod", "OSS/Production/DB"),
-            "OSS/Prod/DB"
+            cascade_rename_group("Work/Production", "Work/Prod", "Work/Production/DB"),
+            "Work/Prod/DB"
         );
     }
 }
@@ -335,47 +335,47 @@ mod build_conn_items_tests {
 
     #[test]
     fn implied_ancestor_header_renders_with_zero_direct_members() {
-        let (_dir, store) = store_with_groups(&[Some("OSS/Production")]);
+        let (_dir, store) = store_with_groups(&[Some("Work/Production")]);
         let rows = build_conn_items(&store, &HashSet::new(), "");
-        // OSS (0 direct, 1 nested) -> OSS/Production (1 direct) -> the connection.
+        // Work (0 direct, 1 nested) -> Work/Production (1 direct) -> the connection.
         assert_eq!(rows.len(), 3);
         assert!(rows[0].is_header);
-        assert_eq!(rows[0].group.as_str(), "OSS");
+        assert_eq!(rows[0].group.as_str(), "Work");
         assert_eq!(rows[0].depth, 0);
         assert_eq!(rows[0].count, 1);
         assert!(rows[1].is_header);
-        assert_eq!(rows[1].group.as_str(), "OSS/Production");
+        assert_eq!(rows[1].group.as_str(), "Work/Production");
         assert_eq!(rows[1].depth, 1);
         assert_eq!(rows[1].count, 1);
         assert!(!rows[2].is_header);
-        assert_eq!(rows[2].group.as_str(), "OSS/Production");
+        assert_eq!(rows[2].group.as_str(), "Work/Production");
         assert_eq!(rows[2].depth, 1);
     }
 
     #[test]
     fn collapsing_a_parent_hides_the_whole_subtree() {
-        let (_dir, store) = store_with_groups(&[Some("OSS/Production"), Some("OSS")]);
-        let collapsed = HashSet::from(["OSS".to_string()]);
+        let (_dir, store) = store_with_groups(&[Some("Work/Production"), Some("Work")]);
+        let collapsed = HashSet::from(["Work".to_string()]);
         let rows = build_conn_items(&store, &collapsed, "");
-        // Only the OSS header itself remains visible.
+        // Only the Work header itself remains visible.
         assert_eq!(rows.len(), 1);
         assert!(rows[0].is_header);
-        assert_eq!(rows[0].group.as_str(), "OSS");
+        assert_eq!(rows[0].group.as_str(), "Work");
         assert!(!rows[0].expanded);
         assert!(rows[0].is_group_end);
     }
 
     #[test]
     fn is_group_end_lands_on_the_deepest_last_row_of_each_top_level_group() {
-        let (_dir, store) = store_with_groups(&[Some("OSS/Production"), Some("LOCAL")]);
+        let (_dir, store) = store_with_groups(&[Some("Work/Production"), Some("LOCAL")]);
         let rows = build_conn_items(&store, &HashSet::new(), "");
-        // OSS, OSS/Production, conn0 (deepest last row of the OSS card),
+        // Work, Work/Production, conn0 (deepest last row of the Work card),
         // LOCAL, conn1 (last row of the LOCAL card).
         assert_eq!(rows.len(), 5);
-        assert!(rows[2].is_group_end, "conn0 should close the OSS card");
+        assert!(rows[2].is_group_end, "conn0 should close the Work card");
         assert!(
             !rows[1].is_group_end,
-            "the OSS/Production header is not the card's true end"
+            "the Work/Production header is not the card's true end"
         );
         assert!(rows[4].is_group_end, "conn1 should close the LOCAL card");
     }
@@ -494,11 +494,11 @@ fn emit_group_subtree(
 /// regardless of grouping or ordering. `collapsed` holds the set of full
 /// group paths currently folded shut.
 ///
-/// `SavedConnection.group` is treated as a `/`-delimited path: `"OSS"` is a
-/// top-level group same as before, `"OSS/Production"` nests under it. A
+/// `SavedConnection.group` is treated as a `/`-delimited path: `"Work"` is a
+/// top-level group same as before, `"Work/Production"` nests under it. A
 /// group's ancestors are registered as folder headers even if they hold no
-/// connections directly, so `"OSS"` still renders when every connection
-/// under it lives at `"OSS/Production"`.
+/// connections directly, so `"Work"` still renders when every connection
+/// under it lives at `"Work/Production"`.
 fn build_conn_items(
     store: &rdb_connstore::ConnStore,
     collapsed: &HashSet<String>,
@@ -1133,7 +1133,7 @@ fn filter_operators(engine: rdb_connstore::Engine) -> Vec<SharedString> {
             "IS NULL",
             "IS NOT NULL",
         ],
-        Engine::MySql | Engine::Sqlite | Engine::Mssql | Engine::Clickhouse => &[
+        Engine::MySql | Engine::MariaDb | Engine::Sqlite | Engine::Mssql | Engine::Clickhouse => &[
             "=",
             "<>",
             ">",
@@ -1156,7 +1156,7 @@ fn filter_operators(engine: rdb_connstore::Engine) -> Vec<SharedString> {
             "IS NULL",
             "IS NOT NULL",
         ],
-        Engine::Redis | Engine::Mongo => &[
+        Engine::Redis | Engine::Valkey | Engine::Mongo => &[
             "=",
             "<>",
             ">",
@@ -2514,7 +2514,7 @@ fn browse_text(
                 q(&table.name)
             )
         }
-        rdb_connstore::Engine::MySql => {
+        rdb_connstore::Engine::MySql | rdb_connstore::Engine::MariaDb => {
             let where_sql = sql_where(
                 col_filters,
                 |c| format!("`{}`", c.replace('`', "``")),
@@ -2564,7 +2564,7 @@ fn browse_text(
                 table.name
             )
         }
-        rdb_connstore::Engine::Redis => {
+        rdb_connstore::Engine::Redis | rdb_connstore::Engine::Valkey => {
             format!("BROWSE {} {offset} {limit}", table.name)
         }
         rdb_connstore::Engine::Mssql => {
@@ -3045,8 +3045,8 @@ enum PaletteAction {
     OpenRecent(usize),
 }
 
-/// Formats a `/`-delimited group path (e.g. `"OSS/Postgre"`) as `"Group: OSS
-/// · Subgroup: Postgre"`, or just `"Group: OSS"` with no subgroup. Empty
+/// Formats a `/`-delimited group path (e.g. `"Work/Postgre"`) as `"Group: Work
+/// · Subgroup: Postgre"`, or just `"Group: Work"` with no subgroup. Empty
 /// string (no dangling separator to strip) when `group` is `None`/blank, so
 /// callers can drop the whole line rather than showing an empty group.
 fn group_sub_label(group: Option<&str>) -> String {

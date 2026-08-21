@@ -79,8 +79,12 @@ impl AnyDriver {
             Engine::Postgres => {
                 AnyDriverInner::Postgres(PostgresDriver::connect(&target_cfg).await?)
             }
-            Engine::MySql => AnyDriverInner::Mysql(MysqlDriver::connect(&target_cfg).await?),
-            Engine::Redis => AnyDriverInner::Redis(RedisDriver::connect(&target_cfg).await?),
+            Engine::MySql | Engine::MariaDb => {
+                AnyDriverInner::Mysql(MysqlDriver::connect(&target_cfg).await?)
+            }
+            Engine::Redis | Engine::Valkey => {
+                AnyDriverInner::Redis(RedisDriver::connect(&target_cfg).await?)
+            }
             Engine::Mongo => AnyDriverInner::Mongo(MongoDriver::connect(&target_cfg).await?),
             Engine::Sqlite => AnyDriverInner::Sqlite(SqliteDriver::connect(&target_cfg).await?),
             Engine::Cassandra => {
@@ -320,13 +324,13 @@ pub fn write_statements(engine: Engine, ops: &[WriteOp]) -> Vec<String> {
             (Engine::Postgres, WriteOp::Delete { table, pk }) => {
                 rdb_driver_postgres::write_sql::delete_sql(table, pk)
             }
-            (Engine::MySql, WriteOp::Update { table, pk, changes }) => {
+            (Engine::MySql | Engine::MariaDb, WriteOp::Update { table, pk, changes }) => {
                 rdb_driver_mysql::write_sql::update_sql(table, pk, changes).0
             }
-            (Engine::MySql, WriteOp::Insert { table, values }) => {
+            (Engine::MySql | Engine::MariaDb, WriteOp::Insert { table, values }) => {
                 rdb_driver_mysql::write_sql::insert_sql(table, values).0
             }
-            (Engine::MySql, WriteOp::Delete { table, pk }) => {
+            (Engine::MySql | Engine::MariaDb, WriteOp::Delete { table, pk }) => {
                 rdb_driver_mysql::write_sql::delete_sql(table, pk).0
             }
             (Engine::Sqlite, WriteOp::Update { table, pk, changes }) => {
@@ -363,7 +367,7 @@ pub fn write_statements(engine: Engine, ops: &[WriteOp]) -> Vec<String> {
             // commit() rejects these outright, this is preview text only.
             (Engine::Clickhouse, op) => format!("ClickHouse write (unsupported): {op:?}"),
             (Engine::Mongo, op) => format!("MongoDB write: {op:?}"),
-            (Engine::Redis, op) => format!("Redis write: {op:?}"),
+            (Engine::Redis | Engine::Valkey, op) => format!("Redis write: {op:?}"),
         })
         .collect()
 }

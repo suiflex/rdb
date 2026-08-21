@@ -166,6 +166,16 @@ Keep the scope specific (`app`, `driver-postgres`, `driver-mysql`, `core`,
      `large_enum_variant`) + `write_statements`. Then run `cargo build -p rdb`
      and add an arm everywhere it complains — the compiler enumerates every
      exhaustive `Engine`/`Query` match site for you; don't hand-audit.
+     **Aliased engine, existing driver** (a wire-protocol-compatible fork of
+     an engine already supported — MariaDB → `driver-mysql`'s `mysql_async`,
+     Valkey → `driver-redis`'s `redis` crate): skip the new crate entirely.
+     Give the alias its own `Engine` variant and `ENGINES` row (own display
+     name/scheme/port/icon — it should still be discoverable in the picker
+     in its own right), but extend every `Engine`-matching site with an
+     or-pattern reusing the existing driver instead of adding an
+     `AnyDriverInner` variant, e.g. `Engine::MySql | Engine::MariaDb =>
+     AnyDriverInner::Mysql(MysqlDriver::connect(&cfg).await?)`. Same
+     `cargo build` compiler-driven sweep applies for finding every site.
   4. Nothing. This step used to list six hand-written string tables
      (`label_to_engine`/`default_port` in the connection form, `label`/`badge`
      in `dispatch.rs`, label/scheme in `export.rs`) that had to be edited by
@@ -182,8 +192,13 @@ Keep the scope specific (`app`, `driver-postgres`, `driver-mysql`, `core`,
        list and `Tokens.db-color()` in `tokens.slint` (`components.slint`).
      - Full-color: `app/src/ui/icons/brand/<engine>.svg`, wired into
        `EngineLogo`'s ternary (`components.slint`, backs the Engine
-       dropdown's `show-logo` and the empty-state "Works with" row in
-       `picker.slint`).
+       dropdown's `show-logo`). **Separately**, the empty-state "Works
+       with" trust-badge row in `picker.slint`'s `SocialBanner` hardcodes
+       its own list of raw `Image { source: @image-url("icons/brand/
+       <engine>.svg") }` elements — it does *not* go through `EngineLogo`,
+       so it's a second, easy-to-miss touch point for the same asset
+       (missed on the MariaDB/Valkey add, caught only by screenshotting
+       the picker afterward).
      - **No official mark available → don't hand-draw one.** Fall back to
        text instead: `DbBadge`'s `fallback-text` (e.g. `"MS"` for SQL
        Server), `EngineLogo`'s empty-source case (renders nothing, row text

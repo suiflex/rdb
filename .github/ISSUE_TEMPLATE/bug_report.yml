@@ -29,7 +29,9 @@ body:
       options:
         - PostgreSQL
         - MySQL
+        - MariaDB
         - Redis
+        - Valkey
         - MongoDB
         - SQLite
         - Cassandra

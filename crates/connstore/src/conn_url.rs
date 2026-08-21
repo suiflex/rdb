@@ -46,8 +46,10 @@ pub struct ParsedUrl {
 fn scheme_to_engine(scheme: &str) -> Option<Engine> {
     match scheme {
         "postgres" | "postgresql" => Some(Engine::Postgres),
-        "mysql" | "mariadb" => Some(Engine::MySql),
+        "mysql" => Some(Engine::MySql),
+        "mariadb" => Some(Engine::MariaDb),
         "redis" | "rediss" => Some(Engine::Redis),
+        "valkey" => Some(Engine::Valkey),
         "mongodb" | "mongodb+srv" => Some(Engine::Mongo),
         "sqlite" | "file" => Some(Engine::Sqlite),
         "cassandra" | "cql" | "scylla" => Some(Engine::Cassandra),
@@ -254,12 +256,20 @@ mod tests {
     }
 
     #[test]
-    fn mariadb_scheme_maps_to_mysql() {
+    fn mariadb_scheme_maps_to_its_own_engine() {
         let p = parse_conn_url("mariadb://root@127.0.0.1:3307").unwrap();
-        assert_eq!(p.engine, Some(Engine::MySql));
+        assert_eq!(p.engine, Some(Engine::MariaDb));
         assert_eq!(p.host.as_deref(), Some("127.0.0.1"));
         assert_eq!(p.port, Some(3307));
         assert_eq!(p.user.as_deref(), Some("root"));
+    }
+
+    #[test]
+    fn valkey_scheme_maps_to_its_own_engine() {
+        let p = parse_conn_url("valkey://:authpass@valkey.host:6379").unwrap();
+        assert_eq!(p.engine, Some(Engine::Valkey));
+        assert_eq!(p.host.as_deref(), Some("valkey.host"));
+        assert_eq!(p.port, Some(6379));
     }
 
     #[test]

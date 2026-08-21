@@ -68,6 +68,22 @@ export component CodeEditor inherits Rectangle {
             // …and one line clear of the bottom edge
             edit-scroll.visible-height - Tokens.sp2
                 - root.cursor-visual-row * root.line-h - 2 * root.line-h);
+        // Same idea, horizontally — a long single-line query otherwise leaves
+        // the caret scrolled out of sight after Cmd+Right/End or typing past
+        // the right edge, with nothing bringing the viewport back to it.
+        //
+        // The near-side bound deliberately omits the gutter-w + sp3 offset
+        // that the caret's own x-coordinate carries (unlike the vertical
+        // case, there's a real gutter to the left of column 0): keeping it
+        // would clamp viewport-x to a small negative value instead of 0 once
+        // the caret returns near the start of the line, leaving the gutter
+        // clipped off the left edge after scrolling back from a long line.
+        edit-scroll.viewport-x = clamp(
+            edit-scroll.viewport-x,
+            root.charw - Tokens.sp2 - root.cursor-col * root.charw,
+            edit-scroll.visible-width - Tokens.sp2
+                - (root.gutter-w + Tokens.sp3 + root.cursor-col * root.charw)
+                - 2 * root.charw);
     }
 
     probe := Text {

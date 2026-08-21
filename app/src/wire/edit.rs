@@ -505,6 +505,70 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         });
     }
 
+    // ----- "Copy SQL": the statements a commit would run, without running them -----
+    // Serves both panes; the pending-edits strip already reports whichever pane
+    // is active, so the button follows the same rule.
+    {
+        let weak = window.as_weak();
+        let panes = panes.clone();
+        let cur_engine = cur_engine.clone();
+        let query_console = query_console.clone();
+        window.on_copy_edit_sql(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let pane = if w.get_split() {
+                w.get_active_pane().clamp(0, 1) as usize
+            } else {
+                0
+            };
+            let ops = {
+                let buf = panes[pane].edit_buf.lock().unwrap();
+                if buf.is_empty() {
+                    return;
+                }
+                let dg = panes[pane].displayed_grid.lock().unwrap();
+                let Some(g) = dg.as_ref() else {
+                    return;
+                };
+                buf.to_ops(g)
+            };
+            let ops = match ops {
+                Ok(ops) if !ops.is_empty() => ops,
+                Ok(_) => return,
+                Err(msg) => {
+                    set_p_status_error(&w, pane, true);
+                    set_p_result_status(&w, pane, SharedString::from(format!("error: {msg}")));
+                    return;
+                }
+            };
+            let Some(engine) = *cur_engine.borrow() else {
+                return;
+            };
+            let statements = dispatch::write_statements(engine, &ops);
+            if statements.is_empty() {
+                return;
+            }
+            for statement in &statements {
+                append_query_console(&query_console, statement.clone());
+            }
+            sync_query_console(&w, &query_console);
+            let sql = statements.join(";\n") + ";";
+            let n = statements.len();
+            let copied = clip_set(&sql);
+            set_p_status_error(&w, pane, !copied);
+            set_p_result_status(
+                &w,
+                pane,
+                SharedString::from(if copied {
+                    format!("{n} statement{} copied", if n == 1 { "" } else { "s" })
+                } else {
+                    "error: no clipboard available".to_string()
+                }),
+            );
+        });
+    }
+
     // ----- right (split) pane: discard/commit, mirrors the left pane above -----
     {
         let weak = window.as_weak();

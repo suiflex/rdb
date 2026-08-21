@@ -100,11 +100,14 @@ pub fn single_table_name(sql: &str) -> Option<(Option<String>, String)> {
 /// Editor placeholder/hint per engine (shown in the UI).
 pub fn editor_hint(engine: Engine) -> &'static str {
     match engine {
-        Engine::Postgres | Engine::MySql | Engine::Sqlite | Engine::Mssql | Engine::Clickhouse => {
-            "SELECT * FROM table"
-        }
+        Engine::Postgres
+        | Engine::MySql
+        | Engine::MariaDb
+        | Engine::Sqlite
+        | Engine::Mssql
+        | Engine::Clickhouse => "SELECT * FROM table",
         Engine::Cassandra => "SELECT * FROM keyspace.table",
-        Engine::Redis => "SET key value",
+        Engine::Redis | Engine::Valkey => "SET key value",
         Engine::Mongo => r#"db.coll.find({ })  ·  or JSON envelope"#,
     }
 }
@@ -113,11 +116,14 @@ pub fn editor_hint(engine: Engine) -> &'static str {
 /// engine's query language.
 pub fn language_label(engine: Engine) -> &'static str {
     match engine {
-        Engine::Postgres | Engine::MySql | Engine::Sqlite | Engine::Mssql | Engine::Clickhouse => {
-            "SQL"
-        }
+        Engine::Postgres
+        | Engine::MySql
+        | Engine::MariaDb
+        | Engine::Sqlite
+        | Engine::Mssql
+        | Engine::Clickhouse => "SQL",
         Engine::Cassandra => "CQL",
-        Engine::Redis => "Redis",
+        Engine::Redis | Engine::Valkey => "Redis",
         Engine::Mongo => "Mongo",
     }
 }
@@ -128,11 +134,12 @@ pub fn comment_prefix(engine: Engine) -> &'static str {
     match engine {
         Engine::Postgres
         | Engine::MySql
+        | Engine::MariaDb
         | Engine::Sqlite
         | Engine::Cassandra
         | Engine::Mssql
         | Engine::Clickhouse => "--",
-        Engine::Redis => "#",
+        Engine::Redis | Engine::Valkey => "#",
         Engine::Mongo => "//",
     }
 }

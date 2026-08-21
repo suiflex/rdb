@@ -140,7 +140,9 @@ component EngineLogo inherits Image {
     source:
         label == "PostgreSQL" ? @image-url("icons/brand/postgres.svg")
         : label == "MySQL" ? @image-url("icons/brand/mysql.svg")
+        : label == "MariaDB" ? @image-url("icons/brand/mariadb.svg")
         : label == "Redis" ? @image-url("icons/brand/redis.svg")
+        : label == "Valkey" ? @image-url("icons/brand/valkey.svg")
         : label == "MongoDB" ? @image-url("icons/brand/mongo.svg")
         : label == "SQLite" ? @image-url("icons/brand/sqlite.svg")
         : label == "Cassandra" ? @image-url("icons/brand/cassandra.svg")
@@ -242,7 +244,8 @@ export component DbBadge inherits Rectangle {
     background: self.fill;
     // Known engine → white brand glyph (icons/db-<engine>.svg via AppIcon).
     property <bool> known: engine == "postgres" || engine == "mysql"
-        || engine == "redis" || engine == "sqlite" || engine == "mongo"
+        || engine == "mariadb" || engine == "redis" || engine == "valkey"
+        || engine == "sqlite" || engine == "mongo"
         || engine == "cassandra" || engine == "clickhouse";
     // Engines with no real brand mark available (e.g. SQL Server — no
     // official logo shipped, and none hand-drawn per operator's call) get

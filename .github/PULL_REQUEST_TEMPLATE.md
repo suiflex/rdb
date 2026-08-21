@@ -29,6 +29,12 @@ Keep the PR focused — one logical change is easier to review and revert.
 - [ ] `make fe-build` / `make fe-run` for UI changes
 - [ ] Manual verification steps (describe them):
 
+## First pull request?
+
+- [ ] I have signed the
+      [Contributor License Agreement](https://github.com/suiflex/rdb/blob/develop/CLA.md)
+      — the bot will comment below with the one-line reply that signs it.
+
 ## Notes for reviewers
 
 <!-- Optional: screenshots for UI changes, trade-offs, follow-ups, anything risky. -->
