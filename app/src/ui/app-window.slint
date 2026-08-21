@@ -440,6 +440,8 @@ callback create-table-commit();
     callback mark-delete();
     callback commit-edits();
     callback discard-edits();
+    // Pending edits as SQL text, to the clipboard, without writing anything.
+    callback copy-edit-sql();
     // Tab / Shift+Tab while editing: store the cell, edit the neighbour.
     callback cell-advance(int, int, string, bool);
 
@@ -1959,6 +1961,9 @@ callback create-table-commit();
                         }
                         commit-edits() => {
                             root.commit-edits();
+                        }
+                        copy-edit-sql() => {
+                            root.copy-edit-sql();
                         }
                         p1-commit-edits() => {
                             root.p1-commit-edits();
