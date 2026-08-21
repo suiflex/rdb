@@ -29,6 +29,16 @@ Keep the PR focused — one logical change is easier to review and revert.
 - [ ] `make fe-build` / `make fe-run` for UI changes
 - [ ] Manual verification steps (describe them):
 
+## Screenshots
+
+<!--
+Touching app/? Attach a before/after image or a short clip — drag it straight
+into this box. Nothing else in a pull request shows a visual change: the diff
+and the test output both stay silent about it.
+
+Backend-only change (crates/, ci, docs)? Delete this section.
+-->
+
 ## First pull request?
 
 - [ ] I have signed the
