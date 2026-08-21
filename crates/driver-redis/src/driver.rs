@@ -3,7 +3,7 @@ use redis::aio::MultiplexedConnection;
 use redis::{Client, Value};
 use tokio::sync::Mutex;
 
-use rdb_core::conn::ConnConfig;
+use rdb_core::conn::{client_id, ConnConfig};
 use rdb_core::driver::Driver;
 use rdb_core::error::{RdbError, Result};
 use rdb_core::query::Query;
@@ -31,10 +31,19 @@ impl Driver for RedisDriver {
     async fn connect(cfg: &ConnConfig) -> Result<Self> {
         let client =
             Client::open(connection_url(cfg)).map_err(|e| RdbError::Connection(e.to_string()))?;
-        let conn = client
+        let mut conn = client
             .get_multiplexed_async_connection()
             .await
             .map_err(|e| RdbError::Connection(e.to_string()))?;
+        // Names the connection in CLIENT LIST / CLIENT INFO. Best-effort: the
+        // name is cosmetic, and a server old enough or locked down enough to
+        // reject SETNAME should not cost the user a working connection.
+        // Redis rejects spaces in a client name, so send it hyphenated.
+        let _: std::result::Result<(), _> = redis::cmd("CLIENT")
+            .arg("SETNAME")
+            .arg(client_id().replace(' ', "-"))
+            .query_async::<()>(&mut conn)
+            .await;
         let db = cfg.database.clone().unwrap_or_else(|| "0".to_string());
         Ok(RedisDriver {
             conn: Mutex::new(conn),

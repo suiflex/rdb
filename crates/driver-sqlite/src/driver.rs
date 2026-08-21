@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use rusqlite::types::ValueRef;
-use rusqlite::Connection;
+use rusqlite::{Connection, InterruptHandle};
 
 use rdb_core::conn::ConnConfig;
 use rdb_core::driver::Driver;
@@ -23,6 +23,10 @@ pub struct SqliteDriver {
     conn: Arc<Mutex<Connection>>,
     /// Logical database name shown in the schema tree (the file stem).
     db_name: String,
+    /// Taken at connect so `cancel_running` can interrupt without locking
+    /// `conn` — the running query already holds that mutex, so waiting for it
+    /// would deadlock the cancel against the thing it is trying to cancel.
+    interrupt: InterruptHandle,
 }
 
 impl SqliteDriver {
@@ -59,10 +63,20 @@ impl Driver for SqliteDriver {
         .await
         .map_err(|e| RdbError::Connection(e.to_string()))?
         .map_err(|e| RdbError::Connection(e.to_string()))?;
+        let interrupt = conn.get_interrupt_handle();
         Ok(SqliteDriver {
             conn: Arc::new(Mutex::new(conn)),
             db_name,
+            interrupt,
         })
+    }
+
+    /// `sqlite3_interrupt` makes the in-progress statement fail with
+    /// `SQLITE_INTERRUPT`. It is a no-op when nothing is running, which matches
+    /// the trait's best-effort contract.
+    async fn cancel_running(&self) -> Result<()> {
+        self.interrupt.interrupt();
+        Ok(())
     }
 
     async fn ping(&self) -> Result<()> {

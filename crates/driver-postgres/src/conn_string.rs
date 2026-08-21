@@ -1,4 +1,4 @@
-use rdb_core::conn::{ConnConfig, SslMode};
+use rdb_core::conn::{client_id, ConnConfig, SslMode, CONNECT_TIMEOUT, KEEPALIVE_INTERVAL};
 
 /// Map our `SslMode` to a libpq `sslmode` token.
 ///
@@ -29,6 +29,14 @@ pub fn build_conn_string(cfg: &ConnConfig) -> String {
         parts.push(format!("password={pw}"));
     }
     parts.push(format!("sslmode={}", sslmode_token(cfg.sslmode)));
+    // Bound the handshake, and keep probing an idle socket so a silently
+    // dropped link surfaces as an error instead of parking a query forever.
+    // Names RDB in pg_stat_activity. Spaces are legal inside a libpq value
+    // only when quoted, and the identity contains one ("RDB 0.40.0").
+    parts.push(format!("application_name='{}'", client_id()));
+    parts.push(format!("connect_timeout={}", CONNECT_TIMEOUT.as_secs()));
+    parts.push("keepalives=1".to_string());
+    parts.push(format!("keepalives_idle={}", KEEPALIVE_INTERVAL.as_secs()));
     parts.join(" ")
 }
 
@@ -53,10 +61,18 @@ mod tests {
     #[test]
     fn builds_full_conn_string() {
         let s = build_conn_string(&base());
-        assert_eq!(
-            s,
+        assert!(s.starts_with(
             "host=localhost port=5432 user=postgres dbname=app password=secret sslmode=prefer"
-        );
+        ));
+    }
+
+    #[test]
+    fn always_bounds_connect_and_enables_keepalive() {
+        // Without these a silently dropped link parks a query forever.
+        let s = build_conn_string(&base());
+        assert!(s.contains(&format!("connect_timeout={}", CONNECT_TIMEOUT.as_secs())));
+        assert!(s.contains("keepalives=1"));
+        assert!(s.contains(&format!("keepalives_idle={}", KEEPALIVE_INTERVAL.as_secs())));
     }
 
     #[test]

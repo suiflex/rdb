@@ -15,7 +15,7 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 
-use rdb_core::conn::{ConnConfig, SslMode};
+use rdb_core::conn::{client_id, ConnConfig, SslMode, CONNECT_TIMEOUT};
 use rdb_core::driver::Driver;
 use rdb_core::error::{RdbError, Result};
 use rdb_core::query::Query;
@@ -48,6 +48,8 @@ fn build_config(cfg: &ConnConfig) -> Config {
     if let Some(db) = &cfg.database {
         config.database(db);
     }
+    // Shows as program_name in sys.dm_exec_sessions and SQL Server Profiler.
+    config.application_name(client_id());
     match cfg.sslmode {
         SslMode::Disable => {
             config.encryption(EncryptionLevel::NotSupported);
@@ -71,8 +73,16 @@ fn build_config(cfg: &ConnConfig) -> Config {
 impl Driver for MssqlDriver {
     async fn connect(cfg: &ConnConfig) -> Result<Self> {
         let config = build_config(cfg);
-        let tcp = TcpStream::connect(config.get_addr())
+        // Bound the TCP connect: an unreachable host that silently blackholes
+        // SYNs would otherwise hang here until the OS gives up, minutes later.
+        let tcp = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(config.get_addr()))
             .await
+            .map_err(|_| {
+                RdbError::Connection(format!(
+                    "connection timed out after {}s",
+                    CONNECT_TIMEOUT.as_secs()
+                ))
+            })?
             .map_err(|e| RdbError::Connection(e.to_string()))?;
         tcp.set_nodelay(true)
             .map_err(|e| RdbError::Connection(e.to_string()))?;

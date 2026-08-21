@@ -8,7 +8,7 @@ import { Tokens } from "tokens.slint";
 import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow, DocRow, ResultTabItem } from "structs.slint";
 import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
-import { PaletteItem } from "palette.slint";
+import { PaletteItem } from "structs.slint";
 import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton, FilterField, ResultModeToggle, DbBadge, Tooltip, TooltipArea, Shortcut } from "components.slint";
 import { ScrollView, TextEdit, ComboBox } from "std-widgets.slint";
 import { AppIcon } from "icons.slint";
@@ -139,6 +139,14 @@ export component QueryPane inherits Rectangle {
     in property <string> sort-text;            // e.g. "sort: id ↑"
     in-out property <string> mongo-filter;     // Compass-style Mongo filter doc
     callback apply-mongo-filter();
+    // Filter-box autocomplete. The candidate list is window-level and shared by
+    // every filter field, because only the focused one can be typing — see
+    // FilterField, which paints its list only while it has focus.
+    in property <[PaletteItem]> filter-completion-items;
+    in property <int> filter-completion-selected;
+    callback filter-completion-choose(int);
+    callback filter-completion-key(string) -> bool;
+    callback mongo-filter-edited(string);
     callback add-row();
     callback mark-delete();
     callback apply-filter();
@@ -208,6 +216,11 @@ export component QueryPane inherits Rectangle {
                         placeholder: "Filter — { \"field\": value }";
                         text <=> root.mongo-filter;
                         submitted => { root.apply-mongo-filter(); }
+                        completion-items: root.filter-completion-items;
+                        completion-selected: root.filter-completion-selected;
+                        completion-choose(i) => { root.filter-completion-choose(i); }
+                        completion-key(k) => { root.filter-completion-key(k) }
+                        edited(t) => { root.mongo-filter-edited(t); }
                     }
                 }
                 // sort text

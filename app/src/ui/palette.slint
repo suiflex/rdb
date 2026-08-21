@@ -2,32 +2,10 @@
 // Open Connection (⌘O) pickers. One shared list-modal shell.
 // References: design/4-modal-open-database.png, design/5-modal-open-connection.png.
 import { Tokens } from "tokens.slint";
+import { PaletteItem } from "structs.slint";
 import { DbBadge, OutlineChip, PrimaryButton, SecondaryButton, FilterField } from "components.slint";
 import { AppIcon } from "icons.slint";
 
-// `kind` picks the leading icon: "database" | "group" | engine badge keys
-// ("postgres"…) | "table" | "function" | "command". `sub` is the mono second
-// line (host : db); `local` appends the green "(local)" tag.
-export struct PaletteItem {
-    label: string,
-    kind: string,
-    sub: string,
-    local: bool,
-    // Per-connection custom accent (connection rows only; ignored elsewhere).
-    color: color,
-    has-custom-color: bool,
-    // Environment tag pill (empty label => no pill rendered).
-    env-tag-label: string,
-    env-tag-color: color,
-    // Group rows only: raw-case group key (for toggling) and current
-    // expand state (drives the caret rotation).
-    group: string,
-    expanded: bool,
-    // Last row of a group's visible block — rounds the card's bottom corners.
-    is-group-end: bool,
-    // Nesting depth of this row's group (0 = top-level). Mirrors `ConnItem.depth`.
-    depth: int,
-}
 // One top-level card of grouped items: the ⌘O "Open Connection" picker's own
 // header + nested subgroups + connections, boxed with a continuous outline
 // (mirrors `TopLevelGroup` in the sidebar). Every other `ListModal` user

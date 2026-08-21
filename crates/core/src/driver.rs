@@ -116,6 +116,25 @@ pub trait Driver: Send + Sync {
         }
     }
 
+    /// Ask the server to abort whatever this connection is currently running.
+    ///
+    /// This is the server-side half of cancel: [`Driver::query`] is driven from
+    /// a tokio task the UI can abort, but aborting the task only drops the
+    /// client's end of the socket — the statement keeps burning server CPU
+    /// until the server notices. Engines that can address a running statement
+    /// out-of-band (Postgres cancel request, MySQL `KILL QUERY`, ClickHouse
+    /// `KILL QUERY`, Mongo `killOp`, SQLite `interrupt`) override this.
+    ///
+    /// Default: no-op. Inherited by engines where a statement is not separately
+    /// cancelable (Cassandra, SQL Server) or where a query is a single
+    /// round-trip that cannot meaningfully be interrupted (Redis).
+    ///
+    /// Best-effort by contract: a driver that finds nothing running returns
+    /// `Ok(())`. Callers must not treat success as proof a statement was killed.
+    async fn cancel_running(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// Primary-key column names of `table` (row identity for editing). An
     /// empty vec means the container is not editable. Default: not editable.
     async fn primary_key(&self, _table: &TableRef) -> Result<Vec<String>> {

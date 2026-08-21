@@ -166,13 +166,13 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             let schema_name = it.label.to_string();
             w.set_schema_name(it.label.clone());
             w.set_bc_schema(it.label);
-            // Anything browsed belonged to the old schema; force a fresh pick and
-            // drop expand/collapse state that referenced the old schema's tables.
-            w.set_active_table(SharedString::default());
-            // Table/browse tabs referenced the old schema and must drop, but SQL
-            // scratch tabs are schema-agnostic — keep them so a query in progress
-            // survives the switch. Snapshot the live editor into the active tab
-            // first (the user may not have run/switched since typing).
+            // Every tab survives a schema switch. A table tab carries its own
+            // fully-qualified TableRef (database + schema + name), so it stays
+            // valid and re-queryable no matter which schema is active now —
+            // closing it was throwing away work the user still wanted, which is
+            // not what switching schema asks for. Snapshot the live editor into
+            // the active tab first (the user may not have run/switched since
+            // typing).
             let prev_active = active_tab_id.lock().unwrap().clone();
             let keep_active: Option<String> = {
                 let mut tabs = workspace_tabs.lock().unwrap();
@@ -181,23 +181,38 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                         tab.query_text = ed_state.borrow().text();
                     }
                 }
-                tabs.retain(|t| t.kind == "sql");
-                // Prefer keeping the tab the user was on (if it was SQL); else the
-                // first surviving SQL tab.
                 prev_active
                     .clone()
                     .filter(|id| tabs.iter().any(|t| &t.id == id))
                     .or_else(|| tabs.first().map(|t| t.id.clone()))
             };
-            // Standby: the active SQL tab survives, so its result is still valid —
+            // Standby: the active tab survives, so its result is still valid —
             // leave the grid up instead of blanking it.
             let standby = keep_active.is_some() && keep_active == prev_active;
             *active_tab_id.lock().unwrap() = keep_active.clone();
-            let limit = browse.lock().unwrap().limit;
-            *browse.lock().unwrap() = BrowseState {
-                limit,
-                ..Default::default()
+            // Reset the live browse state only when the tab staying active is
+            // not a table tab. A surviving table tab keeps browsing its own
+            // TableRef, so wiping page/limit/filters under it would break its
+            // pagination for a switch that never concerned it.
+            let active_is_table = {
+                let tabs = workspace_tabs.lock().unwrap();
+                keep_active
+                    .as_ref()
+                    .and_then(|id| tabs.iter().find(|t| &t.id == id))
+                    .is_some_and(|t| t.table.is_some())
             };
+            if !active_is_table {
+                // Nothing is being browsed any more, so drop the browse state
+                // and the active-table marker together — the marker is what
+                // gates Refresh and the "Filter Rows" affordance, and a table
+                // tab that stays active still needs both.
+                w.set_active_table(SharedString::default());
+                let limit = browse.lock().unwrap().limit;
+                *browse.lock().unwrap() = BrowseState {
+                    limit,
+                    ..Default::default()
+                };
+            }
             {
                 let tabs = workspace_tabs.lock().unwrap();
                 set_workspace_tabs(&w, &tabs, keep_active.as_deref());

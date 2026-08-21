@@ -243,6 +243,24 @@ impl AnyDriver {
     /// Streaming read: Postgres pulls from a server cursor, every other engine
     /// falls back to the trait default (one buffered `query`, chunked). Kept in
     /// sync with the trait so the "No limit" path streams instead of freezing.
+    /// Ask the server to abort this connection's in-flight statement. See
+    /// [`rdb_core::driver::Driver::cancel_running`] — best-effort, and a no-op
+    /// on engines with no cancel API.
+    pub async fn cancel_running(&self) -> Result<()> {
+        match &self.inner {
+            AnyDriverInner::Postgres(d) => d.cancel_running().await,
+            AnyDriverInner::Mysql(d) => d.cancel_running().await,
+            AnyDriverInner::Redis(d) => d.cancel_running().await,
+            AnyDriverInner::Mongo(d) => d.cancel_running().await,
+            AnyDriverInner::Sqlite(d) => d.cancel_running().await,
+            AnyDriverInner::Cassandra(d) => d.cancel_running().await,
+            AnyDriverInner::Mssql(d) => d.cancel_running().await,
+            AnyDriverInner::Clickhouse(d) => d.cancel_running().await,
+            #[cfg(feature = "mock")]
+            AnyDriverInner::Mock(d) => d.cancel_running().await,
+        }
+    }
+
     pub async fn query_stream(
         &self,
         q: &Query,

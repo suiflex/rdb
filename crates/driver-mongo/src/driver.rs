@@ -1,14 +1,14 @@
 use async_trait::async_trait;
 use futures::stream::TryStreamExt;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use mongodb::bson::{doc, Document};
+use mongodb::bson::{doc, Bson, Document};
 use mongodb::options::{ClientOptions, ServerMonitoringMode};
 use mongodb::{Client, Collection};
 
-use rdb_core::conn::{ConnConfig, SslMode};
+use rdb_core::conn::{client_id, ConnConfig, SslMode};
 use rdb_core::driver::Driver;
 use rdb_core::error::{RdbError, Result};
 use rdb_core::query::{MongoKind, MongoOp, Query};
@@ -27,6 +27,37 @@ pub struct MongoDriver {
     /// Max collections listed per database (the sidebar cap). Interior-mutable
     /// so the UI can push the user's NoSQL limit onto a live connection.
     collection_limit: Arc<AtomicUsize>,
+    /// Comment tag of the read currently in flight, if any.
+    ///
+    /// Mongo has no per-connection cancel: `killOp` addresses a server-side
+    /// `opid` that the client never sees directly. The documented way to find
+    /// it again is to tag the query with a `comment` and match on it in
+    /// `currentOp`, so reads carry a driver-generated tag recorded here.
+    in_flight: Arc<Mutex<Option<String>>>,
+}
+
+/// Clears the in-flight comment tag on drop, so an aborted query cannot leave a
+/// stale tag behind for a later cancel to match.
+struct InFlightGuard(Arc<Mutex<Option<String>>>);
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = None;
+        }
+    }
+}
+
+/// Process-unique comment tag. The `rdb-` prefix also makes RDB's reads
+/// identifiable in the profiler and slow-query log.
+fn new_op_tag() -> String {
+    static N: AtomicU64 = AtomicU64::new(0);
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("rdb-{nanos:x}-{n:x}")
 }
 
 /// Fallback collection cap when the UI has not pushed a limit yet.
@@ -111,6 +142,8 @@ impl Driver for MongoDriver {
             .map_err(|e| RdbError::Connection(e.to_string()))?;
         // Fail fast on an unreachable host/replica set instead of the 30s default
         // server-selection hang.
+        // Reported in currentOp / serverStatus and the Atlas client list.
+        options.app_name = Some(client_id().to_string());
         options.server_selection_timeout = Some(Duration::from_secs(8));
         options.connect_timeout = Some(Duration::from_secs(8));
         // The driver's default streaming (awaitable isMaster) SDAM monitor
@@ -128,7 +161,43 @@ impl Driver for MongoDriver {
             client,
             default_db,
             collection_limit: Arc::new(AtomicUsize::new(DEFAULT_COLLECTION_LIMIT)),
+            in_flight: Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// Mongo cancels by server-side operation id, which the client never sees.
+    /// Reads are tagged with a `comment`, so recover the id by matching that
+    /// tag in `currentOp` and then `killOp` each match.
+    ///
+    /// Both commands need privileges an ordinary user may not hold
+    /// (`inprog`/`killop`, typically `clusterMonitor` + `hostManager`). A
+    /// permission failure surfaces as a normal error rather than being
+    /// swallowed, so the user learns why Cancel did nothing.
+    async fn cancel_running(&self) -> Result<()> {
+        let Some(tag) = self.in_flight.lock().ok().and_then(|s| s.clone()) else {
+            return Ok(());
+        };
+        let admin = self.client.database("admin");
+        let current = admin
+            .run_command(doc! { "currentOp": 1, "command.comment": &tag })
+            .await
+            .map_err(|e| RdbError::Query(e.to_string()))?;
+        let ops = current
+            .get_array("inprog")
+            .map(|a| a.to_vec())
+            .unwrap_or_default();
+        for entry in ops {
+            let Some(opid) = entry.as_document().and_then(|d| d.get("opid")) else {
+                continue;
+            };
+            // A finished op is simply gone from `inprog`, so an empty match set
+            // is success under the trait's best-effort contract.
+            admin
+                .run_command(doc! { "killOp": 1, "op": opid.clone() })
+                .await
+                .map_err(|e| RdbError::Query(e.to_string()))?;
+        }
+        Ok(())
     }
 
     async fn ping(&self) -> Result<()> {
@@ -260,10 +329,20 @@ impl Driver for MongoDriver {
         };
         let coll = self.collection(op);
 
+        // Tag reads so `cancel_running` can find the server-side op again, and
+        // clear the tag however this function leaves — including an abort.
+        let tag = new_op_tag();
+        let _in_flight = {
+            if let Ok(mut slot) = self.in_flight.lock() {
+                *slot = Some(tag.clone());
+            }
+            InFlightGuard(self.in_flight.clone())
+        };
+
         match &op.kind {
             MongoKind::Find(filter) => {
                 let filter_doc = json_to_document(filter)?;
-                let mut find = coll.find(filter_doc);
+                let mut find = coll.find(filter_doc).comment(Bson::String(tag.clone()));
                 if let Some(n) = op.limit {
                     find = find.limit(n);
                 }
@@ -296,6 +375,7 @@ impl Driver for MongoDriver {
                     .collect::<Result<Vec<Document>>>()?;
                 let cursor = coll
                     .aggregate(pipeline)
+                    .comment(Bson::String(tag.clone()))
                     .await
                     .map_err(|e| RdbError::Query(e.to_string()))?;
                 let docs: Vec<Document> = cursor

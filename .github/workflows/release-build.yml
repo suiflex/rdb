@@ -227,6 +227,18 @@ jobs:
           dl "rdb-x86_64-unknown-linux-gnu.tar.gz"
           linux_sha="$(sha rdb-x86_64-unknown-linux-gnu.tar.gz)"
 
+          # arm64 Linux is a best-effort build leg (continue-on-error), so the
+          # asset may legitimately be absent. Publish it when it exists, and
+          # drop just the arm64 stanza when it does not, rather than failing a
+          # release that is otherwise complete.
+          arm64_tgz="rdb-aarch64-unknown-linux-gnu.tar.gz"
+          if dl "$arm64_tgz"; then
+            arm64_rules=(-e "s|@LINUX_ARM64_SHA@|$(sha "$arm64_tgz")|g" -e "s| # @ARM64@||g")
+          else
+            echo "::warning::${arm64_tgz} missing; formula ships x86_64 only"
+            arm64_rules=(-e "/# @ARM64@/d")
+          fi
+
           # DMGs carry the signed RDB.app for the GUI cask.
           dl "rdb-aarch64-apple-darwin.dmg"
           dl "rdb-x86_64-apple-darwin.dmg"
@@ -238,12 +250,39 @@ jobs:
           sed -e "s|@VERSION@|${VERSION}|g" \
               -e "s|@BASE@|${base}|g" \
               -e "s|@LINUX_SHA@|${linux_sha}|g" \
+              "${arm64_rules[@]}" \
               packaging/rdb.rb.tmpl > tap/Formula/rdb.rb
           sed -e "s|@VERSION@|${VERSION}|g" \
               -e "s|@BASE@|${base}|g" \
               -e "s|@ARM_DMG_SHA@|${arm_dmg_sha}|g" \
               -e "s|@INTEL_DMG_SHA@|${intel_dmg_sha}|g" \
               packaging/rdb-cask.rb.tmpl > tap/Casks/rdb.rb
+
+          # Nothing else checks these files. They are rendered by `sed` and
+          # pushed straight to the tap, so until now a broken template only
+          # surfaced on a user's `brew install`. Validate the rendered output
+          # rather than the template: `sed` is the part that can go wrong.
+          for f in tap/Formula/rdb.rb tap/Casks/rdb.rb; do
+            ruby -c "$f" > /dev/null \
+              || { echo "::error::${f} is not valid Ruby"; exit 1; }
+
+            # A renamed or dropped sed rule leaves the placeholder behind, which
+            # is still valid Ruby and would ship a literal @VERSION@ to users.
+            if leftover="$(grep -n '@[A-Z0-9_]*@' "$f")"; then
+              echo "::error::${f} has unsubstituted placeholders:"
+              echo "$leftover"
+              exit 1
+            fi
+
+            # `sha()` on a missing asset yields an empty string, rendering
+            # `sha256 ""`. Homebrew accepts that at render time and only fails
+            # much later, mid-download, on the user's machine.
+            if bad="$(grep -n 'sha256' "$f" | grep -vE '"[0-9a-f]{64}"')"; then
+              echo "::error::${f} has a sha256 that is not a 64-hex digest:"
+              echo "$bad"
+              exit 1
+            fi
+          done
 
           cd tap
           git config user.name "github-actions[bot]"

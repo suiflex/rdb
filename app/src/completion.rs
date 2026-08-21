@@ -382,7 +382,7 @@ pub fn suggest(
     if word.is_empty() && !head.ends_with('.') {
         return (0, Vec::new());
     }
-    let mut cands = if let Some(before_dot) = head.strip_suffix('.') {
+    let cands = if let Some(before_dot) = head.strip_suffix('.') {
         // `table.` / `alias.` → that table's columns. When the name before the
         // dot is a schema/database, offer that schema's tables instead.
         // Explicit `schema.` uses the whole tree so other schemas stay reachable.
@@ -430,6 +430,13 @@ pub fn suggest(
             _ => sql::bare_word(cur_line, stmt, nodes, scope, active_schema),
         }
     };
+    rank_and_cap(cands, word)
+}
+
+/// Prefix-filter, rank, dedup and cap a candidate list, and report how much of
+/// the partial word the caller must replace on accept. Shared by `suggest` and
+/// the filter-box entry points so every popup ranks the same way.
+fn rank_and_cap(mut cands: Vec<Candidate>, word: &str) -> (usize, Vec<Candidate>) {
     let wl = word.to_lowercase();
     if !wl.is_empty() {
         cands.retain(|c| match_rank(&c.label, &wl).is_some());
@@ -443,6 +450,70 @@ pub fn suggest(
     cands.retain(|c| seen.insert((c.kind.clone(), c.label.to_lowercase())));
     cands.truncate(20);
     (word.chars().count(), cands)
+}
+
+/// Completions for the Compass-style Mongo filter box.
+///
+/// That box holds a bare filter *document* (`{ "status": { $in: [...] } }`),
+/// not a shell expression, so `suggest` is the wrong entry point: its
+/// `in_literal_or_comment` guard sees the unterminated quote of a key being
+/// typed and correctly refuses to complete inside a string — which is exactly
+/// where a Mongo key lives. Two contexts are worth completing here:
+///
+/// - inside an unterminated `"` → the collection's sampled field names
+/// - a `$`-prefixed token → query operators
+///
+/// Anywhere else returns nothing rather than guessing, so the popup never
+/// fights ordinary value typing.
+pub fn suggest_mongo_filter(
+    before_cursor: &str,
+    nodes: &[VmTreeNode],
+    collection: &str,
+) -> (usize, Vec<Candidate>) {
+    let chars: Vec<char> = before_cursor.chars().collect();
+    let mut in_str = false;
+    let mut esc = false;
+    let mut key_start = 0usize;
+    for (i, ch) in chars.iter().enumerate() {
+        if esc {
+            esc = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_str => esc = true,
+            '"' => {
+                in_str = !in_str;
+                if in_str {
+                    key_start = i + 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    if in_str {
+        let word: String = chars[key_start..].iter().collect();
+        // Fall back to every known field when the collection has not been
+        // sampled yet (Driver::sample_fields runs on expand, not on open).
+        let mut cands = columns_of(nodes, collection);
+        if cands.is_empty() {
+            cands = all_columns(nodes);
+        }
+        return rank_and_cap(cands, &word);
+    }
+    // A `$` token: Mongo query operators. `$` is not an identifier char, so
+    // walk it back explicitly the way `suggest` does for the shell path.
+    let tail: String = chars
+        .iter()
+        .rev()
+        .take_while(|c| c.is_ascii_alphanumeric() || **c == '$')
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    if tail.starts_with('$') {
+        return rank_and_cap(mongo::query_ops(), &tail);
+    }
+    (0, Vec::new())
 }
 
 #[cfg(test)]
@@ -474,6 +545,64 @@ mod tests {
             mk("users", "table"),
             mk("id", "field"),
         ]
+    }
+
+    /// A Mongo-shaped tree: one collection with sampled fields.
+    fn mongo_filter_nodes() -> Vec<VmTreeNode> {
+        let mk = |l: &str, k: &str| VmTreeNode {
+            label: l.into(),
+            kind: k.into(),
+        };
+        vec![
+            mk("shop", "database"),
+            mk("orders", "collection"),
+            mk("status: string", "field"),
+            mk("subtotal: double", "field"),
+            mk("customer_id: objectId", "field"),
+        ]
+    }
+
+    #[test]
+    fn mongo_filter_completes_field_names_inside_quotes() {
+        // The whole point of the separate entry point: `suggest` refuses to
+        // complete inside an unterminated string, which is where a key lives.
+        let (word_len, c) = suggest_mongo_filter("{ \"sta", &mongo_filter_nodes(), "orders");
+        assert_eq!(word_len, 3);
+        assert!(c.iter().any(|x| x.label == "status"));
+        // The sidebar stores "name: type"; only the bare name is inserted.
+        assert!(!c.iter().any(|x| x.label.contains(':')));
+    }
+
+    #[test]
+    fn mongo_filter_completes_query_operators_after_dollar() {
+        let (word_len, c) =
+            suggest_mongo_filter("{ \"subtotal\": { $g", &mongo_filter_nodes(), "orders");
+        assert_eq!(word_len, 2, "the $ is part of the replaced token");
+        let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+        assert!(labels.contains(&"$gt"));
+        assert!(labels.contains(&"$gte"));
+    }
+
+    #[test]
+    fn mongo_filter_stays_quiet_while_typing_a_value() {
+        // A bare value is not completable; popping up here would fight typing.
+        let (_, c) = suggest_mongo_filter("{ \"subtotal\": 12", &mongo_filter_nodes(), "orders");
+        assert!(c.is_empty());
+    }
+
+    #[test]
+    fn mongo_filter_closed_quote_is_not_a_key_context() {
+        // Both quotes balanced: the caret is past the key, not inside it.
+        let (_, c) = suggest_mongo_filter("{ \"status\": ", &mongo_filter_nodes(), "orders");
+        assert!(c.is_empty());
+    }
+
+    #[test]
+    fn mongo_filter_falls_back_to_all_fields_for_an_unsampled_collection() {
+        // sample_fields runs on expand, so a freshly opened collection has no
+        // fields of its own yet — offer what the tree does know.
+        let (_, c) = suggest_mongo_filter("{ \"cust", &mongo_filter_nodes(), "not_sampled_yet");
+        assert!(c.iter().any(|x| x.label == "customer_id"));
     }
 
     /// Two schemas, so a table outside the active one has to be reached by

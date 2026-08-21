@@ -1,6 +1,8 @@
 // Shared Tabula components. All colors/metrics come from Tokens.
 import { Tokens } from "tokens.slint";
 import { AppIcon } from "icons.slint";
+import { PaletteItem } from "structs.slint";
+import { ScrollView } from "std-widgets.slint";
 
 // Rounded, bordered, drop-shadowed surface used for panels that should read
 // as floating above the canvas (connection picker, workspace sidebar) rather
@@ -770,12 +772,103 @@ export component IconButton inherits Rectangle {
 
 // macOS-style window controls (– □ ×), right-aligned in the design.
 // Filter/search input used in sidebars (white rounded box + magnifier).
+
+// Autocomplete list surface, shared by the SQL editor's caret popup and the
+// browse filter field. Owns only the card + scrolling row list; every caller
+// positions it itself, because the anchors have nothing in common (the editor
+// tracks a caret inside a scrolled viewport, the filter field just hangs it
+// under the box). `row-h` and `pad` are exported so a caller's own anchor math
+// can stay in sync with the height this component actually takes.
+export component CompletionList inherits Rectangle {
+    in property <[PaletteItem]> items;
+    in property <int> selected;
+    callback choose(int);
+    out property <length> row-h: 22px;
+    out property <length> pad: 8px;
+    // Natural height, capped so a long candidate list stays a popup.
+    out property <length> natural-height: min(root.items.length * root.row-h + root.pad, 200px);
+    width: 360px;
+    height: root.natural-height;
+    border-radius: Tokens.radius;
+    border-width: 1px;
+    border-color: Tokens.border-strong;
+    background: Tokens.card;
+    drop-shadow-blur: 12px;
+    drop-shadow-color: Tokens.text.with-alpha(0.25);
+    clip: true;
+    ScrollView {
+        // Keep the keyboard-selected row visible: scroll only when the
+        // selection would fall outside the viewport. Clamped so the top rows
+        // sit at 0 and wrap-around (last -> first) snaps back up.
+        viewport-y: -clamp(
+            root.selected * root.row-h - self.visible-height + root.row-h + root.pad,
+            0,
+            max(0, root.items.length * root.row-h + root.pad - self.visible-height));
+        VerticalLayout {
+            padding: 4px;
+            for it[i] in root.items: Rectangle {
+                height: root.row-h;
+                border-radius: Tokens.radius;
+                background: i == root.selected ? Tokens.accent-tint
+                    : cta.has-hover ? Tokens.chrome : transparent;
+                HorizontalLayout {
+                    padding-left: Tokens.sp2;
+                    padding-right: Tokens.sp2;
+                    spacing: Tokens.sp2;
+                    VerticalLayout {
+                        alignment: center;
+                        AppIcon {
+                            name: it.kind == "field" ? "field"
+                                : it.kind == "table" ? "table"
+                                : it.kind == "database" ? "database" : "keyword";
+                            size: 13px;
+                            color: it.kind == "table" ? Tokens.db-pg
+                                : it.kind == "field" ? Tokens.text-dim : Tokens.accent;
+                        }
+                    }
+                    Text {
+                        // The label is the identity the user picks — give it all
+                        // the slack so a long schema.table stays readable; the
+                        // secondary `sub` yields first.
+                        horizontal-stretch: 1;
+                        text: it.label;
+                        color: Tokens.text;
+                        font-family: Tokens.mono;
+                        font-size: Tokens.font-sm;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: it.sub;
+                        color: Tokens.text-faint;
+                        font-family: Tokens.mono;
+                        font-size: Tokens.font-xs;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+                cta := TouchArea { clicked => { root.choose(i); } }
+            }
+        }
+    }
+}
+
 export component FilterField inherits Rectangle {
     in property <string> placeholder;
     in-out property <string> text <=> input.text;
     in property <string> trailing-cap: "";
     callback edited(string);
     callback submitted;
+    // Autocomplete. The candidate list is supplied by the owner (Rust fills it
+    // on `edited`); an empty list means no popup, so nothing else needs a
+    // separate "open" flag. Only the focused field paints its list, which lets
+    // several filter fields share one set of window-level properties.
+    in property <[PaletteItem]> completion-items;
+    in property <int> completion-selected;
+    callback completion-choose(int);
+    // Navigation keys while the popup is up. Returns true when consumed, so an
+    // unhandled key still reaches the TextInput.
+    callback completion-key(string) -> bool;
     public function focus-input() { input.focus(); }
     height: 30px;
     border-radius: Tokens.radius;
@@ -812,6 +905,20 @@ export component FilterField inherits Rectangle {
                 single-line: true;
                 accepted => { root.submitted(); }
                 edited => { root.edited(self.text); }
+                // Intercepted before the TextInput sees them, so Up/Down move
+                // the popup selection instead of the caret and Enter accepts a
+                // candidate rather than submitting a half-typed filter. With no
+                // popup up, every one of these falls through untouched.
+                key-pressed(e) => {
+                    if (root.completion-items.length > 0
+                        && (e.text == Key.UpArrow || e.text == Key.DownArrow
+                            || e.text == Key.Tab || e.text == Key.Escape
+                            || e.text == Key.Return)
+                        && root.completion-key(e.text)) {
+                        return accept;
+                    }
+                    return reject;
+                }
                 cursor-position-changed(cursor-position) => {
                     if cursor-position.x + self.x < 4px {
                         self.x = -cursor-position.x + 4px;
@@ -833,5 +940,15 @@ export component FilterField inherits Rectangle {
         font-size: Tokens.font-sm;
         vertical-alignment: center;
         height: 100%;
+    }
+    // Hangs under the field. Gated on focus so that when several filter fields
+    // share one window-level candidate list, only the one being typed in shows
+    // it.
+    if root.completion-items.length > 0 && input.has-focus: CompletionList {
+        x: 0;
+        y: root.height + 4px;
+        items: root.completion-items;
+        selected: root.completion-selected;
+        choose(i) => { root.completion-choose(i); }
     }
 }

@@ -490,6 +490,43 @@ impl EditorState {
         }
     }
 
+    /// Delete the word to the left of the cursor (macOS Option+Delete).
+    ///
+    /// Anchor a selection and let `backspace` remove it, rather than computing
+    /// a byte range here: that reuses the existing word motion and inherits
+    /// undo recording and line-join handling for free. An existing selection
+    /// wins, matching how every other editor treats a delete with text
+    /// selected.
+    pub fn delete_word_left(&mut self) {
+        if self.sel.is_none() {
+            self.set_selecting(true);
+            self.move_word(-1);
+        }
+        self.backspace();
+    }
+
+    /// Delete from the cursor back to the start of the line (macOS
+    /// Command+Delete). At column 0 the empty selection collapses and
+    /// `backspace` joins with the previous line, which is what macOS does.
+    pub fn delete_to_line_start(&mut self) {
+        if self.sel.is_none() {
+            self.set_selecting(true);
+            self.home();
+        }
+        self.backspace();
+    }
+
+    /// Delete from the cursor to the end of the line (macOS Command+Fn+Delete).
+    /// At end of line the empty selection collapses and `delete` pulls the next
+    /// line up.
+    pub fn delete_to_line_end(&mut self) {
+        if self.sel.is_none() {
+            self.set_selecting(true);
+            self.end();
+        }
+        self.delete();
+    }
+
     /// Cut helper: caller copies `selected_text()` first.
     pub fn cut_selection(&mut self) {
         if self.selection().is_some() {
@@ -1713,5 +1750,64 @@ mod tests {
         ed.set_selecting(true);
         ed.move_word(1);
         assert_eq!(ed.selected_text().as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn delete_word_left_removes_a_whole_word_not_one_char() {
+        let mut ed = EditorState::from_text("SELECT id FROM users");
+        ed.move_doc_end();
+        ed.delete_word_left();
+        assert_eq!(ed.text(), "SELECT id FROM ");
+        // Again, over the trailing space and the previous word.
+        ed.delete_word_left();
+        assert_eq!(ed.text(), "SELECT id ");
+    }
+
+    #[test]
+    fn delete_word_left_removes_the_selection_when_one_exists() {
+        let mut ed = EditorState::from_text("hello world");
+        ed.move_doc_start();
+        ed.set_selecting(true);
+        ed.move_word(1);
+        ed.delete_word_left();
+        assert_eq!(ed.text(), " world");
+    }
+
+    #[test]
+    fn delete_to_line_start_clears_back_to_column_zero() {
+        let mut ed = EditorState::from_text("SELECT id\nFROM users");
+        ed.move_doc_end();
+        ed.delete_to_line_start();
+        assert_eq!(ed.text(), "SELECT id\n");
+        assert_eq!((ed.line, ed.col), (1, 0));
+    }
+
+    #[test]
+    fn delete_to_line_start_at_column_zero_joins_the_previous_line() {
+        let mut ed = EditorState::from_text("ab\ncd");
+        ed.move_doc_end();
+        ed.home();
+        ed.delete_to_line_start();
+        assert_eq!(ed.text(), "abcd");
+    }
+
+    #[test]
+    fn delete_to_line_end_clears_the_rest_of_the_line() {
+        let mut ed = EditorState::from_text("SELECT id FROM users");
+        ed.move_doc_start();
+        ed.move_word(1); // end of "SELECT"
+        ed.delete_to_line_end();
+        assert_eq!(ed.text(), "SELECT");
+    }
+
+    #[test]
+    fn word_delete_is_a_single_undo_step() {
+        // One keystroke must undo as one edit, not character by character.
+        let mut ed = EditorState::from_text("SELECT id FROM users");
+        ed.move_doc_end();
+        ed.delete_word_left();
+        assert_eq!(ed.text(), "SELECT id FROM ");
+        ed.undo();
+        assert_eq!(ed.text(), "SELECT id FROM users");
     }
 }

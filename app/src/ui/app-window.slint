@@ -9,7 +9,8 @@ export { Shortcut }
 import { NavCluster } from "nav-cluster.slint";
 import { ConnPicker } from "picker.slint";
 import { WorkArea } from "workarea.slint";
-import { CommandPalette, ListModal, PaletteItem, PaletteGroup } from "palette.slint";
+import { CommandPalette, ListModal, PaletteGroup } from "palette.slint";
+import { PaletteItem } from "structs.slint";
 import { ConnForm } from "conn-form.slint";
 import { AppIcon } from "icons.slint";
 import { ScrollView, Spinner } from "std-widgets.slint";
@@ -338,6 +339,14 @@ callback create-table-commit();
     in property <[IndexRow]> index-rows;
     callback apply-filter();
     callback apply-mongo-filter();
+    // Filter-box autocomplete. One shared candidate list for every filter field
+    // in the window — only the focused field paints it — with the pane index
+    // carried as an argument rather than a `p1-` twin.
+    in property <[PaletteItem]> filter-completion-items;
+    in property <int> filter-completion-selected;
+    callback filter-completion-choose(int, int);
+    callback filter-completion-key(int, string) -> bool;
+    callback mongo-filter-edited(int, string);
     callback resize-grid-col(int, length);
 
     // ----- SQL editor (lexer-highlighted) -----
@@ -591,7 +600,10 @@ callback create-table-commit();
     callback palette-filter(string);
     callback palette-choose(int);
     callback move-row(int);
-    callback toggle-theme();
+    // 0 = follow the OS, 1 = light, 2 = dark. Rust owns the mode; the UI never
+    // writes darkness directly (see the note on `Tokens.dark`).
+    callback cycle-theme();
+    callback set-theme-mode(int);
 
     // ----- update reminder banner (fed from Rust) -----
     in property <bool> update-available: false;
@@ -640,6 +652,7 @@ callback create-table-commit();
     in-out property <string> f-database;
     in-out property <string> f-password;
     in-out property <bool> f-has-password;
+    in-out property <bool> f-password-unreadable;
     in-out property <string> f-sslmode;
     in-out property <string> f-params;
     in-out property <string> f-color;
@@ -1129,21 +1142,26 @@ callback create-table-commit();
                             }
                         }
                     }
-                    // theme toggle: sun in dark mode, moon in light.
-                    // Always visible (connections screen + workspace) so the
-                    // control lives in the same header spot in both states.
+                    // theme: monitor while following the OS, otherwise the
+                    // icon of the mode in force — sun for light, moon for dark.
+                    // Clicking walks System -> Light -> Dark -> System, so the
+                    // icon always names the current state rather than the next
+                    // one. Always visible (connections screen + workspace) so
+                    // the control lives in the same header spot in both states.
                     VerticalLayout {
                         alignment: center;
                         IconButton {
-                            icon: Tokens.dark ? "sun" : "moon";
-                            tooltip: "Toggle theme";
-                            clicked => { root.toggle-theme(); }
+                            icon: Tokens.theme-mode == 0 ? "monitor"
+                                : Tokens.theme-mode == 1 ? "sun" : "moon";
+                            tooltip: Tokens.theme-mode == 0 ? "Theme: follow system"
+                                : Tokens.theme-mode == 1 ? "Theme: light" : "Theme: dark";
+                            clicked => { root.cycle-theme(); }
                         }
                     }
                     VerticalLayout {
                         alignment: center;
-                        GlyphButton {
-                            glyph: "⚙";
+                        IconButton {
+                            icon: "settings";
                             tooltip: "Settings";
                             clicked => { root.settings-open = true; }
                         }
@@ -1875,6 +1893,11 @@ callback create-table-commit();
                         structure-columns: root.structure-columns;
                         grid-filter <=> root.grid-filter;
                         mongo-filter <=> root.mongo-filter;
+                        filter-completion-items: root.filter-completion-items;
+                        filter-completion-selected: root.filter-completion-selected;
+                        filter-completion-choose(p, i) => { root.filter-completion-choose(p, i); }
+                        filter-completion-key(p, k) => { root.filter-completion-key(p, k) }
+                        mongo-filter-edited(p, t) => { root.mongo-filter-edited(p, t); }
                         active-table: root.active-table;
                         page-start: root.page-start;
                         page-end: root.page-end;
@@ -2554,6 +2577,7 @@ callback create-table-commit();
         f-database <=> root.f-database;
         f-password <=> root.f-password;
         f-has-password <=> root.f-has-password;
+        f-password-unreadable <=> root.f-password-unreadable;
         f-sslmode <=> root.f-sslmode;
         f-params <=> root.f-params;
         f-color <=> root.f-color;
@@ -2751,10 +2775,29 @@ callback create-table-commit();
                     VerticalLayout {
                         spacing: Tokens.sp3;
                         SettingsSectionHeader { label: "Appearance"; }
-                        ToggleRow {
-                            label: "Dark mode";
-                            checked: Tokens.dark;
-                            toggled => { root.toggle-theme(); }
+                        // Three states, so this cannot be a switch. "System"
+                        // hands the choice to the OS and tracks it live.
+                        HorizontalLayout {
+                            alignment: space-between;
+                            spacing: Tokens.sp3;
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: "Theme";
+                                    color: Tokens.text;
+                                    font-size: 13px;
+                                }
+                            }
+                            SelectBox {
+                                width: 110px;
+                                model: ["System", "Light", "Dark"];
+                                current-value: Tokens.theme-mode == 1 ? "Light"
+                                    : Tokens.theme-mode == 2 ? "Dark" : "System";
+                                selected(value) => {
+                                    root.set-theme-mode(value == "Light" ? 1
+                                        : value == "Dark" ? 2 : 0);
+                                }
+                            }
                         }
                         ToggleRow {
                             label: "Sidebar on the right";
