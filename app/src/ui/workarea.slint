@@ -312,6 +312,7 @@ export component WorkArea inherits Rectangle {
     callback mark-delete();
     callback commit-edits();
     callback discard-edits();
+    callback copy-edit-sql();
 
     background: Tokens.canvas;
 
@@ -673,6 +674,17 @@ export component WorkArea inherits Rectangle {
                         height: 22px;
                         clicked => {
                             if (root.split && root.active-pane == 1) { root.p1-discard-edits(); } else { root.discard-edits(); }
+                        }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    SecondaryButton {
+                        text: "Copy SQL";
+                        tooltip: "Copy the statements a commit would run, without writing anything";
+                        height: 22px;
+                        clicked => {
+                            root.copy-edit-sql();
                         }
                     }
                 }
