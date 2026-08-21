@@ -1,0 +1,107 @@
+name: pr-ui-evidence
+
+# Nudges for a screenshot when a pull request changes the UI binary.
+#
+# `paths` is the whole conditional: GitHub renders one static PR template for
+# every pull request and cannot vary it by diff, so the "only when app/ changed"
+# half has to live here. A PR touching only crates/, packaging or docs never
+# starts this workflow at all.
+#
+# pull_request_target, not pull_request: a pull_request run from a fork gets a
+# read-only token, so `pull-requests: write` is ignored and the comment fails
+# silently — exactly when an outside contributor most needs the reminder. That
+# is only safe because this job NEVER checks out the pull request; it reads the
+# body from the event payload and calls the API. Do not add a checkout step.
+on:
+  pull_request_target:
+    # `edited` matters: adding a screenshot edits the body and fires nothing
+    # else, so without it the reminder would outlive the thing it asked for and
+    # only a pointless extra commit would clear it.
+    types: [opened, synchronize, reopened, edited]
+    paths:
+      - app/**
+
+permissions:
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Look for visual evidence in the PR body
+        id: scan
+        # The body is attacker-controlled text. It reaches the script through
+        # `env`, never through `${{ }}` interpolation into the script source,
+        # which would be a script-injection hole.
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import os, re
+
+          body = os.environ.get("PR_BODY") or ""
+
+          # Strip HTML comments first. The template ships commented-out hint
+          # text; without this, a commented-out example would read as a real
+          # screenshot and the check would pass on every PR forever.
+          visible = re.sub(r"<!--.*?-->", "", body, flags=re.S)
+
+          patterns = [
+              r"!\[[^\]]*\]\([^)]+\)",                          # markdown image
+              r"<(?:img|video)\b[^>]*>",                        # html embed
+              r"https://github\.com/user-attachments/assets/",  # drag-and-drop
+              r"https://user-images\.githubusercontent\.com/",  # legacy uploads
+              r"https?://\S+\.(?:png|jpe?g|gif|webp|mp4|mov)\b",  # linked file
+          ]
+          found = any(re.search(p, visible, re.I) for p in patterns)
+          print(f"has_evidence={'true' if found else 'false'}")
+          PY
+
+      - name: Post, update or retract the reminder
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          HAS_EVIDENCE: ${{ steps.scan.outputs.has_evidence }}
+        run: |
+          set -euo pipefail
+          marker='<!-- ui-evidence -->'
+
+          # One sticky comment, found by its hidden marker, so repeated pushes
+          # update it instead of stacking reminders.
+          existing="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
+            --jq "map(select(.body | contains(\"${marker}\"))) | .[0].id // empty")"
+
+          if [ "$HAS_EVIDENCE" = "true" ]; then
+            if [ -n "$existing" ]; then
+              gh api -X DELETE "repos/${REPO}/issues/comments/${existing}"
+              echo "evidence found; retracted the reminder"
+            else
+              echo "evidence found; nothing to retract"
+            fi
+            exit 0
+          fi
+
+          body="${marker}
+          This pull request changes \`app/\`, and there is no screenshot in the
+          description.
+
+          The diff and the test output both stay silent about how something
+          looks, so a screenshot or a short clip is the only way a reviewer can
+          see a visual change. Drag one into the **Screenshots** section of the
+          description.
+
+          If nothing visual changed, ignore this — it is only a reminder and
+          does not block the merge."
+
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${REPO}/issues/comments/${existing}" -f body="$body" > /dev/null
+            echo "reminder updated"
+          else
+            gh api -X POST "repos/${REPO}/issues/${PR}/comments" -f body="$body" > /dev/null
+            echo "reminder posted"
+          fi
