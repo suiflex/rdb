@@ -83,7 +83,7 @@ impl AnyDriver {
                 AnyDriverInner::Mysql(MysqlDriver::connect(&target_cfg).await?)
             }
             Engine::Redis | Engine::Valkey => {
-                AnyDriverInner::Redis(RedisDriver::connect(&target_cfg).await?)
+                AnyDriverInner::Redis(RedisDriver::connect(&target_cfg).await?) 
             }
             Engine::Mongo => AnyDriverInner::Mongo(MongoDriver::connect(&target_cfg).await?),
             Engine::Sqlite => AnyDriverInner::Sqlite(SqliteDriver::connect(&target_cfg).await?),
