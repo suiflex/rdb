@@ -11,6 +11,23 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::*;
 
+/// Which password a Test should actually use.
+///
+/// The typed one wins. An empty box means "unchanged" — the same thing it means
+/// on save (`ConnStore::save_connection` skips an empty password rather than
+/// clearing the secret) — so Test falls back to the stored secret and exercises
+/// what Connect would really use. Without this, testing an existing connection
+/// authenticates with no password at all and fails on a connection that works.
+///
+/// `stored` is lazy so the add-connection form, which has no id yet, never
+/// reaches into the store for some other connection's secret.
+fn test_password(typed: Option<String>, stored: impl FnOnce() -> Option<String>) -> Option<String> {
+    match typed {
+        Some(p) if !p.is_empty() => Some(p),
+        _ => stored(),
+    }
+}
+
 pub(crate) fn wire(window: &MainWindow, state: &AppState) {
     let AppState {
         rt,
@@ -405,12 +422,27 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 None
             };
 
+            // Same fallback the SSH branches above already do — this field was
+            // the one that missed it.
+            let typed_password = f.password.clone();
+            let password = test_password(f.password, || {
+                let id = editing_id.borrow();
+                if id.is_empty() {
+                    None
+                } else {
+                    store.borrow().get_password(&id).ok().flatten()
+                }
+            });
+            // A pass is ambiguous otherwise: the user cannot tell whether their
+            // typing or the saved secret was exercised.
+            let used_saved = typed_password.is_none() && password.is_some();
+
             let cfg = rdb_core::conn::ConnConfig {
                 host: f.host,
                 port: f.port,
                 user: f.user,
                 database: f.database,
-                password: f.password,
+                password,
                 sslmode: f.sslmode,
                 params: f.params,
                 ssh,
@@ -430,7 +462,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                         match result {
                             Ok(_) => {
                                 w.set_test_ok(true);
-                                w.set_test_result(SharedString::from("connection ok"));
+                                w.set_test_result(SharedString::from(if used_saved {
+                                    "connection ok — used the saved password"
+                                } else {
+                                    "connection ok"
+                                }));
                             }
                             Err(e) => {
                                 w.set_test_ok(false);
@@ -604,5 +640,53 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 &conn_filter.borrow(),
             ));
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_password;
+    use std::cell::Cell;
+
+    #[test]
+    fn typed_password_wins_over_the_stored_one() {
+        let got = test_password(Some("typed".into()), || Some("stored".into()));
+        assert_eq!(got.as_deref(), Some("typed"));
+    }
+
+    #[test]
+    fn empty_box_falls_back_to_the_stored_secret() {
+        // The reported bug: an existing connection tested with no password at
+        // all, so a connection that works failed its own Test button.
+        let got = test_password(None, || Some("stored".into()));
+        assert_eq!(got.as_deref(), Some("stored"));
+    }
+
+    #[test]
+    fn a_blank_string_counts_as_empty_not_as_a_password() {
+        // read_conn_form normalises "" to None, but the rule must not depend on
+        // that happening upstream — an empty string is "unchanged" everywhere
+        // else, including ConnStore::save_connection.
+        let got = test_password(Some(String::new()), || Some("stored".into()));
+        assert_eq!(got.as_deref(), Some("stored"));
+    }
+
+    #[test]
+    fn nothing_typed_and_nothing_stored_stays_none() {
+        let got = test_password(None, || None);
+        assert_eq!(got, None);
+    }
+
+    #[test]
+    fn the_store_is_not_consulted_when_a_password_was_typed() {
+        // Laziness matters: reading the secret hits the keychain or decrypts a
+        // file, and the add form has no id to look up in the first place.
+        let looked_up = Cell::new(false);
+        let got = test_password(Some("typed".into()), || {
+            looked_up.set(true);
+            Some("stored".into())
+        });
+        assert_eq!(got.as_deref(), Some("typed"));
+        assert!(!looked_up.get(), "store was read despite a typed password");
     }
 }
