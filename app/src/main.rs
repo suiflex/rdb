@@ -3936,6 +3936,9 @@ fn open_add_form(w: &MainWindow, store: &rdb_connstore::ConnStore, parent: Optio
     w.set_f_database(SharedString::default());
     w.set_f_password(SharedString::default());
     w.set_f_has_password(false);
+    // Reset alongside it, or a warning from a previously edited connection
+    // would follow the user into a brand-new form.
+    w.set_f_password_unreadable(false);
     w.set_f_sslmode(SharedString::from("Disable"));
     w.set_f_params(SharedString::default());
     w.set_f_color(SharedString::from("#2c5fd8"));
