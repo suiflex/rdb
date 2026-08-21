@@ -227,6 +227,18 @@ jobs:
           dl "rdb-x86_64-unknown-linux-gnu.tar.gz"
           linux_sha="$(sha rdb-x86_64-unknown-linux-gnu.tar.gz)"
 
+          # arm64 Linux is a best-effort build leg (continue-on-error), so the
+          # asset may legitimately be absent. Publish it when it exists, and
+          # drop just the arm64 stanza when it does not, rather than failing a
+          # release that is otherwise complete.
+          arm64_tgz="rdb-aarch64-unknown-linux-gnu.tar.gz"
+          if dl "$arm64_tgz"; then
+            arm64_rules=(-e "s|@LINUX_ARM64_SHA@|$(sha "$arm64_tgz")|g" -e "s| # @ARM64@||g")
+          else
+            echo "::warning::${arm64_tgz} missing; formula ships x86_64 only"
+            arm64_rules=(-e "/# @ARM64@/d")
+          fi
+
           # DMGs carry the signed RDB.app for the GUI cask.
           dl "rdb-aarch64-apple-darwin.dmg"
           dl "rdb-x86_64-apple-darwin.dmg"
@@ -238,6 +250,7 @@ jobs:
           sed -e "s|@VERSION@|${VERSION}|g" \
               -e "s|@BASE@|${base}|g" \
               -e "s|@LINUX_SHA@|${linux_sha}|g" \
+              "${arm64_rules[@]}" \
               packaging/rdb.rb.tmpl > tap/Formula/rdb.rb
           sed -e "s|@VERSION@|${VERSION}|g" \
               -e "s|@BASE@|${base}|g" \
