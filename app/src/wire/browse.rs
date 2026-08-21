@@ -195,6 +195,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     split: false,
                     split_ratio: 0.5,
                     pane1_query: String::new(),
+                    folded_heads: Vec::new(),
                     connection_id: (!connection_id.is_empty()).then(|| connection_id.clone()),
                     engine: badge.engine,
                     connection_name: badge.name,

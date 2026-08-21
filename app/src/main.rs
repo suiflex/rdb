@@ -1396,6 +1396,14 @@ struct WorkspaceTab {
     split: bool,
     split_ratio: f32,
     pane1_query: String,
+    // Line indices of the statement heads the user has folded closed, kept
+    // sorted. They index into `query_text` and mean nothing against any other
+    // buffer — which is exactly why they live on the tab rather than on the
+    // pane, where every tab would share one set and fold each other's lines.
+    //
+    // One set, not one per pane: a tab is edited by whichever group has it
+    // active, and both groups write that group's active tab's `query_text`.
+    folded_heads: Vec<usize>,
     // Connection the tab was created against (snapshot, not live-tracked).
     connection_id: Option<String>,
     // DbBadge key, e.g. "postgres"; empty when no connection was active yet.
@@ -1405,6 +1413,16 @@ struct WorkspaceTab {
     // has_custom_color says whether to prefer it over the per-engine color).
     color: slint::Color,
     has_custom_color: bool,
+}
+
+/// A pane's live fold set as the sorted vec a tab stores.
+///
+/// Sorted so a save does not rewrite the file just because the `HashSet`
+/// happened to iterate in a different order.
+fn snapshot_folds(folded: &RefCell<HashSet<usize>>) -> Vec<usize> {
+    let mut v: Vec<usize> = folded.borrow().iter().copied().collect();
+    v.sort_unstable();
+    v
 }
 
 impl WorkspaceTab {
@@ -1426,6 +1444,7 @@ impl WorkspaceTab {
             split: false,
             split_ratio: 0.5,
             pane1_query: String::new(),
+            folded_heads: Vec::new(),
             connection_id: None,
             engine: String::new(),
             connection_name: String::new(),
@@ -2251,6 +2270,10 @@ struct PersistedTab {
     split: bool,
     #[serde(default)]
     pane1_query: String,
+    /// Folded statement heads. `default` so a tabs file written before folding
+    /// was persisted still loads — it simply comes back fully expanded.
+    #[serde(default)]
+    folded_heads: Vec<usize>,
     #[serde(default = "default_split_ratio")]
     split_ratio: f32,
     #[serde(default)]
@@ -2318,6 +2341,7 @@ fn save_query_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active: Option<&str>) 
             group: t.group.min(1),
             split: t.split,
             pane1_query: t.pane1_query.clone(),
+            folded_heads: t.folded_heads.clone(),
             split_ratio: t.split_ratio,
             connection_id: t.connection_id.clone(),
             engine: t.engine.clone(),
@@ -2386,6 +2410,7 @@ fn load_query_tabs() -> (
             t.group = p.group.min(1);
             t.split = p.split;
             t.pane1_query = p.pane1_query;
+            t.folded_heads = p.folded_heads;
             t.split_ratio = p.split_ratio.clamp(0.2, 0.8);
             t.connection_id = p.connection_id;
             t.engine = p.engine;
@@ -4579,6 +4604,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             tab.query_text = ed_state.borrow().text();
+            // Folds index into the text above, so they are snapshotted with it.
+            tab.folded_heads = snapshot_folds(&panes[0].folded_heads);
             tab.loading = w.get_query_running();
             if tab.kind == "table" {
                 tab.browse = browse.lock().unwrap().clone();
@@ -4653,6 +4680,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             tab.query_text = panes[1].ed_state.borrow().text();
+            tab.folded_heads = snapshot_folds(&panes[1].folded_heads);
             tab.loading = w.get_p1_query_running();
             if tab.kind == "sql" {
                 tab.results = panes[1].results.lock().unwrap().clone();
@@ -4708,6 +4736,14 @@ fn main() -> Result<(), slint::PlatformError> {
             }
 
             load_editor_text(pane, &tab.query_text);
+            // Replace the pane's fold set with this tab's, rather than leaving
+            // the previous tab's line numbers to fold whatever now sits at
+            // them. The set is only meaningful against the text just loaded.
+            {
+                let mut folded = panes[pane].folded_heads.borrow_mut();
+                folded.clear();
+                folded.extend(tab.folded_heads.iter().copied());
+            }
 
             // Per-group browse state (drives that group's pagination + edits).
             let browse = &panes[pane].browse;
@@ -5204,6 +5240,7 @@ mod tests {
                     connection_id: Some("c".into()),
                     engine: "postgres".into(),
                     connection_name: "prod-db".into(),
+                    folded_heads: Vec::new(),
                 },
                 PersistedTab {
                     id: "query:c:2".into(),
@@ -5216,6 +5253,7 @@ mod tests {
                     connection_id: None,
                     engine: String::new(),
                     connection_name: String::new(),
+                    folded_heads: Vec::new(),
                 },
             ],
             active: Some("query:c:2".into()),
@@ -5234,6 +5272,53 @@ mod tests {
         assert_eq!(back.tabs[0].engine, "postgres");
         assert_eq!(back.tabs[0].connection_name, "prod-db");
         assert_eq!(back.active.as_deref(), Some("query:c:2"));
+    }
+
+    #[test]
+    fn folded_heads_survive_a_persistence_round_trip() {
+        let payload = PersistedTabs {
+            tabs: vec![PersistedTab {
+                id: "query:c:1".into(),
+                title: "Query 1".into(),
+                query_text: "update t set a = 1;\nselect * from t;".into(),
+                group: 0,
+                split: false,
+                pane1_query: String::new(),
+                split_ratio: 0.5,
+                connection_id: None,
+                engine: String::new(),
+                connection_name: String::new(),
+                folded_heads: vec![0, 5, 9],
+            }],
+            active: None,
+            active_p1: None,
+            active_group: 0,
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        let back: PersistedTabs = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.tabs[0].folded_heads, vec![0, 5, 9]);
+    }
+
+    #[test]
+    fn a_tabs_file_written_before_folding_was_persisted_still_loads() {
+        // The regression that would hit every existing user at once: their
+        // query_tabs.json has no folded_heads key at all. It must load, with
+        // nothing folded — which is exactly today's behaviour.
+        let payload: PersistedTabs = serde_json::from_str(
+            r#"{"tabs":[{"id":"query:c:1","title":"Query 1","query_text":"select 1"}],"active":null}"#,
+        )
+        .unwrap();
+        assert_eq!(payload.tabs.len(), 1);
+        assert!(payload.tabs[0].folded_heads.is_empty());
+    }
+
+    #[test]
+    fn snapshot_folds_sorts_so_saves_do_not_churn() {
+        // A HashSet iterates in an arbitrary order; without sorting, every save
+        // could rewrite the file with the same folds in a different order.
+        let folded = RefCell::new(HashSet::from([9usize, 0, 5]));
+        assert_eq!(snapshot_folds(&folded), vec![0, 5, 9]);
+        assert!(snapshot_folds(&RefCell::new(HashSet::new())).is_empty());
     }
 
     #[test]
