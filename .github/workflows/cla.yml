@@ -35,7 +35,10 @@ jobs:
           # the allowlist silences the bot, it does not record a signature, so
           # allowlisting them would hide exactly what needs collecting.
           allowlist: mulhamna,badrus123,*[bot]
-          custom-notsigned-comment: >
+          # `custom-notsigned-prcomment`, not `custom-notsigned-comment`. The
+          # action ignores an unknown input with only a warning, so the wrong
+          # name silently fell back to the default text instead of failing.
+          custom-notsigned-prcomment: >
             Thanks for your contribution! Before we can merge, please read our
             [Contributor License Agreement](https://github.com/suiflex/rdb/blob/develop/CLA.md)
             and sign it by posting the comment below.
