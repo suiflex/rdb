@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <strong>Native cross-platform database manager.<br>PostgreSQL · MySQL · MariaDB · Redis · Valkey · MongoDB · SQLite · Cassandra · SQL Server · ClickHouse — one binary, no Electron.</strong>
+  <strong>Native cross-platform database manager.<br>PostgreSQL · MySQL · MariaDB · Redis · Valkey · MongoDB · SQLite · Cassandra · Scylla · SQL Server · ClickHouse — one binary, no Electron.</strong>
 </p>
 
 <p align="center">
