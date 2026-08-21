@@ -28,6 +28,19 @@ fn test_password(typed: Option<String>, stored: impl FnOnce() -> Option<String>)
     }
 }
 
+/// How the password box should describe a saved connection's secret, as
+/// `(has_password, unreadable)`.
+///
+/// Kept separate from `.ok()` on purpose. Collapsing the error case into "no
+/// password" makes an unreadable store look exactly like an empty one — a blank
+/// field either way — and leaves the user with nothing to act on.
+fn password_state(read: rdb_connstore::Result<Option<String>>) -> (bool, bool) {
+    match read {
+        Ok(pw) => (pw.is_some_and(|s| !s.is_empty()), false),
+        Err(_) => (false, true),
+    }
+}
+
 pub(crate) fn wire(window: &MainWindow, state: &AppState) {
     let AppState {
         rt,
@@ -84,11 +97,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             *editing_id.borrow_mut() = sc.id.clone();
             // The stored secret is never shown; expose only whether one exists so
             // the form can prompt "leave blank to keep" instead of looking empty.
-            let has_pw = st
-                .get_password(&sc.id)
-                .ok()
-                .flatten()
-                .is_some_and(|s| !s.is_empty());
+            //
+            // A failed read is reported separately rather than folded in. `.ok()`
+            // alone would turn "the store errored" into "there is no password",
+            // which looks identical to an empty field and leaves the user with no
+            // way to tell a missing secret from an unreadable one.
+            let (has_pw, pw_unreadable) = password_state(st.get_password(&sc.id));
             let has_ssh_sec = st
                 .get_ssh_secret(&sc.id)
                 .ok()
@@ -103,6 +117,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             w.set_f_database(SharedString::from(sc.database.unwrap_or_default()));
             w.set_f_password(SharedString::default());
             w.set_f_has_password(has_pw);
+            w.set_f_password_unreadable(pw_unreadable);
             w.set_f_sslmode(SharedString::from(match sc.sslmode {
                 rdb_core::conn::SslMode::Disable => "Disable",
                 rdb_core::conn::SslMode::Prefer => "Prefer",
@@ -645,8 +660,29 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
 
 #[cfg(test)]
 mod tests {
-    use super::test_password;
+    use super::{password_state, test_password};
     use std::cell::Cell;
+
+    #[test]
+    fn a_stored_secret_reads_as_present() {
+        assert_eq!(password_state(Ok(Some("hunter2".into()))), (true, false));
+    }
+
+    #[test]
+    fn no_secret_reads_as_absent_not_broken() {
+        assert_eq!(password_state(Ok(None)), (false, false));
+        // An empty string is not a password.
+        assert_eq!(password_state(Ok(Some(String::new()))), (false, false));
+    }
+
+    #[test]
+    fn an_unreadable_store_is_not_reported_as_no_password() {
+        // The whole point: this used to be indistinguishable from Ok(None), so
+        // a broken secret store showed the same blank box as a connection that
+        // genuinely has no password.
+        let err = rdb_connstore::ConnStoreError::Secret("keychain denied".into());
+        assert_eq!(password_state(Err(err)), (false, true));
+    }
 
     #[test]
     fn typed_password_wins_over_the_stored_one() {
