@@ -1,12 +1,30 @@
 // Design tokens — single source of truth for the Tabula design.
 // Every color/metric in the UI resolves here; no magic hex outside this file.
 // Each color carries a light and a dark value, switched by `dark`.
+//
+// `Palette` is imported only for its `color-scheme`, which is Slint 1.17's one
+// supported way to read the live OS appearance: there is no Rust API for it in
+// this version. std-widgets is already compiled in, so this costs nothing.
+import { Palette } from "std-widgets.slint";
 import "../../assets/fonts/IBMPlexMono-Regular.ttf";
 import "../../assets/fonts/IBMPlexMono-Medium.ttf";
 import "../../assets/fonts/IBMPlexMono-SemiBold.ttf";
 
 export global Tokens {
-    in-out property <bool> dark: false;
+    // 0 = follow the OS, 1 = force light, 2 = force dark. This is the only
+    // theme property Rust writes.
+    in-out property <int> theme-mode: 0;
+
+    // Derived, never assigned. It is `out` on purpose: writing a bound property
+    // in Slint replaces the binding permanently, so a stray `set_dark()` from
+    // Rust would silently sever the link to the OS appearance and never restore
+    // it. Making it read-only turns that mistake into a compile error.
+    // `ColorScheme.unknown` is a real variant and falls through to light, which
+    // is what the app defaulted to before.
+    out property <bool> dark:
+        theme-mode == 1 ? false :
+        theme-mode == 2 ? true  :
+        Palette.color-scheme == ColorScheme.dark;
 
     // ----- surfaces -----
     out property <color> chrome:  dark ? #1E1F24 : #F7F7F8;   // titlebar / toolbars / doc-tab row

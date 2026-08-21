@@ -105,18 +105,41 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         });
     }
 
-    // ----- light/dark toggle -----
+    // ----- theme mode -----
+    //
+    // Both handlers write only the mode. Darkness is derived in `tokens.slint`
+    // from the mode plus the live OS appearance, and writing that derived
+    // property from here would replace its binding permanently — severing the
+    // link to the system theme with no way back. `Theme.dark` is read-only for
+    // exactly that reason.
+    let apply_mode = {
+        let settings = settings.clone();
+        move |w: &MainWindow, mode: rdb_connstore::ThemeMode| {
+            w.global::<Theme>().set_mode(mode.to_index());
+            let _ = settings.borrow_mut().update(|s| s.theme = mode);
+        }
+    };
+
+    // Header button: walks System -> Light -> Dark -> System, so every state is
+    // reachable without opening Settings.
     {
         let weak = window.as_weak();
-        let settings = settings.clone();
-        window.on_toggle_theme(move || {
+        let apply_mode = apply_mode.clone();
+        window.on_cycle_theme(move || {
             if let Some(w) = weak.upgrade() {
-                let t = w.global::<Theme>();
-                let now = t.get_dark();
-                t.set_dark(!now);
-                let _ = settings
-                    .borrow_mut()
-                    .update(|s| s.theme = rdb_connstore::ThemeMode::from_dark(!now));
+                let next = (w.global::<Theme>().get_mode() + 1) % 3;
+                apply_mode(&w, rdb_connstore::ThemeMode::from_index(next));
+            }
+        });
+    }
+
+    // Settings modal: picks a mode directly.
+    {
+        let weak = window.as_weak();
+        let apply_mode = apply_mode.clone();
+        window.on_set_theme_mode(move |i| {
+            if let Some(w) = weak.upgrade() {
+                apply_mode(&w, rdb_connstore::ThemeMode::from_index(i));
             }
         });
     }
