@@ -600,7 +600,10 @@ callback create-table-commit();
     callback palette-filter(string);
     callback palette-choose(int);
     callback move-row(int);
-    callback toggle-theme();
+    // 0 = follow the OS, 1 = light, 2 = dark. Rust owns the mode; the UI never
+    // writes darkness directly (see the note on `Tokens.dark`).
+    callback cycle-theme();
+    callback set-theme-mode(int);
 
     // ----- update reminder banner (fed from Rust) -----
     in property <bool> update-available: false;
@@ -1138,21 +1141,26 @@ callback create-table-commit();
                             }
                         }
                     }
-                    // theme toggle: sun in dark mode, moon in light.
-                    // Always visible (connections screen + workspace) so the
-                    // control lives in the same header spot in both states.
+                    // theme: monitor while following the OS, otherwise the
+                    // icon of the mode in force — sun for light, moon for dark.
+                    // Clicking walks System -> Light -> Dark -> System, so the
+                    // icon always names the current state rather than the next
+                    // one. Always visible (connections screen + workspace) so
+                    // the control lives in the same header spot in both states.
                     VerticalLayout {
                         alignment: center;
                         IconButton {
-                            icon: Tokens.dark ? "sun" : "moon";
-                            tooltip: "Toggle theme";
-                            clicked => { root.toggle-theme(); }
+                            icon: Tokens.theme-mode == 0 ? "monitor"
+                                : Tokens.theme-mode == 1 ? "sun" : "moon";
+                            tooltip: Tokens.theme-mode == 0 ? "Theme: follow system"
+                                : Tokens.theme-mode == 1 ? "Theme: light" : "Theme: dark";
+                            clicked => { root.cycle-theme(); }
                         }
                     }
                     VerticalLayout {
                         alignment: center;
-                        GlyphButton {
-                            glyph: "⚙";
+                        IconButton {
+                            icon: "settings";
                             tooltip: "Settings";
                             clicked => { root.settings-open = true; }
                         }
@@ -2765,10 +2773,29 @@ callback create-table-commit();
                     VerticalLayout {
                         spacing: Tokens.sp3;
                         SettingsSectionHeader { label: "Appearance"; }
-                        ToggleRow {
-                            label: "Dark mode";
-                            checked: Tokens.dark;
-                            toggled => { root.toggle-theme(); }
+                        // Three states, so this cannot be a switch. "System"
+                        // hands the choice to the OS and tracks it live.
+                        HorizontalLayout {
+                            alignment: space-between;
+                            spacing: Tokens.sp3;
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: "Theme";
+                                    color: Tokens.text;
+                                    font-size: 13px;
+                                }
+                            }
+                            SelectBox {
+                                width: 110px;
+                                model: ["System", "Light", "Dark"];
+                                current-value: Tokens.theme-mode == 1 ? "Light"
+                                    : Tokens.theme-mode == 2 ? "Dark" : "System";
+                                selected(value) => {
+                                    root.set-theme-mode(value == "Light" ? 1
+                                        : value == "Dark" ? 2 : 0);
+                                }
+                            }
                         }
                         ToggleRow {
                             label: "Sidebar on the right";
