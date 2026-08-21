@@ -2,6 +2,13 @@
 # Placeholders (@VERSION@, @BASE@, @LINUX_SHA@) are filled in via sed on each
 # release. Edit the template, not the generated file.
 #
+# The arm64 stanza carries its own placeholder and a trailing marker comment.
+# That leg of the build is best-effort (continue-on-error), so the asset may be
+# absent: the workflow strips the marker when it exists and deletes those lines
+# outright when it does not. The arm64 placeholder is deliberately not spelled
+# out above, because the delete path leaves no sed rule to substitute it and a
+# leftover placeholder in this comment would (rightly) fail the render check.
+#
 # Linux only. RDB is a GUI app, so macOS installs go through the `rdb` cask
 # (rdb-cask.rb.tmpl), which drops RDB.app into /Applications. Homebrew resolves
 # a bare `brew install rdb` to the formula, so keeping a macOS formula here
@@ -14,8 +21,22 @@ class Rdb < Formula
 
   depends_on :linux
 
+  # x86_64 stays the unconditional default and arm64 overrides it, rather than
+  # both living in arch blocks. If the best-effort arm64 leg produced nothing,
+  # the override lines are deleted and this formula falls back to exactly the
+  # x86_64-only shape it had before — whereas an arch-block pair with the arm64
+  # half missing leaves an arm machine with no url at all, which Homebrew
+  # rejects at *load* time ("formula requires at least a URL"), breaking more
+  # than just the install.
   url "@BASE@/rdb-x86_64-unknown-linux-gnu.tar.gz"
   sha256 "@LINUX_SHA@"
+
+  # Without this override every Linux user got the x86_64 tarball, so an arm64
+  # machine silently installed a binary it cannot run.
+  on_arm do # @ARM64@
+    url "@BASE@/rdb-aarch64-unknown-linux-gnu.tar.gz" # @ARM64@
+    sha256 "@LINUX_ARM64_SHA@" # @ARM64@
+  end # @ARM64@
 
   def install
     bin.install "rdb"
