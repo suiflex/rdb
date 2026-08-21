@@ -4272,7 +4272,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // toggles from the persisted values.
     window
         .global::<Theme>()
-        .set_dark(settings.borrow().get().theme.is_dark());
+        .set_mode(settings.borrow().get().theme.to_index());
     window
         .global::<Tokens>()
         .set_font_base(clamp_font_size(settings.borrow().get().editor.font_size as i32) as f32);

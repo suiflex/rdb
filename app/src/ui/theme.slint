@@ -1,9 +1,15 @@
 // Rust-facing state global. All design values live in `Tokens`; this only
-// carries the two properties main.rs drives at runtime.
+// carries the properties main.rs drives at runtime.
 import { Tokens } from "tokens.slint";
 
 export global Theme {
-    in-out property <bool> dark <=> Tokens.dark;
+    // 0 = follow the OS, 1 = force light, 2 = force dark.
+    in-out property <int> mode <=> Tokens.theme-mode;
+
+    // Read-only mirror of the resolved value, for Rust and for call sites that
+    // only care whether the UI is currently dark. Deliberately not writable —
+    // see the note on `Tokens.dark`.
+    out property <bool> dark: Tokens.dark;
 
     // per-connection accent, fed from Rust at connect time
     in-out property <color> accent: Tokens.accent;
