@@ -395,6 +395,16 @@ pub(crate) fn bump_p_scroll_request(w: &MainWindow, pane: usize) {
     }
 }
 
+/// Send the grid's scroll offset back to the top. Same one-shot counter idiom
+/// as `bump_p_scroll_request` — see `scroll-top-tick` in tabular-grid.slint.
+pub(crate) fn bump_p_scroll_grid_top(w: &MainWindow, pane: usize) {
+    if pane == 0 {
+        w.set_scroll_top_tick(w.get_scroll_top_tick().wrapping_add(1));
+    } else {
+        w.set_p1_scroll_top_tick(w.get_p1_scroll_top_tick().wrapping_add(1));
+    }
+}
+
 pub(crate) fn get_p_cursor(w: &MainWindow, pane: usize) -> (usize, usize) {
     if pane == 0 {
         (w.get_cursor_line() as usize, w.get_cursor_col() as usize)
