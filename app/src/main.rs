@@ -3824,6 +3824,10 @@ fn present_view(
     set_p_range_anchor(w, pane, -1);
     set_p_range_anchor_col(w, pane, -1);
     SELECTED_RANGE.with(|s| s.borrow_mut()[pane] = None);
+    // Rows are virtualized off the grid's scroll offset, which survives a
+    // result swap: paging forward from the bottom of one page otherwise opens
+    // the next one already scrolled down, or onto blank space.
+    bump_p_scroll_grid_top(w, pane);
     // Seed the Details JSON preview for the first row of the new result.
     if let Some(g) = displayed_grid.lock().unwrap().as_ref() {
         refresh_detail_pretty(w, pane, g, 0);

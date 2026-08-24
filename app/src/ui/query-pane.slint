@@ -122,6 +122,7 @@ export component QueryPane inherits Rectangle {
     in-out property <string> doc-inspect-value;
     in-out property <bool> doc-inspect-open;
     in property <int> scroll-grid-tick;
+    in property <int> scroll-top-tick;
     callback sort-col(int);
     callback reorder-col(int, length);
     callback set-col-filter(int, string);
@@ -795,6 +796,7 @@ export component QueryPane inherits Rectangle {
                 cell-advance(r, c, t, fwd) => { root.cell-advance(r, c, t, fwd); }
                 edit-cancelled() => { root.edit-cancelled(); }
                 scroll-grid-tick: root.scroll-grid-tick;
+                scroll-top-tick: root.scroll-top-tick;
             }
 
             if body.detail-shown: Rectangle {

@@ -50,6 +50,7 @@ export component TabularGrid inherits Rectangle {
     callback edit-cancelled();
     callback copy-request();               // Cmd/Ctrl+C while the grid has focus
     in property <int> scroll-grid-tick;
+    in property <int> scroll-top-tick;
     property <int> date-row: -1;
     property <int> date-col: -1;
     // Manual row virtualization: only the on-screen window of rows is built, so a
@@ -73,6 +74,14 @@ export component TabularGrid inherits Rectangle {
 
     changed scroll-grid-tick => {
         flick.viewport-y = min(0px, flick.height - flick.viewport-height);
+    }
+
+    // A fresh result reuses the same Flickable, and rows are virtualized off
+    // viewport-y (see first-row above), so a stale offset from the previous
+    // result survives the swap — paging forward from the bottom of a page
+    // lands mid-list, or on blank space when the new page is shorter.
+    changed scroll-top-tick => {
+        flick.viewport-y = 0px;
     }
 
     // Claims keyboard focus on any row/cell interaction (see cell-ta below) so

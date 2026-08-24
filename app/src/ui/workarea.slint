@@ -209,6 +209,7 @@ export component WorkArea inherits Rectangle {
     in-out property <string> p1-editing-value;
     in property <bool> p1-editing-large: false;
     in property <int> p1-scroll-grid-tick;
+    in property <int> p1-scroll-top-tick;
     in property <int> p1-pending-count;
     callback p1-commit-edits();
     callback p1-discard-edits();
@@ -279,6 +280,7 @@ export component WorkArea inherits Rectangle {
     in-out property <string> filter-op: "=";
     in property <int> focus-filter-tick;
     in property <int> scroll-grid-tick;
+    in property <int> scroll-top-tick;
 
     callback run();
     callback run-new-tab();
@@ -494,6 +496,7 @@ export component WorkArea inherits Rectangle {
             editing-value <=> root.editing-value;
             editing-large: root.editing-large;
             scroll-grid-tick: root.scroll-grid-tick;
+            scroll-top-tick: root.scroll-top-tick;
             sort-col(i) => { root.sort-col(i); }
             reorder-col(i, x) => { root.reorder-col(i, x); }
             set-col-filter(i, t) => { root.set-col-filter(i, t); }
@@ -642,6 +645,7 @@ export component WorkArea inherits Rectangle {
                 editing-value <=> root.p1-editing-value;
                 editing-large: root.p1-editing-large;
                 scroll-grid-tick: root.p1-scroll-grid-tick;
+                scroll-top-tick: root.p1-scroll-top-tick;
                 sort-col(i) => { root.p1-sort-col(i); }
                 reorder-col(i, x) => { root.p1-reorder-col(i, x); }
                 set-col-filter(i, t) => { root.p1-set-col-filter(i, t); }
