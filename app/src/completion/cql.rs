@@ -23,12 +23,12 @@ pub fn keywords() -> Vec<Candidate> {
 
 /// Completion when the cursor is on a bare word (no `owner.` prefix).
 pub fn bare_word(
-    cur_line: &str,
+    head: &str,
     stmt: &str,
     nodes: &[VmTreeNode],
     scope: &[VmTreeNode],
 ) -> Vec<Candidate> {
-    match super::last_keyword(cur_line, rdb_connstore::QueryLanguage::Cql).as_deref() {
+    match super::last_keyword(head, rdb_connstore::QueryLanguage::Cql).as_deref() {
         // table/keyspace position.
         Some("FROM") | Some("INTO") | Some("UPDATE") | Some("TABLE") => {
             let mut c = tables(scope);

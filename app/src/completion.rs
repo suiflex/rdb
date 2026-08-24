@@ -311,14 +311,34 @@ fn from_table_columns(stmt: &str, nodes: &[VmTreeNode]) -> Vec<Candidate> {
     cols
 }
 
-/// The last keyword token on `line` for `language`, uppercased (via the
-/// editor lexer, so it agrees with what's actually highlighted).
-fn last_keyword(line: &str, language: rdb_connstore::QueryLanguage) -> Option<String> {
-    crate::editor::lex_line(language, line)
-        .into_iter()
+/// The last keyword token in `text` for `language`, uppercased (via the editor
+/// lexer, so it agrees with what's actually highlighted). `text` is the
+/// statement so far, not one line: a formatted query puts the clause keyword on
+/// a line of its own, and reading only the cursor's line reported no clause at
+/// all — the same query typed on one line completed differently.
+fn last_keyword(text: &str, language: rdb_connstore::QueryLanguage) -> Option<String> {
+    text.lines()
         .rev()
-        .find(|s| s.kind == 1)
+        .find_map(|line| {
+            crate::editor::lex_line(language, line)
+                .into_iter()
+                .rev()
+                .find(|s| s.kind == 1)
+        })
         .map(|s| s.text.to_uppercase())
+}
+
+/// The current statement's text up to the cursor. `before_cursor` spans the
+/// whole document, so everything before the last `;` belongs to statements the
+/// clause context must not inherit.
+fn stmt_before_cursor(before_cursor: &str) -> &str {
+    // ponytail: naive `;` split, same rigor as `in_literal_or_comment` above —
+    // a semicolon inside a string literal ends the context early. Upgrade to
+    // the editor's `statement_bounds` if that ever bites.
+    before_cursor
+        .rsplit_once(';')
+        .map(|(_, tail)| tail)
+        .unwrap_or(before_cursor)
 }
 
 /// Whether the cursor is in a table-name position (after FROM, JOIN, INTO,
@@ -469,11 +489,13 @@ pub fn suggest(
             _ => mongo::bare_word(scope),
         }
     } else {
-        // Keyword context comes from the current line; `before_cursor` may span
-        // several lines (alias resolution needs the whole statement).
+        // Keyword context comes from the statement so far, so a clause keyword
+        // on an earlier line still counts; `stmt` stays the whole statement
+        // (alias resolution needs the text after the cursor too).
+        let head = stmt_before_cursor(before_cursor);
         match language {
-            rdb_connstore::QueryLanguage::Cql => cql::bare_word(cur_line, stmt, nodes, scope),
-            _ => sql::bare_word(cur_line, stmt, nodes, scope, active_schema),
+            rdb_connstore::QueryLanguage::Cql => cql::bare_word(head, stmt, nodes, scope),
+            _ => sql::bare_word(head, stmt, nodes, scope, active_schema),
         }
     };
     rank_and_cap(cands, word)
@@ -1237,6 +1259,49 @@ mod tests {
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["config_id", "name"]
         );
+    }
+
+    /// A formatted query puts the clause keyword on its own line, and the
+    /// clause context used to be read from the cursor's line alone — so the
+    /// same query completed columns when typed on one line and only keywords
+    /// when typed across several.
+    #[test]
+    fn multiline_select_still_offers_columns() {
+        let (_, c) = sug(
+            "select\n    na",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
+        let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+        assert!(labels.contains(&"name"), "got {labels:?}");
+    }
+
+    /// Same shape one clause further in: WHERE on an earlier line.
+    #[test]
+    fn multiline_where_still_offers_columns() {
+        let (_, c) = sug(
+            "select *\nfrom job_config\nwhere\n    conf",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
+        let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+        assert!(labels.contains(&"config_id"), "got {labels:?}");
+    }
+
+    /// The clause context stops at the statement boundary — a finished
+    /// statement above must not make the next one look like it is mid-SELECT.
+    #[test]
+    fn clause_context_stops_at_the_previous_statement() {
+        let (_, c) = sug(
+            "select name from job_config;\nsel",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
+        let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+        assert!(labels.contains(&"SELECT"), "got {labels:?}");
     }
 
     /// `AS` is itself a keyword, so the alias scan used to stop on it and
