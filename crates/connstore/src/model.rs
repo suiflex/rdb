@@ -192,6 +192,13 @@ impl Engine {
             .find(|m| m.display == label)
             .map(|m| m.engine)
     }
+
+    /// Resolve a badge key back to its engine, for the places that only carry
+    /// the key (a workspace tab stores one to draw its badge). `None` for an
+    /// unknown or empty key rather than a guess.
+    pub fn from_key(key: &str) -> Option<Engine> {
+        ENGINES.iter().find(|m| m.key == key).map(|m| m.engine)
+    }
 }
 
 /// Environment classification rendered as a colored pill next to the
@@ -520,8 +527,11 @@ mod tests {
             assert!(!m.key.is_empty());
             assert!(!m.scheme.is_empty());
             assert_eq!(Engine::from_display(m.display), Some(e));
+            assert_eq!(Engine::from_key(m.key), Some(e));
         }
         assert_eq!(all.len(), ENGINES.len(), "ENGINES has an unlisted row");
+        assert_eq!(Engine::from_key(""), None);
+        assert_eq!(Engine::from_key("nope"), None);
         for e in all {
             // Keeps the array above honest against the enum: a new variant
             // fails to compile here until it is added to `all`.
