@@ -79,7 +79,12 @@ fn resolve_alias(stmt: &str, owner: &str, language: rdb_connstore::QueryLanguage
                 if words.get(k).is_some_and(|w| w.eq_ignore_ascii_case("AS")) {
                     k += 1;
                 }
-                if table.to_lowercase() == ol {
+                // Compare on the last segment too, so a bare `audit_log.`
+                // still resolves to the `archive.audit_log` that FROM named —
+                // and answers with the qualified name, which is what scopes
+                // the column lookup to the right schema.
+                let table_l = table.to_lowercase();
+                if table_l == ol || table_l.rsplit('.').next() == Some(ol.as_str()) {
                     return table.to_string();
                 }
                 match words.get(k) {
@@ -147,6 +152,18 @@ fn is_subsequence(label: &str, word: &str) -> bool {
         }
     }
     w.peek().is_none()
+}
+
+/// Like `trailing_word`, but keeps a `schema.` qualifier attached. `table.`
+/// completion needs the whole dotted path: dropping the qualifier is what let
+/// a table name repeated across schemas resolve to the wrong one.
+fn trailing_path(s: &str) -> &str {
+    let b = s.as_bytes();
+    let mut i = b.len();
+    while i > 0 && (b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_' || b[i - 1] == b'.') {
+        i -= 1;
+    }
+    &s[i..]
 }
 
 /// The trailing run of identifier chars at the end of `s` (ASCII identifier).
@@ -244,6 +261,13 @@ fn columns_of(nodes: &[VmTreeNode], owner: &str) -> Vec<Candidate> {
     // Tree labels are bare table names; a schema-qualified owner
     // (`schema.table`) matches on its last segment.
     let owner_l = owner.rsplit('.').next().unwrap_or(owner).to_lowercase();
+    // ...but the search itself has to stay inside the named schema, otherwise
+    // the first table with that bare name anywhere in the tree wins and a
+    // table name repeated across schemas answers with the wrong columns.
+    let nodes = match owner.rsplit_once('.') {
+        Some((schema, _)) if is_database(nodes, schema) => schema_scope(nodes, schema),
+        _ => nodes,
+    };
     for (i, n) in nodes.iter().enumerate() {
         if (n.kind == "table" || n.kind == "collection") && n.label.to_lowercase() == owner_l {
             return nodes[i + 1..]
@@ -407,7 +431,9 @@ pub fn suggest(
         // dot is a schema/database, offer that schema's tables instead.
         // Explicit `schema.` uses the whole tree so other schemas stay reachable.
         let owner_word = trailing_word(before_dot);
-        let owner = resolve_alias(stmt, owner_word, language);
+        // The qualified path, so `schema.table.` keeps its schema; identical to
+        // `owner_word` for a bare table or alias.
+        let owner = resolve_alias(stmt, trailing_path(before_dot), language);
         // MongoDB's `db.` / `db.<collection>.` shapes are unambiguous and must
         // win over column completion: a collection's sampled fields (from
         // Driver::sample_fields) would otherwise satisfy the `!cols.is_empty()`
@@ -640,6 +666,35 @@ mod tests {
             mk("t_invoice_line", "table"),
             mk("id_invoice", "field"),
         ]
+    }
+
+    /// The same table name in two schemas: a qualified `schema.table.` has to
+    /// answer with that schema's columns, not whichever copy the flat node
+    /// list happened to hold first.
+    #[test]
+    fn qualified_dot_picks_the_named_schemas_table() {
+        let mk = |l: &str, k: &str| VmTreeNode {
+            label: l.into(),
+            kind: k.into(),
+        };
+        let dupes = vec![
+            mk("public", "database"),
+            mk("audit_log", "table"),
+            mk("public_col", "field"),
+            mk("archive", "database"),
+            mk("audit_log", "table"),
+            mk("archive_col", "field"),
+        ];
+        let (_, c) = sug(
+            "select * from archive.audit_log where archive.audit_log.",
+            &dupes,
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
+        assert_eq!(
+            c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
+            ["archive_col"]
+        );
     }
 
     #[test]
