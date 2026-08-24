@@ -44,6 +44,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         save_active_tab,
         restore_tab,
         save_p1_tab,
+        sync_editor,
         ..
     } = fns.clone();
     let browse = panes[0].browse.clone();
@@ -342,6 +343,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             }
             // Fresh connection: nothing browsed, nothing expanded.
             *cur_engine.borrow_mut() = Some(sc.engine);
+            // The tab restores above already lexed the editors, but the engine
+            // was only known once the line above ran — repaint both panes so a
+            // tab with no engine of its own is not left in the old dialect.
+            sync_editor(0);
+            sync_editor(1);
             expanded_tables.lock().unwrap().clear();
             loaded_dbs.lock().unwrap().clear();
             *collapsed_categories.borrow_mut() = default_collapsed_cats();

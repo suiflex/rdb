@@ -1833,6 +1833,29 @@ fn active_tab_kind(w: &MainWindow) -> String {
         .unwrap_or_default()
 }
 
+/// Query dialect of the pane's active tab, from the engine badge it was
+/// created against. The app-wide `cur_engine` is the *connection* that would
+/// run the query, which is not the same thing: a SQL tab stays open while the
+/// user connects to Mongo, and lexing it as Mongo renders it entirely
+/// uncoloured. `None` when the pane has no active tab, or the tab predates any
+/// connection — the caller falls back to `cur_engine` there.
+pub(crate) fn active_tab_language(
+    w: &MainWindow,
+    pane: usize,
+) -> Option<rdb_connstore::QueryLanguage> {
+    use slint::Model;
+    let (tabs, idx) = if pane == 0 {
+        (w.get_tabs(), w.get_active_tab())
+    } else {
+        (w.get_p1_tabs(), w.get_p1_active_tab())
+    };
+    if idx < 0 {
+        return None;
+    }
+    let tab = tabs.row_data(idx as usize)?;
+    rdb_connstore::Engine::from_key(&tab.engine).map(rdb_connstore::Engine::language)
+}
+
 /// Clipboard write; returns false when no clipboard is available.
 fn clip_set(s: &str) -> bool {
     use copypasta::ClipboardProvider;
