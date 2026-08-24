@@ -16,6 +16,23 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::*;
 
+/// The dialect the editor lexes and completes in: the active tab's own engine
+/// first, the live connection only as a fallback. Highlighting and completion
+/// both go through here so a tab can never be coloured in one dialect and
+/// completed in another.
+fn editor_language(
+    w: &MainWindow,
+    pane: usize,
+    cur_engine: &RefCell<Option<rdb_connstore::Engine>>,
+) -> rdb_connstore::QueryLanguage {
+    crate::active_tab_language(w, pane).unwrap_or_else(|| {
+        cur_engine
+            .borrow()
+            .map(rdb_connstore::Engine::language)
+            .unwrap_or(rdb_connstore::QueryLanguage::Sql)
+    })
+}
+
 /// `folded_heads` stores fold state as raw line indices, but edits that add
 /// or remove lines above a fold (Enter, Backspace/Delete merges, multi-line
 /// paste) don't otherwise touch it — so a stale index stops matching the
@@ -77,10 +94,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
             let sel = ed.selection();
             let error_mark = *panes[pane].error_mark.lock().unwrap();
             let error_line = error_mark.map(|m| m.line as usize);
-            let language = cur_engine
-                .borrow()
-                .map(rdb_connstore::Engine::language)
-                .unwrap_or(rdb_connstore::QueryLanguage::Sql);
+            let language = editor_language(&w, pane, &cur_engine);
             let lines: Vec<ModelRc<Span>> = ed
                 .lines
                 .iter()
@@ -242,10 +256,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                 (ed.before_cursor_doc(), ed.current_statement())
             };
             let schema = w.get_schema_name().to_string();
-            let language = cur_engine
-                .borrow()
-                .map(rdb_connstore::Engine::language)
-                .unwrap_or(rdb_connstore::QueryLanguage::Sql);
+            let language = editor_language(&w, pane, &cur_engine);
             let (word_len, cands) = completion::suggest(
                 &before,
                 &stmt,
@@ -309,10 +320,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                 ed.insert(&label);
                 // Auto-append alias when accepting a table name in FROM/JOIN position.
                 if kind == "table" && settings.borrow().get().editor.auto_table_alias {
-                    let language = cur_engine
-                        .borrow()
-                        .map(rdb_connstore::Engine::language)
-                        .unwrap_or(rdb_connstore::QueryLanguage::Sql);
+                    let language = editor_language(&w, pane, &cur_engine);
                     let before = ed.before_cursor_doc();
                     let cur_line = before.rsplit('\n').next().unwrap_or(&before);
                     if completion::is_table_position(cur_line, language) {
