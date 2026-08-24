@@ -33,6 +33,15 @@ fn editor_language(
     })
 }
 
+/// Drop the completion popup and the replace-length it was built with. Anything
+/// that moves the caret or rewrites the text under it without rebuilding the
+/// list has to call this: `accept_completion` trusts the stored length and would
+/// otherwise backspace over characters that are no longer the word being typed.
+fn hide_completion(w: &MainWindow, group: &GroupRuntime, pane: usize) {
+    set_p_completion_visible(w, pane, false);
+    *group.completion_ctx.borrow_mut() = (0, Vec::new());
+}
+
 /// `folded_heads` stores fold state as raw line indices, but edits that add
 /// or remove lines above a fold (Enter, Backspace/Delete merges, multi-line
 /// paste) don't otherwise touch it — so a stale index stops matching the
@@ -461,6 +470,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                         }
                     }
                     sync_editor(pane);
+                    // The caret left the word the popup was built for, so its
+                    // stored replace-length no longer describes what accepting
+                    // would overwrite.
+                    if let Some(w) = weak.upgrade() {
+                        hide_completion(&w, &panes[pane], pane);
+                    }
                     return true;
                 }
                 if meta {
@@ -566,6 +581,13 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                         // combos here don't edit, or replace the buffer whole.
                         if matches!(text.as_str(), "\u{8}" | "\u{7f}") {
                             refresh_completion(pane);
+                        } else if matches!(text.as_str(), "x" | "v" | "z") {
+                            // Cut/paste/undo rewrite the text under the caret
+                            // without rebuilding the popup, so anything still
+                            // showing describes a word that is no longer there.
+                            if let Some(w) = weak.upgrade() {
+                                hide_completion(&w, &panes[pane], pane);
+                            }
                         }
                     }
                     return handled;
