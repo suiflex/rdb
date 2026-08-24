@@ -1,8 +1,9 @@
 use rdb_core::conn::{SshAuthMode, SshTunnelConfig};
 use rdb_core::error::{RdbError, Result};
 use russh::client::Handle;
-use russh_keys::agent::client::AgentClient;
-use russh_keys::decode_secret_key;
+use russh::keys::agent::client::AgentClient;
+use russh::keys::agent::AgentIdentity;
+use russh::keys::{decode_secret_key, PrivateKeyWithHashAlg};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -28,7 +29,7 @@ pub async fn authenticate(
                 .authenticate_password(&cfg.user, pw)
                 .await
                 .map_err(|e| RdbError::Connection(format!("SSH password auth failed: {e}")))?;
-            if !auth_res {
+            if !auth_res.success() {
                 return Err(RdbError::Connection(
                     "SSH password authentication rejected by server".into(),
                 ));
@@ -51,11 +52,17 @@ pub async fn authenticate(
                 RdbError::Connection(format!("Failed to parse SSH private key: {e}"))
             })?;
 
+            // RSA keys have to be signed with the hash the server actually
+            // accepts (ssh-rsa vs rsa-sha2-256/512); modern servers reject the
+            // SHA-1 default. Ignored for every other algorithm.
+            let hash_alg = session.best_supported_rsa_hash().await.ok().flatten();
+            let key = PrivateKeyWithHashAlg::new(Arc::new(key_pair), hash_alg.flatten());
+
             let auth_res = session
-                .authenticate_publickey(&cfg.user, Arc::new(key_pair))
+                .authenticate_publickey(&cfg.user, key)
                 .await
                 .map_err(|e| RdbError::Connection(format!("SSH key auth failed: {e}")))?;
-            if !auth_res {
+            if !auth_res.success() {
                 return Err(RdbError::Connection(
                     "SSH public key authentication rejected by server".into(),
                 ));
@@ -81,12 +88,17 @@ pub async fn authenticate(
                 ));
             }
 
+            let hash_alg = session.best_supported_rsa_hash().await.ok().flatten();
+
             let mut authenticated = false;
-            for pubkey in identities {
-                let (agent_back, auth_res) =
-                    session.authenticate_future(&cfg.user, pubkey, agent).await;
-                agent = agent_back;
-                if let Ok(true) = auth_res {
+            for identity in identities {
+                let AgentIdentity::PublicKey { key, .. } = identity else {
+                    continue;
+                };
+                let auth_res = session
+                    .authenticate_publickey_with(&cfg.user, key, hash_alg.flatten(), &mut agent)
+                    .await;
+                if matches!(auth_res, Ok(ref r) if r.success()) {
                     authenticated = true;
                     break;
                 }

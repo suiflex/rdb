@@ -1,6 +1,5 @@
-use async_trait::async_trait;
 use russh::client::{self, Handle, Handler};
-use russh::keys::key::PublicKey;
+use russh::keys::PublicKey;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
@@ -30,7 +29,6 @@ impl ClientHandler {
     }
 }
 
-#[async_trait]
 impl Handler for ClientHandler {
     type Error = russh::Error;
 
