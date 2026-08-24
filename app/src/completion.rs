@@ -62,15 +62,35 @@ fn resolve_alias(stmt: &str, owner: &str, language: rdb_connstore::QueryLanguage
     for i in 0..words.len() {
         let w = words[i].to_uppercase();
         if (w == "FROM" || w == "JOIN") && i + 1 < words.len() {
-            let table = words[i + 1];
-            // `FROM tbl alias` — alias is the following non-keyword word.
-            if let Some(alias) = words.get(i + 2) {
-                if !is_keyword_for(language, alias) && alias.to_lowercase() == ol {
+            // A FROM list is comma-separated, and the tokenizer already
+            // dropped the commas — so walk the words after FROM in
+            // `table [AS] [alias]` groups until one stops looking like a
+            // table reference. Only the first entry was examined before, so
+            // `FROM a x, b y` could never resolve `y`.
+            let mut j = i + 1;
+            while j < words.len() {
+                let table = words[j];
+                if is_keyword_for(language, table) {
+                    break;
+                }
+                // `FROM tbl AS alias` — the optional AS sits between the two,
+                // and being a keyword it used to end the scan right here.
+                let mut k = j + 1;
+                if words.get(k).is_some_and(|w| w.eq_ignore_ascii_case("AS")) {
+                    k += 1;
+                }
+                if table.to_lowercase() == ol {
                     return table.to_string();
                 }
-            }
-            if table.to_lowercase() == ol {
-                return table.to_string();
+                match words.get(k) {
+                    Some(alias) if !is_keyword_for(language, alias) => {
+                        if alias.to_lowercase() == ol {
+                            return table.to_string();
+                        }
+                        j = k + 1;
+                    }
+                    _ => j = k,
+                }
             }
         }
     }
@@ -1161,6 +1181,38 @@ mod tests {
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["config_id", "name"]
+        );
+    }
+
+    /// `AS` is itself a keyword, so the alias scan used to stop on it and
+    /// leave an explicit `FROM tbl AS a` alias unresolvable — no popup at all.
+    #[test]
+    fn as_alias_resolves_to_table_columns() {
+        let (_, c) = sug(
+            "select * from job_config as jc where jc.",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
+        assert_eq!(
+            c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
+            ["config_id", "name"]
+        );
+    }
+
+    /// Only the first entry of a comma-separated FROM list was examined, so
+    /// the second table's alias resolved to nothing.
+    #[test]
+    fn comma_joined_from_resolves_the_second_alias() {
+        let (_, c) = sug(
+            "select * from job_config a, users b where b.",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
+        assert_eq!(
+            c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
+            ["id"]
         );
     }
 
