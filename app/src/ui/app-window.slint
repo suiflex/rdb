@@ -508,6 +508,9 @@ callback create-table-commit();
     in property <[ResultTabItem]> p1-result-tabs;
     in property <int> p1-active-result;
     in-out property <int> p1-sql-view-mode;
+    // Pane 0's counterpart. Lived only inside WorkArea until Rust needed to
+    // reset it when a tab is restored.
+    in-out property <int> sql-view-mode;
     in-out property <bool> p1-filter-open;
     in property <[GridColumn]> p1-columns;
     in property <[GridCell]> p1-cells;
@@ -1725,6 +1728,7 @@ callback create-table-commit();
                         p1-result-tabs: root.p1-result-tabs;
                         p1-active-result: root.p1-active-result;
                         p1-sql-view-mode <=> root.p1-sql-view-mode;
+                        sql-view-mode <=> root.sql-view-mode;
                         p1-filter-open <=> root.p1-filter-open;
                         p1-columns: root.p1-columns;
                         p1-cells: root.p1-cells;
