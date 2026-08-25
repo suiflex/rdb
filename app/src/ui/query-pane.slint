@@ -752,7 +752,12 @@ export component QueryPane inherits Rectangle {
 
         // ================= result body =================
         if !root.fn-mode && !root.results-collapsed: body := Rectangle {
+            // `sql-view-mode != 2` matters as much as the rest: `body` is a
+            // bare Rectangle used as a stack, and the chart below is a
+            // full-width sibling declared after this panel — so without the
+            // guard the bars simply paint over the details sidebar.
             property <bool> detail-shown: root.detail-visible && root.view-mode == 0
+                && root.sql-view-mode != 2
                 && root.result-kind == 0 && root.col-count > 0 && root.selected-row >= 0
                 && (root.selected-row + 1) * root.col-count <= root.cells.length;
             // Leaner + more responsive: a smaller slice of the body so the grid
