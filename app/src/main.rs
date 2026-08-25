@@ -2915,6 +2915,28 @@ fn guard_pending_edits(w: &MainWindow, edit_buf: &std::sync::Mutex<model::EditBu
 }
 
 /// Clear the tabular grid properties (used by non-tabular result kinds).
+/// Rebuild the pane's chart bars for the columns currently picked. Shared by a
+/// fresh result and by the pickers, so both agree on how a pick maps to a
+/// column.
+fn rebuild_chart(w: &MainWindow, pane: usize, g: &model::GridModel) {
+    let (label_i, value_i) = get_p_chart_cols_index(w, pane);
+    let label = if label_i < 0 {
+        None
+    } else {
+        Some(label_i as usize)
+    };
+    let value = CHART_VALUE_MAP.with(|m| m.borrow()[pane].get(value_i.max(0) as usize).copied());
+    let bars: Vec<ChartBar> = model::chart_data(g, label, value)
+        .into_iter()
+        .map(|(label, value, frac)| ChartBar {
+            label: label.into(),
+            value: value.into(),
+            frac,
+        })
+        .collect();
+    set_p_chart_bars(w, pane, ModelRc::from(Rc::new(VecModel::from(bars))));
+}
+
 fn clear_grid(w: &MainWindow, pane: usize) {
     set_p_col_count(w, pane, 0);
     set_p_columns(
@@ -3674,6 +3696,11 @@ thread_local! {
     /// then.
     static SELECTED_RANGE: std::cell::RefCell<[Option<(usize, usize, usize)>; 2]> =
         std::cell::RefCell::new(Default::default());
+    /// Grid column behind each entry of the chart's value picker, per pane. The
+    /// picker only lists columns the chart can measure, so its indices are its
+    /// own and have to be mapped back before plotting.
+    static CHART_VALUE_MAP: std::cell::RefCell<[Vec<usize>; 2]> =
+        std::cell::RefCell::new(Default::default());
     /// What each row of the currently displayed ⌘K palette list does when
     /// chosen, rebuilt alongside `palette_items` every open/filter — see
     /// `build_palette_items`.
@@ -3839,18 +3866,40 @@ fn present_view(
         _ => vec![140.0; ncols],
     };
     set_p_col_widths(w, pane, ModelRc::from(Rc::new(VecModel::from(widths))));
-    let bars: Vec<ChartBar> = match v {
-        model::ResultView::Table(g) => model::chart_data(g)
-            .into_iter()
-            .map(|(label, value, frac)| ChartBar {
-                label: label.into(),
-                value: value.into(),
-                frac,
-            })
-            .collect(),
-        _ => Vec::new(),
-    };
-    set_p_chart_bars(w, pane, ModelRc::from(Rc::new(VecModel::from(bars))));
+    // Chart pickers: reset to the auto-pick for every fresh result, since the
+    // columns behind the old indices are gone.
+    match v {
+        model::ResultView::Table(g) => {
+            let numeric = model::numeric_columns(g);
+            let value_cols: Vec<SharedString> = numeric
+                .iter()
+                .filter_map(|&c| g.columns.get(c))
+                .map(|c| SharedString::from(c.name.clone()))
+                .collect();
+            let mut label_cols: Vec<SharedString> = g
+                .columns
+                .iter()
+                .map(|c| SharedString::from(c.name.clone()))
+                .collect();
+            // Past the real columns: label the bars by row number instead.
+            label_cols.push(SharedString::from("row number"));
+            let auto_label = (0..g.columns.len())
+                .find(|c| !numeric.contains(c))
+                .unwrap_or(g.columns.len()) as i32;
+            set_p_chart_label_cols(w, pane, ModelRc::from(Rc::new(VecModel::from(label_cols))));
+            set_p_chart_value_cols(w, pane, ModelRc::from(Rc::new(VecModel::from(value_cols))));
+            set_p_chart_cols_index(w, pane, auto_label, 0);
+            CHART_VALUE_MAP.with(|m| m.borrow_mut()[pane] = numeric);
+            rebuild_chart(w, pane, g);
+        }
+        _ => {
+            set_p_chart_label_cols(w, pane, ModelRc::from(Rc::new(VecModel::default())));
+            set_p_chart_value_cols(w, pane, ModelRc::from(Rc::new(VecModel::default())));
+            set_p_chart_cols_index(w, pane, 0, 0);
+            CHART_VALUE_MAP.with(|m| m.borrow_mut()[pane].clear());
+            set_p_chart_bars(w, pane, ModelRc::from(Rc::new(VecModel::default())));
+        }
+    }
     apply_result(w, pane, v);
     // A fresh result starts on the first row. A stale selection left over from a
     // larger previous result is out of range for the new (smaller) one, and the

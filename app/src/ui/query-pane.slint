@@ -167,6 +167,13 @@ export component QueryPane inherits Rectangle {
     in property <[StructField]> structure-columns;
     in property <[IndexRow]> index-rows;
     in property <[ChartBar]> chart-bars;
+    // Chart column pickers. The value list only holds columns the chart can
+    // measure, so its index is its own — Rust maps it back to a grid column.
+    in property <[string]> chart-label-cols;
+    in property <[string]> chart-value-cols;
+    in-out property <int> chart-label-index;
+    in-out property <int> chart-value-index;
+    callback chart-cols-changed();
 
     background: transparent;
 
@@ -1205,6 +1212,39 @@ export component QueryPane inherits Rectangle {
                     padding: Tokens.sp3;
                     spacing: Tokens.sp1;
                     alignment: start;
+                    // Which column is the label and which is measured used to be
+                    // guessed silently, which reads as arbitrary on a wide
+                    // result. The guess is still the default, now visible and
+                    // changeable.
+                    if root.chart-value-cols.length > 0: HorizontalLayout {
+                        spacing: Tokens.sp2;
+                        padding-bottom: Tokens.sp2;
+                        Text {
+                            text: "Label";
+                            color: Tokens.text-dim;
+                            font-size: Tokens.font-sm;
+                            vertical-alignment: center;
+                        }
+                        ComboBox {
+                            width: 180px;
+                            model: root.chart-label-cols;
+                            current-index <=> root.chart-label-index;
+                            selected => { root.chart-cols-changed(); }
+                        }
+                        Text {
+                            text: "Value";
+                            color: Tokens.text-dim;
+                            font-size: Tokens.font-sm;
+                            vertical-alignment: center;
+                        }
+                        ComboBox {
+                            width: 180px;
+                            model: root.chart-value-cols;
+                            current-index <=> root.chart-value-index;
+                            selected => { root.chart-cols-changed(); }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
                     if root.chart-bars.length == 0: Text {
                         text: "Nothing to chart — the result needs a numeric column";
                         color: Tokens.text-faint;

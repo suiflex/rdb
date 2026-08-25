@@ -27,6 +27,27 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
     let col_order = panes[0].col_order.clone();
     let col_filters = panes[0].col_filters.clone();
 
+    // ----- chart column pickers -----
+    // Replot from the grid already on screen; nothing is re-fetched, so this
+    // stays instant even on a large result.
+    for pane in [0usize, 1usize] {
+        let weak = window.as_weak();
+        let displayed = panes[pane].displayed_grid.clone();
+        let handler = move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if let Some(g) = displayed.lock().unwrap().as_ref() {
+                crate::rebuild_chart(&w, pane, g);
+            }
+        };
+        if pane == 0 {
+            window.on_chart_cols_changed(handler);
+        } else {
+            window.on_p1_chart_cols_changed(handler);
+        }
+    }
+
     // ----- apply client-side row filter to the last result (Feature C) -----
     {
         let weak = window.as_weak();
