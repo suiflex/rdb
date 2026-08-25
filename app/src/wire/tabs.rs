@@ -525,18 +525,30 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 return;
             };
             let mut tabs = workspace_tabs.lock().unwrap();
+            let removed_active =
+                active_group1_tab_id.lock().unwrap().as_deref() == Some(&tabs[remove_at].id);
             tabs.remove(remove_at);
             let remaining = tabs.iter().filter(|tab| tab.group == 1).count();
             let active = active_tab_id.lock().unwrap().clone();
             set_workspace_tabs(&w, &tabs, active.as_deref());
             save_query_tabs(&w, &tabs, active.as_deref());
+            let still_active = active_group1_tab_id.lock().unwrap().clone();
+            let active_index = still_active.and_then(|id| {
+                tabs.iter()
+                    .filter(|tab| tab.group == 1)
+                    .position(|tab| tab.id == id)
+            });
             drop(tabs);
             if remaining == 0 {
                 *active_group1_tab_id.lock().unwrap() = None;
                 load_editor_text(1, "");
                 clear_grid(&w, 1);
-            } else {
+            } else if removed_active {
                 restore_p1_tab(&w, requested.min((remaining - 1) as i32) as usize);
+            } else if let Some(index) = active_index {
+                // Closing some other tab must not move the pane off the tab the
+                // user is working in — only its strip index shifted.
+                w.set_p1_active_tab(index as i32);
             }
         });
     }
