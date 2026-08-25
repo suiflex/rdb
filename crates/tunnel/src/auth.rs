@@ -70,12 +70,34 @@ pub async fn authenticate(
             Ok(())
         }
         SshAuthMode::Agent => {
+            // Agents speak the same protocol over a different transport per
+            // platform: a Unix socket named by $SSH_AUTH_SOCK, or on Windows
+            // the OpenSSH named pipe with Pageant as the fallback. `dynamic()`
+            // boxes the stream so the identity loop below stays one copy.
+            #[cfg(unix)]
             let mut agent = match AgentClient::connect_env().await {
-                Ok(a) => a,
+                Ok(a) => a.dynamic(),
                 Err(e) => {
                     return Err(RdbError::Connection(format!(
                         "Could not connect to SSH agent ($SSH_AUTH_SOCK): {e}"
                     )));
+                }
+            };
+            #[cfg(windows)]
+            let mut agent = {
+                // Where Windows' bundled OpenSSH agent listens.
+                const OPENSSH_PIPE: &str = r"\\.\pipe\openssh-ssh-agent";
+                match AgentClient::connect_named_pipe(OPENSSH_PIPE).await {
+                    Ok(a) => a.dynamic(),
+                    Err(pipe_err) => match AgentClient::connect_pageant().await {
+                        Ok(a) => a.dynamic(),
+                        Err(pageant_err) => {
+                            return Err(RdbError::Connection(format!(
+                                "Could not connect to an SSH agent (OpenSSH pipe: \
+                                 {pipe_err}; Pageant: {pageant_err})"
+                            )));
+                        }
+                    },
                 }
             };
             let identities = agent.request_identities().await.map_err(|e| {
