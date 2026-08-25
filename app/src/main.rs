@@ -2927,6 +2927,19 @@ fn clear_grid(w: &MainWindow, pane: usize) {
         pane,
         ModelRc::from(Rc::new(VecModel::<GridCell>::default())),
     );
+    // Both are drawn from the same result but live in their own models, so
+    // clearing only the grid left the previous tab's bars and detail rows
+    // hanging over an empty one.
+    set_p_chart_bars(
+        w,
+        pane,
+        ModelRc::from(Rc::new(VecModel::<ChartBar>::default())),
+    );
+    set_p_detail_pretty(
+        w,
+        pane,
+        ModelRc::from(Rc::new(VecModel::<SharedString>::default())),
+    );
 }
 
 /// The editor's error highlight, all 0-based in the full buffer: the line the
