@@ -4762,6 +4762,21 @@ fn main() -> Result<(), slint::PlatformError> {
                 w.set_p1_active_tab(group_index as i32);
             }
 
+            // The results view mode (Data/Structure/Indexes, Data/Message/Chart,
+            // grid/tree) is pane state, not tab state: without this, switching
+            // from a table tab left on Structure renders the next tab's query
+            // result through the structure view. Landing on the data view is
+            // the same rule opening a table already follows.
+            if pane == 0 {
+                w.set_show_structure(false);
+                w.set_sql_view_mode(0);
+                w.set_doc_view(0);
+            } else {
+                w.set_p1_show_structure(false);
+                w.set_p1_sql_view_mode(0);
+                w.set_p1_doc_view(0);
+            }
+
             load_editor_text(pane, &tab.query_text);
             // Replace the pane's fold set with this tab's, rather than leaving
             // the previous tab's line numbers to fold whatever now sits at
