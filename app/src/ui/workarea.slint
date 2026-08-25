@@ -218,6 +218,11 @@ export component WorkArea inherits Rectangle {
     in property <[StructField]> p1-structure-columns;
     in property <[IndexRow]> p1-index-rows;
     in property <[ChartBar]> p1-chart-bars;
+    in property <[string]> p1-chart-label-cols;
+    in property <[string]> p1-chart-value-cols;
+    in-out property <int> p1-chart-label-index;
+    in-out property <int> p1-chart-value-index;
+    callback p1-chart-cols-changed();
     // Browse toolbar mirror for the right pane.
     in property <string> p1-sort-text;
     in-out property <string> p1-mongo-filter;
@@ -296,6 +301,11 @@ export component WorkArea inherits Rectangle {
     // Opening/switching a browsed table lands on the grid, not a leftover chart.
     changed active-table => { root.sql-view-mode = 0; root.columns-open = false; }
     in property <[ChartBar]> chart-bars;
+    in property <[string]> chart-label-cols;
+    in property <[string]> chart-value-cols;
+    in-out property <int> chart-label-index;
+    in-out property <int> chart-value-index;
+    callback chart-cols-changed();
 
     in property <[IndexRow]> index-rows;
 
@@ -515,6 +525,11 @@ export component WorkArea inherits Rectangle {
             structure-columns: root.structure-columns;
             index-rows: root.index-rows;
             chart-bars: root.chart-bars;
+            chart-label-cols: root.chart-label-cols;
+            chart-value-cols: root.chart-value-cols;
+            chart-label-index <=> root.chart-label-index;
+            chart-value-index <=> root.chart-value-index;
+            chart-cols-changed => { root.chart-cols-changed(); }
             }
 
             // vertical divider between the two panes (SQL split)
@@ -664,6 +679,11 @@ export component WorkArea inherits Rectangle {
                 structure-columns: root.p1-structure-columns;
                 index-rows: root.p1-index-rows;
                 chart-bars: root.p1-chart-bars;
+                chart-label-cols: root.p1-chart-label-cols;
+                chart-value-cols: root.p1-chart-value-cols;
+                chart-label-index <=> root.p1-chart-label-index;
+                chart-value-index <=> root.p1-chart-value-index;
+                chart-cols-changed => { root.p1-chart-cols-changed(); }
             }
         }
 

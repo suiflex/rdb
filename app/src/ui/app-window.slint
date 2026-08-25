@@ -326,6 +326,11 @@ callback create-table-commit();
     callback copy-text(string);
     callback export-results(int);
     in property <[ChartBar]> chart-bars;
+    in property <[string]> chart-label-cols;
+    in property <[string]> chart-value-cols;
+    in-out property <int> chart-label-index;
+    in-out property <int> chart-value-index;
+    callback chart-cols-changed();
     in property <[string]> all-columns;
     in property <[bool]> col-hidden;
     callback toggle-column(int);
@@ -539,6 +544,11 @@ callback create-table-commit();
     in property <[StructField]> p1-structure-columns;
     in property <[IndexRow]> p1-index-rows;
     in property <[ChartBar]> p1-chart-bars;
+    in property <[string]> p1-chart-label-cols;
+    in property <[string]> p1-chart-value-cols;
+    in-out property <int> p1-chart-label-index;
+    in-out property <int> p1-chart-value-index;
+    callback p1-chart-cols-changed();
     // Browse toolbar mirror for the right split pane.
     in property <string> p1-sort-text;
     in-out property <string> p1-mongo-filter;
@@ -1758,6 +1768,11 @@ callback create-table-commit();
                         p1-structure-columns: root.p1-structure-columns;
                         p1-index-rows: root.p1-index-rows;
                         p1-chart-bars: root.p1-chart-bars;
+                        p1-chart-label-cols: root.p1-chart-label-cols;
+                        p1-chart-value-cols: root.p1-chart-value-cols;
+                        p1-chart-label-index <=> root.p1-chart-label-index;
+                        p1-chart-value-index <=> root.p1-chart-value-index;
+                        p1-chart-cols-changed => { root.p1-chart-cols-changed(); }
                         p1-sort-text: root.p1-sort-text;
                         p1-mongo-filter <=> root.p1-mongo-filter;
                         p1-grid-filter <=> root.p1-grid-filter;
@@ -1862,6 +1877,11 @@ callback create-table-commit();
                         fn-name: root.fn-name;
                         fn-lines: root.fn-lines;
                         chart-bars: root.chart-bars;
+                        chart-label-cols: root.chart-label-cols;
+                        chart-value-cols: root.chart-value-cols;
+                        chart-label-index <=> root.chart-label-index;
+                        chart-value-index <=> root.chart-value-index;
+                        chart-cols-changed => { root.chart-cols-changed(); }
                         all-columns: root.all-columns;
                         col-hidden: root.col-hidden;
                         toggle-column(i) => {

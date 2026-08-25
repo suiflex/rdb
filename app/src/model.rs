@@ -293,30 +293,58 @@ fn flatten_documents(docs: &[serde_json::Value]) -> (Vec<VmColumn>, Vec<Vec<VmCe
     (columns, rows)
 }
 
-/// (label, value-text, frac) triples for the results bar chart: first
-/// non-numeric column is the label, first numeric column the value, capped
-/// at 30 rows and normalized by the largest absolute value. Empty when the
-/// grid has no numeric column.
-pub fn chart_data(g: &GridModel) -> Vec<(String, String, f32)> {
+/// Is every non-empty cell of column `c` parseable as a number (and is there
+/// at least one)? The chart can only measure a column that passes this.
+fn is_numeric_col(g: &GridModel, c: usize) -> bool {
+    let mut any = false;
+    for row in &g.rows {
+        match row.get(c) {
+            Some(cell) if cell.is_null || cell.text.is_empty() => {}
+            Some(cell) if cell.text.parse::<f64>().is_ok() => any = true,
+            _ => return false,
+        }
+    }
+    any
+}
+
+/// Indices of the columns the chart can plot as values, in grid order. Feeds
+/// the value-column picker, which must not offer a column that yields nothing.
+pub fn numeric_columns(g: &GridModel) -> Vec<usize> {
+    (0..g.columns.len())
+        .filter(|&c| is_numeric_col(g, c))
+        .collect()
+}
+
+/// (label, value-text, frac) triples for the results bar chart, capped at 30
+/// rows and normalized by the largest absolute value. Empty when the chosen
+/// value column isn't numeric (or the grid has no numeric column at all).
+///
+/// `value_col`/`label_col` are the user's picks. `None` — or an index that is
+/// out of range or not numeric — falls back to the guess this always made:
+/// the first numeric column for the value, the first non-numeric one for the
+/// label. `label_col == Some(ncols)` deliberately means "number the rows"; the
+/// picker offers it as an entry of its own.
+pub fn chart_data(
+    g: &GridModel,
+    label_col: Option<usize>,
+    value_col: Option<usize>,
+) -> Vec<(String, String, f32)> {
     let ncols = g.columns.len();
     if ncols == 0 || g.rows.is_empty() {
         return Vec::new();
     }
-    let is_numeric = |c: usize| {
-        let mut any = false;
-        for row in &g.rows {
-            match row.get(c) {
-                Some(cell) if cell.is_null || cell.text.is_empty() => {}
-                Some(cell) if cell.text.parse::<f64>().is_ok() => any = true,
-                _ => return false,
-            }
-        }
-        any
-    };
-    let Some(value_col) = (0..ncols).find(|&c| is_numeric(c)) else {
+    let is_numeric = |c: usize| is_numeric_col(g, c);
+    let value_col = value_col
+        .filter(|&c| c < ncols && is_numeric(c))
+        .or_else(|| (0..ncols).find(|&c| is_numeric(c)));
+    let Some(value_col) = value_col else {
         return Vec::new();
     };
-    let label_col = (0..ncols).find(|&c| !is_numeric(c));
+    let label_col = match label_col {
+        Some(c) if c >= ncols => None,
+        Some(c) => Some(c),
+        None => (0..ncols).find(|&c| !is_numeric(c)),
+    };
     let mut out: Vec<(String, String, f64)> = Vec::new();
     for (i, row) in g.rows.iter().take(30).enumerate() {
         let raw = row
@@ -610,10 +638,43 @@ mod tests {
                 ],
             ],
         };
-        let bars = chart_data(&g);
+        let bars = chart_data(&g, None, None);
         assert_eq!(bars.len(), 2);
         assert_eq!(bars[0], ("energy".into(), "10".into(), 1.0));
         assert_eq!(bars[1].2, 0.5);
+    }
+
+    /// Two numeric columns: the picker's choice wins over the leftmost one.
+    #[test]
+    fn chart_data_honours_explicit_columns() {
+        let cell = |t: &str| VmCell {
+            text: t.into(),
+            is_null: false,
+        };
+        let col = |n: &str| VmColumn {
+            name: n.into(),
+            type_name: "int".into(),
+        };
+        let g = GridModel {
+            columns: vec![col("sector"), col("total"), col("errors")],
+            rows: vec![
+                vec![cell("energy"), cell("10"), cell("4")],
+                vec![cell("tech"), cell("5"), cell("8")],
+            ],
+        };
+        assert_eq!(numeric_columns(&g), vec![1, 2]);
+        // Auto-pick still takes the first numeric column.
+        assert_eq!(chart_data(&g, None, None)[0].1, "10");
+        // Explicitly asking for `errors` measures that one instead, and the
+        // largest value in it normalizes the bars.
+        let bars = chart_data(&g, Some(0), Some(2));
+        assert_eq!(bars[0], ("energy".into(), "4".into(), 0.5));
+        assert_eq!(bars[1], ("tech".into(), "8".into(), 1.0));
+        // Past the last column the label falls back to the row number.
+        assert_eq!(chart_data(&g, Some(3), Some(1))[0].0, "row 1");
+        // A non-numeric pick can't be measured, so the guess takes over
+        // rather than leaving the chart blank.
+        assert_eq!(chart_data(&g, None, Some(0))[0].1, "10");
     }
 
     #[test]
@@ -628,7 +689,7 @@ mod tests {
                 is_null: false,
             }]],
         };
-        assert!(chart_data(&g).is_empty());
+        assert!(chart_data(&g, None, None).is_empty());
     }
 
     fn expect_table(rs: &ResultSet) -> GridModel {

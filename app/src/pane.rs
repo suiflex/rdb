@@ -172,6 +172,41 @@ pub(crate) fn set_p_chart_bars(w: &MainWindow, pane: usize, m: ModelRc<ChartBar>
     }
 }
 
+pub(crate) fn set_p_chart_label_cols(w: &MainWindow, pane: usize, m: ModelRc<SharedString>) {
+    if pane == 0 {
+        w.set_chart_label_cols(m);
+    } else {
+        w.set_p1_chart_label_cols(m);
+    }
+}
+
+pub(crate) fn set_p_chart_value_cols(w: &MainWindow, pane: usize, m: ModelRc<SharedString>) {
+    if pane == 0 {
+        w.set_chart_value_cols(m);
+    } else {
+        w.set_p1_chart_value_cols(m);
+    }
+}
+
+pub(crate) fn set_p_chart_cols_index(w: &MainWindow, pane: usize, label: i32, value: i32) {
+    if pane == 0 {
+        w.set_chart_label_index(label);
+        w.set_chart_value_index(value);
+    } else {
+        w.set_p1_chart_label_index(label);
+        w.set_p1_chart_value_index(value);
+    }
+}
+
+/// The pane's picked (label, value) chart columns, as picker indices.
+pub(crate) fn get_p_chart_cols_index(w: &MainWindow, pane: usize) -> (i32, i32) {
+    if pane == 0 {
+        (w.get_chart_label_index(), w.get_chart_value_index())
+    } else {
+        (w.get_p1_chart_label_index(), w.get_p1_chart_value_index())
+    }
+}
+
 pub(crate) fn set_p_grid_sort(w: &MainWindow, pane: usize, col: i32, asc: bool) {
     if pane == 0 {
         w.set_grid_sort_col(col);
