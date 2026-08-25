@@ -1314,7 +1314,18 @@ callback create-table-commit();
                                 padding-left: Tokens.sp2;
                                 padding-top: Tokens.doc-tab-row-h - Tokens.doc-tab-h;
                                 spacing: Tokens.sp1;
-                            for tab[i] in root.tabs: Rectangle {
+                            for tab[i] in root.tabs: tab-root := Rectangle {
+                                // The action buttons sit on top of `tab-ta`, so
+                                // hovering one takes the hover away from it. A
+                                // gate on `tab-ta` alone therefore hid the button
+                                // the pointer had just reached — and a hidden
+                                // element takes no input, so the hover bounced
+                                // back and the button flickered instead of being
+                                // clickable. Count any of the four as hovering
+                                // the tab.
+                                property <bool> hovered: tab-ta.has-hover
+                                    || rename-ta.has-hover || move-ta.has-hover
+                                    || close-ta.has-hover;
                                 width: min(170px, tab-content.preferred-width + 2 * Tokens.sp3);
                                 height: Tokens.doc-tab-h;
                                 // Which tab is selected is otherwise only a
@@ -1416,7 +1427,7 @@ callback create-table-commit();
                                         y: (parent.height - self.height) / 2;
                                         border-radius: 4px;
                                         background: rename-ta.has-hover ? Tokens.card : transparent;
-                                        visible: i == root.active-tab || tab-ta.has-hover;
+                                        visible: i == root.active-tab || tab-root.hovered;
                                         rename-ta := TouchArea {
                                             clicked => {
                                                 root.rename-target = i;
@@ -1447,7 +1458,7 @@ callback create-table-commit();
                                         y: (parent.height - self.height) / 2;
                                         border-radius: 4px;
                                         background: move-ta.has-hover ? Tokens.accent-tint : transparent;
-                                        visible: i == root.active-tab || tab-ta.has-hover;
+                                        visible: i == root.active-tab || tab-root.hovered;
                                         move-ta := TouchArea {
                                             clicked => { root.move-tab-group(i, 1); }
                                             changed has-hover => {
@@ -1474,7 +1485,7 @@ callback create-table-commit();
                                         y: (parent.height - self.height) / 2;
                                         border-radius: 4px;
                                         background: close-ta.has-hover ? Tokens.error : transparent;
-                                        visible: i == root.active-tab || tab-ta.has-hover;
+                                        visible: i == root.active-tab || tab-root.hovered;
                                         close-ta := TooltipArea {
                                             tip: "Close tab  " + Shortcut.primary
                                                 + Shortcut.separator + "W";
@@ -1524,7 +1535,11 @@ callback create-table-commit();
                                 padding-left: Tokens.sp2;
                                 padding-top: Tokens.doc-tab-row-h - Tokens.doc-tab-h;
                                 spacing: Tokens.sp1;
-                            for tab[i] in root.p1-tabs: Rectangle {
+                            for tab[i] in root.p1-tabs: p1-tab-root := Rectangle {
+                                // Same hover-flicker fix as the left strip above.
+                                property <bool> hovered: p1-tab-ta.has-hover
+                                    || p1-rename-ta.has-hover || p1-move-ta.has-hover
+                                    || p1-close-ta.has-hover;
                                 width: min(170px, p1-tab-content.preferred-width + 2 * Tokens.sp3);
                                 height: Tokens.doc-tab-h;
                                 // Same reasoning as the left group above.
@@ -1601,7 +1616,7 @@ callback create-table-commit();
                                         y: (parent.height - self.height) / 2;
                                         border-radius: 4px;
                                         background: p1-rename-ta.has-hover ? Tokens.card : transparent;
-                                        visible: i == root.p1-active-tab || p1-tab-ta.has-hover;
+                                        visible: i == root.p1-active-tab || p1-tab-root.hovered;
                                         p1-rename-ta := TouchArea {
                                             clicked => {
                                                 root.rename-target = i;
@@ -1632,7 +1647,7 @@ callback create-table-commit();
                                         y: (parent.height - self.height) / 2;
                                         border-radius: 4px;
                                         background: p1-move-ta.has-hover ? Tokens.accent-tint : transparent;
-                                        visible: i == root.p1-active-tab || p1-tab-ta.has-hover;
+                                        visible: i == root.p1-active-tab || p1-tab-root.hovered;
                                         p1-move-ta := TouchArea {
                                             clicked => { root.move-tab-group(i, 0); }
                                             changed has-hover => {
@@ -1658,7 +1673,7 @@ callback create-table-commit();
                                         y: (parent.height - self.height) / 2;
                                         border-radius: 4px;
                                         background: p1-close-ta.has-hover ? Tokens.error : transparent;
-                                        visible: i == root.p1-active-tab || p1-tab-ta.has-hover;
+                                        visible: i == root.p1-active-tab || p1-tab-root.hovered;
                                         p1-close-ta := TooltipArea {
                                             tip: "Close tab  " + Shortcut.primary
                                                 + Shortcut.separator + "W";
