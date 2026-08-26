@@ -458,9 +458,14 @@ async fn schema_impl(client: &Client, schema: &str) -> Result<Schema> {
 
     // User tables + columns from information_schema, scoped to one schema.
     // Ordered so columns of the same table are contiguous for grouping.
+    // data_type reports the literal 'USER-DEFINED' for enum and composite
+    // columns, so fall back to udt_name there to show the real type name.
     let rows = client
         .query(
-            "SELECT c.table_name, c.column_name, c.data_type, c.is_nullable \
+            "SELECT c.table_name, c.column_name, \
+             CASE WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name \
+                  ELSE c.data_type END, \
+             c.is_nullable \
              FROM information_schema.columns c \
              JOIN information_schema.tables t \
                ON t.table_schema = c.table_schema AND t.table_name = c.table_name \
