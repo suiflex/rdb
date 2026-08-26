@@ -1,6 +1,6 @@
 [package]
 name = "rdb"
-version = "0.41.0"
+version = "0.41.0" # x-release-please-version
 edition = "2021"
 license.workspace = true
 
