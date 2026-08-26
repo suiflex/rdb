@@ -1,6 +1,6 @@
 use rdb_core::result::Cell;
 use std::error::Error;
-use tokio_postgres::types::{FromSql, Type};
+use tokio_postgres::types::{FromSql, Kind, Type};
 use tokio_postgres::Row;
 
 /// Which `Cell` variant a pg column type maps to. Pragmatic, not exhaustive:
@@ -21,6 +21,7 @@ pub enum CellKind {
     Time,
     TimeTz,
     Interval,
+    Enum,
 }
 
 /// Classify a pg `Type` into a `CellKind`. Unknown types -> `Text` (string
@@ -41,6 +42,9 @@ pub fn classify(ty: &Type) -> CellKind {
         Type::MONEY => CellKind::Money,
         Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME => CellKind::Text,
         Type::JSON | Type::JSONB => CellKind::Json,
+        // Enums are user-defined, so their OID is assigned per database and
+        // can't be matched as a constant - they're identified by kind.
+        _ if matches!(ty.kind(), Kind::Enum(_)) => CellKind::Enum,
         _ => CellKind::Text,
     }
 }
@@ -74,6 +78,22 @@ impl std::fmt::Display for PgMoney {
         } else {
             write!(f, "{whole}.{cents:02}")
         }
+    }
+}
+
+/// `String`'s `FromSql` matches on OID and so rejects every enum, whose OID is
+/// assigned per database - an enum column silently decoded to `Cell::Null`.
+/// Postgres sends an enum value on the wire as its plain label text, so the
+/// decode itself is trivial; only the `accepts` check has to be kind-based.
+struct PgEnum(String);
+
+impl<'a> FromSql<'a> for PgEnum {
+    fn from_sql(_ty: &Type, raw: &'a [u8]) -> Result<Self, Box<dyn Error + Sync + Send>> {
+        Ok(PgEnum(std::str::from_utf8(raw)?.to_string()))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty.kind(), Kind::Enum(_))
     }
 }
 
@@ -287,6 +307,11 @@ pub fn extract_cell(row: &Row, idx: usize) -> Cell {
             Ok(None) => Cell::Null,
             Err(_) => Cell::Text("<unreadable interval value>".to_string()),
         },
+        CellKind::Enum => match row.try_get::<_, Option<PgEnum>>(idx) {
+            Ok(Some(v)) => Cell::Text(v.0),
+            Ok(None) => Cell::Null,
+            Err(_) => Cell::Text("<unreadable enum value>".to_string()),
+        },
         CellKind::Text => string_fallback(row, idx),
     }
 }
@@ -394,6 +419,35 @@ mod tests {
     fn json_types_classify_as_json() {
         assert_eq!(classify(&Type::JSON), CellKind::Json);
         assert_eq!(classify(&Type::JSONB), CellKind::Json);
+    }
+
+    /// Build a `Type` standing in for a user-defined enum. Real ones get their
+    /// OID at CREATE TYPE time; only the kind matters to `classify`/`accepts`.
+    fn enum_type() -> Type {
+        Type::new(
+            "status".to_string(),
+            16_384,
+            Kind::Enum(vec!["active".to_string(), "inactive".to_string()]),
+            "public".to_string(),
+        )
+    }
+
+    #[test]
+    fn enum_classifies_by_kind_not_oid() {
+        // Enum OIDs are per-database, so the OID-constant match can never see
+        // them; without a kind check they fell to Text and string_fallback
+        // turned every label into a phantom NULL.
+        assert_eq!(classify(&enum_type()), CellKind::Enum);
+        assert_ne!(classify(&enum_type()), CellKind::Text);
+    }
+
+    #[test]
+    fn pg_enum_reads_wire_label_and_accepts_only_enums() {
+        let v = <PgEnum as FromSql>::from_sql(&enum_type(), b"active").unwrap();
+        assert_eq!(v.0, "active");
+        assert!(<PgEnum as FromSql>::accepts(&enum_type()));
+        assert!(!<PgEnum as FromSql>::accepts(&Type::TEXT));
+        assert!(<PgEnum as FromSql>::from_sql(&enum_type(), &[0xff, 0xfe]).is_err());
     }
 
     #[test]
