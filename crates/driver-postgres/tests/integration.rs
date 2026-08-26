@@ -92,6 +92,81 @@ async fn select_returns_tabular_rows() {
 
 #[tokio::test]
 #[ignore = "requires docker"]
+async fn enum_and_time_columns_render_their_values() {
+    use rdb_core::query::Query;
+    use rdb_core::result::{Cell, ResultSet};
+
+    let (_container, cfg) = start_pg().await;
+    let driver = PostgresDriver::connect(&cfg).await.expect("connect");
+
+    // These four used to decode to Cell::Null, indistinguishable from a real
+    // NULL, because String's FromSql rejects their OIDs (#253).
+    driver
+        .query(&Query::Sql(
+            "CREATE TYPE status AS ENUM ('active', 'inactive')".into(),
+        ))
+        .await
+        .expect("create enum type");
+    driver
+        .query(&Query::Sql(
+            "CREATE TABLE t253 (id INT4 PRIMARY KEY, s status, start_time TIME, \
+             tz_time TIMETZ, span INTERVAL)"
+                .into(),
+        ))
+        .await
+        .expect("create table");
+    driver
+        .query(&Query::Sql(
+            "INSERT INTO t253 VALUES (1, 'active', '14:30:00', '14:30:00+07', \
+             '1 day 02:03:04'), (2, NULL, NULL, NULL, NULL)"
+                .into(),
+        ))
+        .await
+        .expect("insert");
+
+    let rs = driver
+        .query(&Query::Sql(
+            "SELECT s, start_time, tz_time, span FROM t253 ORDER BY id".into(),
+        ))
+        .await
+        .expect("select");
+
+    match rs {
+        ResultSet::Tabular { cols, rows } => {
+            assert_eq!(cols[0].type_name, "status");
+            assert!(matches!(&rows[0][0], Cell::Text(v) if v == "active"));
+            assert!(matches!(&rows[0][1], Cell::Text(v) if v == "14:30:00"));
+            assert!(matches!(&rows[0][2], Cell::Text(v) if v == "14:30:00+07:00"));
+            assert!(matches!(&rows[0][3], Cell::Text(v) if v == "1 day 02:03:04"));
+            // A real NULL must still read as NULL, not as a decoded value.
+            for cell in &rows[1] {
+                assert!(matches!(cell, Cell::Null));
+            }
+        }
+        other => panic!("expected Tabular, got {other:?}"),
+    }
+
+    // The sidebar names the enum type itself, not the literal 'USER-DEFINED'
+    // that information_schema.data_type reports for it.
+    let schema = driver.schema_for("public").await.expect("schema");
+    let table = schema
+        .databases
+        .iter()
+        .flat_map(|d| &d.containers)
+        .find(|c| c.name == "t253")
+        .expect("t253 in schema");
+    let s_field = table
+        .fields
+        .iter()
+        .find(|f| f.name == "s")
+        .expect("s column");
+    assert_eq!(s_field.type_name, "status");
+
+    driver.close().await.expect("close");
+}
+
+#[tokio::test]
+#[ignore = "requires docker"]
 async fn non_sql_queries_are_unsupported() {
     use rdb_core::error::RdbError;
     use rdb_core::query::{MongoKind, MongoOp, Query};
