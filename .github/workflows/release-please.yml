@@ -42,19 +42,21 @@ jobs:
 
       # The tag stays vX.Y.Z (release-build.yml keys off `v*`); only the
       # GitHub Release display title gets the "RDB " prefix. Manifest mode
-      # path-prefixes the release outputs, so gate on `app--release_created`
-      # (the bare `release_created` is empty here and left the step skipped).
+      # path-prefixes the release outputs for every package except the root
+      # one, which the action emits unprefixed — so this reads the bare
+      # `release_created` now that the package is rooted at the repo.
       - name: Prefix release title with product name
-        if: ${{ steps.release.outputs['app--release_created'] }}
+        if: ${{ steps.release.outputs.release_created }}
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
         run: |
-          gh release edit "${{ steps.release.outputs['app--tag_name'] }}" \
-            --title "RDB ${{ steps.release.outputs['app--tag_name'] }}"
+          gh release edit "${{ steps.release.outputs.tag_name }}" \
+            --title "RDB ${{ steps.release.outputs.tag_name }}"
 
       # We keep CHANGELOG.md at the repo root, but release-please resolves
-      # `changelog-path` relative to its package dir and rejects `..`, so it
-      # writes app/CHANGELOG.md and this step folds that into the root file
+      # `changelog-path` relative to its package dir and rejects `..`. The
+      # package is rooted at the repo, so the config points it at
+      # app/CHANGELOG.md and this step folds that into the root file
       # (prefixing the heading to match the release title) and drops the
       # package copy. app/CHANGELOG.md is rewritten from scratch every run,
       # so it holds exactly the section being released — that's what the
