@@ -7,7 +7,11 @@
       "package-name": "rdb",
       "changelog-path": "app/CHANGELOG.md",
       "extra-files": [
-        "app/Cargo.toml",
+        {
+          "type": "toml",
+          "path": "app/Cargo.toml",
+          "jsonpath": "$.package.version"
+        },
         {
           "type": "json",
           "path": "npm/package.json",
