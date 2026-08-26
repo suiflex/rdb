@@ -18,6 +18,9 @@ pub enum CellKind {
     Numeric,
     Money,
     Json,
+    Time,
+    TimeTz,
+    Interval,
 }
 
 /// Classify a pg `Type` into a `CellKind`. Unknown types -> `Text` (string
@@ -31,6 +34,9 @@ pub fn classify(ty: &Type) -> CellKind {
         Type::UUID => CellKind::Uuid,
         Type::TIMESTAMPTZ | Type::TIMESTAMP => CellKind::Timestamp,
         Type::DATE => CellKind::Date,
+        Type::TIME => CellKind::Time,
+        Type::TIMETZ => CellKind::TimeTz,
+        Type::INTERVAL => CellKind::Interval,
         Type::NUMERIC => CellKind::Numeric,
         Type::MONEY => CellKind::Money,
         Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME => CellKind::Text,
@@ -68,6 +74,113 @@ impl std::fmt::Display for PgMoney {
         } else {
             write!(f, "{whole}.{cents:02}")
         }
+    }
+}
+
+/// Render a microsecond count as `HH:MM:SS[.ffffff]`, trailing zeros of the
+/// fractional part trimmed the way Postgres itself prints them.
+fn fmt_hms(micros: u64) -> String {
+    let secs = micros / 1_000_000;
+    let frac = micros % 1_000_000;
+    let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
+    if frac == 0 {
+        format!("{h:02}:{m:02}:{s:02}")
+    } else {
+        let frac = format!("{frac:06}");
+        format!("{h:02}:{m:02}:{s:02}.{}", frac.trim_end_matches('0'))
+    }
+}
+
+/// `timetz`, like `money`, has no `FromSql` anywhere in the crate ecosystem
+/// (`chrono`'s integration covers `time` but not `timetz`), so the column
+/// silently decoded to `Cell::Null`. The binary wire format is a big-endian
+/// `i64` of microseconds since midnight followed by a big-endian `i32` zone
+/// offset in seconds *west* of UTC — the displayed offset is its negation.
+struct PgTimeTz {
+    micros: i64,
+    zone_secs_west: i32,
+}
+
+impl<'a> FromSql<'a> for PgTimeTz {
+    fn from_sql(_ty: &Type, raw: &'a [u8]) -> Result<Self, Box<dyn Error + Sync + Send>> {
+        let bytes: [u8; 12] = raw.try_into()?;
+        Ok(PgTimeTz {
+            micros: i64::from_be_bytes(bytes[..8].try_into()?),
+            zone_secs_west: i32::from_be_bytes(bytes[8..].try_into()?),
+        })
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        *ty == Type::TIMETZ
+    }
+}
+
+impl std::fmt::Display for PgTimeTz {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let utc_offset = -self.zone_secs_west;
+        let sign = if utc_offset < 0 { '-' } else { '+' };
+        let off = utc_offset.unsigned_abs();
+        let (oh, om) = (off / 3600, (off % 3600) / 60);
+        write!(
+            f,
+            "{}{sign}{oh:02}:{om:02}",
+            fmt_hms(self.micros.unsigned_abs())
+        )
+    }
+}
+
+/// `interval` has the same gap. Wire format is a big-endian `i64` of
+/// microseconds, then `i32` days, then `i32` months. Rendered in Postgres's
+/// own default `postgres` interval style.
+struct PgInterval {
+    micros: i64,
+    days: i32,
+    months: i32,
+}
+
+impl<'a> FromSql<'a> for PgInterval {
+    fn from_sql(_ty: &Type, raw: &'a [u8]) -> Result<Self, Box<dyn Error + Sync + Send>> {
+        let bytes: [u8; 16] = raw.try_into()?;
+        Ok(PgInterval {
+            micros: i64::from_be_bytes(bytes[..8].try_into()?),
+            days: i32::from_be_bytes(bytes[8..12].try_into()?),
+            months: i32::from_be_bytes(bytes[12..].try_into()?),
+        })
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        *ty == Type::INTERVAL
+    }
+}
+
+impl std::fmt::Display for PgInterval {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut parts: Vec<String> = Vec::new();
+        let (years, mons) = (self.months / 12, self.months % 12);
+        if years != 0 {
+            parts.push(format!(
+                "{years} year{}",
+                if years.abs() == 1 { "" } else { "s" }
+            ));
+        }
+        if mons != 0 {
+            parts.push(format!(
+                "{mons} mon{}",
+                if mons.abs() == 1 { "" } else { "s" }
+            ));
+        }
+        if self.days != 0 {
+            parts.push(format!(
+                "{} day{}",
+                self.days,
+                if self.days.abs() == 1 { "" } else { "s" }
+            ));
+        }
+        if self.micros != 0 || parts.is_empty() {
+            let sign = if self.micros < 0 { "-" } else { "" };
+            parts.push(format!("{sign}{}", fmt_hms(self.micros.unsigned_abs())));
+        }
+        write!(f, "{}", parts.join(" "))
     }
 }
 
@@ -154,6 +267,25 @@ pub fn extract_cell(row: &Row, idx: usize) -> Cell {
             Ok(Some(v)) => Cell::Text(v.to_string()),
             Ok(None) => Cell::Null,
             Err(_) => string_fallback(row, idx),
+        },
+        // A decode failure here must not fall through to string_fallback:
+        // String's FromSql rejects these OIDs, so that path would produce a
+        // phantom Cell::Null indistinguishable from a real NULL. Same
+        // reasoning as Numeric and Money above.
+        CellKind::Time => match row.try_get::<_, Option<chrono::NaiveTime>>(idx) {
+            Ok(Some(v)) => Cell::Text(v.format("%H:%M:%S%.f").to_string()),
+            Ok(None) => Cell::Null,
+            Err(_) => Cell::Text("<unreadable time value>".to_string()),
+        },
+        CellKind::TimeTz => match row.try_get::<_, Option<PgTimeTz>>(idx) {
+            Ok(Some(v)) => Cell::Text(v.to_string()),
+            Ok(None) => Cell::Null,
+            Err(_) => Cell::Text("<unreadable time value>".to_string()),
+        },
+        CellKind::Interval => match row.try_get::<_, Option<PgInterval>>(idx) {
+            Ok(Some(v)) => Cell::Text(v.to_string()),
+            Ok(None) => Cell::Null,
+            Err(_) => Cell::Text("<unreadable interval value>".to_string()),
         },
         CellKind::Text => string_fallback(row, idx),
     }
@@ -266,6 +398,91 @@ mod tests {
 
     #[test]
     fn unknown_type_falls_back_to_text() {
-        assert_eq!(classify(&Type::INTERVAL), CellKind::Text);
+        assert_eq!(classify(&Type::XML), CellKind::Text);
+    }
+
+    #[test]
+    fn time_types_classify_to_their_own_kinds() {
+        // Same regression as MONEY: these used to land on the default Text
+        // arm, and String's FromSql rejects their OIDs, so every value became
+        // a phantom Cell::Null. They must not classify as Text.
+        assert_eq!(classify(&Type::TIME), CellKind::Time);
+        assert_eq!(classify(&Type::TIMETZ), CellKind::TimeTz);
+        assert_eq!(classify(&Type::INTERVAL), CellKind::Interval);
+    }
+
+    #[test]
+    fn hms_formats_and_trims_fraction() {
+        assert_eq!(fmt_hms(0), "00:00:00");
+        assert_eq!(fmt_hms(52_200_000_000), "14:30:00");
+        assert_eq!(fmt_hms(52_200_500_000), "14:30:00.5");
+        assert_eq!(fmt_hms(52_200_000_001), "14:30:00.000001");
+    }
+
+    fn timetz_payload(micros: i64, zone_secs_west: i32) -> [u8; 12] {
+        let mut raw = [0u8; 12];
+        raw[..8].copy_from_slice(&micros.to_be_bytes());
+        raw[8..].copy_from_slice(&zone_secs_west.to_be_bytes());
+        raw
+    }
+
+    #[test]
+    fn pg_timetz_decodes_documented_binary_format() {
+        // 14:30:00+07 — pg stores the zone as seconds *west* of UTC, so +07:00
+        // arrives as -25200.
+        let raw = timetz_payload(52_200_000_000, -25_200);
+        let v = <PgTimeTz as FromSql>::from_sql(&Type::TIMETZ, &raw).unwrap();
+        assert_eq!(v.to_string(), "14:30:00+07:00");
+
+        let utc = timetz_payload(0, 0);
+        let v = <PgTimeTz as FromSql>::from_sql(&Type::TIMETZ, &utc).unwrap();
+        assert_eq!(v.to_string(), "00:00:00+00:00");
+
+        // 09:15:00-05:30 (a half-hour offset, east of UTC in pg's sign).
+        let west = timetz_payload(33_300_000_000, 19_800);
+        let v = <PgTimeTz as FromSql>::from_sql(&Type::TIMETZ, &west).unwrap();
+        assert_eq!(v.to_string(), "09:15:00-05:30");
+    }
+
+    #[test]
+    fn pg_timetz_rejects_malformed_payload_and_wrong_oid() {
+        assert!(<PgTimeTz as FromSql>::from_sql(&Type::TIMETZ, &[0u8; 8]).is_err());
+        assert!(<PgTimeTz as FromSql>::accepts(&Type::TIMETZ));
+        assert!(!<PgTimeTz as FromSql>::accepts(&Type::TIME));
+    }
+
+    fn interval_payload(micros: i64, days: i32, months: i32) -> [u8; 16] {
+        let mut raw = [0u8; 16];
+        raw[..8].copy_from_slice(&micros.to_be_bytes());
+        raw[8..12].copy_from_slice(&days.to_be_bytes());
+        raw[12..].copy_from_slice(&months.to_be_bytes());
+        raw
+    }
+
+    #[test]
+    fn pg_interval_decodes_documented_binary_format() {
+        let raw = interval_payload(14_706_000_000, 3, 14); // 1 yr 2 mons 3 days 04:05:06
+        let v = <PgInterval as FromSql>::from_sql(&Type::INTERVAL, &raw).unwrap();
+        assert_eq!(v.to_string(), "1 year 2 mons 3 days 04:05:06");
+
+        let day_only = interval_payload(0, 1, 0);
+        let v = <PgInterval as FromSql>::from_sql(&Type::INTERVAL, &day_only).unwrap();
+        assert_eq!(v.to_string(), "1 day");
+
+        // An all-zero interval still has to render as something visible.
+        let zero = interval_payload(0, 0, 0);
+        let v = <PgInterval as FromSql>::from_sql(&Type::INTERVAL, &zero).unwrap();
+        assert_eq!(v.to_string(), "00:00:00");
+
+        let negative = interval_payload(-1_000_000, 0, 0);
+        let v = <PgInterval as FromSql>::from_sql(&Type::INTERVAL, &negative).unwrap();
+        assert_eq!(v.to_string(), "-00:00:01");
+    }
+
+    #[test]
+    fn pg_interval_rejects_malformed_payload_and_wrong_oid() {
+        assert!(<PgInterval as FromSql>::from_sql(&Type::INTERVAL, &[0u8; 12]).is_err());
+        assert!(<PgInterval as FromSql>::accepts(&Type::INTERVAL));
+        assert!(!<PgInterval as FromSql>::accepts(&Type::TIME));
     }
 }
