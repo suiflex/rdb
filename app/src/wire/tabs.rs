@@ -487,12 +487,13 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             } else {
                 let active = active_tab_id.lock().unwrap().clone();
                 set_workspace_tabs(&w, &tabs, active.as_deref());
+                // `workspace_tabs` is a non-reentrant std mutex and the persist
+                // below re-locks it: holding the guard past this branch froze
+                // the event loop on every close of a non-active tab.
+                drop(tabs);
             }
-            save_query_tabs(
-                &w,
-                &workspace_tabs.lock().unwrap(),
-                active_tab_id.lock().unwrap().as_deref(),
-            );
+            let active = active_tab_id.lock().unwrap().clone();
+            save_query_tabs(&w, &workspace_tabs.lock().unwrap(), active.as_deref());
         });
     }
 
