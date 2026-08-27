@@ -42,7 +42,15 @@ fn simplify(v: serde_json::Value) -> serde_json::Value {
                     // dates fall back to {"$date":{"$numberLong":"ms"}}.
                     "$date" => simplify(inner),
                     "$numberLong" | "$numberInt" => str_to_number(inner),
-                    "$numberDouble" | "$numberDecimal" => str_to_number(inner),
+                    "$numberDouble" => str_to_number(inner),
+                    // Decimal128 stays a string. It is an exact-precision type
+                    // with 34 significant digits; JSON numbers are binary
+                    // doubles, so parsing it silently rewrote the value —
+                    // "4.50" came back as 4.5, and a 20-digit amount as
+                    // 1.2345678901234567e+19, cents gone. A client that shows
+                    // a different number than the database holds is worse than
+                    // one that shows a string.
+                    "$numberDecimal" => inner,
                     _ => {
                         // Not a wrapper: rebuild the one-key object, simplifying its value.
                         let mut m = serde_json::Map::new();
@@ -58,7 +66,8 @@ fn simplify(v: serde_json::Value) -> serde_json::Value {
 }
 
 /// Parse a numeric ext-JSON string into a JSON number; keep the string if it
-/// isn't finite/parseable (e.g. "Infinity", "NaN", Decimal128 precision).
+/// isn't finite/parseable (e.g. "Infinity", "NaN"). Not used for Decimal128,
+/// which has no lossless JSON number form.
 fn str_to_number(v: serde_json::Value) -> serde_json::Value {
     match &v {
         serde_json::Value::String(s) => {
@@ -143,5 +152,20 @@ mod tests {
         let json = document_to_json(d);
         assert_eq!(json["refs"][0], serde_json::json!(oid.to_hex()));
         assert_eq!(json["child"]["_id"], serde_json::json!(oid.to_hex()));
+    }
+    #[test]
+    fn decimal128_keeps_every_digit_the_database_holds() {
+        // Decimal128 is exact to 34 significant digits. Parsing it into a JSON
+        // number turned it into a binary double, so the client displayed — and
+        // could write back — a value the database never held.
+        let doc = doc! {
+            "exact": Bson::Decimal128("0.1234567890123456789012345678901234".parse().unwrap()),
+            "big": Bson::Decimal128("12345678901234567890.99".parse().unwrap()),
+            "money": Bson::Decimal128("4.50".parse().unwrap()),
+        };
+        let json = document_to_json(doc);
+        assert_eq!(json["exact"], "0.1234567890123456789012345678901234");
+        assert_eq!(json["big"], "12345678901234567890.99");
+        assert_eq!(json["money"], "4.50");
     }
 }
