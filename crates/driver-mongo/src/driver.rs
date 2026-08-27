@@ -419,31 +419,41 @@ impl Driver for MongoDriver {
             let table = op.table();
             let db = table.database.as_deref().unwrap_or(&self.default_db);
             let coll = self.client.database(db).collection::<Document>(&table.name);
+            // Each arm reports how many documents it actually touched: a write
+            // that matched nothing used to be counted as applied, so the user
+            // was told an edit saved when the database never saw it.
             let res = match op {
                 WriteOp::Update { pk, changes, .. } => {
-                    let id = pk_id(pk)?;
+                    let filter = pk_filter(pk)?;
                     let mut sets = Document::new();
                     for (field, val) in changes {
                         sets.insert(field.clone(), cell_to_bson(val));
                     }
-                    coll.update_one(doc! { "_id": id }, doc! { "$set": sets })
+                    coll.update_one(filter, doc! { "$set": sets })
                         .await
-                        .map(|_| ())
+                        .map(|r| r.matched_count)
                 }
                 WriteOp::Insert { values, .. } => {
                     let mut d = Document::new();
                     for (field, val) in values {
                         d.insert(field.clone(), cell_to_bson(val));
                     }
-                    coll.insert_one(d).await.map(|_| ())
+                    coll.insert_one(d).await.map(|_| 1)
                 }
-                WriteOp::Delete { pk, .. } => {
-                    let id = pk_id(pk)?;
-                    coll.delete_one(doc! { "_id": id }).await.map(|_| ())
-                }
+                WriteOp::Delete { pk, .. } => coll
+                    .delete_one(pk_filter(pk)?)
+                    .await
+                    .map(|r| r.deleted_count),
             };
             match res {
-                Ok(()) => applied += 1,
+                Ok(0) => {
+                    return Err(RdbError::Query(format!(
+                        "the row's _id no longer identifies a document \
+                         (applied {applied} of {} ops)",
+                        ops.len()
+                    )))
+                }
+                Ok(_) => applied += 1,
                 Err(e) => {
                     return Err(RdbError::Query(format!(
                         "{e} (applied {applied} of {} ops)",
@@ -460,6 +470,20 @@ impl Driver for MongoDriver {
         drop(self.client);
         Ok(())
     }
+}
+
+/// Filter that finds the row a write op names.
+///
+/// The grid flattens an ObjectId to its hex text, so a `_id` that reads as hex
+/// could be either a real ObjectId or a string that merely looks like one, and
+/// the driver cannot tell them apart from the cell alone. Guessing wrong meant
+/// the write silently found nothing, so match either form.
+fn pk_filter(pk: &[(String, Cell)]) -> Result<Document> {
+    let id = pk_id(pk)?;
+    if let mongodb::bson::Bson::ObjectId(oid) = &id {
+        return Ok(doc! { "_id": { "$in": [ Bson::ObjectId(*oid), Bson::String(oid.to_hex()) ] } });
+    }
+    Ok(doc! { "_id": id })
 }
 
 /// The `_id` value from the op identity pairs. Hex ObjectId strings become
@@ -542,6 +566,26 @@ mod tests {
         assert!(matches!(b, mongodb::bson::Bson::ObjectId(_)));
         let b = pk_id(&[("_id".into(), Cell::Text("user-42".into()))]).unwrap();
         assert_eq!(b, mongodb::bson::Bson::String("user-42".into()));
+    }
+
+    #[test]
+    fn a_hex_id_is_matched_as_both_objectid_and_string() {
+        // The grid shows an ObjectId as hex text, so a `_id` that is really the
+        // string "657f…" is indistinguishable from the ObjectId at that point.
+        // Coercing to ObjectId alone made every write on such a row match
+        // nothing — and the old code reported success anyway.
+        let f =
+            pk_filter(&[("_id".into(), Cell::Text("657f1f77bcf86cd799439011".into()))]).unwrap();
+        let arm = f.get_document("_id").unwrap().get_array("$in").unwrap();
+        assert!(matches!(arm[0], mongodb::bson::Bson::ObjectId(_)));
+        assert_eq!(
+            arm[1],
+            mongodb::bson::Bson::String("657f1f77bcf86cd799439011".into())
+        );
+
+        // A plain id keeps its literal value, with no `$in` wrapper.
+        let f = pk_filter(&[("_id".into(), Cell::Text("user-42".into()))]).unwrap();
+        assert_eq!(f.get_str("_id").unwrap(), "user-42");
     }
 
     #[test]
