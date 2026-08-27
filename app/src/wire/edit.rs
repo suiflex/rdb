@@ -97,14 +97,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 let anchor = w.get_range_anchor_row();
                 let anchor_col = w.get_range_anchor_col();
                 SELECTED_RANGE.with(|s| {
-                    s.borrow_mut()[0] =
-                        (anchor >= 0 && anchor != row && anchor_col >= 0).then(|| {
-                            (
-                                anchor.min(row) as usize,
-                                anchor.max(row) as usize,
-                                anchor_col as usize,
-                            )
-                        });
+                    s.borrow_mut()[0] = CellRange::between((anchor, anchor_col), (row, anchor_col));
                 });
             }
         });

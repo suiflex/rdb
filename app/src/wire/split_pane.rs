@@ -10,6 +10,28 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use crate::*;
 
+/// Footer note for a partial copy: how much of the grid actually went to the
+/// clipboard.
+fn copied_msg(grid: &model::GridModel, r: CellRange) -> String {
+    if r.rows() == 1 && r.cols() == 1 {
+        format!("copied 1 cell from {}", grid.columns[r.c0].name)
+    } else if r.cols() == 1 {
+        format!(
+            "copied {} of {} rows, column {}",
+            r.rows(),
+            grid.rows.len(),
+            grid.columns[r.c0].name
+        )
+    } else {
+        format!(
+            "copied {} of {} rows x {} columns",
+            r.rows(),
+            grid.rows.len(),
+            r.cols()
+        )
+    }
+}
+
 pub(crate) fn wire(window: &MainWindow, state: &AppState) {
     let AppState {
         panes, rt, current, ..
@@ -53,12 +75,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 .and_then(|mut cb| cb.set_contents(export::to_tsv(&to_copy)))
             {
                 Ok(()) => match range {
-                    Some((start, end, col)) => format!(
-                        "copied {} of {} rows, column {}",
-                        end - start + 1,
-                        grid.rows.len(),
-                        grid.columns[col].name
-                    ),
+                    Some(r) => copied_msg(&grid, r),
                     None => format!("copied {} rows", grid.rows.len()),
                 },
                 Err(e) => format!("copy failed: {e}"),
@@ -267,14 +284,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 let anchor = w.get_p1_range_anchor_row();
                 let anchor_col = w.get_p1_range_anchor_col();
                 SELECTED_RANGE.with(|s| {
-                    s.borrow_mut()[1] =
-                        (anchor >= 0 && anchor != row && anchor_col >= 0).then(|| {
-                            (
-                                anchor.min(row) as usize,
-                                anchor.max(row) as usize,
-                                anchor_col as usize,
-                            )
-                        });
+                    s.borrow_mut()[1] = CellRange::between((anchor, anchor_col), (row, anchor_col));
                 });
             }
         });
@@ -558,12 +568,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 .and_then(|mut cb| cb.set_contents(export::to_tsv(&to_copy)))
             {
                 Ok(()) => match range {
-                    Some((start, end, col)) => format!(
-                        "copied {} of {} rows, column {}",
-                        end - start + 1,
-                        grid.rows.len(),
-                        grid.columns[col].name
-                    ),
+                    Some(r) => copied_msg(&grid, r),
                     None => format!("copied {} rows", grid.rows.len()),
                 },
                 Err(e) => format!("copy failed: {e}"),
