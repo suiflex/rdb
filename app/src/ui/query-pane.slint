@@ -621,7 +621,9 @@ export component QueryPane inherits Rectangle {
                         font-weight: Tokens.weight-emphasis;
                         vertical-alignment: center;
                     }
-                    Text {
+                    // Named so a UI test can read the note back — it is the
+                    // only place a copy or an export reports what it did.
+                    results-meta := Text {
                         text: root.results-meta;
                         color: Tokens.text-faint;
                         font-size: Tokens.font-sm;
