@@ -505,6 +505,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            // Same as the left pane: the popup has had its answer.
+            w.set_filter_completion_items(ModelRc::from(Rc::new(
+                VecModel::<PaletteItem>::default(),
+            )));
             let raw = w.get_p1_mongo_filter().to_string();
             let trimmed = raw.trim();
             if !trimmed.is_empty() {
@@ -666,7 +670,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                         w.set_filter_completion_selected((sel + 1).rem_euclid(n));
                         true
                     }
-                    "\t" | "\n" | "\r" => {
+                    // Tab takes the candidate; Enter runs the filter. Enter
+                    // used to take the candidate too, so it never reached the
+                    // field's submit: the first press rewrote the text and the
+                    // filter only ran on a second press — which reads as Enter
+                    // doing nothing, and mangles an already-complete filter.
+                    "\t" => {
                         w.invoke_filter_completion_choose(pane, sel);
                         true
                     }
@@ -696,6 +705,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             if guard_pending(&w) {
                 return;
             }
+            // The suggestion popup has had its answer either way.
+            w.set_filter_completion_items(ModelRc::from(Rc::new(
+                VecModel::<PaletteItem>::default(),
+            )));
             let raw = w.get_mongo_filter().to_string();
             let trimmed = raw.trim();
             // Empty clears the filter; otherwise it must be a JSON document.
