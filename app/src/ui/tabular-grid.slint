@@ -248,6 +248,12 @@ export component TabularGrid inherits Rectangle {
             vertical-stretch: 1;
             clip: true;
             flick := Flickable {
+                // Let the per-cell TouchArea own mouse drags for cell selection;
+                // otherwise the Flickable hijacks a drag as a pan and the grid
+                // just slides sideways instead of widening the block. Wheel and
+                // trackpad scrolling, and the scrollbars, are unaffected —
+                // `interactive` only gates drags, not wheel events.
+                interactive: false;
                 width: 100%;
                 height: 100%;
                 viewport-width: max(hdr.preferred-width, la.width);
