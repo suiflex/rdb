@@ -200,14 +200,23 @@ export component CodeEditor inherits Rectangle {
                         }
                         Rectangle { width: Tokens.sp3; }
                         // colored spans (selected ones get a tinted background)
-                        HorizontalLayout {
-                            spacing: 0;
-                            alignment: start;
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            // Keep the row as wide as its text so the ScrollView
+                            // still knows how far a long line reaches.
+                            min-width: line.length > 0
+                                ? root.charw * (line[line.length - 1].col
+                                    + line[line.length - 1].cols)
+                                : 0px;
                             for span in line: Rectangle {
-                                // Pin each span to the caret's charw grid so the
-                                // rendered text and the caret/hit-test stay in lock
-                                // step — no drift, even glyph spacing on long lines.
+                                // Absolute position on the caret's charw grid.
+                                // Stacking these in a layout made every span box
+                                // round to a whole pixel, and with charw at 7.8px
+                                // the error piled up along the line until the text
+                                // sat visibly off the caret.
+                                x: root.charw * span.col;
                                 width: root.charw * span.cols;
+                                height: 100%;
                                 clip: true;
                                 background: span.sel ? Tokens.accent.with-alpha(0.18) : transparent;
                                 Text {
@@ -227,7 +236,6 @@ export component CodeEditor inherits Rectangle {
                                 }
                             }
                         }
-                        Rectangle { horizontal-stretch: 1; }
                     }
 
                     // squiggle under the token that failed
@@ -243,9 +251,13 @@ export component CodeEditor inherits Rectangle {
 
                     // caret
                     if li == root.cursor-line && focus-scope.has-focus: Rectangle {
-                        x: root.gutter-w + Tokens.sp3 + root.cursor-col * root.charw;
+                        // Snapped to a whole pixel: charw is 7.8px, so an
+                        // unrounded x left the caret antialiased across three
+                        // columns and smudged into the glyph next to it.
+                        x: round((root.gutter-w + Tokens.sp3
+                            + root.cursor-col * root.charw) / 1px) * 1px;
                         y: 2px;
-                        width: 1.5px;
+                        width: 2px;
                         height: parent.height - 4px;
                         background: Tokens.accent;
                     }
