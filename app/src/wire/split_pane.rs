@@ -272,19 +272,26 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 }
                 set_p_selected_row(&w, 1, row);
                 w.set_p1_selected_col(col);
-                SELECTED_RANGE.with(|s| s.borrow_mut()[1] = None);
+                // A shift-click finalizes the block on its own: it never fires
+                // a drag, so without this the tint showed a block that Copy
+                // then ignored.
+                let anchor = (w.get_p1_range_anchor_row(), w.get_p1_range_anchor_col());
+                SELECTED_RANGE.with(|s| {
+                    s.borrow_mut()[1] = CellRange::between(anchor, (row, col));
+                });
             }
         });
     }
     {
         let weak = window.as_weak();
-        window.on_p1_row_drag(move |row| {
+        window.on_p1_cell_drag(move |row, origin_col, dx| {
             if let Some(w) = weak.upgrade() {
+                let col = drag_column(&w, 1, origin_col, dx);
                 set_p_selected_row(&w, 1, row);
-                let anchor = w.get_p1_range_anchor_row();
-                let anchor_col = w.get_p1_range_anchor_col();
+                w.set_p1_selected_col(col);
+                let anchor = (w.get_p1_range_anchor_row(), w.get_p1_range_anchor_col());
                 SELECTED_RANGE.with(|s| {
-                    s.borrow_mut()[1] = CellRange::between((anchor, anchor_col), (row, anchor_col));
+                    s.borrow_mut()[1] = CellRange::between(anchor, (row, col));
                 });
             }
         });

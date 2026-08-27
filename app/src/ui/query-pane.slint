@@ -129,7 +129,7 @@ export component QueryPane inherits Rectangle {
     callback resize-col(int, length);
     callback select-cell(int, int);
     callback row-press(int, int, bool);
-    callback row-drag(int);
+    callback cell-drag(int, int, length);
     callback edit-cell(int, int);
     callback cell-edited(int, int, string);
     callback cell-advance(int, int, string, bool);
@@ -801,7 +801,7 @@ export component QueryPane inherits Rectangle {
                 resize-col(i, d) => { root.resize-col(i, d); }
                 select-cell(r, c) => { root.select-cell(r, c); }
                 row-press(r, c, shift) => { root.row-press(r, c, shift); }
-                row-drag(r) => { root.row-drag(r); }
+                cell-drag(r, c, x) => { root.cell-drag(r, c, x); }
                 copy-request() => { root.copy-results(); }
                 edit-cell(r, c) => { root.edit-cell(r, c); }
                 cell-edited(r, c, t) => { root.cell-edited(r, c, t); }

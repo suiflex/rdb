@@ -3024,6 +3024,26 @@ impl CellRange {
     }
 }
 
+/// Column under a drag, resolved from the live column widths: `origin_col` is
+/// the column the press landed in and `dx` the pointer offset within it, so a
+/// drag that leaves its own cell still lands on the right column.
+pub(crate) fn drag_column(w: &MainWindow, pane: usize, origin_col: i32, dx: f32) -> i32 {
+    let widths = get_p_col_widths(w, pane);
+    if widths.is_empty() {
+        return origin_col;
+    }
+    let origin = origin_col.clamp(0, widths.len() as i32 - 1) as usize;
+    let x = widths[..origin].iter().sum::<f32>() + dx;
+    let mut edge = 0.0;
+    for (i, width) in widths.iter().enumerate() {
+        edge += width;
+        if x < edge {
+            return i as i32;
+        }
+    }
+    widths.len() as i32 - 1
+}
+
 /// Slice `grid` down to the pane's finalized drag/shift-click block, if any is
 /// active and still in bounds; otherwise return the grid unchanged.
 fn range_sliced_grid(

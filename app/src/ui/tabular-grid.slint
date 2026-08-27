@@ -23,16 +23,16 @@ export component TabularGrid inherits Rectangle {
     callback set-col-filter(int, string);   // (display col, raw filter text)
     in-out property <int> selected-row: 0;
     in-out property <int> selected-col: -1;
-    // Row/col where the current drag/shift-click range started, -1 = no
-    // range active. Rust owns both (mirrors selected-row); a range is drawn
-    // whenever range-anchor-row differs from selected-row. The column is
-    // fixed at press time and never updated during drag — range copy is
-    // scoped to that one column, not a full row×col rectangle (dragging
-    // into another column visually doesn't widen the copied range).
+    // Cell where the current drag/shift-click block started, -1 = none
+    // active. Rust owns both (mirroring selected-row/selected-col); the block
+    // spans from here to the selected cell, so dragging or shift-clicking in
+    // any direction widens it across rows and columns alike.
     in property <int> range-anchor-row: -1;
     in property <int> range-anchor-col: -1;
     callback row-press(int, int, bool);     // (row, col, shift-held) → mouse/touch down on a cell
-    callback row-drag(int);                 // row currently under the pointer while dragging
+    // (row, column the drag started in, pointer x within that column) —
+    // Rust resolves the column under the pointer from the live column widths.
+    callback cell-drag(int, int, length);
     // inline edit overlay: row/col currently being edited, -1 = none
     in property <int> editing-row: -1;
     in property <int> editing-col: -1;
@@ -291,12 +291,12 @@ export component TabularGrid inherits Rectangle {
                     property <bool> is-num: root.columns[c].type-name == "int4"
                         || root.columns[c].type-name == "int8"
                         || root.columns[c].type-name == "numeric";
-                    // Range copy is scoped to the anchor column only (see
-                    // range-anchor-col doc comment), so the tint highlights
-                    // just that column's cells across the row range, not the
-                    // whole row.
+                    // The tint marks exactly what a copy would take: the block
+                    // between the anchor cell and the cell the pointer ended on.
                     property <bool> in-range: root.range-anchor-col >= 0
-                        && c == root.range-anchor-col
+                        && root.selected-col >= 0
+                        && c >= min(root.range-anchor-col, root.selected-col)
+                        && c <= max(root.range-anchor-col, root.selected-col)
                         && r >= min(root.range-anchor-row, root.selected-row)
                         && r <= max(root.range-anchor-row, root.selected-row);
                     width: root.col-widths.length > c ? root.col-widths[c] : 140px;
@@ -322,7 +322,7 @@ export component TabularGrid inherits Rectangle {
                         }
                         moved => {
                             if (self.pressed) {
-                                root.row-drag(self.drag-row);
+                                root.cell-drag(self.drag-row, c, self.mouse-x);
                             }
                         }
                     }
