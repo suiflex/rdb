@@ -2989,25 +2989,58 @@ fn mark_from(spot: &editor::ErrorSpot, origin: (i32, i32)) -> ErrorMark {
     }
 }
 
-/// Slice `grid` down to the pane's finalized drag/shift-click range, if any
-/// is active and still in bounds; otherwise return the grid unchanged. A
-/// range is always exactly one column wide (the column the drag started
-/// in) — see the `range-anchor-col` doc comment in tabular-grid.slint.
+/// A rectangular block of grid cells, rows `r0..=r1` by columns `c0..=c1`,
+/// normalized so the anchor may sit at any corner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CellRange {
+    pub r0: usize,
+    pub r1: usize,
+    pub c0: usize,
+    pub c1: usize,
+}
+
+impl CellRange {
+    /// Block spanned by an anchor cell and the cell the pointer ended on.
+    /// `None` when both are the same cell — that is a plain click, which the
+    /// callers treat as a single-cell selection rather than a block.
+    fn between(anchor: (i32, i32), focus: (i32, i32)) -> Option<Self> {
+        if anchor.0 < 0 || anchor.1 < 0 || focus.0 < 0 || focus.1 < 0 || anchor == focus {
+            return None;
+        }
+        Some(Self {
+            r0: anchor.0.min(focus.0) as usize,
+            r1: anchor.0.max(focus.0) as usize,
+            c0: anchor.1.min(focus.1) as usize,
+            c1: anchor.1.max(focus.1) as usize,
+        })
+    }
+
+    fn rows(&self) -> usize {
+        self.r1 - self.r0 + 1
+    }
+
+    fn cols(&self) -> usize {
+        self.c1 - self.c0 + 1
+    }
+}
+
+/// Slice `grid` down to the pane's finalized drag/shift-click block, if any is
+/// active and still in bounds; otherwise return the grid unchanged.
 fn range_sliced_grid(
     grid: &model::GridModel,
     pane: usize,
-) -> (model::GridModel, Option<(usize, usize, usize)>) {
+) -> (model::GridModel, Option<CellRange>) {
     let range = SELECTED_RANGE.with(|s| s.borrow()[pane]);
     match range {
-        Some((start, end, col)) if end < grid.rows.len() && col < grid.columns.len() => (
+        Some(r) if r.r1 < grid.rows.len() && r.c1 < grid.columns.len() => (
             model::GridModel {
-                columns: vec![grid.columns[col].clone()],
-                rows: grid.rows[start..=end]
+                columns: grid.columns[r.c0..=r.c1].to_vec(),
+                rows: grid.rows[r.r0..=r.r1]
                     .iter()
-                    .map(|row| vec![row[col].clone()])
+                    .map(|row| row[r.c0..=r.c1].to_vec())
                     .collect(),
             },
-            Some((start, end, col)),
+            Some(r),
         ),
         _ => (grid.clone(), None),
     }
@@ -3690,11 +3723,10 @@ thread_local! {
     /// thread_local suffices; no cross-tab persistence is needed.
     static DOC_TREES: std::cell::RefCell<[(Vec<model::DocNode>, HashSet<String>); 2]> =
         std::cell::RefCell::new(Default::default());
-    /// Finalized (start, end) row range from the last drag/shift-click in the
-    /// results grid, per pane. `None` once a plain click lands with no range,
-    /// or once a fresh result is presented — Copy falls back to the full grid
-    /// then.
-    static SELECTED_RANGE: std::cell::RefCell<[Option<(usize, usize, usize)>; 2]> =
+    /// Finalized block of cells from the last drag/shift-click in the results
+    /// grid, per pane. `None` once a plain click lands with no block, or once
+    /// a fresh result is presented.
+    static SELECTED_RANGE: std::cell::RefCell<[Option<CellRange>; 2]> =
         std::cell::RefCell::new(Default::default());
     /// Grid column behind each entry of the chart's value picker, per pane. The
     /// picker only lists columns the chart can measure, so its indices are its
