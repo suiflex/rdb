@@ -233,15 +233,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 .map(|l| {
                     // Function bodies are always SQL (Postgres introspection),
                     // regardless of the tab's connected engine.
-                    let spans: Vec<Span> = editor::lex_line(rdb_connstore::QueryLanguage::Sql, l)
-                        .into_iter()
-                        .map(|sp| Span {
-                            cols: sp.text.chars().count() as i32,
-                            text: sp.text.into(),
-                            kind: sp.kind,
-                            sel: false,
-                        })
-                        .collect();
+                    let spans = super::editor::ui_spans(
+                        editor::lex_line(rdb_connstore::QueryLanguage::Sql, l),
+                        false,
+                    );
                     ModelRc::from(Rc::new(VecModel::from(spans)))
                 })
                 .collect();

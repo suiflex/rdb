@@ -72,6 +72,32 @@ fn shift_folded_heads(
     }
 }
 
+/// Lexed spans -> UI spans, carrying each span's start column so the renderer
+/// can place it at an absolute `col * charw` instead of stacking rounded
+/// widths in a layout (that rounding drifted the text off the caret grid).
+/// `error_line` repaints plain tokens on the failing line in the error color.
+pub(crate) fn ui_spans(spans: Vec<editor::Span>, error_line: bool) -> Vec<Span> {
+    let mut col = 0;
+    spans
+        .into_iter()
+        .map(|mut sp| {
+            if error_line && sp.kind == 0 {
+                sp.kind = 6;
+            }
+            let cols = sp.text.chars().count() as i32;
+            let start = col;
+            col += cols;
+            Span {
+                col: start,
+                cols,
+                text: sp.text.into(),
+                kind: sp.kind,
+                sel: sp.sel,
+            }
+        })
+        .collect()
+}
+
 pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn) {
     let AppState {
         panes,
@@ -118,22 +144,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                             spans = editor::overlay_selection(spans, a, b);
                         }
                     }
-                    let error_line = error_line == Some(li);
-                    let spans: Vec<Span> = spans
-                        .into_iter()
-                        .map(|mut sp| {
-                            if error_line && sp.kind == 0 {
-                                sp.kind = 6;
-                            }
-                            Span {
-                                cols: sp.text.chars().count() as i32,
-                                text: sp.text.into(),
-                                kind: sp.kind,
-                                sel: sp.sel,
-                            }
-                        })
-                        .collect();
-                    ModelRc::from(Rc::new(VecModel::from(spans)))
+                    ModelRc::from(Rc::new(VecModel::from(ui_spans(
+                        spans,
+                        error_line == Some(li),
+                    ))))
                 })
                 .collect();
             // Update the persistent model in place; same instance → the `for`

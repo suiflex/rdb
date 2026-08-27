@@ -88,9 +88,10 @@ export struct TabItem { title: string, kind: string, preview: bool, engine: stri
 export struct ResultTabItem { label: string, engine: string, connection-name: string, color: color, has-custom-color: bool }
 // One lexed editor token; `kind`: 0 plain · 1 keyword · 2 string ·
 // 3 function · 4 comment · 5 number (mirrors app/src/editor.rs).
-// `sel` = inside the selection (background highlight). `cols` = char count, so
-// the renderer can pin the span to the same charw grid the caret uses.
-export struct Span { text: string, kind: int, sel: bool, cols: int }
+// `sel` = inside the selection (background highlight). `col`/`cols` are the
+// span's start column and char count, so the renderer can place it on the same
+// charw grid the caret uses instead of stacking rounded widths.
+export struct Span { text: string, kind: int, sel: bool, col: int, cols: int }
 // One horizontal bar of the results chart; `frac` is value/max in [0,1].
 export struct ChartBar { label: string, value: string, frac: float }
 // One row of the Indexes view: index name + definition/columns.
