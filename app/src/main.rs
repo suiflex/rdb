@@ -272,6 +272,58 @@ fn cascade_rename_group(old: &str, new: &str, sc_group: &str) -> String {
 }
 
 #[cfg(test)]
+mod cell_range_tests {
+    use super::*;
+    use crate::model::{VmCell, VmColumn};
+
+    fn grid() -> model::GridModel {
+        let col = |n: &str| VmColumn {
+            name: n.into(),
+            type_name: "text".into(),
+        };
+        let cell = |t: String| VmCell {
+            text: t,
+            is_null: false,
+        };
+        model::GridModel {
+            columns: vec![col("a"), col("b"), col("c")],
+            rows: (0..3)
+                .map(|r| (0..3).map(|c| cell(format!("r{r}c{c}"))).collect())
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_block_normalizes_whichever_corner_the_anchor_sits_in() {
+        let up_left = CellRange::between((2, 2), (0, 1)).unwrap();
+        let down_right = CellRange::between((0, 1), (2, 2)).unwrap();
+        assert_eq!(up_left, down_right);
+        assert_eq!(up_left.rows(), 3);
+        assert_eq!(up_left.cols(), 2);
+        // A drag that never left its own cell is a plain click, not a block.
+        assert_eq!(CellRange::between((1, 1), (1, 1)), None);
+    }
+
+    #[test]
+    fn slicing_keeps_only_the_selected_cells() {
+        let block = CellRange::between((1, 1), (2, 2)).unwrap();
+        let sliced = sliced_grid(&grid(), block);
+        assert_eq!(
+            sliced
+                .columns
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            ["b", "c"]
+        );
+        assert_eq!(export::to_tsv_body(&sliced), "r1c1\tr1c2\nr2c1\tr2c2\n");
+
+        let one = CellRange::single(0, 2).unwrap();
+        assert_eq!(export::to_tsv_body(&sliced_grid(&grid(), one)), "r0c2\n");
+    }
+}
+
+#[cfg(test)]
 mod group_cascade_tests {
     use super::*;
 
@@ -3015,6 +3067,16 @@ impl CellRange {
         })
     }
 
+    /// The one cell a plain click leaves selected, if any.
+    fn single(row: i32, col: i32) -> Option<Self> {
+        (row >= 0 && col >= 0).then_some(Self {
+            r0: row as usize,
+            r1: row as usize,
+            c0: col as usize,
+            c1: col as usize,
+        })
+    }
+
     fn rows(&self) -> usize {
         self.r1 - self.r0 + 1
     }
@@ -3044,25 +3106,34 @@ pub(crate) fn drag_column(w: &MainWindow, pane: usize, origin_col: i32, dx: f32)
     widths.len() as i32 - 1
 }
 
-/// Slice `grid` down to the pane's finalized drag/shift-click block, if any is
-/// active and still in bounds; otherwise return the grid unchanged.
-fn range_sliced_grid(
-    grid: &model::GridModel,
+/// What a copy should take from `grid`: the pane's finalized drag/shift-click
+/// block, or the single selected cell when there is no block. `None` means the
+/// whole grid — either the caller asked for everything (the Copy button) or
+/// nothing is selected.
+fn selected_block(
+    w: &MainWindow,
     pane: usize,
-) -> (model::GridModel, Option<CellRange>) {
-    let range = SELECTED_RANGE.with(|s| s.borrow()[pane]);
-    match range {
-        Some(r) if r.r1 < grid.rows.len() && r.c1 < grid.columns.len() => (
-            model::GridModel {
-                columns: grid.columns[r.c0..=r.c1].to_vec(),
-                rows: grid.rows[r.r0..=r.r1]
-                    .iter()
-                    .map(|row| row[r.c0..=r.c1].to_vec())
-                    .collect(),
-            },
-            Some(r),
-        ),
-        _ => (grid.clone(), None),
+    grid: &model::GridModel,
+    all: bool,
+) -> Option<CellRange> {
+    if all {
+        return None;
+    }
+    let block = SELECTED_RANGE.with(|s| s.borrow()[pane]).or_else(|| {
+        let (row, col) = get_p_selected_cell(w, pane);
+        CellRange::single(row, col)
+    })?;
+    (block.r1 < grid.rows.len() && block.c1 < grid.columns.len()).then_some(block)
+}
+
+/// `grid` cropped to `block`.
+fn sliced_grid(grid: &model::GridModel, block: CellRange) -> model::GridModel {
+    model::GridModel {
+        columns: grid.columns[block.c0..=block.c1].to_vec(),
+        rows: grid.rows[block.r0..=block.r1]
+            .iter()
+            .map(|row| row[block.c0..=block.c1].to_vec())
+            .collect(),
     }
 }
 /// Per-column indented JSON for one grid row, empty where the value isn't JSON.

@@ -265,6 +265,14 @@ pub(crate) fn set_p_selected_row(w: &MainWindow, pane: usize, row: i32) {
     }
 }
 
+pub(crate) fn get_p_selected_cell(w: &MainWindow, pane: usize) -> (i32, i32) {
+    if pane == 0 {
+        (w.get_selected_row(), w.get_selected_col())
+    } else {
+        (w.get_p1_selected_row(), w.get_p1_selected_col())
+    }
+}
+
 pub(crate) fn set_p_range_anchor(w: &MainWindow, pane: usize, row: i32) {
     if pane == 0 {
         w.set_range_anchor_row(row);

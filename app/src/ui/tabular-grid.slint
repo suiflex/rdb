@@ -48,7 +48,8 @@ export component TabularGrid inherits Rectangle {
     callback cell-edited(int, int, string); // Enter in the inline editor
     callback cell-advance(int, int, string, bool); // Tab/Shift+Tab → commit + edit neighbour
     callback edit-cancelled();
-    callback copy-request();               // Cmd/Ctrl+C while the grid has focus
+    // Cmd/Ctrl+C while the grid has focus; false = copy the selection only
+    callback copy-request(bool);
     in property <int> scroll-grid-tick;
     in property <int> scroll-top-tick;
     property <int> date-row: -1;
@@ -91,7 +92,7 @@ export component TabularGrid inherits Rectangle {
     grid-focus := FocusScope {
         key-pressed(e) => {
             if ((e.modifiers.control || e.modifiers.meta) && e.text == "c") {
-                root.copy-request();
+                root.copy-request(false);
                 return accept;
             }
             return reject;

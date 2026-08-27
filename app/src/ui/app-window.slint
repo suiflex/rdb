@@ -322,7 +322,7 @@ callback create-table-commit();
     callback run-query();
     callback format-sql();
     callback explain-query();
-    callback copy-results();
+    callback copy-results(bool);
     callback copy-text(string);
     callback export-results(int);
     in property <[ChartBar]> chart-bars;
@@ -588,7 +588,7 @@ callback create-table-commit();
     callback p1-completion-choose(int);
     callback p1-select-result-tab(int);
     callback p1-close-result-tab(int);
-    callback p1-copy-results();
+    callback p1-copy-results(bool);
     callback p1-export-results(int);
     callback p1-sort-col(int);
     callback p1-reorder-col(int, length);
@@ -867,7 +867,7 @@ callback create-table-commit();
                     return accept;
                 }
                 if (e.text == "c") {
-                    if (root.active-pane == 1) { root.p1-copy-results(); } else { root.copy-results(); }
+                    if (root.active-pane == 1) { root.p1-copy-results(false); } else { root.copy-results(false); }
                     return accept;
                 }
             }
@@ -1822,7 +1822,7 @@ callback create-table-commit();
                         p1-completion-choose(i) => { root.p1-completion-choose(i); }
                         p1-select-result-tab(i) => { root.p1-select-result-tab(i); }
                         p1-close-result-tab(i) => { root.p1-close-result-tab(i); }
-                        p1-copy-results() => { root.p1-copy-results(); }
+                        p1-copy-results(all) => { root.p1-copy-results(all); }
                         p1-export-results(i) => { root.p1-export-results(i); }
                         p1-sort-col(i) => { root.p1-sort-col(i); }
                         p1-reorder-col(i, x) => { root.p1-reorder-col(i, x); }
@@ -1968,8 +1968,8 @@ callback create-table-commit();
                         explain-query() => {
                             root.explain-query();
                         }
-                        copy-results() => {
-                            root.copy-results();
+                        copy-results(all) => {
+                            root.copy-results(all);
                         }
                         copy-text(t) => {
                             root.copy-text(t);
