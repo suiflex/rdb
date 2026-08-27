@@ -77,6 +77,27 @@ pub fn set_client_id(id: impl Into<String>) {
     let _ = CLIENT_ID.set(id.into());
 }
 
+/// Percent-encode a URL userinfo component: the RFC 3986 unreserved set is kept
+/// as-is, everything else becomes `%XX`.
+///
+/// A driver that builds a `scheme://user:password@host` URI must run the
+/// credentials through this. The user typed them into a form, not into a URL,
+/// so a password holding `@`, `:` or `/` otherwise either breaks the URI or is
+/// rejected outright — MongoDB answers "password must be URL encoded", which
+/// names something the user never wrote.
+pub fn percent_encode_userinfo(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 /// The registered client identity, or a bare `"RDB"` when nothing registered
 /// one — which is the case for the driver crates' own tests.
 pub fn client_id() -> &'static str {
