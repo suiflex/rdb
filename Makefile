@@ -42,6 +42,10 @@ fe-run-mcp: ## Run the UI with Slint's MCP server on SLINT_MCP_PORT (default 808
 	SLINT_EMIT_DEBUG_INFO=1 SLINT_MCP_PORT=$(SLINT_MCP_PORT) \
 		cargo run -p $(FE_PKG) --features slint/mcp
 
+ui-test: ## Drive the UI through Suitest and publish the run (needs `suitest up`)
+	SLINT_EMIT_DEBUG_INFO=1 cargo build -p $(FE_PKG) --features "slint/mcp,mock"
+	node scripts/suitest-run.mjs
+
 fe-build-run: ## Build the rdb UI then launch it (GUI shows after build)
 	cargo build -p $(FE_PKG)
 	./$(FE_BIN)
