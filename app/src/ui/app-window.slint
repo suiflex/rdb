@@ -304,7 +304,7 @@ callback create-table-commit();
     in-out property <int> range-anchor-row: -1;
     in-out property <int> range-anchor-col: -1;
     callback row-press(int, int, bool);
-    callback row-drag(int);
+    callback cell-drag(int, int, length);
     in property <int> editing-row: -1;
     in property <int> editing-col: -1;
     in-out property <string> editing-value;
@@ -532,7 +532,7 @@ callback create-table-commit();
     in-out property <int> p1-range-anchor-row: -1;
     in-out property <int> p1-range-anchor-col: -1;
     callback p1-row-press(int, int, bool);
-    callback p1-row-drag(int);
+    callback p1-cell-drag(int, int, length);
     in property <int> p1-editing-row: -1;
     in property <int> p1-editing-col: -1;
     in-out property <string> p1-editing-value;
@@ -1771,7 +1771,7 @@ callback create-table-commit();
                         p1-range-anchor-row <=> root.p1-range-anchor-row;
                         p1-range-anchor-col <=> root.p1-range-anchor-col;
                         p1-row-press(r, c, shift) => { root.p1-row-press(r, c, shift); }
-                        p1-row-drag(r) => { root.p1-row-drag(r); }
+                        p1-cell-drag(r, c, x) => { root.p1-cell-drag(r, c, x); }
                         p1-editing-row: root.p1-editing-row;
                         p1-editing-col: root.p1-editing-col;
                         p1-editing-value <=> root.p1-editing-value;
@@ -1927,7 +1927,7 @@ callback create-table-commit();
                         range-anchor-row: root.range-anchor-row;
                         range-anchor-col: root.range-anchor-col;
                         row-press(r, c, shift) => { root.row-press(r, c, shift); }
-                        row-drag(r) => { root.row-drag(r); }
+                        cell-drag(r, c, x) => { root.cell-drag(r, c, x); }
                         editing-row: root.editing-row;
                         editing-col: root.editing-col;
                         editing-value <=> root.editing-value;
