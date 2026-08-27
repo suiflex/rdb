@@ -62,24 +62,30 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
     {
         let weak = window.as_weak();
         let displayed_grid = displayed_grid.clone();
-        window.on_copy_results(move || {
+        window.on_copy_results(move |all| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
             let Some(grid) = displayed_grid.lock().unwrap().clone() else {
                 return;
             };
-            let (to_copy, range) = range_sliced_grid(&grid, 0);
-            use copypasta::ClipboardProvider;
-            let msg = match copypasta::ClipboardContext::new()
-                .and_then(|mut cb| cb.set_contents(export::to_tsv(&to_copy)))
-            {
-                Ok(()) => match range {
-                    Some(r) => copied_msg(&grid, r),
-                    None => format!("copied {} rows", grid.rows.len()),
-                },
-                Err(e) => format!("copy failed: {e}"),
+            // A selection copies its own cells, values only — the header row
+            // belongs to a whole-grid copy, not to a couple of cells pasted
+            // into a spreadsheet.
+            let block = selected_block(&w, 0, &grid, all);
+            let text = match block {
+                Some(r) => export::to_tsv_body(&sliced_grid(&grid, r)),
+                None => export::to_tsv(&grid),
             };
+            use copypasta::ClipboardProvider;
+            let msg =
+                match copypasta::ClipboardContext::new().and_then(|mut cb| cb.set_contents(text)) {
+                    Ok(()) => match block {
+                        Some(r) => copied_msg(&grid, r),
+                        None => format!("copied {} rows", grid.rows.len()),
+                    },
+                    Err(e) => format!("copy failed: {e}"),
+                };
             w.set_results_meta(SharedString::from(msg));
         });
     }
@@ -562,24 +568,27 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
     {
         let weak = window.as_weak();
         let panes = panes.clone();
-        window.on_p1_copy_results(move || {
+        window.on_p1_copy_results(move |all| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
             let Some(grid) = panes[1].displayed_grid.lock().unwrap().clone() else {
                 return;
             };
-            let (to_copy, range) = range_sliced_grid(&grid, 1);
-            use copypasta::ClipboardProvider;
-            let msg = match copypasta::ClipboardContext::new()
-                .and_then(|mut cb| cb.set_contents(export::to_tsv(&to_copy)))
-            {
-                Ok(()) => match range {
-                    Some(r) => copied_msg(&grid, r),
-                    None => format!("copied {} rows", grid.rows.len()),
-                },
-                Err(e) => format!("copy failed: {e}"),
+            let block = selected_block(&w, 1, &grid, all);
+            let text = match block {
+                Some(r) => export::to_tsv_body(&sliced_grid(&grid, r)),
+                None => export::to_tsv(&grid),
             };
+            use copypasta::ClipboardProvider;
+            let msg =
+                match copypasta::ClipboardContext::new().and_then(|mut cb| cb.set_contents(text)) {
+                    Ok(()) => match block {
+                        Some(r) => copied_msg(&grid, r),
+                        None => format!("copied {} rows", grid.rows.len()),
+                    },
+                    Err(e) => format!("copy failed: {e}"),
+                };
             set_p_results_meta(&w, 1, SharedString::from(msg));
         });
     }

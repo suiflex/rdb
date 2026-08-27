@@ -136,13 +136,25 @@ pub fn to_csv(g: &GridModel) -> String {
 /// TSV for the clipboard (pastes into spreadsheets); tabs/newlines inside
 /// cells become spaces.
 pub fn to_tsv(g: &GridModel) -> String {
+    tsv(g, true)
+}
+
+/// TSV without the header row — what a partial selection copies, so pasting a
+/// couple of cells doesn't drag a column name along with them.
+pub fn to_tsv_body(g: &GridModel) -> String {
+    tsv(g, false)
+}
+
+fn tsv(g: &GridModel, header_row: bool) -> String {
     fn clean(s: &str) -> String {
         s.replace(['\t', '\n', '\r'], " ")
     }
     let mut out = String::new();
-    let header: Vec<String> = g.columns.iter().map(|c| clean(&c.name)).collect();
-    out.push_str(&header.join("\t"));
-    out.push('\n');
+    if header_row {
+        let header: Vec<String> = g.columns.iter().map(|c| clean(&c.name)).collect();
+        out.push_str(&header.join("\t"));
+        out.push('\n');
+    }
     for row in &g.rows {
         let cells: Vec<String> = row.iter().map(|c| clean(&c.text)).collect();
         out.push_str(&cells.join("\t"));
@@ -257,6 +269,11 @@ mod tests {
     #[test]
     fn tsv_strips_control_chars() {
         assert_eq!(to_tsv(&grid()), "id\tname\n1\ta,\"b\" \n");
+    }
+
+    #[test]
+    fn tsv_body_drops_the_header() {
+        assert_eq!(to_tsv_body(&grid()), "1\ta,\"b\" \n");
     }
 
     #[test]
