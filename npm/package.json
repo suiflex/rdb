@@ -1,6 +1,6 @@
 {
   "name": "@suiflex/rdb",
-  "version": "0.42.0",
+  "version": "0.43.0",
   "description": "RDB — native cross-platform database manager (PostgreSQL, MySQL, Redis, MongoDB)",
   "homepage": "https://rdb.suiflex.dev",
   "repository": {
