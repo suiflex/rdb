@@ -36,3 +36,7 @@ suitest.config.json
 
 # Node (root delegator + website build)
 node_modules/
+
+# Suitest UI harness — local only, needs a Suitest instance for this project
+scripts/suitest-run.mjs
+tests/suitest/
