@@ -8,7 +8,7 @@ use mongodb::bson::{doc, Bson, Document};
 use mongodb::options::{ClientOptions, ServerMonitoringMode};
 use mongodb::{Client, Collection};
 
-use rdb_core::conn::{client_id, ConnConfig, SslMode};
+use rdb_core::conn::{client_id, percent_encode_userinfo, ConnConfig, SslMode};
 use rdb_core::driver::Driver;
 use rdb_core::error::{RdbError, Result};
 use rdb_core::query::{MongoKind, MongoOp, Query};
@@ -80,8 +80,15 @@ fn build_uri(cfg: &ConnConfig) -> String {
         }
     }
 
+    // Percent-encoded: the credentials came from a form, and Mongo rejects a
+    // URI whose userinfo carries a raw `@`, `:` or `/` with "password must be
+    // URL encoded" — a message about something the user never typed.
     let auth = match &cfg.password {
-        Some(pw) if !pw.is_empty() => format!("{}:{}@", cfg.user, pw),
+        Some(pw) if !pw.is_empty() => format!(
+            "{}:{}@",
+            percent_encode_userinfo(&cfg.user),
+            percent_encode_userinfo(pw)
+        ),
         _ => String::new(),
     };
     // TLS is opt-in for Mongo: only `Require` enforces it (with no cert/hostname
@@ -608,6 +615,29 @@ mod tests {
             uri,
             "mongodb://u:p@db.internal:27017/?directConnection=true"
         );
+    }
+
+    #[tokio::test]
+    async fn build_uri_encodes_credentials_the_user_typed() {
+        // A password holding URI syntax used to be pasted in raw, and the
+        // driver rejected the result with "password must be URL encoded" —
+        // naming something the user never wrote. They typed it into a form.
+        let mut c = cfg(None, SslMode::Disable);
+        c.user = "user@corp".into();
+        c.password = Some("p@ss:1/x".into());
+        let uri = build_uri(&c);
+        assert_eq!(
+            uri,
+            "mongodb://user%40corp:p%40ss%3A1%2Fx@db.internal:27017/?directConnection=true"
+        );
+        let parsed = ClientOptions::parse(&uri)
+            .await
+            .expect("mongo must accept it");
+        let credential = parsed
+            .credential
+            .expect("credentials survive the round trip");
+        assert_eq!(credential.username.as_deref(), Some("user@corp"));
+        assert_eq!(credential.password.as_deref(), Some("p@ss:1/x"));
     }
 
     #[test]

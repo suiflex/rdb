@@ -25,22 +25,6 @@ fn engine_scheme(e: Engine) -> &'static str {
     e.scheme()
 }
 
-/// Percent-encode a URL userinfo component (RFC 3986 unreserved set kept as-is,
-/// everything else `%XX`). Mirrors `percent_decode` in connstore's URL parser so
-/// an exported password round-trips back through the "import URL" flow.
-fn percent_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
 /// Connection-string URL, e.g. `postgresql://user:pass@host:5432/db`. `password`
 /// is the real secret (percent-encoded) so the export can be pasted back into
 /// the "import URL" field and re-used; when absent the credential is `user@`.
@@ -50,7 +34,9 @@ pub fn conn_to_url(c: &SavedConnection, password: Option<&str>) -> String {
         String::new()
     } else {
         match password {
-            Some(p) if !p.is_empty() => format!("{}:{}@", c.user, percent_encode(p)),
+            Some(p) if !p.is_empty() => {
+                format!("{}:{}@", c.user, rdb_core::conn::percent_encode_userinfo(p))
+            }
             _ => format!("{}@", c.user),
         }
     };
