@@ -187,7 +187,17 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             } else {
                 return;
             };
-            if active_tab_id.lock().unwrap().is_none() || active_tab_kind(&w) != "sql" {
+            // Opening a query adds a tab; it never writes over one. The old
+            // rule reused any SQL tab that happened to be active, so picking a
+            // query from history or the saved list silently replaced whatever
+            // the user was writing. An empty scratch tab is still reused —
+            // there is nothing there to lose, and leaving it behind would grow
+            // a blank tab on every open.
+            let editor_is_empty = panes[0].ed_state.borrow().text().trim().is_empty();
+            if active_tab_id.lock().unwrap().is_none()
+                || active_tab_kind(&w) != "sql"
+                || !editor_is_empty
+            {
                 w.invoke_new_tab();
             }
             load_editor_text(0, &text);
