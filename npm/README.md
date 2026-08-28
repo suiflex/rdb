@@ -1,7 +1,7 @@
 # @suiflex/rdb
 
 Native cross-platform database manager — PostgreSQL, MySQL, MariaDB, Redis,
-Valkey, MongoDB, SQLite, Cassandra, SQL Server, ClickHouse in one binary. No
+Valkey, MongoDB, SQLite, Cassandra, SQL Server, Oracle, ClickHouse in one binary. No
 Electron.
 
 ## Install
@@ -20,7 +20,7 @@ rdb
 
 ## Features
 
-- **Multi-engine** — PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite, Cassandra, SQL Server, ClickHouse in one app
+- **Multi-engine** — PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite, Cassandra, SQL Server, Oracle, ClickHouse in one app
 - **Native UI** — GPU-rendered via Slint (no webview, no Chromium, no Electron)
 - **Fast & light** — no GC, no runtime; aggressive release optimization (LTO, `opt-level=z`, `panic=abort`)
 - **Secure connections** — passwords stored in OS keychain (macOS Keychain, libsecret) with AES-GCM encrypted-file fallback
@@ -45,6 +45,7 @@ rdb
 | SQLite | `rusqlite` | Tabular |
 | Cassandra | `scylla` | Tabular |
 | SQL Server | `tiberius` | Tabular |
+| Oracle | `oracle` (ODPI-C) | Tabular |
 | ClickHouse | `clickhouse` (HTTP) | Tabular |
 
 ## Design
@@ -74,7 +75,7 @@ pub trait Driver: Send + Sync {
 
 ```rust
 pub enum Query {
-    Sql(String),           // PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, ClickHouse
+    Sql(String),           // PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, Oracle, ClickHouse
     Cql(String),           // Cassandra/ScyllaDB
     Command(Vec<String>),  // Redis/Valkey: ["GET", "key"]
     Mongo(MongoOp),        // find / insert / aggregate

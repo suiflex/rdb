@@ -12,8 +12,9 @@ import {
 import { REPO_LINKS } from "../config";
 
 // simple-icons has no Microsoft SQL Server mark (it only covers open brands),
-// and no Valkey mark yet (requested upstream, not shipped) — both render
-// without an `icon`, see the conditional <svg> below.
+// no Valkey mark yet (requested upstream, not shipped), and no Oracle mark in
+// the 15.x line we pin — all three render without an `icon`, see the
+// conditional <svg> below.
 const engines = [
   { icon: siPostgresql, name: "PostgreSQL", detail: "via tokio-postgres" },
   { icon: siMysql, name: "MySQL", detail: "via mysql_async" },
@@ -24,6 +25,7 @@ const engines = [
   { icon: siSqlite, name: "SQLite", detail: "local files, zero setup" },
   { icon: siApachecassandra, name: "Cassandra", detail: "via the scylla driver" },
   { icon: null, name: "SQL Server", detail: "via tiberius (T-SQL)" },
+  { icon: null, name: "Oracle", detail: "via oracle (needs Instant Client)" },
   { icon: siClickhouse, name: "ClickHouse", detail: "via HTTP, FORMAT JSON reads" },
 ];
 ---
@@ -48,7 +50,7 @@ const engines = [
   }
 </ul>
 <p class="mt-4 text-sm text-fg-3">
-  All ten ship in the current release. BigQuery and Oracle are
+  All eleven ship in the current release. BigQuery is
   <a
     href={REPO_LINKS.vision}
     rel="noopener"

@@ -1,7 +1,7 @@
 # Contributing to RDB
 
 Thanks for your interest in RDB — a native, cross-platform database manager
-(PostgreSQL, MySQL, Redis, MongoDB, SQLite, Cassandra, SQL Server and
+(PostgreSQL, MySQL, Redis, MongoDB, SQLite, Cassandra, SQL Server, Oracle and
 ClickHouse) built with Rust and Slint.
 
 This guide covers how to build, test, and submit changes. By participating you
@@ -57,7 +57,7 @@ RDB is a Cargo workspace:
 - `crates/core/` — the `Driver` trait, `Query`, `ResultSet`, `Schema`, errors.
 - `crates/connstore/` — saved connections + OS keychain / AES-GCM.
 - `crates/driver-*/` — one crate per engine, each implementing `Driver`:
-  `postgres`, `mysql`, `redis`, `mongo`, `sqlite`, `cassandra`, `mssql`,
+  `postgres`, `mysql`, `redis`, `mongo`, `sqlite`, `cassandra`, `mssql`, `oracle`,
   `clickhouse`.
 
 The repo also holds a few things that are not part of the Rust build:
@@ -113,7 +113,7 @@ those are intentionally kept out of CI.
 
 ### What CI covers
 
-Every backend crate has its own workflow in `.github/workflows/`, and all ten
+Every backend crate has its own workflow in `.github/workflows/`, and all eleven
 are in the `Makefile`'s `BE_PKGS`, so `make be-test` and CI agree on scope.
 Each workflow also watches `crates/core/**`, so a change to `core` fans out and
 retests its dependents.
