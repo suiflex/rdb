@@ -7,7 +7,7 @@ BE_FLAGS = $(addprefix -p ,$(BE_PKGS))
 
 .DEFAULT_GOAL := help
 
-.PHONY: help be-build be-test be-check fe-build fe-run fe-run-mock fe-build-run fe-show fmt fmt-check lint test test-it build all clean
+.PHONY: help ui-test be-build be-test be-check fe-build fe-run fe-run-mock fe-build-run fe-show fmt fmt-check lint test test-it build all clean
 
 FE_BIN = target/debug/$(FE_PKG)
 
@@ -61,6 +61,28 @@ lint: ## Clippy across all targets, warnings are errors
 
 test: ## Run all unit tests (whole workspace, no Docker)
 	cargo test --workspace --lib --bins
+
+ORACLE_STORE = $(CURDIR)/target/ui-test/oracle-store
+EMPTY_STORE  = $(CURDIR)/target/ui-test/empty-store
+ORACLE_CLIENT_DIR ?= $(HOME)/Development/oracle-instantclient
+
+ui-test: ## Drive the UI through Suitest (needs `suitest up` and a reachable Oracle)
+	@test -n "$(ORACLE_URL)" || { \
+	  echo "set ORACLE_URL=oracle://user:pass@host:1521/SERVICE"; exit 2; }
+	SLINT_EMIT_DEBUG_INFO=1 cargo build -p $(FE_PKG) --features "slint/mcp,mock"
+	rm -rf $(ORACLE_STORE) $(EMPTY_STORE)
+	mkdir -p $(EMPTY_STORE)
+	cargo run -q -p rdb-connstore --example seed-store -- \
+	  $(ORACLE_STORE) "Oracle local" oracle \
+	  "$$(printf '%s' '$(ORACLE_URL)' | sed -E 's#.*@([^:/]+).*#\1#')" \
+	  "$$(printf '%s' '$(ORACLE_URL)' | sed -E 's#.*:([0-9]+)/.*#\1#')" \
+	  "$$(printf '%s' '$(ORACLE_URL)' | sed -E 's#^[a-z]+://([^:]+):.*#\1#')" \
+	  "$$(printf '%s' '$(ORACLE_URL)' | sed -E 's#.*/([^/]+)$$#\1#')" \
+	  "$$(printf '%s' '$(ORACLE_URL)' | sed -E 's#^[a-z]+://[^:]+:([^@]+)@.*#\1#')"
+	RDB_ORACLE_STORE=$(ORACLE_STORE) RDB_EMPTY_STORE=$(EMPTY_STORE) \
+	  ORACLE_CLIENT_DIR=$(ORACLE_CLIENT_DIR) \
+	  GIT_BRANCH=$$(git branch --show-current) \
+	  node scripts/suitest-run.mjs
 
 test-it: ## Run integration tests (requires a running Docker daemon)
 	cargo test --workspace --test '*'
