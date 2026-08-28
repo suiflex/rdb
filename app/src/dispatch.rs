@@ -17,6 +17,7 @@ use rdb_driver_clickhouse::ClickhouseDriver;
 use rdb_driver_mongo::MongoDriver;
 use rdb_driver_mssql::MssqlDriver;
 use rdb_driver_mysql::MysqlDriver;
+use rdb_driver_oracle::OracleDriver;
 use rdb_driver_postgres::PostgresDriver;
 use rdb_driver_redis::RedisDriver;
 use rdb_driver_sqlite::SqliteDriver;
@@ -38,6 +39,9 @@ enum AnyDriverInner {
     // Boxed: a tiberius Client's connection buffers are far larger than the
     // other drivers, same reasoning as Cassandra above.
     Mssql(Box<MssqlDriver>),
+    /// Boxed for the same reason as Mssql: an oracle-rs Connection carries
+    /// per-session network buffers far larger than the other variants.
+    Oracle(Box<OracleDriver>),
     Clickhouse(ClickhouseDriver),
     /// In-process demo driver (RDB_MOCK=1); no network, seeded data.
     #[cfg(feature = "mock")]
@@ -93,6 +97,9 @@ impl AnyDriver {
             Engine::Mssql => {
                 AnyDriverInner::Mssql(Box::new(MssqlDriver::connect(&target_cfg).await?))
             }
+            Engine::Oracle => {
+                AnyDriverInner::Oracle(Box::new(OracleDriver::connect(&target_cfg).await?))
+            }
             Engine::Clickhouse => {
                 AnyDriverInner::Clickhouse(ClickhouseDriver::connect(&target_cfg).await?)
             }
@@ -122,6 +129,7 @@ impl AnyDriver {
             AnyDriverInner::Sqlite(d) => d.ping().await,
             AnyDriverInner::Cassandra(d) => d.ping().await,
             AnyDriverInner::Mssql(d) => d.ping().await,
+            AnyDriverInner::Oracle(d) => d.ping().await,
             AnyDriverInner::Clickhouse(d) => d.ping().await,
             #[cfg(feature = "mock")]
             AnyDriverInner::Mock(d) => d.ping().await,
@@ -137,6 +145,7 @@ impl AnyDriver {
             AnyDriverInner::Sqlite(d) => d.schema().await,
             AnyDriverInner::Cassandra(d) => d.schema().await,
             AnyDriverInner::Mssql(d) => d.schema().await,
+            AnyDriverInner::Oracle(d) => d.schema().await,
             AnyDriverInner::Clickhouse(d) => d.schema().await,
             #[cfg(feature = "mock")]
             AnyDriverInner::Mock(d) => d.schema().await,
@@ -152,6 +161,7 @@ impl AnyDriver {
             AnyDriverInner::Sqlite(d) => d.schema_for(schema).await,
             AnyDriverInner::Cassandra(d) => d.schema_for(schema).await,
             AnyDriverInner::Mssql(d) => d.schema_for(schema).await,
+            AnyDriverInner::Oracle(d) => d.schema_for(schema).await,
             AnyDriverInner::Clickhouse(d) => d.schema_for(schema).await,
             #[cfg(feature = "mock")]
             AnyDriverInner::Mock(d) => d.schema_for(schema).await,
@@ -167,6 +177,7 @@ impl AnyDriver {
             AnyDriverInner::Sqlite(d) => d.list_schemas().await,
             AnyDriverInner::Cassandra(d) => d.list_schemas().await,
             AnyDriverInner::Mssql(d) => d.list_schemas().await,
+            AnyDriverInner::Oracle(d) => d.list_schemas().await,
             AnyDriverInner::Clickhouse(d) => d.list_schemas().await,
             #[cfg(feature = "mock")]
             AnyDriverInner::Mock(d) => d.list_schemas().await,
@@ -182,6 +193,7 @@ impl AnyDriver {
             AnyDriverInner::Sqlite(d) => d.list_databases().await,
             AnyDriverInner::Cassandra(d) => d.list_databases().await,
             AnyDriverInner::Mssql(d) => d.list_databases().await,
+            AnyDriverInner::Oracle(d) => d.list_databases().await,
             AnyDriverInner::Clickhouse(d) => d.list_databases().await,
             #[cfg(feature = "mock")]
             AnyDriverInner::Mock(d) => d.list_databases().await,
@@ -197,6 +209,7 @@ impl AnyDriver {
             AnyDriverInner::Sqlite(d) => d.containers(database).await,
             AnyDriverInner::Cassandra(d) => d.containers(database).await,
             AnyDriverInner::Mssql(d) => d.containers(database).await,
+            AnyDriverInner::Oracle(d) => d.containers(database).await,
             AnyDriverInner::Clickhouse(d) => d.containers(database).await,
             #[cfg(feature = "mock")]
             AnyDriverInner::Mock(d) => d.containers(database).await,
@@ -217,6 +230,7 @@ impl AnyDriver {
             AnyDriverInner::Sqlite(d) => d.sample_fields(database, container, sample_size).await,
             AnyDriverInner::Cassandra(d) => d.sample_fields(database, container, sample_size).await,
             AnyDriverInner::Mssql(d) => d.sample_fields(database, container, sample_size).await,
+            AnyDriverInner::Oracle(d) => d.sample_fields(database, container, sample_size).await,
             AnyDriverInner::Clickhouse(d) => {
                 d.sample_fields(database, container, sample_size).await
             }
@@ -234,6 +248,7 @@ impl AnyDriver {
             AnyDriverInner::Sqlite(d) => d.query(q).await,
             AnyDriverInner::Cassandra(d) => d.query(q).await,
             AnyDriverInner::Mssql(d) => d.query(q).await,
+            AnyDriverInner::Oracle(d) => d.query(q).await,
             AnyDriverInner::Clickhouse(d) => d.query(q).await,
             #[cfg(feature = "mock")]
             AnyDriverInner::Mock(d) => d.query(q).await,
@@ -255,6 +270,7 @@ impl AnyDriver {
             AnyDriverInner::Sqlite(d) => d.cancel_running().await,
             AnyDriverInner::Cassandra(d) => d.cancel_running().await,
             AnyDriverInner::Mssql(d) => d.cancel_running().await,
+            AnyDriverInner::Oracle(d) => d.cancel_running().await,
             AnyDriverInner::Clickhouse(d) => d.cancel_running().await,
             #[cfg(feature = "mock")]
             AnyDriverInner::Mock(d) => d.cancel_running().await,
@@ -276,6 +292,7 @@ impl AnyDriver {
             AnyDriverInner::Sqlite(d) => d.query_stream(q, batch, cancel, sink).await,
             AnyDriverInner::Cassandra(d) => d.query_stream(q, batch, cancel, sink).await,
             AnyDriverInner::Mssql(d) => d.query_stream(q, batch, cancel, sink).await,
+            AnyDriverInner::Oracle(d) => d.query_stream(q, batch, cancel, sink).await,
             AnyDriverInner::Clickhouse(d) => d.query_stream(q, batch, cancel, sink).await,
             #[cfg(feature = "mock")]
             AnyDriverInner::Mock(d) => d.query_stream(q, batch, cancel, sink).await,
@@ -291,6 +308,7 @@ impl AnyDriver {
             AnyDriverInner::Sqlite(d) => d.primary_key(table).await,
             AnyDriverInner::Cassandra(d) => d.primary_key(table).await,
             AnyDriverInner::Mssql(d) => d.primary_key(table).await,
+            AnyDriverInner::Oracle(d) => d.primary_key(table).await,
             AnyDriverInner::Clickhouse(d) => d.primary_key(table).await,
             #[cfg(feature = "mock")]
             AnyDriverInner::Mock(d) => d.primary_key(table).await,
@@ -306,6 +324,7 @@ impl AnyDriver {
             AnyDriverInner::Sqlite(d) => d.count(table).await,
             AnyDriverInner::Cassandra(d) => d.count(table).await,
             AnyDriverInner::Mssql(d) => d.count(table).await,
+            AnyDriverInner::Oracle(d) => d.count(table).await,
             AnyDriverInner::Clickhouse(d) => d.count(table).await,
             #[cfg(feature = "mock")]
             AnyDriverInner::Mock(d) => d.count(table).await,
@@ -321,6 +340,7 @@ impl AnyDriver {
             AnyDriverInner::Sqlite(d) => d.commit(ops).await,
             AnyDriverInner::Cassandra(d) => d.commit(ops).await,
             AnyDriverInner::Mssql(d) => d.commit(ops).await,
+            AnyDriverInner::Oracle(d) => d.commit(ops).await,
             AnyDriverInner::Clickhouse(d) => d.commit(ops).await,
             #[cfg(feature = "mock")]
             AnyDriverInner::Mock(d) => d.commit(ops).await,
@@ -377,6 +397,15 @@ pub fn write_statements(engine: Engine, ops: &[WriteOp]) -> Vec<String> {
             }
             (Engine::Mssql, WriteOp::Delete { table, pk }) => {
                 rdb_driver_mssql::write_sql::delete_sql(table, pk)
+            }
+            (Engine::Oracle, WriteOp::Update { table, pk, changes }) => {
+                rdb_driver_oracle::write_sql::update_sql(table, pk, changes)
+            }
+            (Engine::Oracle, WriteOp::Insert { table, values }) => {
+                rdb_driver_oracle::write_sql::insert_sql(table, values)
+            }
+            (Engine::Oracle, WriteOp::Delete { table, pk }) => {
+                rdb_driver_oracle::write_sql::delete_sql(table, pk)
             }
             (Engine::Clickhouse, WriteOp::Insert { table, values }) => {
                 rdb_driver_clickhouse::write_sql::insert_sql(table, values)
