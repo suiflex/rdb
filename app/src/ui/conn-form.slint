@@ -159,7 +159,7 @@ export component ConnForm inherits Rectangle {
                 SelectBox {
                     horizontal-stretch: 1;
                     show-logo: true;
-                    model: ["PostgreSQL", "MySQL", "MariaDB", "Redis", "Valkey", "MongoDB", "SQLite", "Cassandra", "SQL Server", "ClickHouse"];
+                    model: ["PostgreSQL", "MySQL", "MariaDB", "Redis", "Valkey", "MongoDB", "SQLite", "Cassandra", "SQL Server", "Oracle", "ClickHouse"];
                     current-value <=> root.f-engine;
                     selected(v) => { root.engine-changed(v); }
                 }
@@ -181,6 +181,7 @@ export component ConnForm inherits Rectangle {
                         : root.f-engine == "Cassandra" ? "cassandra://user:pass@host:9042/keyspace"
                         : root.f-engine == "SQLite" ? "sqlite:///path/to/database.db"
                         : root.f-engine == "SQL Server" ? "sqlserver://user:pass@host:1433/db"
+                        : root.f-engine == "Oracle" ? "oracle://user:pass@host:1521/service_name"
                         : root.f-engine == "ClickHouse" ? "clickhouse://default@host:8123/db"
                         : "postgresql://user:pass@host:5432/db?sslmode=require";
                     accepted => { root.import-url(); }
@@ -257,7 +258,7 @@ export component ConnForm inherits Rectangle {
             }
 
             // SSL mode applies to network engines with transport encryption.
-            if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL" || root.f-engine == "MariaDB" || root.f-engine == "SQL Server" || root.f-engine == "ClickHouse" || root.f-engine == "Cassandra": HorizontalLayout {
+            if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL" || root.f-engine == "MariaDB" || root.f-engine == "SQL Server" || root.f-engine == "Oracle" || root.f-engine == "ClickHouse" || root.f-engine == "Cassandra": HorizontalLayout {
                 height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "SSL mode"; }
