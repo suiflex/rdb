@@ -5,6 +5,7 @@ members = [
     "crates/connstore",
     "crates/driver-postgres",
     "crates/driver-mysql",
+    "crates/driver-oracle",
     "crates/driver-redis",
     "crates/driver-mongo",
     "crates/driver-sqlite",
