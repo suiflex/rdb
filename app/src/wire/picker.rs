@@ -229,10 +229,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         }
         if screen.starts_with("workspace") {
             let weak = window.as_weak();
-            let table = if screen.starts_with("workspace-users") {
-                "users"
-            } else {
-                "emiten"
+            // "workspace" opens the mock `emiten` fixture; "workspace-<name>"
+            // opens that table instead, so the harness can drive a real
+            // connection whose tables it cannot know in advance.
+            let table = match screen.strip_prefix("workspace-") {
+                Some(name) if !name.is_empty() => name.to_string(),
+                _ => "emiten".to_string(),
             };
             let t2 = Box::leak(Box::new(slint::Timer::default()));
             t2.start(
@@ -240,7 +242,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 std::time::Duration::from_millis(1800),
                 move || {
                     if let Some(w) = weak.upgrade() {
-                        w.invoke_open_table("".into(), table.into());
+                        w.invoke_open_table("".into(), table.as_str().into());
                     }
                 },
             );
