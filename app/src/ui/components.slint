@@ -149,6 +149,7 @@ component EngineLogo inherits Image {
         : label == "SQLite" ? @image-url("icons/brand/sqlite.svg")
         : label == "Cassandra" ? @image-url("icons/brand/cassandra.svg")
         : label == "ClickHouse" ? @image-url("icons/brand/clickhouse.svg")
+        : label == "Oracle" ? @image-url("icons/brand/oracle.svg")
         : @image-url("");
 }
 
@@ -235,7 +236,7 @@ export component SelectBox inherits Rectangle {
 
 // Engine badge: rounded square with 2-letter code, engine color fill.
 export component DbBadge inherits Rectangle {
-    in property <string> engine; // "postgres" | "mysql" | "redis" | "sqlite" | "mongo" | "cassandra" | "clickhouse" | "mssql"
+    in property <string> engine; // "postgres" | "mysql" | "redis" | "sqlite" | "mongo" | "cassandra" | "clickhouse" | "mssql" | "oracle"
     in property <length> size: 24px;
     // Callers with a per-connection custom accent can override this; the
     // default keeps every existing call site's engine-colored look as-is.
@@ -248,7 +249,7 @@ export component DbBadge inherits Rectangle {
     property <bool> known: engine == "postgres" || engine == "mysql"
         || engine == "mariadb" || engine == "redis" || engine == "valkey"
         || engine == "sqlite" || engine == "mongo"
-        || engine == "cassandra" || engine == "clickhouse";
+        || engine == "cassandra" || engine == "clickhouse" || engine == "oracle";
     // Engines with no real brand mark available (e.g. SQL Server — no
     // official logo shipped, and none hand-drawn per operator's call) get
     // their initials spelled out instead of a fabricated icon or a bare "?".
