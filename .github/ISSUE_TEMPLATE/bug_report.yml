@@ -36,6 +36,7 @@ body:
         - SQLite
         - Cassandra
         - SQL Server
+        - Oracle
         - ClickHouse
         - Not engine-specific
     validations:
