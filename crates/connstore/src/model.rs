@@ -24,6 +24,9 @@ pub enum Engine {
     /// Valkey: RESP-compatible fork of Redis, dispatched through the same
     /// `RedisDriver` as `Engine::Redis`.
     Valkey,
+    /// Oracle Database; `database` holds the service name (e.g. `FREEPDB1`),
+    /// not a SID. Database auth only in v1, no wallet/OS auth.
+    Oracle,
 }
 
 /// The query dialect an engine's editor tab speaks. Drives completion, syntax
@@ -119,6 +122,14 @@ pub const ENGINES: &[EngineMeta] = &[
         key: "mssql",
         scheme: "sqlserver",
         default_port: "1433",
+        language: QueryLanguage::Sql,
+    },
+    EngineMeta {
+        engine: Engine::Oracle,
+        display: "Oracle",
+        key: "oracle",
+        scheme: "oracle",
+        default_port: "1521",
         language: QueryLanguage::Sql,
     },
     EngineMeta {
@@ -500,6 +511,7 @@ mod tests {
         assert_eq!(Engine::Mongo.language(), QueryLanguage::Mongo);
         assert_eq!(Engine::Mssql.language(), QueryLanguage::Sql);
         assert_eq!(Engine::Clickhouse.language(), QueryLanguage::Sql);
+        assert_eq!(Engine::Oracle.language(), QueryLanguage::Sql);
     }
 
     /// The lookup panics if a variant has no row, so this is the guard that
@@ -519,6 +531,7 @@ mod tests {
             Engine::Clickhouse,
             Engine::MariaDb,
             Engine::Valkey,
+            Engine::Oracle,
         ];
         for e in all {
             let m = e.meta();
@@ -545,7 +558,8 @@ mod tests {
                 | Engine::Mssql
                 | Engine::Clickhouse
                 | Engine::MariaDb
-                | Engine::Valkey => (),
+                | Engine::Valkey
+                | Engine::Oracle => (),
             };
         }
     }

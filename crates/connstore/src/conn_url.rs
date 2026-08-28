@@ -54,6 +54,7 @@ fn scheme_to_engine(scheme: &str) -> Option<Engine> {
         "sqlite" | "file" => Some(Engine::Sqlite),
         "cassandra" | "cql" | "scylla" => Some(Engine::Cassandra),
         "mssql" | "sqlserver" => Some(Engine::Mssql),
+        "oracle" => Some(Engine::Oracle),
         "clickhouse" | "clickhouses" => Some(Engine::Clickhouse),
         _ => None,
     }
