@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <strong>Native cross-platform database manager.<br>PostgreSQL · MySQL · MariaDB · Redis · Valkey · MongoDB · SQLite · Cassandra · Scylla · SQL Server · ClickHouse — one binary, no Electron.</strong>
+  <strong>Native cross-platform database manager.<br>PostgreSQL · MySQL · MariaDB · Redis · Valkey · MongoDB · SQLite · Cassandra · Scylla · SQL Server · Oracle · ClickHouse — one binary, no Electron.</strong>
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@ A native, lightweight, cross-platform database manager built with Rust and Slint
 
 ## Features
 
-- **Multi-engine** — PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite, Cassandra, SQL Server, ClickHouse in one app
+- **Multi-engine** — PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite, Cassandra, SQL Server, Oracle, ClickHouse in one app
 - **Native UI** — GPU-rendered via Slint (no webview, no Chromium, no Electron)
 - **Fast & light** — no GC, no runtime; aggressive release optimization (LTO, `opt-level=z`, `panic=abort`)
 - **Secure connections** — passwords stored in OS keychain (macOS Keychain, libsecret) with AES-GCM encrypted-file fallback
@@ -50,7 +50,22 @@ A native, lightweight, cross-platform database manager built with Rust and Slint
 | SQLite | `rusqlite` | Tabular |
 | Cassandra | `scylla` | Tabular |
 | SQL Server | `tiberius` | Tabular |
+| Oracle | `oracle` (ODPI-C) | Tabular |
 | ClickHouse | `clickhouse` (HTTP) | Tabular |
+
+> **Oracle needs the Oracle Instant Client.** It is the one engine RDB cannot
+> reach with the binary alone: Oracle ships no public wire-protocol spec, so
+> the driver goes through Oracle's own client library, which is loaded at
+> runtime and is not redistributable. Install the **Basic** or **Basic Light**
+> package from [Oracle's Instant Client
+> downloads](https://www.oracle.com/database/technologies/instant-client/downloads.html)
+> and put it on the library path (`DYLD_LIBRARY_PATH` on macOS,
+> `LD_LIBRARY_PATH` on Linux, `PATH` on Windows). Nothing is needed to *build*
+> RDB — only to connect to Oracle — and every other engine stays dependency-free.
+>
+> Known gap: Oracle 21c+ native `JSON` columns are not readable yet
+> ([rust-oracle#107](https://github.com/kubo/rust-oracle/issues/107)); read
+> them as `JSON_SERIALIZE(<col> RETURNING VARCHAR2)`.
 
 ## Design
 
@@ -79,7 +94,7 @@ pub trait Driver: Send + Sync {
 
 ```rust
 pub enum Query {
-    Sql(String),           // PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, ClickHouse
+    Sql(String),           // PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, Oracle, ClickHouse
     Cql(String),           // Cassandra/ScyllaDB
     Command(Vec<String>),  // Redis/Valkey: ["GET", "key"]
     Mongo(MongoOp),        // find / insert / aggregate
@@ -231,7 +246,7 @@ The release binary lands at `target/release/rdb`.
 
 | Engine | Language | Example |
 | --- | --- | --- |
-| PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, ClickHouse | SQL | `SELECT * FROM users` |
+| PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, Oracle, ClickHouse | SQL | `SELECT * FROM users` |
 | Cassandra | CQL (no JOIN/subquery/HAVING) | `SELECT * FROM keyspace.table` |
 | Redis, Valkey | command tokens | `GET user:1`, `SET user:1 value` |
 | MongoDB | mongosh chain, or a JSON envelope | `db.users.find({ age: { $gt: 20 } }).limit(5)`<br>`{"collection":"users","op":"find","body":{}}` |
@@ -249,7 +264,7 @@ Type in the **Filter** box above the grid — filters rows client-side without r
 
 ## Project status
 
-Active development. Ships 10 engines (PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite, Cassandra, SQL Server, ClickHouse); planned expansion to ~20 (BigQuery, Oracle, and more).
+Active development. Ships 11 engines (PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite, Cassandra, SQL Server, Oracle, ClickHouse); planned expansion to ~20 (BigQuery and more).
 
 ## Crate overview
 
@@ -265,6 +280,7 @@ Active development. Ships 10 engines (PostgreSQL, MySQL, MariaDB, Redis, Valkey,
 | `rdb-driver-sqlite` | SQLite driver via `rusqlite` |
 | `rdb-driver-cassandra` | Cassandra driver via `scylla` |
 | `rdb-driver-mssql` | SQL Server driver via `tiberius` |
+| `rdb-driver-oracle` | Oracle driver via `oracle` (ODPI-C) |
 | `rdb-driver-clickhouse` | ClickHouse driver via the `clickhouse` HTTP crate |
 
 ## License
