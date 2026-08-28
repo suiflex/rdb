@@ -105,6 +105,7 @@ pub fn editor_hint(engine: Engine) -> &'static str {
         | Engine::MariaDb
         | Engine::Sqlite
         | Engine::Mssql
+        | Engine::Oracle
         | Engine::Clickhouse => "SELECT * FROM table",
         Engine::Cassandra => "SELECT * FROM keyspace.table",
         Engine::Redis | Engine::Valkey => "SET key value",
@@ -121,6 +122,7 @@ pub fn language_label(engine: Engine) -> &'static str {
         | Engine::MariaDb
         | Engine::Sqlite
         | Engine::Mssql
+        | Engine::Oracle
         | Engine::Clickhouse => "SQL",
         Engine::Cassandra => "CQL",
         Engine::Redis | Engine::Valkey => "Redis",
@@ -138,6 +140,7 @@ pub fn comment_prefix(engine: Engine) -> &'static str {
         | Engine::Sqlite
         | Engine::Cassandra
         | Engine::Mssql
+        | Engine::Oracle
         | Engine::Clickhouse => "--",
         Engine::Redis | Engine::Valkey => "#",
         Engine::Mongo => "//",

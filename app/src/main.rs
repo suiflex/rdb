@@ -1185,7 +1185,12 @@ fn filter_operators(engine: rdb_connstore::Engine) -> Vec<SharedString> {
             "IS NULL",
             "IS NOT NULL",
         ],
-        Engine::MySql | Engine::MariaDb | Engine::Sqlite | Engine::Mssql | Engine::Clickhouse => &[
+        Engine::MySql
+        | Engine::MariaDb
+        | Engine::Sqlite
+        | Engine::Mssql
+        | Engine::Oracle
+        | Engine::Clickhouse => &[
             "=",
             "<>",
             ">",
@@ -1781,6 +1786,7 @@ fn default_pk_type(engine: rdb_connstore::Engine) -> &'static str {
         rdb_connstore::Engine::MySql => "INT",
         rdb_connstore::Engine::Sqlite => "INTEGER",
         rdb_connstore::Engine::Mssql => "INT IDENTITY(1,1)",
+        rdb_connstore::Engine::Oracle => "NUMBER GENERATED ALWAYS AS IDENTITY",
         // ClickHouse has no auto-increment/serial equivalent — ORDER BY is
         // its closest concept, not a per-column identity default.
         rdb_connstore::Engine::Clickhouse => "UInt64",
@@ -1794,6 +1800,7 @@ fn default_col_type(engine: rdb_connstore::Engine) -> &'static str {
         rdb_connstore::Engine::MySql => "VARCHAR(255)",
         rdb_connstore::Engine::Sqlite => "TEXT",
         rdb_connstore::Engine::Mssql => "NVARCHAR(255)",
+        rdb_connstore::Engine::Oracle => "VARCHAR2(255)",
         rdb_connstore::Engine::Clickhouse => "String",
         _ => "text",
     }
@@ -2682,6 +2689,23 @@ fn browse_text(
                 table.name.replace('"', "\"\"")
             )
         }
+        rdb_connstore::Engine::Oracle => {
+            // Unlike T-SQL, Oracle's OFFSET/FETCH needs no ORDER BY, so this
+            // is real pagination rather than a first-page-only browse.
+            // Requires Oracle 12c or later.
+            let q = |s: &str| s.replace('"', "\"\"");
+            let where_sql = sql_where(col_filters, |c| format!("\"{}\"", q(c)), "LIKE");
+            let target = match table.schema.as_deref() {
+                Some(sc) if !sc.is_empty() => {
+                    format!("\"{}\".\"{}\"", q(sc), q(&table.name))
+                }
+                _ => format!("\"{}\"", q(&table.name)),
+            };
+            format!(
+                "SELECT * FROM {target}{where_sql} \
+                 OFFSET {offset} ROWS FETCH NEXT {limit} ROWS ONLY"
+            )
+        }
         rdb_connstore::Engine::Clickhouse => {
             let q = |s: &str| s.replace('"', "\"\"");
             let where_sql = sql_where(col_filters, |c| format!("\"{}\"", q(c)), "LIKE");
@@ -3559,6 +3583,14 @@ async fn fetch_indexes(
              COALESCE(NULLIF('{}', ''), DATABASE()) GROUP BY index_name ORDER BY 1",
             esc(&table.name),
             esc(table.database.as_deref().unwrap_or("")),
+        ),
+        rdb_connstore::Engine::Oracle => format!(
+            "SELECT index_name, LISTAGG(column_name, ', ') \
+             WITHIN GROUP (ORDER BY column_position) \
+             FROM all_ind_columns WHERE table_name = '{}' AND table_owner = '{}' \
+             GROUP BY index_name ORDER BY 1",
+            esc(&table.name.to_uppercase()),
+            esc(&table.schema.as_deref().unwrap_or("").to_uppercase()),
         ),
         _ => return Vec::new(),
     };
