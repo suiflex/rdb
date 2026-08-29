@@ -16,9 +16,10 @@ on:
   pull_request_target:
     types: [opened, reopened, synchronize]
 
+# The app token below carries the write, so the job's own token only ever
+# reads.
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   label:
@@ -26,8 +27,18 @@ jobs:
     if: github.repository_owner == 'suiflex'
     runs-on: ubuntu-latest
     steps:
+      # Label as suiflex-bot rather than github-actions, so every label on a
+      # pull request comes from the same identity as the ones pr-triage.yml
+      # applies. Same app credentials that workflow passes to the shared
+      # organization job.
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.SUIFLEX_BOT_APP_ID }}
+          private-key: ${{ secrets.SUIFLEX_BOT_PRIVATE_KEY }}
       - uses: actions/labeler@v5
         with:
+          repo-token: ${{ steps.app-token.outputs.token }}
           configuration-path: .github/labeler.yml
           # Drop a label again once a force-push stops touching that area,
           # so the row keeps describing the diff as it stands.
