@@ -1,0 +1,98 @@
+# Path -> label map for the PR area labeler (.github/workflows/pr-labeler.yml).
+#
+# One entry per component, mirroring the per-crate CI workflows: a reviewer can
+# tell from the label row which parts of the workspace a pull request touches
+# without opening the diff.
+#
+# Adding a crate means adding it here as well as to the Makefile's BE_PKGS and
+# its own workflow — nothing checks that this file stayed in sync.
+
+
+"area: app":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "app/**"
+
+"area: core":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/core/**"
+
+"area: connstore":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/connstore/**"
+
+"area: tunnel":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/tunnel/**"
+
+"area: driver-postgres":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/driver-postgres/**"
+
+"area: driver-mysql":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/driver-mysql/**"
+
+"area: driver-redis":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/driver-redis/**"
+
+"area: driver-mongo":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/driver-mongo/**"
+
+"area: driver-sqlite":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/driver-sqlite/**"
+
+"area: driver-cassandra":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/driver-cassandra/**"
+
+"area: driver-mssql":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/driver-mssql/**"
+
+"area: driver-clickhouse":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/driver-clickhouse/**"
+
+"area: driver-oracle":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/driver-oracle/**"
+
+"area: website":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "website/**"
+
+"area: ci":
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"
+          - "Makefile"
+
+"area: packaging":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "npm/**"
+          - "packaging/**"
+          - "scripts/install.*"
+
+"area: docs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "*.md"
+          - "docs/**"
