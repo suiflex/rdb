@@ -5035,6 +5035,16 @@ fn main() -> Result<(), slint::PlatformError> {
                     ..Default::default()
                 };
             }
+            // The Mongo filter box is a plain window property, so it keeps
+            // whatever the previous tab left in it unless the restored state is
+            // pushed back out: the box read empty while the query it came back
+            // to was still filtered.
+            let filter = SharedString::from(browse.lock().unwrap().mongo_filter.clone());
+            if pane == 1 {
+                w.set_p1_mongo_filter(filter);
+            } else {
+                w.set_mongo_filter(filter);
+            }
 
             // Function source is still a left-group view; table chrome is fully
             // group-local so moving a table keeps its toolbar and footer.
