@@ -1,4 +1,5 @@
-# Path -> label map for the PR area labeler (.github/workflows/pr-labeler.yml).
+# Path -> label map for the PR area labeler (the `label` job in
+# .github/workflows/suiflex.yml).
 #
 # One entry per component, mirroring the per-crate CI workflows: a reviewer can
 # tell from the label row which parts of the workspace a pull request touches
