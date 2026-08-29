@@ -858,6 +858,8 @@ export component FilterField inherits Rectangle {
     in property <string> placeholder;
     in-out property <string> text <=> input.text;
     in property <string> trailing-cap: "";
+    // Show an inline × that empties the field and re-submits it.
+    in property <bool> clearable;
     callback edited(string);
     callback submitted;
     // Autocomplete. The candidate list is supplied by the owner (Rust fills it
@@ -926,6 +928,33 @@ export component FilterField inherits Rectangle {
                     } else if cursor-position.x + self.x > parent.width - 4px - self.text-cursor-width {
                         self.x = parent.width - cursor-position.x - 4px - self.text-cursor-width;
                     }
+                }
+            }
+        }
+        // Clearing an applied filter has no other route: ⌘Z only ever covered
+        // the code editor's own buffer, never a toolbar input, and by the time
+        // the box holds text the query behind it has already re-run.
+        if root.clearable && input.text != "": VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 18px;
+                height: 18px;
+                border-radius: Tokens.radius;
+                background: clear-ta.has-hover ? Tokens.chrome : transparent;
+                animate background { duration: Tokens.fade; }
+                clear-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        input.text = "";
+                        // `submitted` is the existing apply path and already
+                        // drops the suggestion popup, so no `edited` is needed.
+                        root.submitted();
+                    }
+                }
+                AppIcon {
+                    name: "close";
+                    size: 10px;
+                    color: clear-ta.has-hover ? Tokens.text : Tokens.text-faint;
                 }
             }
         }
