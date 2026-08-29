@@ -509,19 +509,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             w.set_filter_completion_items(ModelRc::from(Rc::new(
                 VecModel::<PaletteItem>::default(),
             )));
+            // Same as the left pane: validation is left to the query path.
             let raw = w.get_p1_mongo_filter().to_string();
             let trimmed = raw.trim();
-            if !trimmed.is_empty() {
-                if let Err(e) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                    set_p_status_error(&w, 1, true);
-                    set_p_result_status(
-                        &w,
-                        1,
-                        SharedString::from(format!("invalid filter JSON: {e}")),
-                    );
-                    return;
-                }
-            }
             {
                 let mut st = panes[1].browse.lock().unwrap();
                 st.mongo_filter = trimmed.to_string();
@@ -711,14 +701,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             )));
             let raw = w.get_mongo_filter().to_string();
             let trimmed = raw.trim();
-            // Empty clears the filter; otherwise it must be a JSON document.
-            if !trimmed.is_empty() {
-                if let Err(e) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                    w.set_status_error(true);
-                    w.set_result_status(SharedString::from(format!("invalid filter JSON: {e}")));
-                    return;
-                }
-            }
+            // Deliberately unvalidated here. The filter is spliced into the
+            // browse query and parsed by `query_parse` (json5, so bare keys and
+            // single quotes work like they do in the editor); a bad document
+            // comes back through the normal query error path, which browse mode
+            // actually renders. Rejecting it here instead set a status string
+            // that nothing painted, so Enter looked like a no-op.
             {
                 let mut st = browse.lock().unwrap();
                 st.mongo_filter = trimmed.to_string();
