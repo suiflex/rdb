@@ -278,25 +278,30 @@ fn next_call(s: &str) -> Result<(&str, &str, &str), String> {
 }
 
 /// Extract the balanced `(...)` whose opening paren is at byte index `open`,
-/// respecting JSON string literals so parens inside strings don't unbalance the
+/// respecting string literals so parens inside strings don't unbalance the
 /// scan. Returns the inner text and the byte index just past the closing `)`.
 /// Parens/quotes are ASCII, so all slice boundaries fall on char boundaries.
+///
+/// Both quote styles count: bodies are parsed as json5, where `'a)b'` is as
+/// ordinary as `"a)b"`. Tracking the opening quote rather than a flag is what
+/// keeps `"it's"` from reading as the start of a single-quoted string.
 fn extract_parens(s: &str, open: usize) -> Result<(&str, usize), String> {
     let b = s.as_bytes();
-    let (mut depth, mut in_str, mut esc, mut i) = (0i32, false, false, open);
+    let (mut depth, mut esc, mut i) = (0i32, false, open);
+    let mut quote: Option<u8> = None;
     while i < b.len() {
         let c = b[i];
-        if in_str {
+        if let Some(q) = quote {
             if esc {
                 esc = false;
             } else if c == b'\\' {
                 esc = true;
-            } else if c == b'"' {
-                in_str = false;
+            } else if c == q {
+                quote = None;
             }
         } else {
             match c {
-                b'"' => in_str = true,
+                b'"' | b'\'' => quote = Some(c),
                 b'(' => depth += 1,
                 b')' => {
                     depth -= 1;
@@ -573,6 +578,24 @@ mod tests {
                 _ => panic!("expected Find"),
             },
             _ => panic!("expected Mongo"),
+        }
+    }
+
+    #[test]
+    fn mongo_line_paren_inside_single_quoted_string_stays_balanced() {
+        // json5 bodies use single quotes as readily as double, so the paren
+        // scan has to respect both.
+        for text in [
+            r#"db.c.find({ note: 'a)b' })"#,
+            r#"db.c.find({ note: "it's )" })"#,
+        ] {
+            match parse_query(Engine::Mongo, text).expect(text) {
+                Query::Mongo(op) => match op.kind {
+                    MongoKind::Find(f) => assert!(f.get("note").is_some(), "{text}"),
+                    _ => panic!("expected Find"),
+                },
+                _ => panic!("expected Mongo"),
+            }
         }
     }
 
