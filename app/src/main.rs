@@ -2657,17 +2657,21 @@ fn browse_text(
             }
         }
         rdb_connstore::Engine::Mongo => {
+            // mongosh shape, not the JSON envelope: it is what a Mongo user
+            // already knows how to edit, and it can carry a `.sort(...)` the
+            // envelope has no field for. `parse_mongo_line` reads it back.
             let db = table
                 .database
                 .as_deref()
-                .map(|d| format!("\"database\":\"{d}\","))
+                .filter(|d| !d.is_empty())
+                .map(|d| format!("use('{d}')\n"))
                 .unwrap_or_default();
             let body = match filter.trim() {
                 "" => "{}",
                 f => f,
             };
             format!(
-                "{{\"collection\":\"{}\",{db}\"op\":\"find\",\"body\":{body},\"limit\":{limit},\"skip\":{offset}}}",
+                "{db}db.{}.find({body}).skip({offset}).limit({limit})",
                 table.name
             )
         }
@@ -5702,13 +5706,45 @@ mod tests {
         };
         assert_eq!(
             browse_text(rdb_connstore::Engine::Mongo, &m, 1, 50, "", &[]),
-            "{\"collection\":\"orders\",\"database\":\"shop\",\"op\":\"find\",\"body\":{},\"limit\":50,\"skip\":50}"
+            "use('shop')\ndb.orders.find({}).skip(50).limit(50)"
         );
         // A filter document lands in the find body.
         assert_eq!(
-            browse_text(rdb_connstore::Engine::Mongo, &m, 0, 20, r#"{"status":"A"}"#, &[]),
-            "{\"collection\":\"orders\",\"database\":\"shop\",\"op\":\"find\",\"body\":{\"status\":\"A\"},\"limit\":20,\"skip\":0}"
+            browse_text(
+                rdb_connstore::Engine::Mongo,
+                &m,
+                0,
+                20,
+                r#"{"status":"A"}"#,
+                &[]
+            ),
+            "use('shop')\ndb.orders.find({\"status\":\"A\"}).skip(0).limit(20)"
         );
+    }
+
+    // What the browse toolbar emits has to survive the parser it is handed to.
+    #[test]
+    fn mongo_browse_text_round_trips_through_parse_query() {
+        let m = rdb_core::write::TableRef {
+            database: Some("shop".into()),
+            schema: None,
+            name: "orders".into(),
+        };
+        // A bare key is what the filter box lets through now, so parse it too.
+        let text = browse_text(rdb_connstore::Engine::Mongo, &m, 2, 20, "{status:'A'}", &[]);
+        let q = crate::query_parse::parse_query(rdb_connstore::Engine::Mongo, &text)
+            .expect("browse text must parse");
+        let rdb_core::query::Query::Mongo(op) = q else {
+            panic!("expected a Mongo op");
+        };
+        assert_eq!(op.collection, "orders");
+        assert_eq!(op.database.as_deref(), Some("shop"));
+        assert_eq!(op.limit, Some(20));
+        assert_eq!(op.skip, Some(40));
+        let rdb_core::query::MongoKind::Find(f) = op.kind else {
+            panic!("expected a find");
+        };
+        assert_eq!(f, serde_json::json!({"status": "A"}));
     }
 
     #[test]
