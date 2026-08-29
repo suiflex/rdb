@@ -2,7 +2,9 @@
 
 ## Project
 
-Native cross-platform database manager (PostgreSQL, MySQL, Redis, MongoDB, SQLite, Cassandra) built with Rust + Slint UI. Monorepo workspace.
+Native cross-platform database manager (PostgreSQL, MySQL, MariaDB, Redis,
+Valkey, MongoDB, SQLite, Cassandra, SQL Server, Oracle, ClickHouse) built with
+Rust + Slint UI. Monorepo workspace.
 
 Alongside the Rust workspace (`app/`, `crates/*`) the repo also holds: `website/`
 (Astro marketing site, deployed by Cloudflare Pages' Git integration on every
@@ -262,6 +264,15 @@ Everything here is env-var driven; there are no CLI flags.
 both no-op under it, deliberately, so the screenshot harness never touches the
 developer's tabs. A persistence test written in mock mode passes without testing
 anything — use `RDB_STORE_DIR` with a real (SQLite is easiest) connection.
+
+**Mock mode ignores `saved_queries.json` entirely.** `main.rs` takes
+`default_saved()` whenever `mock_mode()` is true, so the sidebar's Queries tab
+always shows the same four seeded queries. Seeding that file (even via a
+redirected `HOME`) to drive the harness towards a particular editor buffer does
+nothing; `RDB_SCREEN=sql` likewise always opens `emiten-per-sektor`. Reaching a
+buffer the seed doesn't contain — an indented one, say, which is what the gutter
+needs before it shows any fold arrows — means adding an `RDB_SCREEN` branch that
+calls `load_editor_text`, the way `sql-empty` and `sql-multi` already do.
 
 **Driving the UI from outside** — Slint 1.17 embeds an MCP server in the app:
 
