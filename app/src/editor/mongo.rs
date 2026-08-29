@@ -1,4 +1,4 @@
-//! mongosh method words for the editor lexer. `lex_line` uppercases every
+//! mongosh method words and chain modifiers for the editor lexer. `lex_line` uppercases every
 //! identifier before matching (shared across all four dialects), so these
 //! stay uppercase even though real mongosh calls are lowercase/camelCase.
 
