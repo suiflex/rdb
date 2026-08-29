@@ -24,7 +24,7 @@ const guides = [
 
 const querySyntax = [
   {
-    engines: "PostgreSQL, MySQL, SQLite, SQL Server, ClickHouse",
+    engines: "PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, Oracle, ClickHouse",
     language: "SQL",
     examples: ["SELECT * FROM users WHERE active = true"],
   },
@@ -35,16 +35,46 @@ const querySyntax = [
     note: "No JOIN, subquery, or HAVING: CQL is a narrower dialect than SQL.",
   },
   {
-    engines: "Redis",
+    engines: "Redis, Valkey",
     language: "command tokens",
     examples: ["GET user:1", "SET user:1 value", "HGETALL user:1"],
   },
   {
     engines: "MongoDB",
-    language: "mongosh chain, or a JSON envelope",
+    language: "mongosh chain",
     examples: [
       "db.users.find({ age: { $gt: 20 } }).limit(5)",
-      '{"collection":"users","op":"find","body":{}}',
+      "use('shop')\ndb.orders.find({ status: 'open' }).sort({ _id: -1 })",
+    ],
+    note: "Opening a collection writes this same form into the editor, so what you browse is a query you can edit.",
+  },
+];
+
+// What the Mongo query tab actually accepts. Kept next to the syntax table
+// because the README points here for it.
+const mongoSupport = [
+  {
+    title: "Methods",
+    items: [
+      "find({ ... })",
+      "aggregate([ ... ])",
+      "insertOne({ ... })",
+    ],
+  },
+  {
+    title: "Chain modifiers",
+    items: [
+      ".limit(n)",
+      ".skip(n)",
+      ".sort({ field: 1 | -1 })",
+    ],
+  },
+  {
+    title: "Addressing",
+    items: [
+      "use('database')",
+      "db.collection",
+      "db.getCollection('fs.files')",
     ],
   },
 ];
@@ -108,6 +138,43 @@ const querySyntax = [
           ))
         }
       </div>
+    </div>
+  </section>
+
+  <section class="border-t border-line bg-panel" aria-label="MongoDB support">
+    <div class="mx-auto max-w-4xl px-4 py-14 sm:px-6">
+      <h2 class="font-display text-2xl font-semibold tracking-tight">What the MongoDB tab accepts</h2>
+      <p class="mt-3 max-w-xl text-sm leading-relaxed text-fg-2">
+        Query bodies are read as JSON5, so unquoted keys and single-quoted
+        strings work exactly as they do in mongosh. Modifiers may appear in any
+        order and apply to <code class="font-mono text-[13px]">find</code>;
+        an aggregation carries its own paging as pipeline stages.
+      </p>
+      <div class="mt-6 grid gap-4 sm:grid-cols-3">
+        {
+          mongoSupport.map((group) => (
+            <div class="rounded-xl border border-line bg-bg px-4 py-4">
+              <span class="block text-sm font-medium">{group.title}</span>
+              <ul class="mt-3 space-y-2">
+                {group.items.map((item) => (
+                  <li class="rounded-lg border border-line bg-code px-3 py-2 font-mono text-[13px] text-fg-2">
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        }
+      </div>
+      <p class="mt-5 max-w-xl text-xs leading-relaxed text-fg-3">
+        Not yet parsed: <code class="font-mono">ObjectId(...)</code> and the
+        write and read helpers beyond the three above
+        (<code class="font-mono">findOne</code>,
+        <code class="font-mono">updateMany</code>,
+        <code class="font-mono">deleteOne</code> and friends). Autocomplete
+        offers some of these ahead of the parser, so they will complete and then
+        fail to run.
+      </p>
     </div>
   </section>
 
