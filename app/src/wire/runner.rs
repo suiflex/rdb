@@ -420,41 +420,30 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                                 tab.loading = false;
                                 tab.view = Some(sr.clone());
                                 let is_browse = tab.kind == "table";
-                                if is_browse {
-                                    tab.results.clear();
-                                    tab.active_result = 0;
-                                } else {
-                                    // ⌘\ opens a new result tab; snapshot the
-                                    // outgoing result's live grid (sort/filters/
-                                    // search) so returning to it keeps its state.
-                                    if new_tab && is_active {
-                                        if let Some(r) = tab.results.get_mut(tab.active_result) {
-                                            let mut hidden: Vec<usize> = hidden_cols
-                                                .lock()
-                                                .unwrap()
-                                                .iter()
-                                                .copied()
-                                                .collect();
-                                            hidden.sort_unstable();
-                                            r.grid = GridState {
-                                                col_filters: col_filters.lock().unwrap().clone(),
-                                                sort: *sort_state.lock().unwrap(),
-                                                hidden,
-                                                col_order: col_order.lock().unwrap().clone(),
-                                                col_widths: get_p_col_widths(&w, pane),
-                                                grid_filter: w.get_grid_filter().to_string(),
-                                                filter_col: w.get_filter_col().to_string(),
-                                                filter_op: w.get_filter_op().to_string(),
-                                            };
-                                        }
+                                // ⌘\ opens a new result tab; snapshot the
+                                // outgoing result's live grid (sort/filters/
+                                // search) so returning to it keeps its state.
+                                // A browse tab takes the same path: it used to
+                                // drop every result, which made ⌘\ and the Run
+                                // New button silently do nothing there.
+                                if new_tab && is_active {
+                                    if let Some(r) = tab.results.get_mut(tab.active_result) {
+                                        let mut hidden: Vec<usize> =
+                                            hidden_cols.lock().unwrap().iter().copied().collect();
+                                        hidden.sort_unstable();
+                                        r.grid = GridState {
+                                            col_filters: col_filters.lock().unwrap().clone(),
+                                            sort: *sort_state.lock().unwrap(),
+                                            hidden,
+                                            col_order: col_order.lock().unwrap().clone(),
+                                            col_widths: get_p_col_widths(&w, pane),
+                                            grid_filter: w.get_grid_filter().to_string(),
+                                            filter_col: w.get_filter_col().to_string(),
+                                            filter_op: w.get_filter_op().to_string(),
+                                        };
                                     }
-                                    store_result(
-                                        &mut tab.results,
-                                        &mut tab.active_result,
-                                        sr,
-                                        new_tab,
-                                    );
                                 }
+                                store_result(&mut tab.results, &mut tab.active_result, sr, new_tab);
                                 let tab_results = tab.results.clone();
                                 let tab_active = tab.active_result;
                                 if !is_active {
@@ -462,11 +451,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                                 }
                                 *results.lock().unwrap() = tab_results;
                                 *active_result.lock().unwrap() = tab_active;
-                                if is_browse {
-                                    set_result_tabs(&w, pane, &[], 0);
-                                } else {
-                                    set_result_tabs(&w, pane, &results.lock().unwrap(), tab_active);
-                                }
+                                set_result_tabs(&w, pane, &results.lock().unwrap(), tab_active);
                                 present_view(
                                     &w,
                                     pane,
