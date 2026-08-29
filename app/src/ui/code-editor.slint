@@ -10,8 +10,8 @@ import { CompletionList } from "components.slint";
 export component CodeEditor inherits Rectangle {
     in property <[[Span]]> lines;
     // Per-line fold metadata, parallel to `lines`. `fold-state`: 0 plain,
-    // 1 open statement head (▾), 2 closed head (▸). `line-hidden`: body line
-    // of a closed statement, collapsed to zero height.
+    // 1 open statement head (triangle down), 2 closed head (triangle right).
+    // `line-hidden`: body line of a closed statement, collapsed to zero height.
     in property <[int]> fold-state;
     in property <[bool]> line-hidden;
     callback toggle-fold(int);
@@ -174,17 +174,17 @@ export component CodeEditor inherits Rectangle {
                                         clicked => {
                                             root.toggle-fold(li);
                                         }
-                                        // TouchArea is not a layout, so the icon
-                                        // would pin to (0,0) of the row and read
-                                        // as a stray tick instead of a chevron.
-                                        VerticalLayout {
-                                            alignment: center;
-                                            AppIcon {
-                                                name: "caret";
-                                                size: 12px;
-                                                color: fold-ta.has-hover ? Tokens.accent : Tokens.text-dim;
-                                                transform-rotation: root.fold-state[li] == 2 ? -90deg : 0deg;
-                                            }
+                                        // "fold", not the shared "caret": that
+                                        // one draws a 12x6 stroke inside a 24x24
+                                        // box, so at this size only ~6x3px of
+                                        // hairline chevron survives and reads as
+                                        // a stray tick. This glyph is a solid
+                                        // triangle in a box its own size.
+                                        AppIcon {
+                                            name: "fold";
+                                            size: 10px;
+                                            color: fold-ta.has-hover ? Tokens.accent : Tokens.text-dim;
+                                            transform-rotation: root.fold-state[li] == 2 ? -90deg : 0deg;
                                         }
                                     }
                                 }
