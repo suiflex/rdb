@@ -222,6 +222,7 @@ export component QueryPane inherits Rectangle {
                         width: 260px;
                         height: 28px;
                         placeholder: "Filter — { \"field\": value }";
+                        clearable: true;
                         text <=> root.mongo-filter;
                         submitted => { root.apply-mongo-filter(); }
                         completion-items: root.filter-completion-items;
