@@ -249,7 +249,7 @@ The release binary lands at `target/release/rdb`.
 | PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, Oracle, ClickHouse | SQL | `SELECT * FROM users` |
 | Cassandra | CQL (no JOIN/subquery/HAVING) | `SELECT * FROM keyspace.table` |
 | Redis, Valkey | command tokens | `GET user:1`, `SET user:1 value` |
-| MongoDB | mongosh chain, or a JSON envelope | `db.users.find({ age: { $gt: 20 } }).limit(5)`<br>`{"collection":"users","op":"find","body":{}}` |
+| MongoDB | mongosh chain | `db.users.find({ age: { $gt: 20 } }).limit(5)`<br>`use('shop')`<br>`db.getCollection('fs.files').find({}).sort({ _id: -1 })` |
 
 More detail (including MongoDB's supported methods/modifiers) is on the
 [docs page](https://rdb.suiflex.dev/docs).
