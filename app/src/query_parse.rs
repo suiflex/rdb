@@ -109,7 +109,7 @@ pub fn editor_hint(engine: Engine) -> &'static str {
         | Engine::Clickhouse => "SELECT * FROM table",
         Engine::Cassandra => "SELECT * FROM keyspace.table",
         Engine::Redis | Engine::Valkey => "SET key value",
-        Engine::Mongo => r#"db.coll.find({ })  ·  or JSON envelope"#,
+        Engine::Mongo => r#"db.coll.find({ }).sort({ _id: -1 })  ·  use('db') to switch"#,
     }
 }
 
@@ -209,15 +209,25 @@ fn strip_use(s: &str) -> (Option<String>, &str) {
 /// preceded the query.
 fn parse_mongo_line(s: &str, database: Option<String>) -> Result<Query, String> {
     let rest = &s[3..]; // drop "db."
-    let dot = rest
-        .find('.')
-        .ok_or_else(|| "expected db.<collection>.<op>(...)".to_string())?;
-    let collection = rest[..dot].trim().to_string();
+                        // `db.getCollection('fs.files')` is mongosh's escape hatch for names that
+                        // are not plain identifiers. Splitting on the first dot cannot reach those:
+                        // GridFS and the `system.*` collections all carry one.
+    let (collection, after_collection) = if rest.trim_start().starts_with("getCollection") {
+        // Keep the leading '.' so `next_call` sees `.getCollection(...)`.
+        let (_, arg, tail) = next_call(&s[2..])?;
+        let name = arg.trim().trim_matches(|c| c == '\'' || c == '"');
+        (name.to_string(), tail)
+    } else {
+        let dot = rest
+            .find('.')
+            .ok_or_else(|| "expected db.<collection>.<op>(...)".to_string())?;
+        (rest[..dot].trim().to_string(), &rest[dot..])
+    };
     if collection.is_empty() {
         return Err("missing collection in db.<collection>.<op>(...)".into());
     }
 
-    let (method, arg, mut cursor) = next_call(&rest[dot..])?;
+    let (method, arg, mut cursor) = next_call(after_collection)?;
     let kind = match method {
         "find" => MongoKind::Find(parse_json_arg(arg, "find")?),
         "insertOne" | "insert" => MongoKind::Insert(parse_json_arg(arg, method)?),
