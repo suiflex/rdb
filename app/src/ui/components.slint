@@ -934,7 +934,9 @@ export component FilterField inherits Rectangle {
             KeyCap { text: root.trailing-cap; }
         }
     }
-    if input.text == "": Text {
+    // Also gated on focus: the caret sits at the same x as the first glyph, so
+    // a focused-but-empty field draws the caret on top of the placeholder.
+    if input.text == "" && !input.has-focus: Text {
         x: Tokens.sp2 + 6px + 14px;
         text: root.placeholder;
         color: Tokens.text-faint;
