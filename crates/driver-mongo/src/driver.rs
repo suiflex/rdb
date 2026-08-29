@@ -401,6 +401,8 @@ impl Driver for MongoDriver {
         Ok(vec!["_id".to_string()])
     }
 
+    /// Whole-collection count: the browse footer's total and its page bounds
+    /// therefore describe the collection, not the filter the grid is showing.
     async fn count(&self, table: &TableRef) -> Result<u64> {
         let db = table.database.as_deref().unwrap_or(&self.default_db);
         self.client
