@@ -2670,10 +2670,26 @@ fn browse_text(
                 "" => "{}",
                 f => f,
             };
-            format!(
-                "{db}db.{}.find({body}).skip({offset}).limit({limit})",
-                table.name
-            )
+            // A plain identifier reads best as `db.orders`; anything else (a
+            // dot, a dash, a space — GridFS's `fs.files`, the `system.*`
+            // collections) has to go through getCollection or the parser would
+            // split the name at its first dot.
+            let ident = !table.name.is_empty()
+                && !table.name.starts_with(|c: char| c.is_ascii_digit())
+                && table
+                    .name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_');
+            let coll = if ident {
+                format!("db.{}", table.name)
+            } else if table.name.contains('\'') {
+                // ponytail: the parser unquotes by trimming, not unescaping, so
+                // pick the quote the name does not use rather than escaping it.
+                format!("db.getCollection(\"{}\")", table.name)
+            } else {
+                format!("db.getCollection('{}')", table.name)
+            };
+            format!("{db}{coll}.find({body}).skip({offset}).limit({limit})")
         }
         rdb_connstore::Engine::Redis | rdb_connstore::Engine::Valkey => {
             format!("BROWSE {} {offset} {limit}", table.name)
@@ -5745,6 +5761,29 @@ mod tests {
             panic!("expected a find");
         };
         assert_eq!(f, serde_json::json!({"status": "A"}));
+    }
+
+    // GridFS and the system collections carry a dot, which the short
+    // `db.<name>.` form cannot express: the parser would split the name there.
+    #[test]
+    fn mongo_browse_text_quotes_a_dotted_collection() {
+        let m = rdb_core::write::TableRef {
+            database: Some("shop".into()),
+            schema: None,
+            name: "fs.files".into(),
+        };
+        let text = browse_text(rdb_connstore::Engine::Mongo, &m, 0, 20, "", &[]);
+        assert_eq!(
+            text,
+            "use('shop')\ndb.getCollection('fs.files').find({}).skip(0).limit(20)"
+        );
+        let q = crate::query_parse::parse_query(rdb_connstore::Engine::Mongo, &text)
+            .expect("dotted collection must parse");
+        let rdb_core::query::Query::Mongo(op) = q else {
+            panic!("expected a Mongo op");
+        };
+        assert_eq!(op.collection, "fs.files");
+        assert_eq!(op.limit, Some(20));
     }
 
     #[test]
