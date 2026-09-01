@@ -616,6 +616,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                     ) {
                         ed.set_selecting(shift);
                     }
+                    // Taken once per keystroke: anything that is not another
+                    // auto-close disarms the pair unwrap below.
+                    let armed_pair = ed.take_pair();
                     let mut it = text.chars();
                     let handled = match (it.next(), it.next()) {
                         (Some(c), None) => match c {
@@ -627,26 +630,13 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                                 true
                             }
                             '\u{8}' => {
-                                // Delete both sides of an empty pair in one
-                                // keystroke, mirroring the auto-close below.
-                                let before = ed
-                                    .col
-                                    .checked_sub(1)
-                                    .and_then(|c| ed.lines[ed.line].chars().nth(c));
-                                let after = ed.lines[ed.line].chars().nth(ed.col);
-                                let is_empty_pair = ed.selection().is_none()
-                                    && matches!(
-                                        (before, after),
-                                        (Some('('), Some(')'))
-                                            | (Some('['), Some(']'))
-                                            | (Some('{'), Some('}'))
-                                            | (Some('"'), Some('"'))
-                                            | (Some('\''), Some('\''))
-                                    );
-                                ed.backspace();
-                                if is_empty_pair {
-                                    ed.delete();
-                                }
+                                // Unwrap an empty pair in one keystroke, but
+                                // only the one auto-closed below and only
+                                // while the cursor still sits inside it.
+                                // Matching on the surrounding characters alone
+                                // ate both quotes of an `''` the user typed
+                                // themselves.
+                                ed.backspace_pair(armed_pair);
                                 true
                             }
                             '\u{7f}' => {
@@ -707,8 +697,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                                     '{' => '}',
                                     other => other, // quotes close themselves
                                 };
-                                ed.insert(&format!("{c}{closer}"));
-                                ed.move_cursor(0, -1);
+                                ed.insert_pair(c, closer);
                                 true
                             }
                             c if !c.is_control() => {
