@@ -87,10 +87,20 @@ pub(crate) fn ui_spans(spans: Vec<editor::Span>, error_line: bool) -> Vec<Span> 
             let cols = sp.text.chars().count() as i32;
             let start = col;
             col += cols;
+            // A tab has no glyph in IBM Plex Mono and draws as a tofu box. It
+            // already sits in exactly one grid cell, so swapping it for a
+            // space on the way to the renderer keeps every column where it is
+            // and only changes what is painted — the buffer, and the text
+            // handed to the driver, keep the tab the user pasted.
+            let text = if sp.text.contains('\t') {
+                sp.text.replace('\t', " ")
+            } else {
+                sp.text
+            };
             Span {
                 col: start,
                 cols,
-                text: sp.text.into(),
+                text: text.into(),
                 kind: sp.kind,
                 sel: sp.sel,
             }
@@ -815,4 +825,19 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
     }
 
     (sync_editor, load_editor_text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tabs_are_painted_as_spaces_without_moving_columns() {
+        let spans = editor::lex_line(rdb_connstore::QueryLanguage::Sql, "select\ta");
+        let ui = ui_spans(spans, false);
+        let joined: String = ui.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(joined, "select a");
+        // Each span still starts where it did: a tab is one cell, not eight.
+        assert_eq!(ui.last().map(|s| s.col + s.cols), Some(8));
+    }
 }
