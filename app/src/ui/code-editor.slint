@@ -36,7 +36,10 @@ export component CodeEditor inherits Rectangle {
     // Mouse: press places the caret, drag extends the selection, double-click
     // selects the word. All carry (line, col) hit-tested from the pointer.
     callback press-pos(int, int, bool);
-    callback drag-pos(int, int);
+    // (pressed line, rows travelled on screen, column) — the row delta stays
+    // separate because folded lines draw at zero height, so the host has to
+    // skip them to turn it back into a buffer line.
+    callback drag-pos(int, int, int);
     callback select-word(int, int);
     // SQL autocomplete popup, anchored under the caret
     in property <[PaletteItem]> completion-items;
@@ -127,8 +130,10 @@ export component CodeEditor inherits Rectangle {
                     // delta so a drag can cross lines while still grabbed here.
                     property <int> hit-col:
                         max(0, round((line-ta.mouse-x - root.gutter-w - Tokens.sp3) / root.charw));
-                    property <int> hit-line:
-                        clamp(li + floor(line-ta.mouse-y / root.line-h), 0, root.lines.length - 1);
+                    // Rows the pointer has travelled from this one, signed. A
+                    // press is always inside its own row, so only a drag ever
+                    // sees anything but 0.
+                    property <int> hit-rows: floor(line-ta.mouse-y / root.line-h);
 
                     line-ta := TouchArea {
                         // Sub-pixel jitter between the two taps of a double-click
@@ -143,18 +148,18 @@ export component CodeEditor inherits Rectangle {
                                 focus-scope.focus();
                                 self.press-x = self.mouse-x;
                                 self.press-y = self.mouse-y;
-                                root.press-pos(parent.hit-line, parent.hit-col, e.modifiers.shift);
+                                root.press-pos(li, parent.hit-col, e.modifiers.shift);
                             }
                         }
                         moved => {
                             if (self.pressed
                                 && (abs(self.mouse-x - self.press-x) > 3px
                                     || abs(self.mouse-y - self.press-y) > 3px)) {
-                                root.drag-pos(parent.hit-line, parent.hit-col);
+                                root.drag-pos(li, parent.hit-rows, parent.hit-col);
                             }
                         }
                         double-clicked => {
-                            root.select-word(parent.hit-line, parent.hit-col);
+                            root.select-word(li, parent.hit-col);
                         }
                     }
 
