@@ -194,6 +194,10 @@ pub struct EditorState {
     redo_stack: Vec<Snap>,
     /// Last undo push came from plain typing — coalesce the next one.
     typing: bool,
+    /// Cursor position parked between a pair this editor auto-closed itself.
+    /// Backspace only unwraps both halves at that exact spot, so a quote the
+    /// user typed next to another one loses a single character like any other.
+    auto_pair: Option<(usize, usize)>,
 }
 
 const UNDO_CAP: usize = 200;
@@ -427,6 +431,32 @@ impl EditorState {
         self.push_undo(one_char && self.sel.is_none());
         self.remove_selection();
         self.insert_raw(&s);
+    }
+
+    /// Insert `open` with its closer and park the cursor between them, arming
+    /// the one-keystroke unwrap in `backspace_pair`.
+    pub fn insert_pair(&mut self, open: char, closer: char) {
+        self.insert(&format!("{open}{closer}"));
+        self.move_cursor(0, -1);
+        self.auto_pair = Some((self.line, self.col));
+    }
+
+    /// Read and clear the armed auto-close position. The caller takes it once
+    /// per keystroke, so any key other than `insert_pair` disarms the unwrap.
+    pub fn take_pair(&mut self) -> Option<(usize, usize)> {
+        self.auto_pair.take()
+    }
+
+    /// Backspace that removes both halves of a pair, but only the one this
+    /// editor auto-closed and that the cursor has not left since. `armed` is
+    /// the value `take_pair` returned at the start of this keystroke.
+    pub fn backspace_pair(&mut self, armed: Option<(usize, usize)>) -> bool {
+        let unwrap = armed == Some((self.line, self.col)) && self.sel.is_none();
+        self.backspace();
+        if unwrap {
+            self.delete();
+        }
+        unwrap
     }
 
     fn insert_raw(&mut self, s: &str) {
@@ -1154,6 +1184,39 @@ mod tests {
     fn regions(text: &str) -> Vec<(usize, usize)> {
         let lines: Vec<String> = text.lines().map(str::to_string).collect();
         fold_regions(&lines)
+    }
+
+    #[test]
+    fn backspace_unwraps_only_the_pair_the_editor_closed() {
+        // Auto-closed and never left: one keystroke takes both halves.
+        let mut ed = EditorState::from_text("select ");
+        ed.insert_pair('(', ')');
+        assert_eq!(ed.text(), "select ()");
+        let armed = ed.take_pair();
+        assert!(ed.backspace_pair(armed));
+        assert_eq!(ed.text(), "select ");
+
+        // A quote the user typed next to an existing one is not a pair the
+        // editor owns, so backspace takes a single character.
+        let mut ed = EditorState::from_text("select ''");
+        assert!(!ed.backspace_pair(None));
+        assert_eq!(ed.text(), "select '");
+
+        // Armed, but the cursor moved away: still a plain backspace.
+        let mut ed = EditorState::from_text("select ");
+        ed.insert_pair('"', '"');
+        let armed = ed.take_pair();
+        ed.move_cursor(0, 1);
+        assert!(!ed.backspace_pair(armed));
+        assert_eq!(ed.text(), "select \"");
+
+        // Typing inside the pair disarms it: the closer survives.
+        let mut ed = EditorState::from_text("");
+        ed.insert_pair('(', ')');
+        let armed = ed.take_pair();
+        ed.insert("a");
+        assert!(!ed.backspace_pair(armed));
+        assert_eq!(ed.text(), "()");
     }
 
     #[test]
