@@ -51,8 +51,14 @@ export component CodeEditor inherits Rectangle {
 
     property <length> line-h: 21px;
     property <length> gutter-w: 40px;
-    // IBM Plex Mono advance width, measured from a hidden probe.
-    property <length> charw: probe.preferred-width / 10;
+    // IBM Plex Mono advance width: 600/1000 em, read straight from the hmtx
+    // table of the font vendored in assets/fonts. Taken from the font metric
+    // rather than measured off a hidden Text probe because `preferred-width`
+    // is not a reliable multiple of the advance at every size -- at
+    // font-base 14px it reports 85.05px for ten characters that render in
+    // 84.0px, and that 0.1px per character piles up until the caret sits
+    // whole characters away from the glyph it belongs to on a long line.
+    property <length> charw: Tokens.font-md * 0.6;
 
     background: Tokens.canvas;
 
@@ -84,13 +90,6 @@ export component CodeEditor inherits Rectangle {
             edit-scroll.visible-width - Tokens.sp2
                 - (root.gutter-w + Tokens.sp3 + root.cursor-col * root.charw)
                 - 2 * root.charw);
-    }
-
-    probe := Text {
-        text: "0000000000";
-        font-family: Tokens.mono;
-        font-size: Tokens.font-md;
-        visible: false;
     }
 
     focus-scope := FocusScope {
