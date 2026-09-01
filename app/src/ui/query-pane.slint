@@ -75,7 +75,7 @@ export component QueryPane inherits Rectangle {
     callback toggle-fold(int);
     callback editor-key(string, bool, bool, bool) -> bool;
     callback editor-press(int, int, bool);
-    callback editor-drag(int, int);
+    callback editor-drag(int, int, int);
     callback editor-select-word(int, int);
 
     // ----- autocomplete -----
@@ -605,7 +605,7 @@ export component QueryPane inherits Rectangle {
                     completion-choose(i) => { root.completion-choose(i); }
                     edit-key(t, cmd, alt, shift) => { root.editor-key(t, cmd, alt, shift) }
                     press-pos(l, c, sh) => { root.editor-press(l, c, sh); }
-                    drag-pos(l, c) => { root.editor-drag(l, c); }
+                    drag-pos(l, r, c) => { root.editor-drag(l, r, c); }
                     select-word(l, c) => { root.editor-select-word(l, c); }
                 }
                 Rectangle { height: 1px; background: Tokens.border; }

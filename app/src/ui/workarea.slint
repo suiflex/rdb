@@ -110,7 +110,7 @@ export component WorkArea inherits Rectangle {
     callback close-result-tab(int);
     callback editor-key(string, bool, bool, bool) -> bool;
     callback editor-press(int, int, bool);
-    callback editor-drag(int, int);
+    callback editor-drag(int, int, int);
     callback editor-select-word(int, int);
     in property <bool> find-open;
     in-out property <string> find-text;
@@ -255,7 +255,7 @@ export component WorkArea inherits Rectangle {
     callback p1-toggle-fold(int);
     callback p1-editor-key(string, bool, bool, bool) -> bool;
     callback p1-editor-press(int, int, bool);
-    callback p1-editor-drag(int, int);
+    callback p1-editor-drag(int, int, int);
     callback p1-editor-select-word(int, int);
     callback p1-completion-choose(int);
     callback p1-select-result-tab(int);
@@ -470,7 +470,7 @@ export component WorkArea inherits Rectangle {
             toggle-fold(l) => { root.toggle-fold(l); }
             editor-key(t, cmd, alt, shift) => { root.editor-key(t, cmd, alt, shift) }
             editor-press(l, c, sh) => { root.editor-press(l, c, sh); }
-            editor-drag(l, c) => { root.editor-drag(l, c); }
+            editor-drag(l, r, c) => { root.editor-drag(l, r, c); }
             editor-select-word(l, c) => { root.editor-select-word(l, c); }
             completion-items: root.completion-items;
             completion-visible: root.completion-visible;
@@ -624,7 +624,7 @@ export component WorkArea inherits Rectangle {
                 toggle-fold(l) => { root.p1-toggle-fold(l); }
                 editor-key(t, cmd, alt, shift) => { root.p1-editor-key(t, cmd, alt, shift) }
                 editor-press(l, c, sh) => { root.p1-editor-press(l, c, sh); }
-                editor-drag(l, c) => { root.p1-editor-drag(l, c); }
+                editor-drag(l, r, c) => { root.p1-editor-drag(l, r, c); }
                 editor-select-word(l, c) => { root.p1-editor-select-word(l, c); }
                 completion-items: root.p1-completion-items;
                 completion-visible: root.p1-completion-visible;

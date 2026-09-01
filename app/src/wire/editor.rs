@@ -108,6 +108,40 @@ pub(crate) fn ui_spans(spans: Vec<editor::Span>, error_line: bool) -> Vec<Span> 
         .collect()
 }
 
+/// Body lines collapsed under a closed fold head — the rows the editor draws
+/// at zero height.
+fn hidden_lines(lines: &[String], folded: &HashSet<usize>) -> Vec<bool> {
+    let mut hidden = vec![false; lines.len()];
+    for (head, end) in editor::fold_regions(lines) {
+        if folded.contains(&head) {
+            for h in hidden.iter_mut().take(end + 1).skip(head + 1) {
+                *h = true;
+            }
+        }
+    }
+    hidden
+}
+
+/// Buffer line `rows` *visible* rows away from `from`. A drag is hit-tested in
+/// screen rows, but a selection is addressed in buffer lines, and a line
+/// collapsed under a closed fold occupies no row — counting buffer lines
+/// instead landed the drag inside the folded block.
+fn line_after_rows(hidden: &[bool], from: usize, rows: i32) -> usize {
+    let step: isize = if rows < 0 { -1 } else { 1 };
+    let mut at = from as isize;
+    for _ in 0..rows.unsigned_abs() {
+        let mut next = at + step;
+        while next >= 0 && (next as usize) < hidden.len() && hidden[next as usize] {
+            next += step;
+        }
+        if next < 0 || next as usize >= hidden.len() {
+            break;
+        }
+        at = next;
+    }
+    at as usize
+}
+
 pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn) {
     let AppState {
         panes,
@@ -168,18 +202,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
             // `hidden` blanks out the body lines of a closed region; nested
             // closed regions just union their ranges.
             let n = ed.lines.len();
-            let mut hidden = vec![false; n];
             let mut fold_state = vec![0i32; n];
             let folded = folded_heads.borrow();
-            for (h, e) in editor::fold_regions(&ed.lines) {
-                let closed = folded.contains(&h);
-                fold_state[h] = if closed { 2 } else { 1 };
-                if closed {
-                    for hl in hidden.iter_mut().take(e + 1).skip(h + 1) {
-                        *hl = true;
-                    }
-                }
+            for (h, _) in editor::fold_regions(&ed.lines) {
+                fold_state[h] = if folded.contains(&h) { 2 } else { 1 };
             }
+            let hidden = hidden_lines(&ed.lines, &folded);
             let cursor_visual_row = hidden
                 .iter()
                 .take(ed.line)
@@ -794,17 +822,27 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
     {
         let panes = panes.clone();
         let sync_editor = sync_editor.clone();
-        let drag: Rc<dyn Fn(usize, i32, i32)> = Rc::new(move |pane, line, col| {
-            panes[pane].ed_state.borrow_mut().move_to(line, col, true);
+        // `rows` is how many rows *on screen* the pointer has travelled from
+        // the line it was pressed on, so folded lines have to be skipped to
+        // turn it back into a buffer line.
+        let drag: Rc<dyn Fn(usize, i32, i32, i32)> = Rc::new(move |pane, line, rows, col| {
+            let ed_state = panes[pane].ed_state.clone();
+            let line = {
+                let ed = ed_state.borrow();
+                let hidden = hidden_lines(&ed.lines, &panes[pane].folded_heads.borrow());
+                let from = (line.max(0) as usize).min(hidden.len().saturating_sub(1));
+                line_after_rows(&hidden, from, rows) as i32
+            };
+            ed_state.borrow_mut().move_to(line, col, true);
             sync_editor(pane);
         });
         window.on_editor_drag({
             let drag = drag.clone();
-            move |line, col| drag(0, line, col)
+            move |line, rows, col| drag(0, line, rows, col)
         });
         window.on_p1_editor_drag({
             let drag = drag.clone();
-            move |line, col| drag(1, line, col)
+            move |line, rows, col| drag(1, line, rows, col)
         });
     }
     {
@@ -830,6 +868,32 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drag_rows_skip_the_lines_a_closed_fold_collapsed() {
+        // select / a, / b are one region: folding line 0 hides lines 1 and 2,
+        // so the rows on screen read select, from, t.
+        let lines: Vec<String> = "select\n  a,\n  b\nfrom\n  t"
+            .split('\n')
+            .map(str::to_string)
+            .collect();
+        let folded: HashSet<usize> = [0].into_iter().collect();
+        let hidden = hidden_lines(&lines, &folded);
+        assert_eq!(hidden, vec![false, true, true, false, false]);
+
+        // One row down from `select` is `from` (line 3), not `  a,` (line 1).
+        assert_eq!(line_after_rows(&hidden, 0, 1), 3);
+        assert_eq!(line_after_rows(&hidden, 0, 2), 4);
+        // Past the end clamps to the last visible line.
+        assert_eq!(line_after_rows(&hidden, 0, 9), 4);
+        // Upwards, and standing still.
+        assert_eq!(line_after_rows(&hidden, 4, -2), 0);
+        assert_eq!(line_after_rows(&hidden, 3, 0), 3);
+
+        // Nothing folded: rows and buffer lines agree again.
+        let hidden = hidden_lines(&lines, &HashSet::new());
+        assert_eq!(line_after_rows(&hidden, 0, 2), 2);
+    }
 
     #[test]
     fn tabs_are_painted_as_spaces_without_moving_columns() {
