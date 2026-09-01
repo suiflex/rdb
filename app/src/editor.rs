@@ -451,7 +451,23 @@ impl EditorState {
     /// editor auto-closed and that the cursor has not left since. `armed` is
     /// the value `take_pair` returned at the start of this keystroke.
     pub fn backspace_pair(&mut self, armed: Option<(usize, usize)>) -> bool {
-        let unwrap = armed == Some((self.line, self.col)) && self.sel.is_none();
+        // The arm alone is not enough: the ⌘ combos return before the caller
+        // gets to take it, so it can still be set after an undo or a paste.
+        // Require the pair to actually be there too.
+        let l = &self.lines[self.line];
+        let around = (
+            self.col.checked_sub(1).and_then(|c| l.chars().nth(c)),
+            l.chars().nth(self.col),
+        );
+        let is_pair = matches!(
+            around,
+            (Some('('), Some(')'))
+                | (Some('['), Some(']'))
+                | (Some('{'), Some('}'))
+                | (Some('"'), Some('"'))
+                | (Some('\''), Some('\''))
+        );
+        let unwrap = is_pair && armed == Some((self.line, self.col)) && self.sel.is_none();
         self.backspace();
         if unwrap {
             self.delete();
@@ -1209,6 +1225,12 @@ mod tests {
         ed.move_cursor(0, 1);
         assert!(!ed.backspace_pair(armed));
         assert_eq!(ed.text(), "select \"");
+
+        // A stale arm from a ⌘ combo that skipped `take_pair` cannot unwrap
+        // text that is no longer a pair.
+        let mut ed = EditorState::from_text("ab");
+        assert!(!ed.backspace_pair(Some((0, 2))));
+        assert_eq!(ed.text(), "a");
 
         // Typing inside the pair disarms it: the closer survives.
         let mut ed = EditorState::from_text("");
