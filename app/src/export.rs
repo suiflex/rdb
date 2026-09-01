@@ -149,6 +149,17 @@ fn tsv(g: &GridModel, header_row: bool) -> String {
     out
 }
 
+/// Clipboard flavour of a TSV: the same text without the trailing newline a
+/// text file wants. Copying a single cell out of the result grid otherwise
+/// put the value plus an Enter on the clipboard, so pasting it into the query
+/// editor opened a new line.
+pub fn for_clipboard(mut s: String) -> String {
+    if s.ends_with('\n') {
+        s.pop();
+    }
+    s
+}
+
 /// JSON array of row objects (`[{ "col": "val", "nullcol": null }]`). Built
 /// through `serde_json` so escaping is correct.
 pub fn to_json(g: &GridModel) -> String {
@@ -260,6 +271,14 @@ mod tests {
     #[test]
     fn tsv_body_drops_the_header() {
         assert_eq!(to_tsv_body(&grid()), "1\ta,\"b\" \n");
+    }
+
+    #[test]
+    fn clipboard_tsv_drops_only_the_final_newline() {
+        assert_eq!(for_clipboard(to_tsv_body(&grid())), "1\ta,\"b\" ");
+        // An empty trailing row is still a row: only one newline comes off.
+        assert_eq!(for_clipboard("a\n\n".to_string()), "a\n");
+        assert_eq!(for_clipboard(String::new()), "");
     }
 
     #[test]

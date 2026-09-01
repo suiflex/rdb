@@ -73,10 +73,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             // belongs to a whole-grid copy, not to a couple of cells pasted
             // into a spreadsheet.
             let block = selected_block(&w, 0, &grid, all);
-            let text = match block {
+            let text = export::for_clipboard(match block {
                 Some(r) => export::to_tsv_body(&sliced_grid(&grid, r)),
                 None => export::to_tsv(&grid),
-            };
+            });
             use copypasta::ClipboardProvider;
             let msg =
                 match copypasta::ClipboardContext::new().and_then(|mut cb| cb.set_contents(text)) {
@@ -576,10 +576,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 return;
             };
             let block = selected_block(&w, 1, &grid, all);
-            let text = match block {
+            let text = export::for_clipboard(match block {
                 Some(r) => export::to_tsv_body(&sliced_grid(&grid, r)),
                 None => export::to_tsv(&grid),
-            };
+            });
             use copypasta::ClipboardProvider;
             let msg =
                 match copypasta::ClipboardContext::new().and_then(|mut cb| cb.set_contents(text)) {
