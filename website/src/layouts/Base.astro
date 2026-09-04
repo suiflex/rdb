@@ -45,6 +45,16 @@ const ogImageUrl = new URL(ogImage ?? url("/og.png"), Astro.site);
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImageUrl} />
 
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-9YDEWDFM5X"></script>
+    <script is:inline>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'G-9YDEWDFM5X');
+    </script>
+
     <slot name="head" />
   </head>
   <body class="bg-ink text-fg antialiased">
