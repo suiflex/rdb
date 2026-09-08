@@ -60,11 +60,11 @@ def gh_author(sha):
     proc = subprocess.run(
         [
             "gh", "api", f"repos/{repo}/commits/{sha}",
-            "--jq", "[.author.login, .commit.author.name, .commit.author.email]"
-            " | @tsv",
+            "--jq", "[.author.login, .commit.author.name, .commit.author.email] | @tsv",
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     if proc.returncode != 0:
         return (None, None, None)
@@ -80,6 +80,7 @@ def prev_emails(prevtag):
         ["git", "log", prevtag, "--format=%ae"],
         capture_output=True,
         text=True,
+        check=False,
     )
     if proc.returncode != 0:
         return set()
