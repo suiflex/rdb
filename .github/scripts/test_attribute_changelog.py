@@ -107,8 +107,10 @@ def test_maintainer_only_release_gets_no_sections():
 
 
 if __name__ == "__main__":
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_"):
-            fn()
-            print(f"ok {name}")
+    cases = sorted(
+        (name, fn) for name, fn in globals().items() if name.startswith("test_")
+    )
+    for name, fn in cases:
+        fn()
+        print(f"ok {name}")
     print("all checks passed")
