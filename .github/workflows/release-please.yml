@@ -53,6 +53,32 @@ jobs:
           gh release edit "${{ steps.release.outputs.tag_name }}" \
             --title "RDB ${{ steps.release.outputs.tag_name }}"
 
+      # release-please builds the Release body from its own plain changelog
+      # notes. By the time a release is created the enriched block (per-line
+      # @handles + Thanks + New Contributors, added by the fold step below on
+      # each feature-PR merge) is already on develop, which this job has
+      # checked out. Replace the body with that block so the credited notes
+      # are what people see on the Release page. Skip if the block is missing
+      # or has no section yet, so a race can't wipe the notes.
+      - name: Use the credited changelog block as the Release body
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          version="${TAG#v}"
+          awk -v h="## RDB: [$version](" '
+            index($0, h) == 1 { grab = 1; next }
+            grab && /^## / { exit }
+            grab { print }
+          ' CHANGELOG.md | sed '/./,$!d' > release-notes.md
+          if [ -s release-notes.md ] && grep -q '^### ' release-notes.md; then
+            gh release edit "$TAG" --notes-file release-notes.md
+          else
+            echo "no credited block for $version yet; leaving the body as-is"
+          fi
+          rm -f release-notes.md
+
       # We keep CHANGELOG.md at the repo root, but release-please resolves
       # `changelog-path` relative to its package dir and rejects `..`. The
       # package is rooted at the repo, so the config points it at
@@ -82,14 +108,19 @@ jobs:
             echo "no open release PR; nothing to fold"
             exit 0
           fi
-          # Copy the script out before switching branches: the release branch
+          # Copy the scripts out before switching branches: the release branch
           # is only rebuilt when release-please rewrites it, so it can carry an
-          # older copy of this script than the commit that triggered this run.
-          script=$(mktemp)
-          cp .github/scripts/fold_changelog.py "$script"
+          # older copy of these scripts than the commit that triggered this run.
+          # fold_changelog.py splices release-please's section into the root
+          # file; attribute_changelog.py then credits contributors in that
+          # newest block (per-line @handles, a Thanks list, New Contributors).
+          scripts=$(mktemp -d)
+          cp .github/scripts/fold_changelog.py \
+             .github/scripts/attribute_changelog.py "$scripts"/
           git fetch origin "$branch"
           git checkout "$branch"
-          python3 "$script"
+          python3 "$scripts/fold_changelog.py"
+          python3 "$scripts/attribute_changelog.py"
           rm -f app/CHANGELOG.md
           if git diff --quiet -- CHANGELOG.md app/CHANGELOG.md; then
             echo "CHANGELOG already folded into the root"
@@ -98,5 +129,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A CHANGELOG.md app/CHANGELOG.md
-          git commit -m "docs: fold changelog into the repo root"
+          git commit -m "docs: fold and attribute changelog"
           git push origin "$branch"
