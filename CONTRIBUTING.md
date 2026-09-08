@@ -227,6 +227,9 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/); the
 - One logical change per commit. Each commit should leave the tree in a
   buildable, testable state so `git revert` stays safe.
 - Do **not** hand-edit the `release-please`-managed sections of any changelog.
+  Each release also gets **Thanks** and **New Contributors** sections added
+  automatically from the commits it contains — those are generated too, so
+  don't edit them by hand either.
 
 Example release notes from commit headers:
 
