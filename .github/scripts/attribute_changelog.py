@@ -26,8 +26,6 @@ import sys
 
 MAINTAINERS = {"mulhamna", "badrus123"}
 
-HEADING = "# Changelog"
-_HEAD_RE = re.compile(r"^## (?:.+?: )?\[([^\]]+)\]\(([^)]*)\)")
 _PREVTAG_RE = re.compile(r"/compare/(.+?)\.\.\.")
 _BULLET_RE = re.compile(
     r"^(\* (?:\*\*[^:*]+:\*\* )?)(.*?)( \(\[[0-9a-f]+\]\([^)]*\)\))\s*$"
@@ -102,7 +100,10 @@ def attribute(text, resolve=gh_author, history=prev_emails, product="RDB"):
         return text  # already attributed this run
 
     lines = block.splitlines()
-    head_match = _HEAD_RE.match(lines[0])
+    head_re = re.compile(
+        r"^## " + re.escape(product) + r": \[([^\]]+)\]\(([^)]*)\)"
+    )
+    head_match = head_re.match(lines[0])
     if not head_match:
         return text
     prevtag_match = _PREVTAG_RE.search(head_match.group(2))
