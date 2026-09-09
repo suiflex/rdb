@@ -235,6 +235,10 @@ impl Driver for OracleDriver {
             Ok(ResultSet::Tabular { cols, rows: out })
         })
         .await
+        .map_err(|e| match e {
+            RdbError::Query(msg) => RdbError::Query(unsupported_type_hint(&msg)),
+            other => other,
+        })
     }
 
     async fn primary_key(&self, table: &TableRef) -> Result<Vec<String>> {
@@ -357,6 +361,28 @@ fn leading_keyword(sql: &str) -> &str {
     &rest[..end]
 }
 
+/// `oracledb` cannot decode a `BFILE` or an object type (`XMLTYPE` describes
+/// as one), and it refuses the whole statement rather than the one column —
+/// so a `SELECT *` over a table containing either fails with nothing shown.
+/// The raw message names the internal type and stops there, which leaves the
+/// user with nowhere to go; name the way out instead.
+fn unsupported_type_hint(msg: &str) -> String {
+    if msg.contains("unsupported database type DB_TYPE_BFILE") {
+        return "This driver cannot read BFILE columns yet, and Oracle refuses \
+                the whole query rather than the one column. Select the other \
+                columns by name, or read the file through DBMS_LOB."
+            .to_string();
+    }
+    if msg.contains("unsupported database type DB_TYPE_OBJECT") {
+        return "This driver cannot read object types or XMLTYPE columns yet, \
+                and Oracle refuses the whole query rather than the one column. \
+                Select the other columns by name, or read an XMLTYPE as \
+                <col>.getClobVal()."
+            .to_string();
+    }
+    msg.to_string()
+}
+
 /// `ORA-00942: table or view does not exist` — the server's own message,
 /// which `oracledb` passes through verbatim in `ErrorKind::DbError`. Anything
 /// else is a client-side failure and its `Display` is already the best text
@@ -442,6 +468,16 @@ mod tests {
             "-- one\n-- two\n\n  /* three */\nSELECT 1 FROM dual"
         ));
         assert!(!is_query("-- careful\nDROP TABLE t"));
+    }
+
+    #[test]
+    fn an_undecodable_column_type_names_the_way_out() {
+        let bfile = unsupported_type_hint("unsupported database type DB_TYPE_BFILE");
+        assert!(bfile.contains("BFILE") && bfile.contains("DBMS_LOB"));
+        let obj = unsupported_type_hint("unsupported database type DB_TYPE_OBJECT");
+        assert!(obj.contains("XMLTYPE") && obj.contains("getClobVal"));
+        // Unrelated errors pass through untouched.
+        assert_eq!(unsupported_type_hint("ORA-00942: nope"), "ORA-00942: nope");
     }
 
     #[test]
