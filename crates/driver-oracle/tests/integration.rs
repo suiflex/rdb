@@ -284,6 +284,66 @@ async fn connect_query_schema_commit_against_real_oracle() {
             .expect("drop modern table");
     }
 
+    // A column header must repeat the precision that was declared. Oracle
+    // describes a bare TIMESTAMP as scale 6 and a TIMESTAMP(0) as scale 0, so
+    // reading 0 as "unset" would rewrite every TIMESTAMP(0) to TIMESTAMP(6).
+    // A NULL BFILE must read as NULL: labelling an empty cell "[BFILE]"
+    // claims a file is on the server that is not.
+    let _ = driver.query(&sql("DROP TABLE rdb_it_shapes")).await;
+    driver
+        .query(&sql(
+            "CREATE TABLE rdb_it_shapes (ts0 TIMESTAMP(0), ts TIMESTAMP)",
+        ))
+        .await
+        .expect("create shapes table");
+    let rs = driver
+        .query(&sql("SELECT ts0, ts FROM rdb_it_shapes"))
+        .await
+        .expect("select shapes");
+    let ResultSet::Tabular { cols, .. } = rs else {
+        panic!("expected a tabular result");
+    };
+    assert_eq!(cols[0].type_name, "TIMESTAMP(0)", "declared precision lost");
+    assert_eq!(cols[1].type_name, "TIMESTAMP(6)");
+    driver
+        .query(&sql("DROP TABLE rdb_it_shapes"))
+        .await
+        .expect("drop shapes table");
+
+    // A BFILE column cannot be decoded, and the driver refuses the whole
+    // statement rather than the one column — so the message has to say what to
+    // do instead of naming an internal type and stopping.
+    let _ = driver.query(&sql("DROP TABLE rdb_it_bfile")).await;
+    driver
+        .query(&sql("CREATE TABLE rdb_it_bfile (id NUMBER, f BFILE)"))
+        .await
+        .expect("create bfile table");
+    driver
+        .query(&sql("INSERT INTO rdb_it_bfile VALUES (1, NULL)"))
+        .await
+        .expect("insert bfile row");
+    let err = driver
+        .query(&sql("SELECT id, f FROM rdb_it_bfile"))
+        .await
+        .expect_err("a BFILE column should fail loudly");
+    assert!(
+        err.to_string().contains("DBMS_LOB"),
+        "unreadable column type gave no way out: {err}"
+    );
+    // The other columns are still reachable by name.
+    let rs = driver
+        .query(&sql("SELECT id FROM rdb_it_bfile"))
+        .await
+        .expect("selecting around the BFILE should work");
+    let ResultSet::Tabular { rows, .. } = rs else {
+        panic!("expected a tabular result");
+    };
+    assert!(matches!(rows[0][0], Cell::Int(1)));
+    driver
+        .query(&sql("DROP TABLE rdb_it_bfile"))
+        .await
+        .expect("drop bfile table");
+
     // Non-SQL queries belong to other engines and must be refused.
     assert!(driver
         .query(&Query::Command(vec!["GET".into(), "k".into()]))
