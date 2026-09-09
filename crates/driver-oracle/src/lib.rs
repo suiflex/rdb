@@ -1,4 +1,4 @@
-//! rdb-driver-oracle: Oracle Database driver impl via the `oracle` crate (ODPI-C).
+//! rdb-driver-oracle: Oracle Database driver impl via Oracle's pure-Rust `oracledb` crate.
 
 mod convert;
 mod schema;
