@@ -22,6 +22,8 @@
 
 use std::collections::HashMap;
 
+use chrono::{Datelike, NaiveDate, TimeDelta, Timelike};
+
 use oracledb::{
     DbType, FromDbValue, JsonValue, Metadata, OracleIntervalDS, OracleIntervalYM, OracleNumber,
     OracleTimestamp, Row, Vector, VectorData, DB_TYPE_BFILE, DB_TYPE_BINARY_DOUBLE,
@@ -170,26 +172,70 @@ fn number_cell(n: OracleNumber) -> Cell {
 /// `YYYY-MM-DD HH:MM:SS[.ffffff][ ±HH:MM]`, built from the components so the
 /// session's NLS settings cannot change it. Oracle's `DATE` carries a time
 /// component (unlike the SQL standard), so it is never rendered date-only.
+///
+/// **A zoned column's components arrive as UTC.** Oracle puts a
+/// `TIMESTAMP WITH TIME ZONE` on the wire as the UTC instant plus the zone
+/// offset it was written in, and `OracleTimestamp` reports both verbatim. So
+/// the offset has to be added back to recover the local time that was
+/// stored — printing the components beside the offset, as the crate's own
+/// `Display` does, states a time that never existed: a value written
+/// `09:05:01 +07:00` would read back as `02:05:01 +07:00`.
 fn format_timestamp(t: &OracleTimestamp, zoned: bool) -> String {
-    let mut s = format!(
-        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-        t.year(),
-        t.month(),
-        t.day(),
-        t.hour(),
-        t.minute(),
-        t.second()
-    );
+    let (h, m) = (t.tz_hour_offset(), t.tz_minute_offset());
+    let (y, mo, d, hh, mi, ss) = if zoned && (h != 0 || m != 0) {
+        match shift_to_zone(t, h, m) {
+            Some(parts) => parts,
+            // Only an out-of-range date reaches this, which the server cannot
+            // produce; showing UTC beats showing nothing.
+            None => raw_parts(t),
+        }
+    } else {
+        raw_parts(t)
+    };
+
+    let mut s = format!("{y:04}-{mo:02}-{d:02} {hh:02}:{mi:02}:{ss:02}");
     let micros = t.nanoseconds() / 1_000;
     if micros > 0 {
         s.push_str(&format!(".{micros:06}"));
     }
     if zoned {
-        let (h, m) = (t.tz_hour_offset(), t.tz_minute_offset());
         let sign = if h < 0 || m < 0 { '-' } else { '+' };
         s.push_str(&format!(" {sign}{:02}:{:02}", h.abs(), m.abs()));
     }
     s
+}
+
+fn raw_parts(t: &OracleTimestamp) -> (i32, u32, u32, u32, u32, u32) {
+    (
+        t.year() as i32,
+        t.month() as u32,
+        t.day() as u32,
+        t.hour() as u32,
+        t.minute() as u32,
+        t.second() as u32,
+    )
+}
+
+/// UTC components plus an offset, as local calendar parts. `chrono` does the
+/// arithmetic because the offset can roll the day, the month and the year, and
+/// getting February right by hand is not worth the lines.
+fn shift_to_zone(
+    t: &OracleTimestamp,
+    tz_hour: i8,
+    tz_minute: i8,
+) -> Option<(i32, u32, u32, u32, u32, u32)> {
+    let utc = NaiveDate::from_ymd_opt(t.year() as i32, t.month() as u32, t.day() as u32)?
+        .and_hms_opt(t.hour() as u32, t.minute() as u32, t.second() as u32)?;
+    let local =
+        utc.checked_add_signed(TimeDelta::minutes(tz_hour as i64 * 60 + tz_minute as i64))?;
+    Some((
+        local.year(),
+        local.month(),
+        local.day(),
+        local.hour(),
+        local.minute(),
+        local.second(),
+    ))
 }
 
 /// A `VECTOR` column holds hundreds or thousands of components; pasting them
@@ -409,11 +455,46 @@ mod tests {
     }
 
     #[test]
-    fn timestamp_with_zone_keeps_its_offset() {
-        let east = OracleTimestamp::new_timestamp_tz(2024, 3, 7, 9, 5, 1, 0, 7, 30);
-        assert_eq!(format_timestamp(&east, true), "2024-03-07 09:05:01 +07:30");
-        let west = OracleTimestamp::new_timestamp_tz(2024, 3, 7, 9, 5, 1, 0, -5, 0);
+    fn a_zoned_timestamp_shows_the_local_time_that_was_stored() {
+        // The components Oracle sends are UTC; 02:05:01Z at +07:00 is the
+        // 09:05:01 that was written. Rendering 02:05:01 beside "+07:00" would
+        // name a moment seven hours off.
+        let east = OracleTimestamp::new_timestamp_tz(2024, 3, 7, 2, 5, 1, 0, 7, 0);
+        assert_eq!(format_timestamp(&east, true), "2024-03-07 09:05:01 +07:00");
+        let india = OracleTimestamp::new_timestamp_tz(2024, 3, 7, 2, 5, 1, 0, 5, 30);
+        assert_eq!(format_timestamp(&india, true), "2024-03-07 07:35:01 +05:30");
+        let west = OracleTimestamp::new_timestamp_tz(2024, 3, 7, 14, 5, 1, 0, -5, 0);
         assert_eq!(format_timestamp(&west, true), "2024-03-07 09:05:01 -05:00");
+        let half_west = OracleTimestamp::new_timestamp_tz(2024, 3, 7, 14, 5, 1, 0, -5, -30);
+        assert_eq!(
+            format_timestamp(&half_west, true),
+            "2024-03-07 08:35:01 -05:30"
+        );
+    }
+
+    #[test]
+    fn an_offset_that_crosses_midnight_rolls_the_date() {
+        // 22:30Z at +07:00 is the next morning, and at the end of a month the
+        // month and year roll with it.
+        let next_day = OracleTimestamp::new_timestamp_tz(2024, 3, 7, 22, 30, 0, 0, 7, 0);
+        assert_eq!(
+            format_timestamp(&next_day, true),
+            "2024-03-08 05:30:00 +07:00"
+        );
+        let new_year = OracleTimestamp::new_timestamp_tz(2023, 12, 31, 20, 0, 0, 0, 7, 0);
+        assert_eq!(
+            format_timestamp(&new_year, true),
+            "2024-01-01 03:00:00 +07:00"
+        );
+        // Backwards over a leap day.
+        let leap = OracleTimestamp::new_timestamp_tz(2024, 3, 1, 2, 0, 0, 0, -5, 0);
+        assert_eq!(format_timestamp(&leap, true), "2024-02-29 21:00:00 -05:00");
+    }
+
+    #[test]
+    fn a_zoned_timestamp_already_at_utc_is_not_shifted() {
+        let utc = OracleTimestamp::new_timestamp_tz(2024, 3, 7, 9, 5, 1, 0, 0, 0);
+        assert_eq!(format_timestamp(&utc, true), "2024-03-07 09:05:01 +00:00");
     }
 
     #[test]
