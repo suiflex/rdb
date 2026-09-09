@@ -50,22 +50,8 @@ A native, lightweight, cross-platform database manager built with Rust and Slint
 | SQLite | `rusqlite` | Tabular |
 | Cassandra | `scylla` | Tabular |
 | SQL Server | `tiberius` | Tabular |
-| Oracle | `oracle` (ODPI-C) | Tabular |
+| Oracle | `oracledb` (Oracle's thin driver) | Tabular |
 | ClickHouse | `clickhouse` (HTTP) | Tabular |
-
-> **Oracle needs the Oracle Instant Client.** It is the one engine RDB cannot
-> reach with the binary alone: Oracle ships no public wire-protocol spec, so
-> the driver goes through Oracle's own client library, which is loaded at
-> runtime and is not redistributable. Install the **Basic** or **Basic Light**
-> package from [Oracle's Instant Client
-> downloads](https://www.oracle.com/database/technologies/instant-client/downloads.html)
-> and put it on the library path (`DYLD_LIBRARY_PATH` on macOS,
-> `LD_LIBRARY_PATH` on Linux, `PATH` on Windows). Nothing is needed to *build*
-> RDB — only to connect to Oracle — and every other engine stays dependency-free.
->
-> Known gap: Oracle 21c+ native `JSON` columns are not readable yet
-> ([rust-oracle#107](https://github.com/kubo/rust-oracle/issues/107)); read
-> them as `JSON_SERIALIZE(<col> RETURNING VARCHAR2)`.
 
 ## Design
 
@@ -280,7 +266,7 @@ Active development. Ships 11 engines (PostgreSQL, MySQL, MariaDB, Redis, Valkey,
 | `rdb-driver-sqlite` | SQLite driver via `rusqlite` |
 | `rdb-driver-cassandra` | Cassandra driver via `scylla` |
 | `rdb-driver-mssql` | SQL Server driver via `tiberius` |
-| `rdb-driver-oracle` | Oracle driver via `oracle` (ODPI-C) |
+| `rdb-driver-oracle` | Oracle driver via `oracledb` |
 | `rdb-driver-clickhouse` | ClickHouse driver via the `clickhouse` HTTP crate |
 
 ## License
