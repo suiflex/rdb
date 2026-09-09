@@ -288,18 +288,20 @@ fn write_json(v: &JsonValue, out: &mut String) {
             let hex: String = b.iter().map(|x| format!("{x:02x}")).collect();
             write_json_string(&hex, out);
         }
-        JsonValue::JsonArray(items) => {
-            out.push('[');
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                write_json(item, out);
-            }
-            out.push(']');
-        }
+        JsonValue::JsonArray(items) => write_json_array(items, out),
         JsonValue::JsonObject(map) => write_json_object(map, out),
     }
+}
+
+fn write_json_array(items: &[JsonValue], out: &mut String) {
+    out.push('[');
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        write_json(item, out);
+    }
+    out.push(']');
 }
 
 /// Oracle's OSON decodes into a `HashMap`, whose iteration order is arbitrary
