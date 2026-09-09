@@ -45,7 +45,7 @@ rdb
 | SQLite | `rusqlite` | Tabular |
 | Cassandra | `scylla` | Tabular |
 | SQL Server | `tiberius` | Tabular |
-| Oracle | `oracle` (ODPI-C) | Tabular |
+| Oracle | `oracledb` (Oracle's thin driver) | Tabular |
 | ClickHouse | `clickhouse` (HTTP) | Tabular |
 
 ## Design
