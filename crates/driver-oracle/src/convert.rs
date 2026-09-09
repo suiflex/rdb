@@ -115,19 +115,26 @@ pub fn cell_at(row: &Row, idx: usize, md: &Metadata) -> Cell {
     // BFILE points at a file on the database server's own disk, a REF CURSOR
     // is a nested result set, and an OBJECT is a user-defined type: each is a
     // separate feature rather than a value, so name it instead of showing a
-    // blank cell.
+    // blank cell — but an absent one is still absent.
+    //
+    // Measured note: `oracledb` currently refuses BFILE and object types (an
+    // XMLTYPE describes as one) before a row reaches this function, failing
+    // the whole statement — `driver::unsupported_type_hint` is what the user
+    // actually sees today. These arms are kept for the day it decodes them,
+    // and because a REF CURSOR can still arrive from PL/SQL.
     if ty == &DB_TYPE_BFILE {
-        return Cell::Text("[BFILE]".into());
+        return marker_or_null(row, idx, "[BFILE]");
     }
     if ty == &DB_TYPE_CURSOR {
-        return Cell::Text("[REF CURSOR]".into());
+        return marker_or_null(row, idx, "[REF CURSOR]");
     }
     if ty == &DB_TYPE_OBJECT {
-        return Cell::Text("[OBJECT]".into());
+        return marker_or_null(row, idx, "[OBJECT]");
     }
 
-    // XMLTYPE and anything upstream adds later: text is the likeliest shape,
-    // and a failed attempt still lands on a marker rather than a blank.
+    // Anything upstream adds later: text is the likeliest shape, and a failed
+    // attempt still lands on a marker rather than a blank. (XMLTYPE does not
+    // reach here — it describes as an object type and is refused earlier.)
     cell(row, idx, Cell::Text, "[unsupported type]")
 }
 
@@ -148,6 +155,19 @@ where
         Ok(None) => Cell::Null,
         Err(_) => Cell::Text(marker.to_string()),
     }
+}
+
+/// A column whose value is a handle rather than data: a file on the server, a
+/// nested result set, a user-defined type. There is nothing to render either
+/// way, but a NULL still has to read as NULL — labelling an empty cell
+/// `[BFILE]` claims a file is there.
+///
+/// `Option<String>` is what asks the question: `FromDbValue for Option<T>`
+/// answers `None` for a NULL before it ever tries `T`'s conversion, so the
+/// conversion failing (which it always does for these types) only ever means
+/// "present but not renderable".
+fn marker_or_null(row: &Row, idx: usize, marker: &str) -> Cell {
+    cell(row, idx, |_: String| Cell::Text(marker.to_string()), marker)
 }
 
 /// Oracle NUMBER carries up to 38 significant digits — wider than `i64` and
@@ -250,7 +270,9 @@ fn describe_vector(v: &Vector) -> String {
                 VectorData::Float32(x) => ("FLOAT32", x.len()),
                 VectorData::Float64(x) => ("FLOAT64", x.len()),
                 VectorData::Int8(x) => ("INT8", x.len()),
-                VectorData::Binary(x) => ("BINARY", x.len()),
+                // Packed: `VectorData::decode` stores one byte per eight
+                // dimensions, so the byte count is not the dimension count.
+                VectorData::Binary(x) => ("BINARY", x.len() * 8),
             };
             format!("[VECTOR {kind} · {n} dims]")
         }
@@ -280,7 +302,15 @@ fn write_json(v: &JsonValue, out: &mut String) {
         JsonValue::BinaryFloat(f) => out.push_str(&f.to_string()),
         JsonValue::BinaryDouble(f) => out.push_str(&f.to_string()),
         JsonValue::String(s) => write_json_string(s, out),
-        JsonValue::Timestamp(t) => write_json_string(&format_timestamp(t, true), out),
+        // `JsonValue::Timestamp` carries four OSON types — DATE, TIMESTAMP7,
+        // TIMESTAMP and TIMESTAMP_TZ — and only the last is zoned. Nothing
+        // distinguishes them afterwards except the offset itself, so a
+        // non-zero offset is the only honest signal; appending `+00:00` to
+        // every one of them would put a zone on values that never had one.
+        JsonValue::Timestamp(t) => {
+            let zoned = t.tz_hour_offset() != 0 || t.tz_minute_offset() != 0;
+            write_json_string(&format_timestamp(t, zoned), out)
+        }
         JsonValue::IntervalDS(i) => write_json_string(&i.to_string(), out),
         JsonValue::IntervalYM(i) => write_json_string(&i.to_string(), out),
         JsonValue::Vector(vec) => write_json_string(&describe_vector(vec), out),
@@ -390,11 +420,13 @@ pub fn column_type_name(md: &Metadata) -> String {
     simple_type_name(ty).to_string()
 }
 
-/// Oracle reports a timestamp's fractional-second digits in the scale field.
-/// A describe that omits it (scale 0 on a type that always has one) means the
-/// default, which is 6.
+/// Oracle reports a timestamp's fractional-second digits in the scale field,
+/// with the default already applied: a bare `TIMESTAMP` describes as scale 6,
+/// not as 0. So scale is used as given — `TIMESTAMP(0)` is a real declaration
+/// meaning no fractional seconds, and treating 0 as "unset" would rewrite it
+/// to `TIMESTAMP(6)` in the header.
 fn timestamp_precision(scale: i8) -> u8 {
-    if (1..=9).contains(&scale) {
+    if (0..=9).contains(&scale) {
         scale as u8
     } else {
         6
@@ -559,10 +591,37 @@ mod tests {
     }
 
     #[test]
-    fn a_timestamp_without_a_reported_precision_defaults_to_six() {
-        assert_eq!(timestamp_precision(0), 6);
-        assert_eq!(timestamp_precision(-127), 6);
+    fn a_declared_timestamp_precision_is_used_as_reported() {
+        // Measured against a live server: a bare TIMESTAMP describes as
+        // scale 6 and TIMESTAMP(0) as scale 0, so 0 is a declaration, not a
+        // gap. Reading it as "unset" turned every TIMESTAMP(0) into (6).
+        assert_eq!(timestamp_precision(0), 0);
         assert_eq!(timestamp_precision(3), 3);
+        assert_eq!(timestamp_precision(6), 6);
+        assert_eq!(timestamp_precision(9), 9);
+        // Only a value outside the legal range falls back.
+        assert_eq!(timestamp_precision(-127), 6);
+    }
+
+    #[test]
+    fn a_binary_vector_counts_dimensions_not_bytes() {
+        // Binary vectors are packed eight dimensions to the byte, so a
+        // 128-dimension vector arrives as 16 bytes.
+        let v = Vector::Dense(VectorData::Binary(vec![0; 16]));
+        assert_eq!(describe_vector(&v), "[VECTOR BINARY · 128 dims]");
+    }
+
+    #[test]
+    fn a_json_timestamp_without_an_offset_gets_no_zone() {
+        // JsonValue::Timestamp also carries OSON DATE and plain TIMESTAMP;
+        // stamping those "+00:00" would assert a zone they never had.
+        let plain = JsonValue::Timestamp(ts(2024, 3, 7, 9, 5, 1, 0));
+        assert_eq!(render_json(&plain), r#""2024-03-07 09:05:01""#);
+        // A zoned one still shifts and still shows its offset.
+        let zoned = JsonValue::Timestamp(OracleTimestamp::new_timestamp_tz(
+            2024, 3, 7, 2, 5, 1, 0, 7, 0,
+        ));
+        assert_eq!(render_json(&zoned), r#""2024-03-07 09:05:01 +07:00""#);
     }
 
     #[test]
