@@ -222,6 +222,68 @@ async fn connect_query_schema_commit_against_real_oracle() {
     };
     assert_eq!(rows.len(), 250, "result truncated at the first fetch batch");
 
+    // A DML statement has no result set; its whole result is the row count,
+    // so it must come back as `Affected`, not as an empty table.
+    let rs = driver
+        .query(&sql("UPDATE rdb_it_users SET score = 1 WHERE id = 1"))
+        .await
+        .expect("update via query");
+    assert!(
+        matches!(rs, ResultSet::Affected(1)),
+        "DML should report a row count: {rs:?}"
+    );
+
+    // The server's own message has to reach the user intact. An opaque
+    // client-side string here would leave them with nothing to act on.
+    let err = driver
+        .query(&sql("SELECT * FROM rdb_no_such_table"))
+        .await
+        .expect_err("missing table should fail");
+    assert!(
+        err.to_string().contains("ORA-00942"),
+        "server error not surfaced: {err}"
+    );
+
+    // Oracle 21c+ native JSON and 23c BOOLEAN. The ODPI-C driver this one
+    // replaced could not read a JSON column at all — it failed the whole
+    // `SELECT *` and told the user to wrap the column in `JSON_SERIALIZE`.
+    let _ = driver.query(&sql("DROP TABLE rdb_it_modern")).await;
+    if driver
+        .query(&sql(
+            "CREATE TABLE rdb_it_modern (id NUMBER, doc JSON, ok BOOLEAN)",
+        ))
+        .await
+        .is_ok()
+    {
+        driver
+            .query(&sql(
+                "INSERT INTO rdb_it_modern VALUES (1, '{\"b\":2,\"a\":[1,null]}', TRUE)",
+            ))
+            .await
+            .expect("insert json row");
+        let rs = driver
+            .query(&sql("SELECT doc, ok FROM rdb_it_modern"))
+            .await
+            .expect("select json without JSON_SERIALIZE");
+        let ResultSet::Tabular { rows, .. } = rs else {
+            panic!("expected a tabular result");
+        };
+        assert!(
+            matches!(&rows[0][0], Cell::Text(s) if s == r#"{"a":[1,null],"b":2}"#),
+            "JSON column not decoded: {:?}",
+            rows[0][0]
+        );
+        assert!(
+            matches!(rows[0][1], Cell::Bool(true)),
+            "BOOLEAN column not decoded: {:?}",
+            rows[0][1]
+        );
+        driver
+            .query(&sql("DROP TABLE rdb_it_modern"))
+            .await
+            .expect("drop modern table");
+    }
+
     // Non-SQL queries belong to other engines and must be refused.
     assert!(driver
         .query(&Query::Command(vec!["GET".into(), "k".into()]))
