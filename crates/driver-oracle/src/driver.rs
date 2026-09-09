@@ -1,21 +1,19 @@
-//! Oracle driver backed by the `oracle` crate (ODPI-C over OCI).
+//! Oracle driver backed by Oracle's own pure-Rust `oracledb` crate.
 //!
-//! **Why this crate and not a pure-Rust one.** The pure-Rust `oracle-rs` was
-//! tried first, since it would have kept RDB free of a native dependency.
-//! Measured against a real 23ai server it silently truncated every result set
-//! at the server's first 100-row batch, dropped the connection on *any* SQL
-//! error without surfacing the `ORA-` message, and returned no primary keys —
-//! so tables could not be edited. Those are upstream bugs (issues #8, #12),
-//! not something a caller can work around, and silent row loss is the worst
-//! failure mode a database browser can have. ODPI-C is compiled into this
-//! binary; the Oracle client library it needs (`libclntsh`) is loaded
-//! lazily at *runtime*, so builds, tests and CI need nothing installed —
-//! only actually connecting to Oracle does.
+//! **Why this crate.** RDB shipped Oracle first on `oracle` (ODPI-C over OCI),
+//! which made Oracle the only engine that needed something installed before it
+//! could connect: the Oracle Instant Client, loaded at runtime. A pure-Rust
+//! third-party crate had been tried before that and rejected on measurement —
+//! it silently truncated every result set at the server's first 100-row batch
+//! and returned no primary keys. `oracledb` is Oracle's own thin driver: it
+//! speaks the wire protocol directly, so there is no client library and no
+//! native dependency, and Oracle maintains it. Oracle is now an engine like
+//! any other.
 //!
-//! **Blocking client on an async trait.** OCI is synchronous, so every call
-//! runs on `spawn_blocking` with the connection behind a `std::sync::Mutex`.
-//! That mutex is held only inside the blocking closure, never across an
-//! await, so it cannot deadlock the runtime.
+//! **Blocking client on an async trait.** `oracledb`'s API is synchronous, so
+//! every call runs on `spawn_blocking` with the connection behind a
+//! `std::sync::Mutex`. That mutex is held only inside the blocking closure,
+//! never across an await, so it cannot deadlock the runtime.
 //!
 //! v1 scope: database (username/password) auth only — no OS auth, Kerberos,
 //! wallet or SYSDBA; service-name connect only (`ConnConfig.database` is the
@@ -26,8 +24,7 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use oracle::sql_type::ToSql;
-use oracle::Connection;
+use oracledb::{Config, Connection, ErrorKind, ToDbValue};
 
 use rdb_core::conn::{ConnConfig, SslMode};
 use rdb_core::driver::Driver;
@@ -37,7 +34,7 @@ use rdb_core::result::{Cell, Column, ResultSet};
 use rdb_core::schema::Schema;
 use rdb_core::write::{TableRef, WriteOp};
 
-use crate::convert::{column_type_name, sql_value_to_cell};
+use crate::convert::{cell_at, column_type_name};
 use crate::schema::{fold_rows, SchemaRow, COLUMNS_QUERY};
 use crate::write_sql;
 
@@ -61,21 +58,23 @@ fn connect_string(cfg: &ConnConfig) -> String {
     format!("{proto}://{}:{}/{}", cfg.host, cfg.port, service)
 }
 
-/// Run a blocking OCI call on the blocking pool.
+/// Run a blocking database call on the blocking pool.
 ///
 /// The lock lives entirely inside the closure — it is taken and dropped on
-/// the blocking thread — so no guard is ever held across an `.await`.
+/// the blocking thread — so no guard is ever held across an `.await`. The
+/// closure gets `&mut` because a few calls (`close`) need it and the rest do
+/// not care.
 async fn on_conn<T, F>(conn: &Arc<Mutex<Connection>>, f: F) -> Result<T>
 where
     T: Send + 'static,
-    F: FnOnce(&Connection) -> std::result::Result<T, oracle::Error> + Send + 'static,
+    F: FnOnce(&mut Connection) -> std::result::Result<T, oracledb::Error> + Send + 'static,
 {
     let conn = Arc::clone(conn);
     tokio::task::spawn_blocking(move || {
-        let guard = conn
+        let mut guard = conn
             .lock()
             .map_err(|_| RdbError::Connection("connection lock poisoned".into()))?;
-        f(&guard).map_err(|e| RdbError::Query(ora_err(&e)))
+        f(&mut guard).map_err(|e| RdbError::Query(ora_err(&e)))
     })
     .await
     .map_err(|e| RdbError::Connection(format!("worker thread failed: {e}")))?
@@ -83,11 +82,15 @@ where
 
 /// Rows of a single-column query, as text. Used by the several catalog
 /// lookups that all want the same shape.
-fn one_column(conn: &Connection, sql: &str, params: &[&dyn ToSql]) -> oracle::Result<Vec<String>> {
+fn one_column(
+    conn: &Connection,
+    sql: &str,
+    params: &[&dyn ToDbValue],
+) -> std::result::Result<Vec<String>, oracledb::Error> {
     let mut out = Vec::new();
     for row in conn.query(sql, params)? {
         let row = row?;
-        out.push(row.get::<usize, String>(0).unwrap_or_default());
+        out.push(row.get::<Option<String>>(0)?.unwrap_or_default());
     }
     Ok(out)
 }
@@ -100,18 +103,21 @@ impl Driver for OracleDriver {
         let dsn = connect_string(cfg);
         let fallback_schema = cfg.user.to_uppercase();
 
-        // Connecting is itself blocking, and it is also where a missing
-        // Oracle client library surfaces — reword that one, because the raw
-        // ODPI-C message is a wall of URLs.
+        // Connecting is itself blocking.
         tokio::task::spawn_blocking(move || {
-            let conn = Connection::connect(&user, &password, &dsn)
-                .map_err(|e| RdbError::Connection(connect_err(&e)))?;
+            let config = Config::default()
+                .set_credentials(&user, &password)
+                .set_connect_string(&dsn)
+                .map_err(|e| RdbError::Connection(ora_err(&e)))?;
+            let conn = oracledb::connect(config).map_err(|e| RdbError::Connection(ora_err(&e)))?;
             let schema = conn
-                .query_row_as::<String>(
+                .query_row(
                     "SELECT SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') FROM DUAL",
                     &[],
                 )
+                .and_then(|r| r.get::<Option<String>>(0))
                 .ok()
+                .flatten()
                 .filter(|s| !s.is_empty())
                 // Unless the session ran ALTER SESSION SET CURRENT_SCHEMA,
                 // the current schema is the connecting user, upper-cased.
@@ -145,12 +151,12 @@ impl Driver for OracleDriver {
             for row in c.query(COLUMNS_QUERY, &[&bind])? {
                 let row = row?;
                 out.push((
-                    row.get::<usize, String>(0).unwrap_or_default(),
-                    row.get::<usize, String>(1).unwrap_or_default(),
-                    row.get::<usize, String>(2).unwrap_or_default(),
-                    row.get::<usize, i64>(3).unwrap_or(0) != 0,
-                    row.get::<usize, i64>(4).unwrap_or(0) != 0,
-                    row.get::<usize, i64>(5).unwrap_or(0) != 0,
+                    row.get::<Option<String>>(0)?.unwrap_or_default(),
+                    row.get::<Option<String>>(1)?.unwrap_or_default(),
+                    row.get::<Option<String>>(2)?.unwrap_or_default(),
+                    row.get::<Option<i64>>(3)?.unwrap_or(0) != 0,
+                    row.get::<Option<i64>>(4)?.unwrap_or(0) != 0,
+                    row.get::<Option<i64>>(5)?.unwrap_or(0) != 0,
                 ));
             }
             Ok(out)
@@ -201,34 +207,34 @@ impl Driver for OracleDriver {
                 return Err(RdbError::UnsupportedQuery)
             }
         };
-        let for_err = sql.clone();
         on_conn(&self.conn, move |c| {
-            let mut stmt = c.statement(&sql).build()?;
-            // DDL and DML have no result set to iterate; they report a row
-            // count instead. `is_query` comes from Oracle's own parse of the
-            // statement, so it needs no guessing from the SQL text.
-            if !stmt.is_query() {
-                stmt.execute(&[])?;
-                return Ok(ResultSet::Affected(stmt.row_count().unwrap_or(0)));
+            // DDL, DML and PL/SQL have no result set to iterate; they report a
+            // row count instead.
+            if !is_query(&sql) {
+                return Ok(ResultSet::Affected(c.execute(&sql, &[])?.rows_affected()));
             }
-            let rows = stmt.query(&[])?;
-            let cols: Vec<Column> = rows
-                .column_info()
+            let cursor = c.query(&sql, &[])?;
+            let meta = cursor.columns().clone();
+            let cols: Vec<Column> = meta
                 .iter()
-                .map(|c| Column {
-                    name: c.name().to_string(),
-                    type_name: column_type_name(c.oracle_type()),
+                .map(|m| Column {
+                    name: m.name().to_string(),
+                    type_name: column_type_name(m),
                 })
                 .collect();
             let mut out: Vec<Vec<Cell>> = Vec::new();
-            for row in rows {
+            for row in cursor {
                 let row = row?;
-                out.push(row.sql_values().iter().map(sql_value_to_cell).collect());
+                out.push(
+                    meta.iter()
+                        .enumerate()
+                        .map(|(i, m)| cell_at(&row, i, m))
+                        .collect(),
+                );
             }
             Ok(ResultSet::Tabular { cols, rows: out })
         })
         .await
-        .map_err(|e| RdbError::Query(with_offset_line(&json_hint(&e.to_string()), &for_err)))
     }
 
     async fn primary_key(&self, table: &TableRef) -> Result<Vec<String>> {
@@ -256,8 +262,11 @@ impl Driver for OracleDriver {
 
     async fn count(&self, table: &TableRef) -> Result<u64> {
         let sql = format!("SELECT COUNT(*) FROM {}", write_sql::table_name(table));
-        let n = on_conn(&self.conn, move |c| c.query_row_as::<i64>(&sql, &[])).await?;
-        Ok(n.max(0) as u64)
+        let n = on_conn(&self.conn, move |c| {
+            c.query_row(&sql, &[])?.get::<Option<i64>>(0)
+        })
+        .await?;
+        Ok(n.unwrap_or(0).max(0) as u64)
     }
 
     async fn commit(&self, ops: &[WriteOp]) -> Result<u64> {
@@ -280,7 +289,7 @@ impl Driver for OracleDriver {
             let mut affected = 0u64;
             for sql in &stmts {
                 match c.execute(sql, &[]) {
-                    Ok(stmt) => affected += stmt.row_count().unwrap_or(0),
+                    Ok(res) => affected += res.rows_affected(),
                     Err(e) => {
                         let _ = c.rollback();
                         return Err(e);
@@ -300,68 +309,63 @@ impl Driver for OracleDriver {
     }
 }
 
-/// A missing Oracle client library is the one error a new user is most likely
-/// to hit, and ODPI-C reports it as several lines of help URLs. Say the one
-/// thing they need to do instead.
-fn connect_err(e: &oracle::Error) -> String {
-    let msg = e.to_string();
-    if msg.contains("DPI-1047") {
-        return "Oracle Client library not found. Install Oracle Instant Client \
-                (Basic or Basic Light) and make sure it is on the library path."
-            .to_string();
-    }
-    ora_err(e)
+/// Whether a statement produces a result set to iterate rather than a row
+/// count, decided from its leading keyword.
+///
+/// `oracledb` classifies statements this same way internally
+/// (`Statement::determine_statement_type`, which routes on `SELECT`/`WITH`
+/// versus DML/DDL/PL/SQL keywords) but keeps the answer crate-private, so
+/// this mirrors that table rather than inventing a different one. `Cursor`
+/// does report an empty column list for a non-query, but it carries no
+/// affected-row count, and "3 rows updated" is the whole result of a DML
+/// statement — so routing has to happen before execution, not after.
+///
+/// ponytail: leading keyword only. `TABLE(...)`, `(SELECT ...)` and other
+/// rarities route to `execute`, which still runs them correctly but reports a
+/// row count instead of the rows. Replace this with upstream's own answer if
+/// it is ever exposed.
+fn is_query(sql: &str) -> bool {
+    matches!(
+        leading_keyword(sql).to_uppercase().as_str(),
+        "SELECT" | "WITH"
+    )
 }
 
-/// `ORA-00942: table or view does not exist` — the code and message, without
-/// ODPI-C's trailing `fn_name`/`action` noise.
-fn ora_err(e: &oracle::Error) -> String {
-    match e.db_error() {
-        Some(db) => format!("ORA-{:05}: {}", db.code(), db.message().trim()),
-        None => e.to_string(),
+/// The first bare word of a statement, skipping whitespace and both comment
+/// forms. A query editor's buffer routinely opens with a `--` note above the
+/// statement, so a naive `trim_start` would classify most saved queries wrong.
+fn leading_keyword(sql: &str) -> &str {
+    let mut rest = sql.trim_start();
+    loop {
+        if let Some(after) = rest.strip_prefix("--") {
+            rest = after
+                .split_once('\n')
+                .map_or("", |(_, tail)| tail)
+                .trim_start();
+        } else if let Some(after) = rest.strip_prefix("/*") {
+            rest = after
+                .split_once("*/")
+                .map_or("", |(_, tail)| tail)
+                .trim_start();
+        } else {
+            break;
+        }
     }
+    let end = rest
+        .find(|c: char| !c.is_alphanumeric() && c != '_')
+        .unwrap_or(rest.len());
+    &rest[..end]
 }
 
-/// Oracle 21c's native `JSON` column type has no binding in the `oracle`
-/// crate yet (kubo/rust-oracle#107), so a `SELECT *` over a table containing
-/// one fails before any row is read. The raw message says only "unsupported
-/// Oracle type JSON", which leaves the user with nowhere to go — name the
-/// workaround instead.
-fn json_hint(msg: &str) -> String {
-    if msg.contains("unsupported Oracle type JSON") {
-        return "Oracle JSON columns are not supported by this driver yet. \
-                Select the column as JSON_SERIALIZE(<col> RETURNING VARCHAR2) \
-                to read it as text."
-            .to_string();
+/// `ORA-00942: table or view does not exist` — the server's own message,
+/// which `oracledb` passes through verbatim in `ErrorKind::DbError`. Anything
+/// else is a client-side failure and its `Display` is already the best text
+/// available.
+fn ora_err(e: &oracledb::Error) -> String {
+    match e.kind() {
+        ErrorKind::DbError(msg) => msg.trim().to_string(),
+        _ => e.to_string(),
     }
-    msg.to_string()
-}
-
-/// Oracle reports where a statement broke as a character offset. Turn that
-/// into the 1-based line the query editor highlights via its `[[rdb-line:N]]`
-/// marker — the same contract `driver-mssql` fills from SQL Server's typed
-/// line number.
-fn with_offset_line(msg: &str, sql: &str) -> String {
-    match offset_of(msg).and_then(|off| line_of_offset(sql, off)) {
-        Some(n) => format!("[[rdb-line:{n}]] {msg}"),
-        None => msg.to_string(),
-    }
-}
-
-/// ODPI-C puts the offset in the error's `offset` field, which reaches us
-/// only through the rendered message, as `... offset: N ...`.
-fn offset_of(msg: &str) -> Option<usize> {
-    let rest = msg.split("offset: ").nth(1)?;
-    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
-    digits.parse().ok()
-}
-
-fn line_of_offset(sql: &str, offset: usize) -> Option<u32> {
-    if offset == 0 || offset > sql.len() {
-        return None;
-    }
-    let line = sql[..offset].bytes().filter(|b| *b == b'\n').count() + 1;
-    (line > 1).then_some(line as u32)
 }
 
 #[cfg(test)]
@@ -411,36 +415,38 @@ mod tests {
     }
 
     #[test]
-    fn a_multiline_statement_reports_the_failing_line() {
-        let sql = "SELECT 1\nFROM dual\nWHERE bogus";
-        // Offset 19 lands on line 3.
-        let marked = with_offset_line("ORA-00904: bad, offset: 19 xyz", sql);
-        assert_eq!(marked, "[[rdb-line:3]] ORA-00904: bad, offset: 19 xyz");
+    fn selects_and_ctes_are_queries() {
+        assert!(is_query("SELECT * FROM dual"));
+        assert!(is_query("  select 1 from dual"));
+        assert!(is_query("WITH t AS (SELECT 1 FROM dual) SELECT * FROM t"));
     }
 
     #[test]
-    fn a_single_line_statement_gets_no_marker() {
-        // Line 1 needs no highlight, and no offset at all must not invent one.
-        assert_eq!(
-            with_offset_line("ORA-00904: bad, offset: 3 x", "SELECT bogus"),
-            "ORA-00904: bad, offset: 3 x"
-        );
-        assert_eq!(
-            with_offset_line("ORA-00942: nope", "SELECT 1"),
-            "ORA-00942: nope"
-        );
+    fn dml_ddl_and_plsql_are_not_queries() {
+        assert!(!is_query("UPDATE users SET name = 'x'"));
+        assert!(!is_query("INSERT INTO users VALUES (1)"));
+        assert!(!is_query("DELETE FROM users"));
+        assert!(!is_query("MERGE INTO users USING dual ON (1=1)"));
+        assert!(!is_query("CREATE TABLE t (id NUMBER)"));
+        assert!(!is_query("TRUNCATE TABLE t"));
+        assert!(!is_query("BEGIN NULL; END;"));
+        assert!(!is_query(""));
     }
 
     #[test]
-    fn a_json_column_failure_names_the_workaround() {
-        let hinted = json_hint("internal error: unsupported Oracle type JSON");
-        assert!(hinted.contains("JSON_SERIALIZE"));
-        // Unrelated errors must pass through untouched.
-        assert_eq!(json_hint("ORA-00942: nope"), "ORA-00942: nope");
+    fn a_leading_comment_does_not_hide_the_keyword() {
+        // A saved query routinely opens with a note above the statement.
+        assert!(is_query("-- daily totals\nSELECT * FROM dual"));
+        assert!(is_query("/* daily totals */ SELECT * FROM dual"));
+        assert!(is_query(
+            "-- one\n-- two\n\n  /* three */\nSELECT 1 FROM dual"
+        ));
+        assert!(!is_query("-- careful\nDROP TABLE t"));
     }
 
     #[test]
-    fn offset_past_the_end_of_the_statement_is_ignored() {
-        assert_eq!(line_of_offset("SELECT 1", 999), None);
+    fn an_unterminated_comment_is_not_mistaken_for_a_query() {
+        assert!(!is_query("/* never closed SELECT"));
+        assert!(!is_query("-- only a comment"));
     }
 }

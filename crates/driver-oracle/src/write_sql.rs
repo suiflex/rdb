@@ -1,9 +1,8 @@
 //! Oracle SQL dialect for the shared literal write-builder
 //! (`rdb_core::write_sql`) — the same pattern `driver-postgres` and
 //! `driver-mssql` use rather than `driver-mysql`'s bind-param one, because
-//! oracle-rs binds a typed `Value` and a `Cell` carries no Oracle type to
-//! bind it as; a literal lets Oracle apply the column's own implicit
-//! conversion.
+//! a bind carries a Rust type and a `Cell` names no Oracle type to bind it
+//! as; a literal lets Oracle apply the column's own implicit conversion.
 //!
 //! One Oracle behaviour worth knowing before editing a row: **Oracle stores
 //! the empty string as NULL.** Writing `Cell::Text("")` emits the literal
