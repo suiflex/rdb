@@ -8,9 +8,10 @@
 // edge) and only one renders — a shared owner keeps them in lock-step, which a
 // duplicated two-way binding would not.
 import { Tokens } from "tokens.slint";
-import { TreeNode } from "structs.slint";
+import { TreeNode, TopLevelGroup } from "structs.slint";
 import { IconButton } from "components.slint";
 import { Sidebar } from "sidebar.slint";
+import { ConnectionsPanel } from "connections-panel.slint";
 
 export component NavCluster inherits HorizontalLayout {
     // Sidebar on the right: splitter on the inner (left) edge, drag sign flipped.
@@ -29,11 +30,14 @@ export component NavCluster inherits HorizontalLayout {
     in property <bool> sidebar-rail: false;
     in property <length> sidebar-w;
     in property <int> focus-tick;
+    in property <[TopLevelGroup]> connections;
+    in property <int> selected-conn: -1;
 
     callback set-rail(bool);
     callback set-visible(bool);
     callback set-w(length);
 
+    callback connect-clicked(int);
     callback disconnect();
     callback open-function(string);
     callback open-query(string, int);
@@ -64,43 +68,58 @@ export component NavCluster inherits HorizontalLayout {
                     if root.sidebar-w - (self.mouse-x - self.pressed-x) < 150px {
                         root.set-rail(true);
                     } else {
-                        root.set-w(clamp(root.sidebar-w - (self.mouse-x - self.pressed-x), 184px, 360px));
+                        root.set-w(clamp(root.sidebar-w - (self.mouse-x - self.pressed-x), 320px, 560px));
                     }
                 }
             }
         }
     }
 
-    if root.sidebar-visible && !root.sidebar-rail: Sidebar {
-        focus-tick: root.focus-tick;
+    // Connections rail sits to the left of, and separate from, the Items/
+    // Queries/History card — its own column, not stacked above it.
+    if root.sidebar-visible && !root.sidebar-rail: HorizontalLayout {
         horizontal-stretch: 0;
         min-width: root.sidebar-w;
         max-width: root.sidebar-w;
-        tree: root.tree;
-        conn-name: root.conn-name;
-        active-table: root.active-table;
-        active-count: root.active-count;
-        query-tree: root.query-tree;
-        mode: root.sidebar-mode;
-        tree-loading: root.tree-loading;
-        schema-list: root.schema-list;
-        schema-name: root.schema-name;
-        disconnect() => { root.disconnect(); }
-        open-function(f) => { root.open-function(f); }
-        open-query(q, i) => { root.open-query(q, i); }
-        insert-query(i) => { root.insert-query(i); }
-        rerun-query(i) => { root.rerun-query(i); }
-        history-action(i, a) => { root.history-action(i, a); }
-        run-saved-query(i) => { root.run-saved-query(i); }
-        query-action(i, a) => { root.query-action(i, a); }
-        mode-changed(m) => { root.mode-changed(m); }
-        open-table(db, t) => { root.open-table(db, t); }
-        pin-table(db, t) => { root.pin-table(db, t); }
-        toggle-fields(db, t) => { root.toggle-fields(db, t); }
-        toggle-node(t) => { root.toggle-node(t); }
-        select-schema(s) => { root.select-schema(s); }
-        filter-tree(t) => { root.filter-tree(t); }
-        add-item() => { root.add-item(); }
+        spacing: 0px;
+
+        ConnectionsPanel {
+            horizontal-stretch: 0;
+            width: 132px;
+            connections: root.connections;
+            selected-conn: root.selected-conn;
+            connect-clicked(i) => { root.connect-clicked(i); }
+        }
+
+        Sidebar {
+            focus-tick: root.focus-tick;
+            horizontal-stretch: 1;
+            tree: root.tree;
+            conn-name: root.conn-name;
+            active-table: root.active-table;
+            active-count: root.active-count;
+            query-tree: root.query-tree;
+            mode: root.sidebar-mode;
+            tree-loading: root.tree-loading;
+            schema-list: root.schema-list;
+            schema-name: root.schema-name;
+            disconnect() => { root.disconnect(); }
+            open-function(f) => { root.open-function(f); }
+            open-query(q, i) => { root.open-query(q, i); }
+            insert-query(i) => { root.insert-query(i); }
+            rerun-query(i) => { root.rerun-query(i); }
+            history-action(i, a) => { root.history-action(i, a); }
+            run-saved-query(i) => { root.run-saved-query(i); }
+            query-action(i, a) => { root.query-action(i, a); }
+            mode-changed(m) => { root.mode-changed(m); }
+            open-table(db, t) => { root.open-table(db, t); }
+            pin-table(db, t) => { root.pin-table(db, t); }
+            toggle-fields(db, t) => { root.toggle-fields(db, t); }
+            toggle-node(t) => { root.toggle-node(t); }
+            select-schema(s) => { root.select-schema(s); }
+            filter-tree(t) => { root.filter-tree(t); }
+            add-item() => { root.add-item(); }
+        }
     }
 
     // icon rail: compact tab icons when collapsed below the min width.
@@ -172,7 +191,7 @@ export component NavCluster inherits HorizontalLayout {
                     if root.sidebar-w + (self.mouse-x - self.pressed-x) < 150px {
                         root.set-rail(true);
                     } else {
-                        root.set-w(clamp(root.sidebar-w + (self.mouse-x - self.pressed-x), 184px, 360px));
+                        root.set-w(clamp(root.sidebar-w + (self.mouse-x - self.pressed-x), 320px, 560px));
                     }
                 }
             }

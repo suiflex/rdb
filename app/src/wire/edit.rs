@@ -16,8 +16,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         rt,
         panes,
         current,
+        driver_pool,
         cur_engine,
         query_console,
+        workspace_tabs,
+        active_tab_id,
         ..
     } = state.clone();
     let edit_buf = panes[0].edit_buf.clone();
@@ -405,11 +408,14 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let edit_buf = edit_buf.clone();
         let displayed_grid = displayed_grid.clone();
         let current = current.clone();
+        let driver_pool = driver_pool.clone();
         let rt = rt.clone();
         let commit_buf = edit_buf.clone();
         let cur_engine = cur_engine.clone();
         let query_console = query_console.clone();
         let repaint_edits = repaint_edits.clone();
+        let active_tab_id = active_tab_id.clone();
+        let workspace_tabs = workspace_tabs.clone();
         window.on_commit_edits(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -453,6 +459,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             };
             let weak2 = weak.clone();
             let current = current.clone();
+            let driver_pool = driver_pool.clone();
             let commit_buf = commit_buf.clone();
             if let Some(engine) = *cur_engine.borrow() {
                 for statement in dispatch::write_statements(engine, &ops) {
@@ -465,10 +472,15 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 w.set_status_error(false);
                 w.set_result_status(SharedString::from("saving…"));
             }
+            // The active tab's own connection, not whatever `current` is —
+            // switching focus between already-open tabs never touches `current`.
+            let tab_connection_id = focused_tab_connection_id(&active_tab_id, &workspace_tabs);
             rt.spawn(async move {
                 let driver = {
+                    let pool = driver_pool.read().await;
                     let guard = current.lock().await;
-                    guard.as_ref().map(|(_, d)| d.clone())
+                    driver_for(&pool, guard.as_ref(), tab_connection_id.as_deref())
+                        .map(|(_, d)| d.clone())
                 };
                 let outcome = match driver {
                     Some(driver) => driver.commit(&ops).await,
@@ -591,9 +603,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let weak = window.as_weak();
         let panes = panes.clone();
         let current = current.clone();
+        let driver_pool = driver_pool.clone();
         let rt = rt.clone();
         let cur_engine = cur_engine.clone();
         let query_console = query_console.clone();
+        let active_tab_id = active_tab_id.clone();
+        let workspace_tabs = workspace_tabs.clone();
         window.on_p1_commit_edits(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -640,6 +655,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             };
             let weak2 = weak.clone();
             let current = current.clone();
+            let driver_pool = driver_pool.clone();
             let commit_buf = panes[1].edit_buf.clone();
             if let Some(engine) = *cur_engine.borrow() {
                 for statement in dispatch::write_statements(engine, &ops) {
@@ -650,10 +666,14 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             let query_console = query_console.clone();
             set_p_status_error(&w, 1, false);
             set_p_result_status(&w, 1, SharedString::from("saving…"));
+            // Split panes share their tab's single connection_id.
+            let tab_connection_id = focused_tab_connection_id(&active_tab_id, &workspace_tabs);
             rt.spawn(async move {
                 let driver = {
+                    let pool = driver_pool.read().await;
                     let guard = current.lock().await;
-                    guard.as_ref().map(|(_, d)| d.clone())
+                    driver_for(&pool, guard.as_ref(), tab_connection_id.as_deref())
+                        .map(|(_, d)| d.clone())
                 };
                 let outcome = match driver {
                     Some(driver) => driver.commit(&ops).await,

@@ -388,7 +388,7 @@ mod build_conn_items_tests {
     #[test]
     fn implied_ancestor_header_renders_with_zero_direct_members() {
         let (_dir, store) = store_with_groups(&[Some("Work/Production")]);
-        let rows = build_conn_items(&store, &HashSet::new(), "");
+        let rows = build_conn_items(&store, &HashSet::new(), "", &HashSet::new());
         // Work (0 direct, 1 nested) -> Work/Production (1 direct) -> the connection.
         assert_eq!(rows.len(), 3);
         assert!(rows[0].is_header);
@@ -408,7 +408,7 @@ mod build_conn_items_tests {
     fn collapsing_a_parent_hides_the_whole_subtree() {
         let (_dir, store) = store_with_groups(&[Some("Work/Production"), Some("Work")]);
         let collapsed = HashSet::from(["Work".to_string()]);
-        let rows = build_conn_items(&store, &collapsed, "");
+        let rows = build_conn_items(&store, &collapsed, "", &HashSet::new());
         // Only the Work header itself remains visible.
         assert_eq!(rows.len(), 1);
         assert!(rows[0].is_header);
@@ -420,7 +420,7 @@ mod build_conn_items_tests {
     #[test]
     fn is_group_end_lands_on_the_deepest_last_row_of_each_top_level_group() {
         let (_dir, store) = store_with_groups(&[Some("Work/Production"), Some("LOCAL")]);
-        let rows = build_conn_items(&store, &HashSet::new(), "");
+        let rows = build_conn_items(&store, &HashSet::new(), "", &HashSet::new());
         // Work, Work/Production, conn0 (deepest last row of the Work card),
         // LOCAL, conn1 (last row of the LOCAL card).
         assert_eq!(rows.len(), 5);
@@ -453,15 +453,28 @@ fn subtree_conn_count(
 /// folders followed by its own direct connection rows. Never touches
 /// `is_group_end` — that is only meaningful at the top-level group's true
 /// last visible row, which the caller marks after the whole subtree returns.
+/// Read-only lookups threaded through `emit_group_subtree`'s recursion —
+/// bundled so the function stays under clippy's argument-count limit.
+struct GroupCtx<'a> {
+    child_folders: &'a std::collections::HashMap<Option<String>, Vec<String>>,
+    direct_conns: &'a std::collections::HashMap<String, Vec<usize>>,
+    collapsed: &'a HashSet<String>,
+    live: &'a HashSet<String>,
+}
+
 fn emit_group_subtree(
     path: &str,
     depth: i32,
     store: &rdb_connstore::ConnStore,
-    child_folders: &std::collections::HashMap<Option<String>, Vec<String>>,
-    direct_conns: &std::collections::HashMap<String, Vec<usize>>,
-    collapsed: &HashSet<String>,
+    ctx: &GroupCtx,
     rows: &mut Vec<ConnItem>,
 ) {
+    let GroupCtx {
+        child_folders,
+        direct_conns,
+        collapsed,
+        live,
+    } = *ctx;
     let expanded = !collapsed.contains(path);
     rows.push(ConnItem {
         id: SharedString::default(),
@@ -482,6 +495,7 @@ fn emit_group_subtree(
         env_tag_color: theme::accent_or_default(""),
         is_group_end: false,
         depth,
+        live: false,
     });
     if !expanded {
         // Collapsing a folder hides its whole subtree, not just its direct rows.
@@ -489,15 +503,7 @@ fn emit_group_subtree(
     }
     if let Some(children) = child_folders.get(&Some(path.to_string())) {
         for child in children {
-            emit_group_subtree(
-                child,
-                depth + 1,
-                store,
-                child_folders,
-                direct_conns,
-                collapsed,
-                rows,
-            );
+            emit_group_subtree(child, depth + 1, store, ctx, rows);
         }
     }
     if let Some(idxs) = direct_conns.get(path) {
@@ -534,6 +540,7 @@ fn emit_group_subtree(
                     .unwrap_or_else(|| theme::accent_or_default("")),
                 is_group_end: false,
                 depth,
+                live: live.contains(&s.id),
             });
         }
     }
@@ -555,6 +562,7 @@ fn build_conn_items(
     store: &rdb_connstore::ConnStore,
     collapsed: &HashSet<String>,
     filter: &str,
+    live: &HashSet<String>,
 ) -> Vec<ConnItem> {
     let needle = filter.trim().to_lowercase();
     // child_folders[None] is the top-level order; child_folders[Some(p)] is
@@ -639,19 +647,18 @@ fn build_conn_items(
                             .unwrap_or_else(|| theme::accent_or_default("")),
                         is_group_end: false,
                         depth: 0,
+                        live: live.contains(&s.id),
                     });
                 }
             }
         } else {
-            emit_group_subtree(
-                path,
-                0,
-                store,
-                &child_folders,
-                &direct_conns,
+            let ctx = GroupCtx {
+                child_folders: &child_folders,
+                direct_conns: &direct_conns,
                 collapsed,
-                &mut rows,
-            );
+                live,
+            };
+            emit_group_subtree(path, 0, store, &ctx, &mut rows);
         }
         // Whatever this top-level group's true last visible row ended up
         // being (its header if collapsed, its deepest descendant otherwise)
@@ -703,9 +710,10 @@ fn build_sidebar_model(
     store: &rdb_connstore::ConnStore,
     collapsed: &HashSet<String>,
     filter: &str,
+    live: &HashSet<String>,
 ) -> ModelRc<TopLevelGroup> {
     ModelRc::from(Rc::new(VecModel::from(group_conn_items(build_conn_items(
-        store, collapsed, filter,
+        store, collapsed, filter, live,
     )))))
 }
 
@@ -719,7 +727,8 @@ fn build_conn_palette_items(
     collapsed: &HashSet<String>,
     filter: &str,
 ) -> (Vec<PaletteItem>, Vec<i32>) {
-    let rows = build_conn_items(store, collapsed, filter);
+    // Palette items don't render liveness, so an empty set is fine here.
+    let rows = build_conn_items(store, collapsed, filter, &HashSet::new());
     let mut items: Vec<PaletteItem> = Vec::new();
     let mut map: Vec<i32> = Vec::new();
     for r in rows {
@@ -853,6 +862,7 @@ mod row_group_at_y_tests {
             env_tag_color: Default::default(),
             is_group_end: false,
             depth: 0,
+            live: false,
         }
     }
 
@@ -1553,6 +1563,33 @@ fn connection_badge_info(store: &rdb_connstore::ConnStore, connection_id: &str) 
             has_custom_color: c.color.is_some(),
         })
         .unwrap_or_default()
+}
+
+/// Point the topbar identity chrome (name, accent, env pill, sidebar
+/// selection) at `connection_id` — called when switching to a tab so the
+/// chrome always names the connection that tab's queries actually run
+/// against, not whichever was last explicitly connected. A no-op when the
+/// tab carries no `connection_id` (tabs predating multi-connection, or a
+/// disconnected scratch tab) — leaves the topbar as-is rather than guessing.
+fn sync_conn_chrome(w: &MainWindow, store: &rdb_connstore::ConnStore, connection_id: Option<&str>) {
+    let Some((idx, sc)) = connection_id.and_then(|id| {
+        store
+            .list()
+            .iter()
+            .position(|c| c.id == id)
+            .map(|idx| (idx, store.list()[idx].clone()))
+    }) else {
+        return;
+    };
+    w.set_selected_conn(idx as i32);
+    w.set_status_conn(SharedString::from(sc.name.clone()));
+    w.set_bc_conn(SharedString::from(sc.name));
+    w.global::<Theme>()
+        .set_accent(theme::accent_or_default(sc.color.as_deref().unwrap_or("")));
+    w.set_active_env_tag_label(theme::env_tag_label(sc.env_tag).into());
+    w.set_active_env_tag_color(
+        theme::env_tag_color(sc.env_tag).unwrap_or_else(|| theme::accent_or_default("")),
+    );
 }
 
 fn workspace_tab_index(tabs: &[WorkspaceTab], active_id: Option<&str>) -> Option<usize> {
@@ -4405,6 +4442,131 @@ fn read_conn_form(w: &MainWindow) -> Result<FormConn, &'static str> {
 /// removes query-vs-ping (and query-vs-query) serialization.
 type DriverSlot = Arc<tokio::sync::Mutex<Option<(rdb_connstore::Engine, Arc<AnyDriver>)>>>;
 
+/// Every connection opened this session, keyed by `connection_id`, so a
+/// query started from a tab reaches *that tab's* connection even after
+/// `current` has since moved on to another one (`current` still tracks only
+/// the actively-focused connection, for the sidebar/browse/schema flows that
+/// have no other notion of "which connection"). Entries persist for the
+/// session — bounded by how many distinct saved connections the user opens,
+/// not a leak.
+// RwLock: reads (per-dispatch lookup) run concurrent; writes (connect,
+// evict) stay exclusive but rare.
+type DriverPool =
+    Arc<tokio::sync::RwLock<HashMap<String, (rdb_connstore::Engine, Arc<AnyDriver>)>>>;
+
+/// Resolve which driver a query should run against: the pool entry for its
+/// own connection id when there is one, else `current` (covers only a tab
+/// with no `connection_id` yet). A tab that *has* a `connection_id` but it's
+/// missing from `pool` means that connection was explicitly disconnected —
+/// falling back to `current` there would silently run the query against
+/// whatever unrelated connection happens to be focused now.
+fn driver_for<'a, V>(
+    pool: &'a HashMap<String, V>,
+    current: Option<&'a V>,
+    connection_id: Option<&str>,
+) -> Option<&'a V> {
+    match connection_id {
+        Some(id) => pool.get(id),
+        None => current,
+    }
+}
+
+#[cfg(test)]
+mod driver_pool_tests {
+    use super::driver_for;
+    use std::collections::HashMap;
+
+    #[test]
+    fn picks_the_tabs_own_connection_over_current() {
+        let mut pool = HashMap::new();
+        pool.insert("conn-a".to_string(), "driver-a");
+        pool.insert("conn-b".to_string(), "driver-b");
+        let current = Some(&"driver-b");
+        // Tab belongs to conn-a even though conn-b is the one focused now.
+        assert_eq!(
+            driver_for(&pool, current, Some("conn-a")),
+            Some(&"driver-a")
+        );
+    }
+
+    #[test]
+    fn falls_back_to_current_when_tab_has_no_connection_id() {
+        let pool: HashMap<String, &str> = HashMap::new();
+        let current = Some(&"driver-b");
+        assert_eq!(driver_for(&pool, current, None), Some(&"driver-b"));
+    }
+
+    #[test]
+    fn none_when_tab_has_a_connection_id_missing_from_pool() {
+        // Explicitly disconnected: must not silently fall back to `current`.
+        let pool: HashMap<String, &str> = HashMap::new();
+        let current = Some(&"driver-b");
+        assert_eq!(driver_for(&pool, current, Some("conn-a")), None);
+    }
+
+    #[test]
+    fn none_when_nothing_matches() {
+        let pool: HashMap<String, &str> = HashMap::new();
+        assert_eq!(driver_for(&pool, None, Some("conn-a")), None);
+    }
+}
+
+/// The focused tab's own connection id — the one a query/browse/edit action
+/// started from that tab must run against, per `driver_for`. Duplicated by
+/// hand across every wiring module before this, which is how the tab-vs-
+/// `current` mismatch bugs (see `driver_for`) kept reappearing.
+fn focused_tab_connection_id(
+    active_tab_id: &std::sync::Mutex<Option<String>>,
+    workspace_tabs: &std::sync::Mutex<Vec<WorkspaceTab>>,
+) -> Option<String> {
+    let id = active_tab_id.lock().unwrap().clone()?;
+    workspace_tabs
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|t| t.id == id)
+        .and_then(|t| t.connection_id.clone())
+}
+
+/// Connection ids any open tab still references, across both split-pane
+/// groups. A pool entry whose id falls out of this set has no tab left that
+/// could query it — safe to close.
+fn live_connection_ids(tabs: &[WorkspaceTab]) -> HashSet<String> {
+    tabs.iter()
+        .filter_map(|t| t.connection_id.clone())
+        .collect()
+}
+
+#[cfg(test)]
+mod live_connection_ids_tests {
+    use super::{live_connection_ids, WorkspaceTab};
+
+    fn tab(id: &str, connection_id: Option<&str>) -> WorkspaceTab {
+        let mut t = WorkspaceTab::sql(id.into(), 0);
+        t.connection_id = connection_id.map(str::to_string);
+        t
+    }
+
+    #[test]
+    fn collects_every_distinct_connection_still_open() {
+        let tabs = vec![
+            tab("q1", Some("conn-a")),
+            tab("q2", Some("conn-b")),
+            tab("q3", Some("conn-a")),
+            tab("q4", None),
+        ];
+        let live = live_connection_ids(&tabs);
+        assert_eq!(live.len(), 2);
+        assert!(live.contains("conn-a"));
+        assert!(live.contains("conn-b"));
+    }
+
+    #[test]
+    fn no_tabs_means_nothing_live() {
+        assert!(live_connection_ids(&[]).is_empty());
+    }
+}
+
 /// Slot holding the "re-run the current browse query" closure. Set once the
 /// browse view knows what it is browsing; `None` before that.
 type BrowseTrigger = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
@@ -4427,6 +4589,7 @@ struct AppState {
     settings: Rc<RefCell<rdb_connstore::SettingsStore>>,
     history_cap: Rc<Cell<usize>>,
     current: DriverSlot,
+    driver_pool: DriverPool,
     raw_nodes: Arc<Mutex<Vec<model::VmTreeNode>>>,
     expanded_tables: Arc<Mutex<HashSet<String>>>,
     loaded_dbs: Arc<Mutex<HashSet<String>>>,
@@ -4437,6 +4600,14 @@ struct AppState {
     active_tab_id: Arc<Mutex<Option<String>>>,
     active_group1_tab_id: Arc<Mutex<Option<String>>>,
     current_connection_id: Arc<Mutex<Option<String>>>,
+    // Ids with a driver actually in `driver_pool` right now — set at connect
+    // success, cleared at disconnect. Distinct from `live_connection_ids`
+    // (which open tabs merely *reference*): a tab keeps its `connection_id`
+    // after that connection is disconnected (so reconnecting can pick it
+    // back up), so the tab-based set can't tell the sidebar dot or the
+    // "another connection is still around" check whether a connection is
+    // actually live right now.
+    connected_ids: Arc<Mutex<HashSet<String>>>,
     query_number: Arc<std::sync::atomic::AtomicUsize>,
     collapsed_categories: Rc<RefCell<HashSet<String>>>,
     sidebar_filter: Arc<Mutex<String>>,
@@ -4594,6 +4765,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // query. Drivers are `&self`, internally pooled and cheap to clone, so this
     // removes query↔ping (and query↔query) serialization.
     let current: DriverSlot = Arc::new(tokio::sync::Mutex::new(None));
+    let driver_pool: DriverPool = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
 
     // Set of group labels the user has collapsed in the sidebar.
     let collapsed: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
@@ -4670,6 +4842,8 @@ fn main() -> Result<(), slint::PlatformError> {
         Arc::new(std::sync::Mutex::new(None));
     let current_connection_id: Arc<std::sync::Mutex<Option<String>>> =
         Arc::new(std::sync::Mutex::new(None));
+    let connected_ids: Arc<std::sync::Mutex<HashSet<String>>> =
+        Arc::new(std::sync::Mutex::new(HashSet::new()));
     // One-shot database override for the next connect: the database switcher sets
     // it, then re-invokes the connect path, which consumes it (take) so a plain
     // reconnect from the picker still uses the connection's saved database.
@@ -4767,6 +4941,7 @@ fn main() -> Result<(), slint::PlatformError> {
         settings: settings.clone(),
         history_cap: history_cap.clone(),
         current: current.clone(),
+        driver_pool: driver_pool.clone(),
         raw_nodes: raw_nodes.clone(),
         expanded_tables: expanded_tables.clone(),
         loaded_dbs: loaded_dbs.clone(),
@@ -4777,6 +4952,7 @@ fn main() -> Result<(), slint::PlatformError> {
         active_tab_id: active_tab_id.clone(),
         active_group1_tab_id: active_group1_tab_id.clone(),
         current_connection_id: current_connection_id.clone(),
+        connected_ids: connected_ids.clone(),
         query_number: query_number.clone(),
         collapsed_categories: collapsed_categories.clone(),
         sidebar_filter: sidebar_filter.clone(),
@@ -4802,6 +4978,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let store = store.clone();
         let collapsed = collapsed.clone();
         let conn_filter = conn_filter.clone();
+        let connected_ids = connected_ids.clone();
         move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -4810,10 +4987,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 &store.borrow(),
                 &collapsed.borrow(),
                 &conn_filter.borrow(),
+                &connected_ids.lock().unwrap(),
             ));
         }
     };
     rebuild_sidebar();
+    window.on_refresh_connections(rebuild_sidebar.clone());
     window.set_schema_tree(ModelRc::from(Rc::new(VecModel::<TreeNode>::default())));
 
     let (sync_editor, load_editor_text) = wire::editor::wire(&window, &state);
@@ -4973,6 +5152,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let load_editor_text = load_editor_text.clone();
         let panes = panes.clone();
         let last_view = last_view.clone();
+        let store = store.clone();
+        let current_connection_id = current_connection_id.clone();
         Rc::new(move |w, abs_index| {
             let (tab, pane, group_index) = {
                 let tabs = tabs.lock().unwrap();
@@ -4985,6 +5166,17 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             if pane == 0 {
                 *active_tab_id.lock().unwrap() = Some(tab.id.clone());
+                // Topbar identity follows whichever tab is now on screen, not
+                // the last connection explicitly picked from the connect flow.
+                sync_conn_chrome(w, &store.borrow(), tab.connection_id.as_deref());
+                // `current_connection_id` is the single "what does a NEW action
+                // target" pointer (new tab, browse-from-sidebar) — it must track
+                // the focused tab too, or a plain tab switch leaves it aimed at
+                // whatever connection was last explicitly clicked, and a New
+                // Query fired right after silently lands on the wrong one.
+                if let Some(cid) = tab.connection_id.clone() {
+                    *current_connection_id.lock().unwrap() = Some(cid);
+                }
             } else {
                 *active_group1_tab_id.lock().unwrap() = Some(tab.id.clone());
             }

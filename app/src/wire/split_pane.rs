@@ -34,7 +34,13 @@ fn copied_msg(grid: &model::GridModel, r: CellRange) -> String {
 
 pub(crate) fn wire(window: &MainWindow, state: &AppState) {
     let AppState {
-        panes, rt, current, ..
+        panes,
+        rt,
+        current,
+        driver_pool,
+        active_tab_id,
+        workspace_tabs,
+        ..
     } = state.clone();
     let displayed_grid = panes[0].displayed_grid.clone();
 
@@ -161,10 +167,21 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let panes = panes.clone();
         let rt = rt.clone();
         let current = current.clone();
+        let driver_pool = driver_pool.clone();
+        let active_tab_id = active_tab_id.clone();
+        let workspace_tabs = workspace_tabs.clone();
         let cancel = move || {
             let current = current.clone();
+            let driver_pool = driver_pool.clone();
+            // The active tab's own connection, not whatever `current` is.
+            let tab_connection_id = focused_tab_connection_id(&active_tab_id, &workspace_tabs);
             rt.spawn(async move {
-                let driver = { current.lock().await.as_ref().map(|(_, d)| d.clone()) };
+                let driver = {
+                    let pool = driver_pool.read().await;
+                    let guard = current.lock().await;
+                    driver_for(&pool, guard.as_ref(), tab_connection_id.as_deref())
+                        .map(|(_, d)| d.clone())
+                };
                 if let Some(d) = driver {
                     let _ = d.cancel_running().await;
                 }

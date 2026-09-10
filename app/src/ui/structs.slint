@@ -58,6 +58,9 @@ export struct ConnItem {
     // Nesting depth of this row's group (0 = top-level). Drives left indent;
     // mirrors `TreeNode.depth`.
     depth: int,
+    // Has an open driver right now (a workspace tab is bound to it). False
+    // for headers and for connections never connected this session.
+    live: bool,
 }
 // One top-level card in the sidebar: its own header row plus every row
 // nested under it (subgroup headers, direct connections), so the sidebar

@@ -1,0 +1,112 @@
+// Standalone connections list: own card to the left of the Items/Queries/
+// History sidebar, always visible as its own section, never hidden behind
+// a tab switch.
+import { Tokens } from "tokens.slint";
+import { TopLevelGroup } from "structs.slint";
+import { FloatingCard } from "components.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export component ConnectionsPanel inherits Rectangle {
+    in property <[TopLevelGroup]> connections;
+    // Store index of the active tab's connection — same field the picker
+    // uses (`selected-conn`), so "active" always means the same row
+    // everywhere instead of drifting on a name-string comparison.
+    in property <int> selected-conn: -1;
+    callback connect-clicked(int);
+
+    background: Tokens.canvas;
+
+    card := FloatingCard {
+        x: Tokens.sp1;
+        y: Tokens.sp1;
+        width: parent.width - 2 * Tokens.sp1;
+        height: parent.height - 2 * Tokens.sp1;
+
+        VerticalLayout {
+            Rectangle {
+                height: 26px;
+                Text {
+                    x: Tokens.sp2;
+                    text: "CONNECTIONS";
+                    color: Tokens.text-faint;
+                    font-size: Tokens.font-xs;
+                    font-weight: Tokens.weight-emphasis;
+                    vertical-alignment: center;
+                }
+            }
+            list := ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    width: list.visible-width;
+                    padding-left: Tokens.sp2;
+                    padding-right: Tokens.sp2;
+                    padding-bottom: Tokens.sp1;
+                    spacing: 2px;
+                    for group in root.connections: VerticalLayout {
+                        for item in group.rows: Rectangle {
+                            property <bool> active: !item.is-header && item.index == root.selected-conn;
+                            height: 26px;
+                            border-radius: Tokens.radius;
+                            background: item.is-header ? transparent
+                                : active ? Tokens.accent-tint
+                                : (ta.has-hover ? Tokens.border : transparent);
+                            ta := TouchArea {
+                                enabled: !item.is-header;
+                                clicked => { root.connect-clicked(item.index); }
+                            }
+                            HorizontalLayout {
+                                padding-left: Tokens.sp2 + item.depth * Tokens.sp3;
+                                padding-right: Tokens.sp2;
+                                spacing: Tokens.sp2;
+                                if item.is-header: Text {
+                                    text: item.name;
+                                    color: Tokens.text-faint;
+                                    font-size: Tokens.font-xs;
+                                    font-weight: Tokens.weight-emphasis;
+                                    vertical-alignment: center;
+                                }
+                                if !item.is-header: Rectangle {
+                                    width: 8px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 8px;
+                                            height: 8px;
+                                            border-radius: 4px;
+                                            background: item.has-custom-color ? item.color : Tokens.db-color(item.engine);
+                                        }
+                                    }
+                                }
+                                if !item.is-header: Text {
+                                    horizontal-stretch: 1;
+                                    text: item.name;
+                                    color: active ? Tokens.on-tint : Tokens.text;
+                                    font-size: Tokens.font-sm;
+                                    font-weight: active ? Tokens.weight-emphasis : 400;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                                // Live/offline dot, always drawn (not just when
+                                // live) — with two connections open, disconnecting
+                                // one must show which is which, not just silently
+                                // vanish from a shared "connected" state.
+                                if !item.is-header: Rectangle {
+                                    width: 6px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 6px;
+                                            height: 6px;
+                                            border-radius: 3px;
+                                            background: item.live ? Tokens.ok : Tokens.error;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -18,6 +18,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         settings,
         panes,
         current,
+        driver_pool,
         cur_engine,
         collapsed,
         conn_filter,
@@ -29,6 +30,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         active_tab_id,
         active_group1_tab_id,
         current_connection_id,
+        connected_ids,
         query_number,
         conn_modal_map,
         ..
@@ -616,6 +618,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let conn_filter = conn_filter.clone();
         let settings = settings.clone();
         let conn_modal_map = conn_modal_map.clone();
+        let connected_ids = connected_ids.clone();
         window.on_toggle_group(move |g| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -637,6 +640,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 &store.borrow(),
                 &collapsed.borrow(),
                 &conn_filter.borrow(),
+                &connected_ids.lock().unwrap(),
             ));
             // Keep the ⌘O modal in sync too, whichever surface triggered this.
             if w.get_conn_modal_open() {
@@ -659,6 +663,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let collapsed = collapsed.clone();
         let conn_filter = conn_filter.clone();
         let settings = settings.clone();
+        let connected_ids = connected_ids.clone();
         window.on_group_delete(move |g| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -693,6 +698,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 &store.borrow(),
                 &collapsed.borrow(),
                 &conn_filter.borrow(),
+                &connected_ids.lock().unwrap(),
             ));
         });
     }
@@ -705,6 +711,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let collapsed = collapsed.clone();
         let conn_filter = conn_filter.clone();
         let settings = settings.clone();
+        let connected_ids = connected_ids.clone();
         window.on_group_rename(move |old, new| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -760,6 +767,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 &store.borrow(),
                 &collapsed.borrow(),
                 &conn_filter.borrow(),
+                &connected_ids.lock().unwrap(),
             ));
         });
     }
@@ -770,6 +778,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let store = store.clone();
         let collapsed = collapsed.clone();
         let conn_filter = conn_filter.clone();
+        let connected_ids = connected_ids.clone();
         window.on_conn_filter(move |t| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -779,6 +788,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 &store.borrow(),
                 &collapsed.borrow(),
                 &conn_filter.borrow(),
+                &connected_ids.lock().unwrap(),
             ));
         });
     }
@@ -789,6 +799,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let store = store.clone();
         let collapsed = collapsed.clone();
         let conn_filter = conn_filter.clone();
+        let connected_ids = connected_ids.clone();
         window.on_toggle_favorite(move |idx| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -806,6 +817,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 &store.borrow(),
                 &collapsed.borrow(),
                 &conn_filter.borrow(),
+                &connected_ids.lock().unwrap(),
             ));
         });
     }
@@ -816,6 +828,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let store = store.clone();
         let collapsed = collapsed.clone();
         let conn_filter = conn_filter.clone();
+        let connected_ids = connected_ids.clone();
         window.on_reorder_conn(move |from_idx, delta, drop_y| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -830,8 +843,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
 
             // Cross-group drop: the release point landed on a different
             // group's header or row than the dragged connection's own group.
-            let rendered =
-                build_conn_items(&store.borrow(), &collapsed.borrow(), &conn_filter.borrow());
+            let rendered = build_conn_items(
+                &store.borrow(),
+                &collapsed.borrow(),
+                &conn_filter.borrow(),
+                &connected_ids.lock().unwrap(),
+            );
             if let Some(target_group) = row_group_at_y(&rendered, drop_y) {
                 let from_id = {
                     let s = store.borrow();
@@ -858,6 +875,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                         &store.borrow(),
                         &collapsed.borrow(),
                         &conn_filter.borrow(),
+                        &connected_ids.lock().unwrap(),
                     ));
                     return;
                 }
@@ -898,6 +916,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 &store.borrow(),
                 &collapsed.borrow(),
                 &conn_filter.borrow(),
+                &connected_ids.lock().unwrap(),
             ));
         });
     }
@@ -916,10 +935,22 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let active_tab_id = active_tab_id.clone();
         let current_connection_id = current_connection_id.clone();
         let panes = panes.clone();
+        let driver_pool = driver_pool.clone();
+        let store = store.clone();
+        let collapsed = collapsed.clone();
+        let conn_filter = conn_filter.clone();
+        let connected_ids = connected_ids.clone();
         window.on_disconnect(move || {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            // Which connection this actually drops — the one currently
+            // browsed. Two connections can be live at once; this must never
+            // be confused with "disconnect everything".
+            let disconnecting_id = current_connection_id.lock().unwrap().clone();
+            if let Some(id) = &disconnecting_id {
+                connected_ids.lock().unwrap().remove(id);
+            }
             // Stop any in-flight query first: disconnecting must not leave a query
             // running on the server. Dropping the driver is not enough on its own
             // — the server only reaps the statement once it notices the socket is
@@ -944,7 +975,16 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 set_p_query_running(&w, p, false);
                 set_p_streaming(&w, p, false);
             }
-            w.set_connected(false);
+            // Drop this connection's entry from the multi-connection pool
+            // too, not just the legacy single-slot `current` below —
+            // otherwise a "disconnected" connection can keep quietly
+            // serving whatever tab is still bound to it.
+            if let Some(id) = disconnecting_id.clone() {
+                let driver_pool = driver_pool.clone();
+                rt.spawn(async move {
+                    driver_pool.write().await.remove(&id);
+                });
+            }
             w.set_selected_conn(-1);
             w.set_active_table(SharedString::default());
             w.set_status_conn(SharedString::from("no connection"));
@@ -980,10 +1020,56 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             loaded_dbs.lock().unwrap().clear();
             *collapsed_categories.borrow_mut() = default_collapsed_cats();
             raw_nodes.lock().unwrap().clear();
-            let current = current.clone();
-            rt.spawn(async move {
-                *current.lock().await = None;
-            });
+            {
+                let current = current.clone();
+                rt.spawn(async move {
+                    *current.lock().await = None;
+                });
+            }
+            // Only fall back to the landing picker when no other connection
+            // is actually still connected — with two connections open,
+            // disconnecting one must not blow away the other's workspace.
+            // `connected_ids` (not tab scoping — a tab keeps its
+            // `connection_id` after its connection drops) already had
+            // `disconnecting_id` removed above, so any entry left here is a
+            // genuinely different, still-live connection.
+            let other_live = !connected_ids.lock().unwrap().is_empty();
+            w.set_connections(build_sidebar_model(
+                &store.borrow(),
+                &collapsed.borrow(),
+                &conn_filter.borrow(),
+                &connected_ids.lock().unwrap(),
+            ));
+            if other_live {
+                // Resync chrome to whatever tab stayed focused, so the
+                // topbar reflects a connection that's actually still there
+                // instead of the one just dropped.
+                let cid = active_tab_id.lock().unwrap().clone().and_then(|id| {
+                    workspace_tabs
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .find(|t| t.id == id)
+                        .and_then(|t| t.connection_id.clone())
+                });
+                sync_conn_chrome(&w, &store.borrow(), cid.as_deref());
+                if let Some(cid) = cid {
+                    *current_connection_id.lock().unwrap() = Some(cid.clone());
+                    // `current` was cleared above along with the dropped
+                    // connection; repopulate it from the pool entry the
+                    // surviving connection still owns, or the health poll
+                    // (which only ever pings `current`) is stuck reading
+                    // None forever and the breadcrumb dot freezes.
+                    let current = current.clone();
+                    let driver_pool = driver_pool.clone();
+                    rt.spawn(async move {
+                        let entry = driver_pool.read().await.get(&cid).cloned();
+                        *current.lock().await = entry;
+                    });
+                }
+            } else {
+                w.set_connected(false);
+            }
         });
     }
 
