@@ -65,6 +65,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             };
             save_active_tab(&w);
             let number = query_number.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            // `current_connection_id` tracks both an explicit connect-click
+            // and a plain tab-switch (restore_tab_for_pane keeps it aimed at
+            // whichever tab is on screen), so it's always "what a new action
+            // should target" — no need to separately inspect the focused
+            // tab's own connection_id here.
             let connection = current_connection_id
                 .lock()
                 .unwrap()

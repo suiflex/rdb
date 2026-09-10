@@ -18,6 +18,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         store,
         panes,
         current,
+        driver_pool,
         cur_engine,
         collapsed,
         raw_nodes,
@@ -29,6 +30,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         active_tab_id,
         active_group1_tab_id,
         current_connection_id,
+        connected_ids,
         db_override,
         query_console,
         query_number,
@@ -58,9 +60,51 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
     {
         let weak = window.as_weak();
         let current = current.clone();
+        let driver_pool = driver_pool.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let current_connection_id = current_connection_id.clone();
+        let connected_ids = connected_ids.clone();
         rt.spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                // Close every pooled connection no open tab references anymore
+                // (plus whichever one is actively focused, even between its
+                // last tab closing and a new one opening). Piggybacked on this
+                // existing tick rather than a second timer — up to 10s of a
+                // closed tab's connection lingering is a fine trade for one
+                // fewer moving part.
+                let evicted: Vec<String> = {
+                    let mut live = live_connection_ids(&workspace_tabs.lock().unwrap());
+                    if let Some(id) = current_connection_id.lock().unwrap().clone() {
+                        live.insert(id);
+                    }
+                    let mut pool = driver_pool.write().await;
+                    let evicted: Vec<String> = pool
+                        .keys()
+                        .filter(|id| !live.contains(*id))
+                        .cloned()
+                        .collect();
+                    pool.retain(|id, _| live.contains(id));
+                    evicted
+                };
+                if !evicted.is_empty() {
+                    // A connection can go from "connected" to evicted without
+                    // ever going through the explicit disconnect handler
+                    // (every tab that named it just got closed) — keep the
+                    // sidebar dot's source of truth in step here too.
+                    {
+                        let mut ids = connected_ids.lock().unwrap();
+                        for id in &evicted {
+                            ids.remove(id);
+                        }
+                    }
+                    let weak = weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = weak.upgrade() {
+                            w.invoke_refresh_connections();
+                        }
+                    });
+                }
                 // None = no driver (picker); Some(ok) = pinged a live connection.
                 // Clone the driver out of the mutex before pinging so a slow ping
                 // never blocks an in-flight query.
@@ -132,6 +176,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let store = store.clone();
         let completion_nodes = completion_nodes.clone();
         let current = current.clone();
+        let driver_pool = driver_pool.clone();
         let raw_nodes = raw_nodes.clone();
         let expanded_tables = expanded_tables.clone();
         let loaded_dbs = loaded_dbs.clone();
@@ -210,6 +255,13 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 for t in &mut kept {
                     t.loading = false;
                 }
+                // Picking a connection changes what NEW actions target (new
+                // tab, browse-from-sidebar) — it must never rewrite a tab
+                // that's already open. Each tab is permanently locked to
+                // the connection it was created against (routed by its own
+                // `connection_id` through `driver_pool`); reassigning the
+                // focused one here is what made switching connections look
+                // like it dragged the open query tab along with it.
                 let active = active_tab_id
                     .lock()
                     .unwrap()
@@ -340,6 +392,15 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     }
                 }
                 w.set_active_pane(init_active_group as i32);
+                // restore_tab() above re-syncs chrome (and the "what does a
+                // new action target" pointer) to the *repainted tab's own*
+                // connection as a side effect of repainting its pane. When
+                // the kept-active tab belongs to a different connection than
+                // the one just picked here, that side effect quietly drags
+                // the topbar back — reapply the picked connection last so it
+                // always wins.
+                sync_conn_chrome(&w, &store.borrow(), Some(&sc.id));
+                *current_connection_id.lock().unwrap() = Some(sc.id.clone());
             }
             // Fresh connection: nothing browsed, nothing expanded.
             *cur_engine.borrow_mut() = Some(sc.engine);
@@ -358,6 +419,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             // tasks await this lock and resolve once the connect lands.
             let claimed = current.clone().try_lock_owned().ok();
             let engine = sc.engine;
+            let connection_id = sc.id.clone();
+            let driver_pool = driver_pool.clone();
+            let connected_ids = connected_ids.clone();
             let raw_nodes = raw_nodes.clone();
             let completion_nodes = completion_nodes.clone();
             let fn_defs = fn_defs.clone();
@@ -442,6 +506,15 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                         let driver = Arc::new(driver);
                         *slot = Some((engine, driver.clone()));
                         drop(slot);
+                        driver_pool
+                            .write()
+                            .await
+                            .insert(connection_id.clone(), (engine, driver.clone()));
+                        // Now genuinely connected — the sidebar dot and
+                        // "another connection is still around" checks read
+                        // this, not tab scoping (see `connected_ids` on
+                        // `AppState`).
+                        connected_ids.lock().unwrap().insert(connection_id.clone());
                         let nodes = model::to_tree_model(&schema);
                         let fields = model::to_structure_model(&schema);
                         // Scoped Mongo tree holds only the selected database: open
@@ -572,6 +645,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                                 w.set_tree_loading(false);
                                 // Swap the picker for the workspace.
                                 w.set_connected(true);
+                                // Sidebar dot now shows this connection live,
+                                // even before any tab has run a query against it.
+                                w.invoke_refresh_connections();
                             }
                         });
                         // Load every other schema's tables so cross-schema

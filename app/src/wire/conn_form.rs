@@ -48,6 +48,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         collapsed,
         conn_filter,
         editing_id,
+        connected_ids,
         ..
     } = state.clone();
 
@@ -505,12 +506,14 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             let store = store.clone();
             let collapsed = collapsed.clone();
             let conn_filter = conn_filter.clone();
+            let connected_ids = connected_ids.clone();
             move || {
                 if let Some(w) = weak.upgrade() {
                     w.set_connections(build_sidebar_model(
                         &store.borrow(),
                         &collapsed.borrow(),
                         &conn_filter.borrow(),
+                        &connected_ids.lock().unwrap(),
                     ));
                 }
             }
@@ -632,6 +635,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let editing_id = editing_id.clone();
         let collapsed = collapsed.clone();
         let conn_filter = conn_filter.clone();
+        let connected_ids = connected_ids.clone();
         window.on_form_delete_confirmed(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -653,6 +657,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 &store.borrow(),
                 &collapsed.borrow(),
                 &conn_filter.borrow(),
+                &connected_ids.lock().unwrap(),
             ));
         });
     }

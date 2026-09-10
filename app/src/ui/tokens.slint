@@ -108,7 +108,10 @@ export global Tokens {
     out property <length> titlebar-h: 44px + zoom-delta;
     out property <length> doc-tab-row-h: 35px + zoom-delta;
     out property <length> doc-tab-h: 30px + zoom-delta;
-    out property <length> sidebar-w: 218px;
+    // Shared by the connections rail (fixed 132px) + the Items/Queries/
+    // History card beside it — wide enough that neither is squished on
+    // first launch, before the user ever drags the splitter.
+    out property <length> sidebar-w: 400px;
     out property <length> grid-row-h: 24px + zoom-delta;
     out property <length> grid-header-h: 27px + zoom-delta;
     out property <length> status-bar-h: 34px + zoom-delta;

@@ -20,6 +20,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
         store,
         panes,
         current,
+        driver_pool,
         workspace_tabs,
         active_tab_id,
         active_group1_tab_id,
@@ -37,6 +38,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
         let weak = window.as_weak();
         let rt = rt.clone();
         let current = current.clone();
+        let driver_pool = driver_pool.clone();
         let current_connection_id = current_connection_id.clone();
         let store = store.clone();
         let last_view = last_view.clone();
@@ -76,6 +78,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             let Some(target_id) = active_id.lock().unwrap().clone() else {
                 return;
             };
+            let mut tab_connection_id = None;
             if let Some(tab) = workspace_tabs
                 .lock()
                 .unwrap()
@@ -84,9 +87,22 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             {
                 tab.loading = true;
                 tab.query_text = sql.clone();
+                tab_connection_id = tab.connection_id.clone();
+                // First run on a scratch tab (opened before any connection was
+                // tracked, or restored from disk without one) locks it to
+                // whatever it runs against now — otherwise it keeps following
+                // `current_connection_id` around on every later click, and
+                // never counts as "live" for a given connection (disconnect's
+                // other-still-live check, the sidebar dot) since nothing ever
+                // points at it.
+                if tab_connection_id.is_none() {
+                    tab_connection_id = current_connection_id.lock().unwrap().clone();
+                    tab.connection_id = tab_connection_id.clone();
+                }
             }
             let weak2 = weak.clone();
             let current = current.clone();
+            let driver_pool = driver_pool.clone();
             let last_view = last_view.clone();
             let browse = browse.clone();
             let edit_buf = edit_buf.clone();
@@ -115,10 +131,8 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                 // hid it. The console still updates in place when it is open.
                 cur_db = w.get_schema_name().to_string();
             }
-            // Snapshot which connection is running THIS query — not read back
-            // later from `current_connection_id`, since the user can switch the
-            // active connection while the query is in flight.
-            let query_connection_id = current_connection_id.lock().unwrap().clone();
+            let query_connection_id =
+                tab_connection_id.or_else(|| current_connection_id.lock().unwrap().clone());
             let query_badge = query_connection_id
                 .as_deref()
                 .map(|cid| connection_badge_info(&store.borrow(), cid))
@@ -126,8 +140,10 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             let started = std::time::Instant::now();
             let jh = rt.spawn(async move {
                 let picked = {
+                    let pool = driver_pool.read().await;
                     let guard = current.lock().await;
-                    guard.as_ref().map(|(e, d)| (*e, d.clone()))
+                    driver_for(&pool, guard.as_ref(), query_connection_id.as_deref())
+                        .map(|(e, d)| (*e, d.clone()))
                 };
                 let queue_ms = started.elapsed().as_millis() as u64;
                 let driver_started = std::time::Instant::now();
@@ -528,6 +544,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
         let weak = window.as_weak();
         let rt = rt.clone();
         let current = current.clone();
+        let driver_pool = driver_pool.clone();
         let current_connection_id = current_connection_id.clone();
         let store = store.clone();
         let query_console = query_console.clone();
@@ -581,6 +598,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             // Log the RAW sql (clean `SELECT * FROM t`, no injected LIMIT).
             append_query_console(&query_console, sql.clone());
             sync_query_console(&w, &query_console);
+            let mut tab_connection_id = None;
             if let Some(tab) = workspace_tabs
                 .lock()
                 .unwrap()
@@ -589,6 +607,12 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             {
                 tab.loading = true;
                 tab.query_text = sql.clone();
+                tab_connection_id = tab.connection_id.clone();
+                // Same first-run lock as run_sql: see the comment there.
+                if tab_connection_id.is_none() {
+                    tab_connection_id = current_connection_id.lock().unwrap().clone();
+                    tab.connection_id = tab_connection_id.clone();
+                }
             }
             set_p_query_running(&w, pane, true);
             set_p_streaming(&w, pane, true);
@@ -597,9 +621,10 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             set_p_result_status(&w, pane, SharedString::from("streaming…"));
             set_p_results_meta(&w, pane, SharedString::default());
 
-            // Snapshot which connection is running THIS stream, same reasoning
-            // as run_sql: the active connection can change before it finishes.
-            let query_connection_id = current_connection_id.lock().unwrap().clone();
+            // The tab's own connection, same reasoning as run_sql: the active
+            // connection can change before this stream finishes.
+            let query_connection_id =
+                tab_connection_id.or_else(|| current_connection_id.lock().unwrap().clone());
             let query_badge = query_connection_id
                 .as_deref()
                 .map(|cid| connection_badge_info(&store.borrow(), cid))
@@ -862,11 +887,19 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             let sql_for_pk = sql.clone();
             let q = rdb_core::query::Query::Sql(sql);
             let current = current.clone();
+            let driver_pool = driver_pool.clone();
+            let query_connection_id_for_pick = query_connection_id.clone();
             rt.spawn(async move {
                 let t0 = std::time::Instant::now();
                 let picked = {
+                    let pool = driver_pool.read().await;
                     let guard = current.lock().await;
-                    guard.as_ref().map(|(e, d)| (*e, d.clone()))
+                    driver_for(
+                        &pool,
+                        guard.as_ref(),
+                        query_connection_id_for_pick.as_deref(),
+                    )
+                    .map(|(e, d)| (*e, d.clone()))
                 };
                 let driver = picked.as_ref().map(|(_, d)| d.clone());
                 let (ctx, mut crx) = tokio::sync::mpsc::channel::<rdb_core::result::StreamItem>(4);

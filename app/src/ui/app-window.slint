@@ -36,7 +36,10 @@ export component MainWindow inherits Window {
     icon: @image-url("../../assets/icon.png");
     preferred-width: 1240px;
     preferred-height: 780px;
-    min-width: 760px;
+    // Toolbar row (breadcrumb + search pill + aux icon cluster) needs ~950px
+    // of fixed-width content when connected; below that the icon cluster on
+    // the right gets pushed past the window edge instead of shrinking.
+    min-width: 980px;
     min-height: 500px;
     background: Tokens.chrome;
     default-font-size: 13px;
@@ -280,6 +283,13 @@ callback create-table-commit();
     in property <string> conn-status: "connecting";
     callback disconnect();
     callback conn-filter(string);
+    // Re-render the connections sidebar (live dots etc.) from Rust state.
+    // Needed as a callback, not a plain fn call, because the connect flow's
+    // success/failure is only known from an async task off the UI thread —
+    // invoke_from_event_loop's closure must be Send, so it can't touch the
+    // Rc-based connection store directly; invoking this callback bounces
+    // back into a plain sync handler that can.
+    callback refresh-connections();
 
     // ----- work area models -----
     in-out property <string> query-text;
@@ -1271,6 +1281,9 @@ callback create-table-commit();
                     sidebar-w: root.sidebar-w;
                     schema-list: root.schema-list;
                     schema-name: root.schema-name;
+                    connections: root.connections;
+                    selected-conn: root.selected-conn;
+                    connect-clicked(i) => { root.connect-clicked(i); }
                     set-rail(v) => { root.sidebar-rail = v; }
                     set-visible(v) => { root.sidebar-visible = v; }
                     set-w(v) => { root.sidebar-w = v; }
@@ -1389,6 +1402,16 @@ callback create-table-commit();
                                     padding-left: Tokens.sp3;
                                     padding-right: Tokens.sp1;
                                     spacing: Tokens.sp2;
+                                    // connection color dot
+                                    if tab.engine != "": VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 6px;
+                                            height: 6px;
+                                            border-radius: 3px;
+                                            background: tab.has-custom-color ? tab.color : Tokens.db-color(tab.engine);
+                                        }
+                                    }
                                     if tab.kind == "table": VerticalLayout {
                                         alignment: center;
                                         Rectangle {
@@ -1596,6 +1619,16 @@ callback create-table-commit();
                                 p1-tab-content := HorizontalLayout {
                                     padding-left: Tokens.sp3;
                                     padding-right: Tokens.sp2;
+                                    spacing: Tokens.sp2;
+                                    if tab.engine != "": VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 6px;
+                                            height: 6px;
+                                            border-radius: 3px;
+                                            background: tab.has-custom-color ? tab.color : Tokens.db-color(tab.engine);
+                                        }
+                                    }
                                     Text {
                                         vertical-alignment: center;
                                         text: tab.kind == "sql" ? ">_" : tab.kind == "function" ? "ƒ" : "▦";
@@ -2158,6 +2191,9 @@ callback create-table-commit();
                     sidebar-w: root.sidebar-w;
                     schema-list: root.schema-list;
                     schema-name: root.schema-name;
+                    connections: root.connections;
+                    selected-conn: root.selected-conn;
+                    connect-clicked(i) => { root.connect-clicked(i); }
                     set-rail(v) => { root.sidebar-rail = v; }
                     set-visible(v) => { root.sidebar-visible = v; }
                     set-w(v) => { root.sidebar-w = v; }

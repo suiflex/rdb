@@ -18,6 +18,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         store,
         panes,
         current,
+        driver_pool,
         cur_engine,
         raw_nodes,
         expanded_tables,
@@ -107,6 +108,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let cur_engine = cur_engine.clone();
         let browse = browse.clone();
         let current = current.clone();
+        let driver_pool = driver_pool.clone();
         let rt = rt.clone();
         let run_browse = run_browse.clone();
         let edit_buf = edit_buf.clone();
@@ -229,15 +231,19 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             // Fetch total + primary key off-thread; footer updates when done.
             let weak2 = weak.clone();
             let current = current.clone();
+            let driver_pool = driver_pool.clone();
             let browse = browse.clone();
             let edit_buf = edit_buf.clone();
             let workspace_tabs = workspace_tabs.clone();
             let active_tab_id = active_tab_id.clone();
             let query_console = query_console.clone();
+            let table_connection_id = (!connection_id.is_empty()).then(|| connection_id.clone());
             rt.spawn(async move {
                 let picked = {
+                    let pool = driver_pool.read().await;
                     let guard = current.lock().await;
-                    guard.as_ref().map(|(e, d)| (*e, d.clone()))
+                    driver_for(&pool, guard.as_ref(), table_connection_id.as_deref())
+                        .map(|(e, d)| (*e, d.clone()))
                 };
                 let Some((engine, driver)) = picked.as_ref() else {
                     return;
@@ -358,9 +364,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let weak = window.as_weak();
         let browse = browse.clone();
         let current = current.clone();
+        let driver_pool = driver_pool.clone();
         let rt = rt.clone();
         let run_browse = run_browse.clone();
         let guard_pending = guard_pending.clone();
+        let active_tab_id = active_tab_id.clone();
+        let workspace_tabs = workspace_tabs.clone();
         window.on_refresh_page(move || {
             if weak.upgrade().is_some_and(|w| guard_pending(&w)) {
                 return;
@@ -371,11 +380,17 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             let Some(table) = table else { return };
             let weak2 = weak.clone();
             let current = current.clone();
+            let driver_pool = driver_pool.clone();
             let browse = browse.clone();
+            // The focused tab's own connection, not whatever `current` is —
+            // switching focus between already-open tabs never touches `current`.
+            let tab_connection_id = focused_tab_connection_id(&active_tab_id, &workspace_tabs);
             rt.spawn(async move {
                 let driver = {
+                    let pool = driver_pool.read().await;
                     let guard = current.lock().await;
-                    guard.as_ref().map(|(_, d)| d.clone())
+                    driver_for(&pool, guard.as_ref(), tab_connection_id.as_deref())
+                        .map(|(_, d)| d.clone())
                 };
                 let Some(driver) = driver else {
                     return;
