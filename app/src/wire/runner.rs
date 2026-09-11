@@ -139,12 +139,8 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                 .unwrap_or_default();
             let started = std::time::Instant::now();
             let jh = rt.spawn(async move {
-                let picked = {
-                    let pool = driver_pool.read().await;
-                    let guard = current.lock().await;
-                    driver_for(&pool, guard.as_ref(), query_connection_id.as_deref())
-                        .map(|(e, d)| (*e, d.clone()))
-                };
+                let picked =
+                    resolve_driver(&driver_pool, &current, query_connection_id.as_deref()).await;
                 let queue_ms = started.elapsed().as_millis() as u64;
                 let driver_started = std::time::Instant::now();
                 // Multi-statement: SQL engines split on top-level `;` and run
@@ -891,16 +887,12 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             let query_connection_id_for_pick = query_connection_id.clone();
             rt.spawn(async move {
                 let t0 = std::time::Instant::now();
-                let picked = {
-                    let pool = driver_pool.read().await;
-                    let guard = current.lock().await;
-                    driver_for(
-                        &pool,
-                        guard.as_ref(),
-                        query_connection_id_for_pick.as_deref(),
-                    )
-                    .map(|(e, d)| (*e, d.clone()))
-                };
+                let picked = resolve_driver(
+                    &driver_pool,
+                    &current,
+                    query_connection_id_for_pick.as_deref(),
+                )
+                .await;
                 let driver = picked.as_ref().map(|(_, d)| d.clone());
                 let (ctx, mut crx) = tokio::sync::mpsc::channel::<rdb_core::result::StreamItem>(4);
                 let cancel_prod = cancel.clone();

@@ -951,17 +951,28 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             if let Some(id) = &disconnecting_id {
                 connected_ids.lock().unwrap().remove(id);
             }
-            // Stop any in-flight query first: disconnecting must not leave a query
-            // running on the server. Dropping the driver is not enough on its own
-            // — the server only reaps the statement once it notices the socket is
-            // gone, which is exactly the lag that kept load high after a
-            // disconnect — so ask it to cancel before tearing the connection down.
+            // Cancel the in-flight query before tearing the connection down,
+            // so the server drops it instead of running it to completion.
+            // Resolved by `disconnecting_id`, not the legacy `current` slot —
+            // with two connections open they can point at different ones.
             {
                 let current = current.clone();
+                let driver_pool = driver_pool.clone();
+                let disconnecting_id = disconnecting_id.clone();
                 rt.spawn(async move {
-                    let driver = { current.lock().await.as_ref().map(|(_, d)| d.clone()) };
-                    if let Some(d) = driver {
-                        let _ = d.cancel_running().await;
+                    let driver =
+                        resolve_driver(&driver_pool, &current, disconnecting_id.as_deref())
+                            .await
+                            .map(|(_, d)| d);
+                    let Some(driver) = driver else { return };
+                    let _ = driver.cancel_running().await;
+                    // Drop the pool entry too, not just `current` — but only
+                    // if a fast reconnect hasn't already replaced it.
+                    if let Some(id) = disconnecting_id {
+                        let mut pool = driver_pool.write().await;
+                        if still_the_disconnected_driver(&pool, &id, &driver) {
+                            pool.remove(&id);
+                        }
                     }
                 });
             }
@@ -974,16 +985,6 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 }
                 set_p_query_running(&w, p, false);
                 set_p_streaming(&w, p, false);
-            }
-            // Drop this connection's entry from the multi-connection pool
-            // too, not just the legacy single-slot `current` below —
-            // otherwise a "disconnected" connection can keep quietly
-            // serving whatever tab is still bound to it.
-            if let Some(id) = disconnecting_id.clone() {
-                let driver_pool = driver_pool.clone();
-                rt.spawn(async move {
-                    driver_pool.write().await.remove(&id);
-                });
             }
             w.set_selected_conn(-1);
             w.set_active_table(SharedString::default());

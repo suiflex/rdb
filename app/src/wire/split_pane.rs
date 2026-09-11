@@ -176,12 +176,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             // The active tab's own connection, not whatever `current` is.
             let tab_connection_id = focused_tab_connection_id(&active_tab_id, &workspace_tabs);
             rt.spawn(async move {
-                let driver = {
-                    let pool = driver_pool.read().await;
-                    let guard = current.lock().await;
-                    driver_for(&pool, guard.as_ref(), tab_connection_id.as_deref())
-                        .map(|(_, d)| d.clone())
-                };
+                let driver = resolve_driver(&driver_pool, &current, tab_connection_id.as_deref())
+                    .await
+                    .map(|(_, d)| d);
                 if let Some(d) = driver {
                     let _ = d.cancel_running().await;
                 }

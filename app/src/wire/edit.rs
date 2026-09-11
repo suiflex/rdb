@@ -476,12 +476,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             // switching focus between already-open tabs never touches `current`.
             let tab_connection_id = focused_tab_connection_id(&active_tab_id, &workspace_tabs);
             rt.spawn(async move {
-                let driver = {
-                    let pool = driver_pool.read().await;
-                    let guard = current.lock().await;
-                    driver_for(&pool, guard.as_ref(), tab_connection_id.as_deref())
-                        .map(|(_, d)| d.clone())
-                };
+                let driver = resolve_driver(&driver_pool, &current, tab_connection_id.as_deref())
+                    .await
+                    .map(|(_, d)| d);
                 let outcome = match driver {
                     Some(driver) => driver.commit(&ops).await,
                     None => Err(rdb_core::error::RdbError::Connection(
@@ -669,12 +666,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             // Split panes share their tab's single connection_id.
             let tab_connection_id = focused_tab_connection_id(&active_tab_id, &workspace_tabs);
             rt.spawn(async move {
-                let driver = {
-                    let pool = driver_pool.read().await;
-                    let guard = current.lock().await;
-                    driver_for(&pool, guard.as_ref(), tab_connection_id.as_deref())
-                        .map(|(_, d)| d.clone())
-                };
+                let driver = resolve_driver(&driver_pool, &current, tab_connection_id.as_deref())
+                    .await
+                    .map(|(_, d)| d);
                 let outcome = match driver {
                     Some(driver) => driver.commit(&ops).await,
                     None => Err(rdb_core::error::RdbError::Connection(

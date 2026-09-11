@@ -239,12 +239,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             let query_console = query_console.clone();
             let table_connection_id = (!connection_id.is_empty()).then(|| connection_id.clone());
             rt.spawn(async move {
-                let picked = {
-                    let pool = driver_pool.read().await;
-                    let guard = current.lock().await;
-                    driver_for(&pool, guard.as_ref(), table_connection_id.as_deref())
-                        .map(|(e, d)| (*e, d.clone()))
-                };
+                let picked =
+                    resolve_driver(&driver_pool, &current, table_connection_id.as_deref()).await;
                 let Some((engine, driver)) = picked.as_ref() else {
                     return;
                 };
@@ -386,12 +382,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             // switching focus between already-open tabs never touches `current`.
             let tab_connection_id = focused_tab_connection_id(&active_tab_id, &workspace_tabs);
             rt.spawn(async move {
-                let driver = {
-                    let pool = driver_pool.read().await;
-                    let guard = current.lock().await;
-                    driver_for(&pool, guard.as_ref(), tab_connection_id.as_deref())
-                        .map(|(_, d)| d.clone())
-                };
+                let driver = resolve_driver(&driver_pool, &current, tab_connection_id.as_deref())
+                    .await
+                    .map(|(_, d)| d);
                 let Some(driver) = driver else {
                     return;
                 };
