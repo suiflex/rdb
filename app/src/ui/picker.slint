@@ -4,7 +4,7 @@
 import { Tokens } from "tokens.slint";
 import {
     DbBadge, OutlineChip, PrimaryButton, SecondaryButton, TextButton,
-    TagChip, FilterField, Tooltip, FloatingCard, DangerButton
+    TagChip, FilterField, Tooltip, FloatingCard, DangerButton, IconButton
 } from "components.slint";
 import { AppIcon } from "icons.slint";
 import { ConnItem, KvRow, TopLevelGroup } from "structs.slint";
@@ -259,24 +259,17 @@ export component ConnPicker inherits Rectangle {
                     padding-bottom: Tokens.sp3;
                     spacing: Tokens.sp3;
                     FilterField {
-                        height: 30px;
                         horizontal-stretch: 1;
                         placeholder: "Filter connections...";
                         edited(t) => { root.filter(t); }
                     }
-                    Rectangle {
-                        width: 30px;
-                        height: 30px;
-                        border-radius: Tokens.radius;
-                        border-width: 1px;
-                        border-color: Tokens.border;
-                        background: Tokens.card;
-                        Text {
-                            text: "+";
-                            color: add-ta.has-hover ? Tokens.text : Tokens.text-dim;
-                            font-size: 17px;
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: "plus";
+                            tooltip: "New connection";
+                            clicked => { root.add-clicked(); }
                         }
-                        add-ta := TouchArea { clicked => { root.add-clicked(); } }
                     }
                 }
 

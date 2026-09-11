@@ -5,7 +5,7 @@ import { PaletteItem } from "structs.slint";
 import { ScrollView } from "std-widgets.slint";
 import {
     FilledButton, OutlineButton, TextButton as MaterialTextButton, IconButton as MaterialIconButton,
-    MaterialStyleMetrics, MaterialTypography, StateLayerArea, Switch
+    MaterialStyleMetrics, MaterialTypography, StateLayerArea, Switch, TextField
 } from "@material";
 
 // Rounded, bordered, drop-shadowed surface used for panels that should read
@@ -386,41 +386,11 @@ export component ExportButton {
     }
 }
 
-// Form text input (conn form): Tokens-styled card box, optional password mode.
-export component FormField inherits Rectangle {
+// Form text input (conn form): Material filled text field. `placeholder`
+// becomes its label, which floats up once the field has text or focus.
+export component FormField inherits TextField {
     in property <string> placeholder;
-    in-out property <string> text <=> input.text;
-    in property <InputType> input-type: InputType.text;
-    callback accepted;
-    height: 30px;
-    clip: true;
-    border-radius: Tokens.radius;
-    border-width: 1px;
-    border-color: input.has-focus ? Tokens.accent : Tokens.border;
-    background: Tokens.card;
-    HorizontalLayout {
-        padding-left: Tokens.sp2;
-        padding-right: Tokens.sp2;
-        input := TextInput {
-            font-size: Tokens.font-sm;
-            color: Tokens.text;
-            vertical-alignment: center;
-            single-line: true;
-            input-type: root.input-type;
-            horizontal-stretch: 1;
-            accepted => { root.accepted(); }
-        }
-    }
-    if input.text == "": Text {
-        x: Tokens.sp2;
-        width: parent.width - 2 * Tokens.sp2;
-        text: root.placeholder;
-        color: Tokens.text-faint;
-        font-size: Tokens.font-sm;
-        vertical-alignment: center;
-        overflow: elide;
-        height: 100%;
-    }
+    label: root.placeholder;
 }
 
 // Small bordered key cap (⌘K, ⌘P, ⌘↵).
@@ -749,9 +719,12 @@ export component CompletionList inherits Rectangle {
     }
 }
 
-export component FilterField inherits Rectangle {
+// Search/filter input (sidebars, palette, toolbars): a Material text field
+// with a search icon. Material's TextField already clips and scrolls to the
+// caret, so long values (a Mongo JSON filter) no longer need our own viewport.
+export component FilterField {
     in property <string> placeholder;
-    in-out property <string> text <=> input.text;
+    in-out property <string> text <=> tf.text;
     in property <string> trailing-cap: "";
     // Show an inline × that empties the field and re-submits it.
     in property <bool> clearable;
@@ -765,113 +738,51 @@ export component FilterField inherits Rectangle {
     in property <int> completion-selected;
     callback completion-choose(int);
     // Navigation keys while the popup is up. Returns true when consumed, so an
-    // unhandled key still reaches the TextInput.
+    // unhandled key still reaches the input.
     callback completion-key(string) -> bool;
-    public function focus-input() { input.focus(); }
-    height: 30px;
-    border-radius: Tokens.radius;
-    border-width: 1px;
-    border-color: input.has-focus ? Tokens.accent : Tokens.border;
-    background: Tokens.card;
-    HorizontalLayout {
-        padding-left: Tokens.sp2;
-        padding-right: 6px;
-        spacing: Tokens.sp2;
-        VerticalLayout {
-            alignment: center;
-            AppIcon { name: "search"; size: 14px; color: Tokens.text-faint; }
-        }
-        // Bounded, clipped viewport that scrolls to the caret. A single-line
-        // TextInput does not scroll on its own (Slint docs): it grows to its full
-        // text width, so long content (e.g. a Mongo JSON filter) would spill past
-        // the box. Grow the input to its text width, clip it here, and shift its
-        // x on cursor moves so the newest characters stay visible while typing.
-        Rectangle {
-            horizontal-stretch: 1;
-            // Do not let the input's text width inflate the field: without this
-            // the viewport's preferred width tracks the (unbounded) text and the
-            // whole FilterField grows, defeating the clip.
-            preferred-width: 0px;
-            min-width: 0px;
-            clip: true;
-            input := TextInput {
-                width: max(parent.width, self.preferred-width);
-                height: parent.height;
-                font-size: Tokens.font-sm;
-                color: Tokens.text;
-                vertical-alignment: center;
-                single-line: true;
-                accepted => { root.submitted(); }
-                edited => { root.edited(self.text); }
-                // Intercepted before the TextInput sees them, so Up/Down move
-                // the popup selection instead of the caret and Enter accepts a
-                // candidate rather than submitting a half-typed filter. With no
-                // popup up, every one of these falls through untouched.
-                key-pressed(e) => {
-                    if (root.completion-items.length > 0
-                        && (e.text == Key.UpArrow || e.text == Key.DownArrow
-                            || e.text == Key.Tab || e.text == Key.Escape
-                            || e.text == Key.Return)
-                        && root.completion-key(e.text)) {
-                        return accept;
-                    }
-                    return reject;
-                }
-                cursor-position-changed(cursor-position) => {
-                    if cursor-position.x + self.x < 4px {
-                        self.x = -cursor-position.x + 4px;
-                    } else if cursor-position.x + self.x > parent.width - 4px - self.text-cursor-width {
-                        self.x = parent.width - cursor-position.x - 4px - self.text-cursor-width;
-                    }
-                }
-            }
-        }
+    public function focus-input() { tf.focus(); }
+    forward-focus: tf;
+    tf := TextField {
+        width: 100%;
+        label: root.placeholder;
+        leading-icon: AppIcons.get("search");
         // Clearing an applied filter has no other route: ⌘Z only ever covered
         // the code editor's own buffer, never a toolbar input, and by the time
         // the box holds text the query behind it has already re-run.
-        if root.clearable && input.text != "": VerticalLayout {
-            alignment: center;
-            Rectangle {
-                width: 18px;
-                height: 18px;
-                border-radius: Tokens.radius;
-                background: clear-ta.has-hover ? Tokens.chrome : transparent;
-                animate background { duration: Tokens.fade; }
-                clear-ta := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        input.text = "";
-                        // `submitted` is the existing apply path and already
-                        // drops the suggestion popup, so no `edited` is needed.
-                        root.submitted();
-                    }
-                }
-                AppIcon {
-                    name: "close";
-                    size: 10px;
-                    color: clear-ta.has-hover ? Tokens.text : Tokens.text-faint;
-                }
-            }
+        trailing-icon: root.clearable && root.text != "" ? AppIcons.get("close") : @image-url("");
+        trailing-icon-clicked => {
+            tf.text = "";
+            // `submitted` is the existing apply path and already drops the
+            // suggestion popup, so no `edited` is needed.
+            root.submitted();
         }
-        if root.trailing-cap != "": VerticalLayout {
-            alignment: center;
-            KeyCap { text: root.trailing-cap; }
+        accepted => { root.submitted(); }
+        edited(t) => { root.edited(t); }
+        // Intercepted before the input sees them, so Up/Down move the popup
+        // selection instead of the caret and Enter accepts a candidate rather
+        // than submitting a half-typed filter. With no popup up, every one of
+        // these falls through untouched.
+        key-pressed(e) => {
+            if (root.completion-items.length > 0
+                && (e.text == Key.UpArrow || e.text == Key.DownArrow
+                    || e.text == Key.Tab || e.text == Key.Escape
+                    || e.text == Key.Return)
+                && root.completion-key(e.text)) {
+                return accept;
+            }
+            return reject;
         }
     }
-    // Also gated on focus: the caret sits at the same x as the first glyph, so
-    // a focused-but-empty field draws the caret on top of the placeholder.
-    if input.text == "" && !input.has-focus: Text {
-        x: Tokens.sp2 + 6px + 14px;
-        text: root.placeholder;
-        color: Tokens.text-faint;
-        font-size: Tokens.font-sm;
-        vertical-alignment: center;
-        height: 100%;
+    // Shortcut hint (⌘P) while the field is idle.
+    if root.trailing-cap != "" && root.text == "" && !tf.has-focus: KeyCap {
+        x: root.width - self.width - Tokens.sp4;
+        y: (root.height - self.height) / 2;
+        text: root.trailing-cap;
     }
     // Hangs under the field. Gated on focus so that when several filter fields
     // share one window-level candidate list, only the one being typed in shows
     // it.
-    if root.completion-items.length > 0 && input.has-focus: CompletionList {
+    if root.completion-items.length > 0 && tf.has-focus: CompletionList {
         x: 0;
         y: root.height + 4px;
         items: root.completion-items;

@@ -186,7 +186,8 @@ export component QueryPane inherits Rectangle {
         // Each pane owns its toolbar so the split (right) pane keeps full
         // browse actions — parity with the primary pane.
         if root.browse-mode: Rectangle {
-            height: 48px; // fits the 40px Material buttons
+            // 40px Material buttons; the Mongo filter adds a 56px text field.
+            height: root.result-kind == 1 ? 64px : 48px;
             background: Tokens.canvas;
             HorizontalLayout {
                 padding-left: Tokens.sp3;
@@ -220,7 +221,6 @@ export component QueryPane inherits Rectangle {
                     alignment: center;
                     FilterField {
                         width: 260px;
-                        height: 28px;
                         placeholder: "Filter — { \"field\": value }";
                         clearable: true;
                         text <=> root.mongo-filter;
@@ -338,7 +338,7 @@ export component QueryPane inherits Rectangle {
         if root.browse-mode && root.filter-open: Rectangle {
             property <int> focus-tick: root.focus-filter-tick;
             changed focus-tick => { filter-value.focus-input(); }
-            height: 38px;
+            height: 64px; // 56px Material text field + row padding
             background: Tokens.chrome;
             border-width: 1px;
             border-color: Tokens.border;
