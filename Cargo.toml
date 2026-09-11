@@ -15,6 +15,14 @@ members = [
     "crates/tunnel",
     "app",
 ]
+# Vendored upstream source, patched in below: not ours to lint or format.
+exclude = ["app/vendor/i-slint-renderer-femtovg"]
+
+# Slint's femtovg renderer with a layer-alignment fix for fractional scale
+# factors (whole-UI zoom). See app/vendor/i-slint-renderer-femtovg/PATCHES.md;
+# must match the slint version exactly.
+[patch.crates-io]
+i-slint-renderer-femtovg = { path = "app/vendor/i-slint-renderer-femtovg" }
 
 [workspace.package]
 license = "Apache-2.0"
