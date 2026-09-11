@@ -90,26 +90,24 @@ async fn attempt_connect(
     cfg: rdb_connstore::Result<rdb_core::conn::ConnConfig>,
     nosql_limit: usize,
     timeout_secs: u64,
-) -> Result<(AnyDriver, rdb_core::schema::Schema, Option<String>), rdb_core::error::RdbError> {
+    pooled: Option<Arc<AnyDriver>>,
+) -> Result<(Arc<AnyDriver>, rdb_core::schema::Schema, Option<String>), rdb_core::error::RdbError> {
     let attempt = async {
         let cfg = cfg.map_err(|e| rdb_core::error::RdbError::Connection(e.to_string()))?;
+        // Switching back to a connection that is still open (the rail) reuses
+        // its driver instead of a new handshake; a dead one falls through to
+        // a fresh connect.
+        if let Some(driver) = pooled {
+            if let Ok((schema, scoped_db)) = initial_schema(&driver, engine, &cfg).await {
+                return Ok((driver, schema, scoped_db));
+            }
+        }
         let driver = AnyDriver::connect(engine, &cfg).await?;
         // Apply the NoSQL collection cap before any schema fetch so the
         // first sidebar load already honors it (Mongo only).
         driver.set_collection_limit(nosql_limit);
-        // MongoDB: when the connection names a database, scope the sidebar
-        // to it (matching the schema switcher) instead of listing every
-        // database on the server.
-        let scoped_db = if matches!(engine, rdb_connstore::Engine::Mongo) {
-            cfg.database.clone().filter(|d| !d.is_empty())
-        } else {
-            None
-        };
-        let schema = match &scoped_db {
-            Some(db) => driver.schema_for(db).await?,
-            None => driver.schema().await?,
-        };
-        Ok::<_, rdb_core::error::RdbError>((driver, schema, scoped_db))
+        let (schema, scoped_db) = initial_schema(&driver, engine, &cfg).await?;
+        Ok::<_, rdb_core::error::RdbError>((Arc::new(driver), schema, scoped_db))
     };
     match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), attempt).await {
         Ok(r) => r,
@@ -117,6 +115,26 @@ async fn attempt_connect(
             "connection timed out".into(),
         )),
     }
+}
+
+/// The first sidebar schema. MongoDB: when the connection names a database,
+/// scope the sidebar to it (matching the schema switcher) instead of listing
+/// every database on the server.
+async fn initial_schema(
+    driver: &AnyDriver,
+    engine: rdb_connstore::Engine,
+    cfg: &rdb_core::conn::ConnConfig,
+) -> Result<(rdb_core::schema::Schema, Option<String>), rdb_core::error::RdbError> {
+    let scoped_db = if matches!(engine, rdb_connstore::Engine::Mongo) {
+        cfg.database.clone().filter(|d| !d.is_empty())
+    } else {
+        None
+    };
+    let schema = match &scoped_db {
+        Some(db) => driver.schema_for(db).await?,
+        None => driver.schema().await?,
+    };
+    Ok((schema, scoped_db))
 }
 
 /// The database/schema selector's entries and its starting value.
@@ -170,7 +188,7 @@ fn build_schema_picker_names(
 async fn finish_connect_success(
     weak: slint::Weak<MainWindow>,
     engine: rdb_connstore::Engine,
-    driver: AnyDriver,
+    driver: Arc<AnyDriver>,
     schema: rdb_core::schema::Schema,
     scoped_db: Option<String>,
     connection_id: String,
@@ -206,7 +224,6 @@ async fn finish_connect_success(
         .into_iter()
         .map(SharedString::from)
         .collect();
-    let driver = Arc::new(driver);
     *slot = Some((engine, driver.clone()));
     drop(slot);
     driver_pool
@@ -494,6 +511,9 @@ fn handle_connect_clicked(state: &AppState, fns: &AppFns, weak: slint::Weak<Main
         expanded_tables,
         loaded_dbs,
         connect_handle,
+        // A database switch needs a driver on the new database, never the
+        // pooled one.
+        db_ovr.is_none(),
     );
 }
 
@@ -635,6 +655,7 @@ fn spawn_connect_task(
     expanded_tables: Arc<Mutex<HashSet<String>>>,
     loaded_dbs: Arc<Mutex<HashSet<String>>>,
     connect_handle: Rc<RefCell<Option<tokio::task::JoinHandle<()>>>>,
+    reuse_pooled: bool,
 ) {
     let weak2 = weak.clone();
     let store_driver = current.clone();
@@ -659,7 +680,13 @@ fn spawn_connect_task(
         } else {
             15
         };
-        match attempt_connect(engine, cfg, nosql_limit, timeout_secs).await {
+        let pooled = if reuse_pooled {
+            let pool = driver_pool.read().await;
+            pool.get(&connection_id).map(|(_, d)| d.clone())
+        } else {
+            None
+        };
+        match attempt_connect(engine, cfg, nosql_limit, timeout_secs, pooled).await {
             Ok((driver, schema, scoped_db)) => {
                 finish_connect_success(
                     weak2,
