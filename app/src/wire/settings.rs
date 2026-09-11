@@ -166,17 +166,18 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         });
     }
 
-    // ----- app-wide font size -----
+    // ----- app-wide zoom (⌘+ / ⌘−) -----
     {
         let weak = window.as_weak();
         let settings = settings.clone();
-        window.on_set_font_size(move |value| {
-            let size = clamp_font_size(value);
+        window.on_zoom_step(move |step| {
+            let current = settings.borrow().get().editor.font_size as i32;
+            let level = clamp_font_size(current + step);
             let _ = settings
                 .borrow_mut()
-                .update(|s| s.editor.font_size = size as u16);
+                .update(|s| s.editor.font_size = level as u16);
             if let Some(w) = weak.upgrade() {
-                w.global::<Tokens>().set_font_base(size as f32);
+                apply_zoom(&w, level);
             }
         });
     }
