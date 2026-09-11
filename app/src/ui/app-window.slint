@@ -18,7 +18,7 @@ import { CommandPalette, ListModal, PaletteGroup } from "palette.slint";
 import { PaletteItem } from "structs.slint";
 import { ConnForm } from "conn-form.slint";
 import { AppIcon } from "icons.slint";
-import { ScrollView, Spinner } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 import {
     GridColumn,
     GridCell,
@@ -1074,10 +1074,10 @@ callback create-table-commit();
                     // the change isn't a silent jump.
                     if root.tree-loading: VerticalLayout {
                         alignment: center;
-                        Spinner {
-                            width: 16px;
-                            height: 16px;
+                        CircularProgressIndicator {
                             indeterminate: true;
+                            min-height: 16px;
+                            max-height: 16px;
                         }
                     }
                     VerticalLayout {

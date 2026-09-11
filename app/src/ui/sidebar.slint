@@ -5,7 +5,8 @@ import { Tokens } from "tokens.slint";
 import { TreeNode } from "structs.slint";
 import { DbBadge, FilterField, KeyCap, Tooltip, Shortcut, FloatingCard } from "components.slint";
 import { AppIcon } from "icons.slint";
-import { ScrollView, Spinner } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
+import { CircularProgressIndicator } from "@material";
 
 export component Sidebar inherits Rectangle {
     in property <[TreeNode]> tree;
@@ -375,7 +376,7 @@ export component Sidebar inherits Rectangle {
                     alignment: center;
                     HorizontalLayout {
                         alignment: center;
-                        Spinner { width: 20px; height: 20px; indeterminate: true; }
+                        CircularProgressIndicator { indeterminate: true; min-height: 20px; max-height: 20px; }
                     }
                 }
             }
