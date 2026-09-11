@@ -104,6 +104,12 @@ pub struct AppSettings {
     /// Max collections listed per database for NoSQL engines (MongoDB). RDBMS
     /// table listings are unaffected. A large value effectively shows them all.
     pub nosql_collection_limit: u32,
+    /// Download a newer release on the daily check without asking; the
+    /// "ready to install" prompt still waits for the user.
+    pub auto_install_updates: bool,
+    /// Version that last ran, so the first launch on a newer one shows
+    /// What's New. `None` on a fresh install: nothing to compare against.
+    pub last_seen_version: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -115,6 +121,8 @@ impl Default for AppSettings {
             ui_state: UiState::default(),
             editor: EditorPrefs::default(),
             nosql_collection_limit: 200,
+            auto_install_updates: false,
+            last_seen_version: None,
         }
     }
 }
@@ -199,6 +207,8 @@ mod tests {
         assert!(s.get().editor.auto_table_alias);
         assert!(s.get().editor.error_highlight);
         assert_eq!(s.get().nosql_collection_limit, 200);
+        assert!(!s.get().auto_install_updates);
+        assert_eq!(s.get().last_seen_version, None);
     }
 
     #[test]
