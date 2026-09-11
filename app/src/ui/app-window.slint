@@ -4,6 +4,7 @@ import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
     CircularProgressIndicator, DropDownMenu, LinearProgressIndicator, MaterialPalette, MaterialScheme,
+    MaterialTypography,
     // Aliased: the native MenuBar below uses the built-in `MenuItem` element.
     MenuItem as MaterialMenuItem
 } from "@material";
@@ -2322,8 +2323,8 @@ callback create-table-commit();
                 Text {
                     text: "Rename tab";
                     color: Tokens.text;
-                    font-size: 15px;
-                    font-weight: 700;
+                    font-size: MaterialTypography.headline_small.font_size;
+                    font-weight: MaterialTypography.headline_small.font_weight;
                     horizontal-alignment: center;
                 }
                 Rectangle {
@@ -2391,8 +2392,8 @@ callback create-table-commit();
                 Text {
                     text: root.create-title;
                     color: Tokens.text;
-                    font-size: 15px;
-                    font-weight: 700;
+                    font-size: MaterialTypography.headline_small.font_size;
+                    font-weight: MaterialTypography.headline_small.font_weight;
                     horizontal-alignment: center;
                 }
                 Rectangle {
@@ -2462,8 +2463,8 @@ callback create-table-commit();
                 Text {
                     text: "New table in " + root.schema-name;
                     color: Tokens.text;
-                    font-size: 15px;
-                    font-weight: 700;
+                    font-size: MaterialTypography.headline_small.font_size;
+                    font-weight: MaterialTypography.headline_small.font_weight;
                     horizontal-alignment: center;
                 }
                 // table name
@@ -2833,8 +2834,8 @@ callback create-table-commit();
                 Text {
                     text: "Settings";
                     color: Tokens.text;
-                    font-size: 15px;
-                    font-weight: 700;
+                    font-size: MaterialTypography.headline_small.font_size;
+                    font-weight: MaterialTypography.headline_small.font_weight;
                     horizontal-alignment: center;
                 }
 
@@ -3172,8 +3173,8 @@ callback create-table-commit();
                 Text {
                     text: "Keyboard Shortcuts";
                     color: Tokens.text;
-                    font-size: 15px;
-                    font-weight: 700;
+                    font-size: MaterialTypography.headline_small.font_size;
+                    font-weight: MaterialTypography.headline_small.font_weight;
                     horizontal-alignment: center;
                 }
 
