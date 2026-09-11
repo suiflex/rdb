@@ -893,6 +893,11 @@ fn show_chrome_screen(w: &MainWindow, which: &str) {
     match which {
         "notch-light" => w.invoke_set_theme_mode(1),
         "sidebar-collapsed" => w.set_sidebar_rail(true),
+        // The rail's "+": the modal lists only connections not open yet.
+        "conn-add" => {
+            w.set_conn_modal_adding(true);
+            w.invoke_open_conn_modal();
+        }
         _ => {
             // The picker footer's "Export ▾".
             let position = slint::LogicalPosition::new(466.0, 722.0);
@@ -962,6 +967,7 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
             | "menu-hover"
             | "notch-light"
             | "sidebar-collapsed"
+            | "conn-add"
     ) {
         return;
     }
@@ -1002,7 +1008,8 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
                     "shortcuts" => w.set_shortcuts_open(true),
                     // Click the picker footer's "Export ▾" so the popup menu
                     // (not reachable any other way) shows in the screenshot.
-                    "export-menu" | "menu-hover" | "notch-light" | "sidebar-collapsed" => {
+                    "export-menu" | "menu-hover" | "notch-light" | "sidebar-collapsed"
+                    | "conn-add" => {
                         show_chrome_screen(&w, &which)
                     }
                     "settings" | "settings-updates" => {
