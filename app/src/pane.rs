@@ -8,7 +8,9 @@
 
 use slint::{Model, ModelRc, SharedString};
 
-use crate::{ChartBar, DocRow, ErrorMark, GridCell, GridColumn, IndexRow, MainWindow, PaletteItem};
+use crate::{
+    ChartBar, DocRow, ErrorMark, GridCell, GridColumn, IndexRow, MainWindow, MenuItem, PaletteItem,
+};
 
 // ----- per-pane result setters: pane 0 writes the base properties, pane 1 the
 // p1-* mirror. Workspace groups render independently, including table chrome.
@@ -172,7 +174,7 @@ pub(crate) fn set_p_chart_bars(w: &MainWindow, pane: usize, m: ModelRc<ChartBar>
     }
 }
 
-pub(crate) fn set_p_chart_label_cols(w: &MainWindow, pane: usize, m: ModelRc<SharedString>) {
+pub(crate) fn set_p_chart_label_cols(w: &MainWindow, pane: usize, m: ModelRc<MenuItem>) {
     if pane == 0 {
         w.set_chart_label_cols(m);
     } else {
@@ -180,7 +182,7 @@ pub(crate) fn set_p_chart_label_cols(w: &MainWindow, pane: usize, m: ModelRc<Sha
     }
 }
 
-pub(crate) fn set_p_chart_value_cols(w: &MainWindow, pane: usize, m: ModelRc<SharedString>) {
+pub(crate) fn set_p_chart_value_cols(w: &MainWindow, pane: usize, m: ModelRc<MenuItem>) {
     if pane == 0 {
         w.set_chart_value_cols(m);
     } else {
