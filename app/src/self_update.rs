@@ -230,7 +230,10 @@ mod macos {
     /// one is confirmed in place, rolling back on any failure), clears
     /// quarantine, and relaunches. On success the caller quits the event
     /// loop right after.
-    pub fn perform_update(dmg_path: &Path) -> Result<(), SelfUpdateError> {
+    pub fn perform_update(
+        dmg_path: &Path,
+        on_step: &mut dyn FnMut(&'static str),
+    ) -> Result<(), SelfUpdateError> {
         let exe = std::env::current_exe()?;
         let bundle_root = bundle_root(&exe).ok_or(SelfUpdateError::NotSwappable)?;
         let bundle_name = bundle_root
@@ -244,6 +247,7 @@ mod macos {
         std::fs::create_dir_all(&mnt)?;
         let mnt_str = mnt.to_string_lossy().to_string();
         let dmg_str = dmg_path.to_string_lossy().to_string();
+        on_step("Mounting");
         run_checked(
             "hdiutil",
             &[
@@ -259,6 +263,7 @@ mod macos {
 
         let staged = bundle_root.with_file_name(format!("{bundle_name}.new"));
         let _ = std::fs::remove_dir_all(&staged);
+        on_step("Copying");
         let staged_result = run_checked(
             "cp",
             &[
@@ -274,6 +279,7 @@ mod macos {
             &["-dr", "com.apple.quarantine", &staged.to_string_lossy()],
         );
 
+        on_step("Replacing");
         let backup = bundle_root.with_file_name(format!("{bundle_name}.old"));
         let _ = std::fs::remove_dir_all(&backup);
         std::fs::rename(&bundle_root, &backup)?;
@@ -289,6 +295,7 @@ mod macos {
             }
         }
 
+        on_step("Relaunching");
         std::process::Command::new("open")
             .args(["-n", &bundle_root.to_string_lossy()])
             .spawn()
@@ -321,11 +328,15 @@ Remove-Item -Path $PSCommandPath -ErrorAction SilentlyContinue
     /// (Windows can't overwrite a running exe), swaps the already-downloaded
     /// exe into place, and relaunches. Our process must quit right after this
     /// returns `Ok` — the swap only happens once we're actually gone.
-    pub fn perform_update(new_exe: &Path) -> Result<(), SelfUpdateError> {
+    pub fn perform_update(
+        new_exe: &Path,
+        on_step: &mut dyn FnMut(&'static str),
+    ) -> Result<(), SelfUpdateError> {
         let exe = std::env::current_exe()?;
         let work = work_dir();
         std::fs::create_dir_all(&work)?;
 
+        on_step("Verifying");
         let mut head = [0u8; 2];
         std::fs::File::open(new_exe)?.read_exact(&mut head)?;
         if &head != b"MZ" {
@@ -336,6 +347,7 @@ Remove-Item -Path $PSCommandPath -ErrorAction SilentlyContinue
         let script_path = work.join("finish-update.ps1");
         std::fs::write(&script_path, FINISH_SCRIPT)?;
 
+        on_step("Relaunching");
         let pid = std::process::id();
         std::process::Command::new("powershell")
             .args([
@@ -387,19 +399,24 @@ pub fn is_swappable(_exe: Option<&Path>) -> bool {
 /// — the old process's job is done. Never reached in practice on a platform
 /// where `is_swappable` is false, but stays a plain cross-platform function
 /// (rather than `#[cfg]`-gated) so callers don't need their own per-platform
-/// branching.
-pub fn perform_swap(downloaded: &Path) -> Result<(), SelfUpdateError> {
+/// branching. `on_step` names each install phase as it starts ("Mounting",
+/// "Copying", …) so the UI can show where the install is instead of a bare
+/// "Restarting…".
+pub fn perform_swap(
+    downloaded: &Path,
+    mut on_step: impl FnMut(&'static str),
+) -> Result<(), SelfUpdateError> {
     #[cfg(target_os = "macos")]
     {
-        macos::perform_update(downloaded)
+        macos::perform_update(downloaded, &mut on_step)
     }
     #[cfg(target_os = "windows")]
     {
-        windows::perform_update(downloaded)
+        windows::perform_update(downloaded, &mut on_step)
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
-        let _ = downloaded;
+        let _ = (downloaded, &mut on_step);
         Err(SelfUpdateError::NotSwappable)
     }
 }
