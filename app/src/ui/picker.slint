@@ -4,12 +4,12 @@
 import { Tokens } from "tokens.slint";
 import {
     DbBadge, OutlineChip, PrimaryButton, SecondaryButton, TextButton,
-    TagChip, FilterField, Tooltip, FloatingCard, DangerButton, IconButton
+    TagChip, FilterField, Tooltip, DangerButton, IconButton
 } from "components.slint";
 import { AppIcon } from "icons.slint";
 import { ConnItem, KvRow, TopLevelGroup } from "structs.slint";
 import { ScrollView } from "std-widgets.slint";
-import { MaterialPalette, MaterialTypography } from "@material";
+import { ElevatedCard, MaterialPalette, MaterialTypography } from "@material";
 
 // Social badges: Product Hunt launch + GitHub star, plus supported-engine
 // trust badges ("Works with"). Shared between the empty state and the
@@ -244,7 +244,7 @@ export component ConnPicker inherits Rectangle {
             width: 560px;
             background: Tokens.canvas;
 
-            card := FloatingCard {
+            card := ElevatedCard {
                 x: Tokens.sp3;
                 y: Tokens.sp3;
                 width: parent.width - 2 * Tokens.sp3;
