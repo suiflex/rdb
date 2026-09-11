@@ -829,22 +829,37 @@ fn sync_rows(cur: &ModelRc<ConnItem>, next: &ModelRc<ConnItem>) {
     }
 }
 
+/// Connections the ⌘O modal leaves out: the open ones when the rail's "+"
+/// opened it to add a connection, none for a plain ⌘O switch.
+fn conn_modal_skip(w: &MainWindow, connected_ids: &Mutex<HashSet<String>>) -> HashSet<String> {
+    if w.get_conn_modal_adding() {
+        connected_ids.lock().unwrap().clone()
+    } else {
+        HashSet::new()
+    }
+}
+
 /// Flatten `build_conn_items`'s output into the ⌘O "Open Connection" modal's
 /// `PaletteItem` list plus a parallel index map (`-1` for a header row, the
 /// real store index for a connection row) — shared by the modal's open
 /// handler and the group-toggle handler so both stay in sync however the
-/// toggle was triggered.
+/// toggle was triggered. Connections whose id is in `skip` are left out.
+/// ponytail: a group whose connections are all skipped keeps its header.
 fn build_conn_palette_items(
     store: &rdb_connstore::ConnStore,
     collapsed: &HashSet<String>,
     filter: &str,
+    skip: &HashSet<String>,
 ) -> (Vec<PaletteItem>, Vec<i32>) {
     // Palette items don't render liveness, so an empty set is fine here.
     let rows = build_conn_items(store, collapsed, filter, &HashSet::new());
     let mut items: Vec<PaletteItem> = Vec::new();
     let mut map: Vec<i32> = Vec::new();
     // The modal doesn't animate its groups, so collapsed rows just drop out.
-    for r in rows.into_iter().filter(|r| !r.hidden) {
+    for r in rows
+        .into_iter()
+        .filter(|r| !r.hidden && !skip.contains(r.id.as_str()))
+    {
         if r.is_header {
             items.push(PaletteItem {
                 label: rdb_connstore::group_leaf(&r.group).to_lowercase().into(),

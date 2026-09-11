@@ -444,6 +444,15 @@ callback create-table-commit();
     // ----- open-database / open-connection modals -----
     in-out property <bool> db-modal-open: false;
     in-out property <bool> conn-modal-open: false;
+    // Opened from the rail's "+": list only connections that aren't open yet,
+    // so an open one can't be picked again by mistake. Cleared whenever the
+    // modal closes, so ⌘O keeps the full switch-connection list.
+    in-out property <bool> conn-modal-adding: false;
+    changed conn-modal-open => {
+        if !root.conn-modal-open {
+            root.conn-modal-adding = false;
+        }
+    }
     in property <[PaletteGroup]> db-items;
     // Databases the current connection can switch to; empty hides the switcher.
     in property <[string]> db-list;
@@ -1315,7 +1324,10 @@ callback create-table-commit();
                     connections: root.connections;
                     selected-conn: root.selected-conn;
                     connect-clicked(i) => { root.connect-clicked(i); }
-                    open-picker => { root.open-conn-modal(); }
+                    open-picker => {
+                        root.conn-modal-adding = true;
+                        root.open-conn-modal();
+                    }
                     set-rail(v) => { root.sidebar-rail = v; }
                     set-visible(v) => { root.sidebar-visible = v; }
                     set-w(v) => { root.sidebar-w = v; }
@@ -2278,7 +2290,10 @@ callback create-table-commit();
                     connections: root.connections;
                     selected-conn: root.selected-conn;
                     connect-clicked(i) => { root.connect-clicked(i); }
-                    open-picker => { root.open-conn-modal(); }
+                    open-picker => {
+                        root.conn-modal-adding = true;
+                        root.open-conn-modal();
+                    }
                     set-rail(v) => { root.sidebar-rail = v; }
                     set-visible(v) => { root.sidebar-visible = v; }
                     set-w(v) => { root.sidebar-w = v; }
