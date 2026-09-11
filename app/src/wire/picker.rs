@@ -317,12 +317,16 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             let _ = settings
                 .borrow_mut()
                 .update(|s| s.ui_state.collapsed_groups = groups);
-            w.set_connections(build_sidebar_model(
-                &store.borrow(),
-                &collapsed.borrow(),
-                &conn_filter.borrow(),
-                &connected_ids.lock().unwrap(),
-            ));
+            // In place, so the picker animates the group open/shut.
+            update_sidebar_model(
+                &w,
+                group_conn_items(build_conn_items(
+                    &store.borrow(),
+                    &collapsed.borrow(),
+                    &conn_filter.borrow(),
+                    &connected_ids.lock().unwrap(),
+                )),
+            );
             // Keep the ⌘O modal in sync too, whichever surface triggered this.
             if w.get_conn_modal_open() {
                 let (items, map) =

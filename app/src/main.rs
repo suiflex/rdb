@@ -444,12 +444,15 @@ mod build_conn_items_tests {
         let (_dir, store) = store_with_groups(&[Some("Work/Production"), Some("Work")]);
         let collapsed = HashSet::from(["Work".to_string()]);
         let rows = build_conn_items(&store, &collapsed, "", &HashSet::new());
-        // Only the Work header itself remains visible.
-        assert_eq!(rows.len(), 1);
-        assert!(rows[0].is_header);
-        assert_eq!(rows[0].group.as_str(), "Work");
-        assert!(!rows[0].expanded);
-        assert!(rows[0].is_group_end);
+        // The subtree stays in the model (so the picker can animate it shut),
+        // but only the Work header itself is visible.
+        assert_eq!(rows.len(), 4, "Work, Work/Production, conn0, conn1");
+        let visible: Vec<&ConnItem> = rows.iter().filter(|r| !r.hidden).collect();
+        assert_eq!(visible.len(), 1);
+        assert!(visible[0].is_header);
+        assert_eq!(visible[0].group.as_str(), "Work");
+        assert!(!visible[0].expanded);
+        assert!(visible[0].is_group_end);
     }
 
     #[test]
@@ -484,8 +487,10 @@ fn subtree_conn_count(
     total
 }
 
-/// Depth-first: push `path`'s header row, then (unless collapsed) its child
-/// folders followed by its own direct connection rows. Never touches
+/// Depth-first: push `path`'s header row, then its child folders followed by
+/// its own direct connection rows. A collapsed folder's subtree is still
+/// emitted, with `hidden` set, so the picker can animate it shut and open
+/// instead of rows popping in and out; `hidden` is the parent's state. Never touches
 /// `is_group_end` — that is only meaningful at the top-level group's true
 /// last visible row, which the caller marks after the whole subtree returns.
 /// Read-only lookups threaded through `emit_group_subtree`'s recursion —
@@ -500,6 +505,7 @@ struct GroupCtx<'a> {
 fn emit_group_subtree(
     path: &str,
     depth: i32,
+    hidden: bool,
     store: &rdb_connstore::ConnStore,
     ctx: &GroupCtx,
     rows: &mut Vec<ConnItem>,
@@ -531,14 +537,13 @@ fn emit_group_subtree(
         is_group_end: false,
         depth,
         live: false,
+        hidden,
     });
-    if !expanded {
-        // Collapsing a folder hides its whole subtree, not just its direct rows.
-        return;
-    }
+    // Collapsing a folder hides its whole subtree, not just its direct rows.
+    let children_hidden = hidden || !expanded;
     if let Some(children) = child_folders.get(&Some(path.to_string())) {
         for child in children {
-            emit_group_subtree(child, depth + 1, store, ctx, rows);
+            emit_group_subtree(child, depth + 1, children_hidden, store, ctx, rows);
         }
     }
     if let Some(idxs) = direct_conns.get(path) {
@@ -576,6 +581,7 @@ fn emit_group_subtree(
                 is_group_end: false,
                 depth,
                 live: live.contains(&s.id),
+                hidden: children_hidden,
             });
         }
     }
@@ -683,6 +689,7 @@ fn build_conn_items(
                         is_group_end: false,
                         depth: 0,
                         live: live.contains(&s.id),
+                        hidden: false,
                     });
                 }
             }
@@ -693,16 +700,32 @@ fn build_conn_items(
                 collapsed,
                 live,
             };
-            emit_group_subtree(path, 0, store, &ctx, &mut rows);
-        }
-        // Whatever this top-level group's true last visible row ended up
-        // being (its header if collapsed, its deepest descendant otherwise)
-        // is the one that rounds the card's bottom corners.
-        if let Some(last) = rows.last_mut() {
-            last.is_group_end = true;
+            emit_group_subtree(path, 0, false, store, &ctx, &mut rows);
         }
     }
+    mark_group_ends(&mut rows);
     rows
+}
+
+/// Flag each top-level group's true last visible row (its header if
+/// collapsed, its deepest visible descendant otherwise) — the row that rounds
+/// the card's bottom corners. One pass: a new top-level header closes the
+/// previous group. Hidden rows of a collapsed subtree are skipped.
+fn mark_group_ends(rows: &mut [ConnItem]) {
+    let mut last_visible: Option<usize> = None;
+    for i in 0..rows.len() {
+        if rows[i].is_header && rows[i].depth == 0 {
+            if let Some(j) = last_visible.take() {
+                rows[j].is_group_end = true;
+            }
+        }
+        if !rows[i].hidden {
+            last_visible = Some(i);
+        }
+    }
+    if let Some(j) = last_visible {
+        rows[j].is_group_end = true;
+    }
 }
 
 /// Bucket `build_conn_items`'s flat rows into one `TopLevelGroup` per
@@ -752,6 +775,38 @@ fn build_sidebar_model(
     )))))
 }
 
+/// Apply a rebuilt sidebar model row by row when its shape is unchanged —
+/// a group collapse/expand only flips `hidden`/`expanded` flags — so Slint
+/// keeps the row elements and animates them. Any structural change (a row
+/// added, removed, filtered) replaces the model outright.
+fn update_sidebar_model(w: &MainWindow, next: Vec<TopLevelGroup>) {
+    let cur = w.get_connections();
+    let same_shape = cur.row_count() == next.len()
+        && next.iter().enumerate().all(|(gi, g)| {
+            cur.row_data(gi).is_some_and(|c| {
+                c.has_header == g.has_header && c.rows.row_count() == g.rows.row_count()
+            })
+        });
+    if !same_shape {
+        w.set_connections(ModelRc::from(Rc::new(VecModel::from(next))));
+        return;
+    }
+    for (gi, g) in next.iter().enumerate() {
+        if let Some(c) = cur.row_data(gi) {
+            sync_rows(&c.rows, &g.rows);
+        }
+    }
+}
+
+/// Write `next`'s rows into same-length `cur`, touching only rows that changed.
+fn sync_rows(cur: &ModelRc<ConnItem>, next: &ModelRc<ConnItem>) {
+    for (ri, row) in next.iter().enumerate() {
+        if cur.row_data(ri).as_ref() != Some(&row) {
+            cur.set_row_data(ri, row);
+        }
+    }
+}
+
 /// Flatten `build_conn_items`'s output into the ⌘O "Open Connection" modal's
 /// `PaletteItem` list plus a parallel index map (`-1` for a header row, the
 /// real store index for a connection row) — shared by the modal's open
@@ -766,7 +821,8 @@ fn build_conn_palette_items(
     let rows = build_conn_items(store, collapsed, filter, &HashSet::new());
     let mut items: Vec<PaletteItem> = Vec::new();
     let mut map: Vec<i32> = Vec::new();
-    for r in rows {
+    // The modal doesn't animate its groups, so collapsed rows just drop out.
+    for r in rows.into_iter().filter(|r| !r.hidden) {
         if r.is_header {
             items.push(PaletteItem {
                 label: rdb_connstore::group_leaf(&r.group).to_lowercase().into(),
@@ -849,13 +905,19 @@ fn group_palette_items(flat: Vec<PaletteItem>) -> Vec<PaletteGroup> {
 /// group. Heights mirror `picker.slint`'s row layout: 28px header (+8px
 /// `Tokens.sp2` extra on every header but the first, for the gap between
 /// cards) / 40px row, no spacing between rows otherwise — if that layout
-/// changes, update both.
+/// changes, update both. Rows inside a collapsed group stay in the list with
+/// `hidden` set but render at 0px, so they take no height here either.
 fn row_group_at_y(rendered: &[ConnItem], y: i32) -> Option<String> {
     const HEADER_H: i32 = 28;
     const HEADER_GAP: i32 = 8;
     const ROW_H: i32 = 40;
     let mut top = 0;
     for (i, item) in rendered.iter().enumerate() {
+        if item.hidden {
+            continue;
+        }
+        // Row 0 is always a visible top-level header, so `i > 0` still means
+        // "not the first card".
         let h = if item.is_header {
             if i > 0 {
                 HEADER_H + HEADER_GAP
@@ -870,7 +932,11 @@ fn row_group_at_y(rendered: &[ConnItem], y: i32) -> Option<String> {
         }
         top += h;
     }
-    rendered.last().map(|item| item.group.to_string())
+    rendered
+        .iter()
+        .rev()
+        .find(|item| !item.hidden)
+        .map(|item| item.group.to_string())
 }
 
 #[cfg(test)]
@@ -898,7 +964,20 @@ mod row_group_at_y_tests {
             is_group_end: false,
             depth: 0,
             live: false,
+            hidden: false,
         }
+    }
+
+    #[test]
+    fn hidden_rows_take_no_height() {
+        // A collapsed group's rows stay in the list but render at 0px, so they
+        // must not push the rows after them down.
+        let mut folded = header("A");
+        folded.is_header = false;
+        folded.hidden = true;
+        let rendered = vec![header("A"), folded, header("B")];
+        // Just past A's 28px header is B's (gap + header), not the hidden row.
+        assert_eq!(row_group_at_y(&rendered, 30).as_deref(), Some("B"));
     }
 
     fn row(group: &str) -> ConnItem {

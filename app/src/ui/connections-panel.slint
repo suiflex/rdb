@@ -45,7 +45,9 @@ export component ConnectionsPanel inherits Rectangle {
                     for group in root.connections: VerticalLayout {
                         for item in group.rows: Rectangle {
                             property <bool> active: !item.is-header && item.index == root.selected-conn;
-                            height: 26px;
+                            // Rows inside a collapsed group are in the model but hidden.
+                            visible: !item.hidden;
+                            height: item.hidden ? 0px : 26px;
                             border-radius: Tokens.radius;
                             background: item.is-header ? transparent
                                 : active ? Tokens.accent-tint
