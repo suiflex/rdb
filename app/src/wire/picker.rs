@@ -814,7 +814,8 @@ fn schedule_connect_timer(
     store: &Rc<RefCell<rdb_connstore::ConnStore>>,
     screen: &str,
 ) {
-    if screen == "connections" {
+    // "tooltip" hovers a control on this same pre-connect screen.
+    if screen == "connections" || screen == "tooltip" {
         return;
     }
     let idx = store
@@ -877,6 +878,7 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
             | "update-installing"
             | "settings"
             | "settings-updates"
+            | "tooltip"
     ) {
         return;
     }
@@ -908,6 +910,14 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
                         w.set_update_available(true);
                     }
                     // Settings modal: Appearance (0) or Updates (1) tab.
+                    // Hover the picker's "+": a Material tooltip inside the
+                    // clipped connection card (it used to be cut off there).
+                    "tooltip" => {
+                        w.window()
+                            .dispatch_event(slint::platform::WindowEvent::PointerMoved {
+                                position: slint::LogicalPosition::new(516.0, 100.0),
+                            });
+                    }
                     "settings" | "settings-updates" => {
                         w.set_settings_tab(if which == "settings" { 0 } else { 1 });
                         w.set_settings_open(true);
