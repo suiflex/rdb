@@ -97,6 +97,12 @@ export component CodeEditor inherits Rectangle {
 
     focus-scope := FocusScope {
         key-pressed(e) => {
+            // ⌘+ / ⌘− are the window's zoom: let them bubble up untouched
+            // instead of the editor seeing them first.
+            if ((e.modifiers.meta || e.modifiers.control)
+                && (e.text == "+" || e.text == "=" || e.text == "-")) {
+                return reject;
+            }
             if (root.edit-key(e.text, e.modifiers.meta || e.modifiers.control, e.modifiers.alt, e.modifiers.shift)) {
                 return accept;
             }

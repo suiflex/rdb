@@ -45,8 +45,13 @@ export component MainWindow inherits Window {
     // Toolbar row (breadcrumb + search pill + aux icon cluster) needs ~950px
     // of fixed-width content when connected; below that the icon cluster on
     // the right gets pushed past the window edge instead of shrinking.
-    min-width: 980px;
-    min-height: 500px;
+    // Whole-UI zoom factor (1.0 = 100%), set with the scale factor. Slint
+    // turns these logical minimums into physical ones at the *zoomed* scale,
+    // so without the division every ⌘+ forced the window bigger (past the
+    // screen, clipping the layout) and ⌘− never shrank it back.
+    in property <float> zoom: 1.0;
+    min-width: 980px / root.zoom;
+    min-height: 500px / root.zoom;
     background: Tokens.chrome;
     default-font-size: 13px;
 
