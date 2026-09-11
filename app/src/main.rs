@@ -4749,45 +4749,6 @@ fn focused_tab_connection_id(
         .and_then(|t| t.connection_id.clone())
 }
 
-/// Connection ids any open tab still references, across both split-pane
-/// groups. A pool entry whose id falls out of this set has no tab left that
-/// could query it — safe to close.
-fn live_connection_ids(tabs: &[WorkspaceTab]) -> HashSet<String> {
-    tabs.iter()
-        .filter_map(|t| t.connection_id.clone())
-        .collect()
-}
-
-#[cfg(test)]
-mod live_connection_ids_tests {
-    use super::{live_connection_ids, WorkspaceTab};
-
-    fn tab(id: &str, connection_id: Option<&str>) -> WorkspaceTab {
-        let mut t = WorkspaceTab::sql(id.into(), 0);
-        t.connection_id = connection_id.map(str::to_string);
-        t
-    }
-
-    #[test]
-    fn collects_every_distinct_connection_still_open() {
-        let tabs = vec![
-            tab("q1", Some("conn-a")),
-            tab("q2", Some("conn-b")),
-            tab("q3", Some("conn-a")),
-            tab("q4", None),
-        ];
-        let live = live_connection_ids(&tabs);
-        assert_eq!(live.len(), 2);
-        assert!(live.contains("conn-a"));
-        assert!(live.contains("conn-b"));
-    }
-
-    #[test]
-    fn no_tabs_means_nothing_live() {
-        assert!(live_connection_ids(&[]).is_empty());
-    }
-}
-
 /// Slot holding the "re-run the current browse query" closure. Set once the
 /// browse view knows what it is browsing; `None` before that.
 type BrowseTrigger = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
@@ -4822,12 +4783,12 @@ struct AppState {
     active_group1_tab_id: Arc<Mutex<Option<String>>>,
     current_connection_id: Arc<Mutex<Option<String>>>,
     // Ids with a driver actually in `driver_pool` right now — set at connect
-    // success, cleared at disconnect. Distinct from `live_connection_ids`
-    // (which open tabs merely *reference*): a tab keeps its `connection_id`
-    // after that connection is disconnected (so reconnecting can pick it
-    // back up), so the tab-based set can't tell the sidebar dot or the
-    // "another connection is still around" check whether a connection is
-    // actually live right now.
+    // success, cleared at disconnect (and the only thing that closes one:
+    // there is no idle eviction). Distinct from the ids open tabs merely
+    // *reference*: a tab keeps its `connection_id` after that connection is
+    // disconnected (so reconnecting can pick it back up), so a tab-based set
+    // can't tell the rail, the sidebar dot or the "another connection is
+    // still around" check whether a connection is actually live right now.
     connected_ids: Arc<Mutex<HashSet<String>>>,
     query_number: Arc<std::sync::atomic::AtomicUsize>,
     collapsed_categories: Rc<RefCell<HashSet<String>>>,
