@@ -106,9 +106,19 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                         w.set_update_stage(SharedString::from("idle"));
                         return;
                     };
+                    w.set_update_step(SharedString::default());
                     w.set_update_stage(SharedString::from("restarting"));
                     let weak2 = weak.clone();
-                    std::thread::spawn(move || match self_update::perform_swap(&path) {
+                    let weak_step = weak.clone();
+                    let on_step = move |step: &'static str| {
+                        let weak = weak_step.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = weak.upgrade() {
+                                w.set_update_step(SharedString::from(step));
+                            }
+                        });
+                    };
+                    std::thread::spawn(move || match self_update::perform_swap(&path, on_step) {
                         Ok(()) => {
                             let _ = slint::invoke_from_event_loop(|| {
                                 let _ = slint::quit_event_loop();
