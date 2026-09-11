@@ -923,7 +923,8 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
 /// that table instead, so the harness can drive a real connection whose
 /// tables it cannot know in advance.
 fn schedule_workspace_open_timer(window: &MainWindow, screen: &str) {
-    if !screen.starts_with("workspace") {
+    // "chart" opens the default table too (not a `workspace-<table>` name).
+    if !screen.starts_with("workspace") && screen != "chart" {
         return;
     }
     let weak = window.as_weak();
@@ -1098,6 +1099,8 @@ fn schedule_standalone_grid_actions(window: &MainWindow, screen: &str, grid_read
             grid_ready,
             Rc::new(|w| w.invoke_set_limit("25".into())),
         ),
+        // Chart view of the loaded grid (column pickers + bars).
+        "chart" => when(window, grid_ready, Rc::new(|w| w.set_sql_view_mode(2))),
         "workspace-insert" => when(window, grid_ready, Rc::new(|w| w.invoke_add_row())),
         "workspace-users-bool" | "workspace-users-date" => {
             when(window, grid_ready, Rc::new(|w| w.invoke_add_row()));
