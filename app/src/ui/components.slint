@@ -597,38 +597,6 @@ export component TagChip inherits Rectangle {
     }
 }
 
-// Icon button with hover fill; glyph-based to stay resolution-crisp.
-export component GlyphButton inherits Rectangle {
-    in property <string> glyph;
-    in property <length> glyph-size: Tokens.font-md;
-    in property <bool> danger-hover: false; // close button: red fill + white glyph
-    in property <string> tooltip;           // optional hover label
-    callback clicked;
-    width: Tokens.button-h + 2px;
-    height: Tokens.button-h + 2px;
-    border-radius: Tokens.radius;
-    background: ta.has-hover ? (danger-hover ? Tokens.error : Tokens.border) : transparent;
-    animate background { duration: Tokens.fade; }
-    Text {
-        text: root.glyph;
-        color: ta.has-hover && root.danger-hover ? white : Tokens.text-dim;
-        font-size: root.glyph-size;
-    }
-    ta := TouchArea {
-        clicked => { root.clicked(); }
-        changed has-hover => {
-            if self.has-hover && root.tooltip != "" {
-                Tooltip.text = root.tooltip;
-                Tooltip.x = root.absolute-position.x + root.width / 2;
-                Tooltip.y = root.absolute-position.y + root.height + 4px;
-                Tooltip.shown = true;
-            } else if Tooltip.text == root.tooltip {
-                Tooltip.shown = false;
-            }
-        }
-    }
-}
-
 // Header/toolbar icon action. Takes an AppIcons name; `active` paints it in
 // the checked (primary) state for toggles like the sidebar/panel switches.
 export component IconButton {
