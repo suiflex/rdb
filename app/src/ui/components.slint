@@ -5,7 +5,7 @@ import { PaletteItem } from "structs.slint";
 import { ScrollView } from "std-widgets.slint";
 import {
     FilledButton, OutlineButton, TextButton as MaterialTextButton, IconButton as MaterialIconButton,
-    MaterialStyleMetrics, MaterialTypography, StateLayerArea
+    MaterialStyleMetrics, MaterialTypography, StateLayerArea, Switch
 } from "@material";
 
 // Rounded, bordered, drop-shadowed surface used for panels that should read
@@ -23,26 +23,22 @@ export component FloatingCard inherits Rectangle {
     clip: true;
 }
 
-// iOS-style on/off switch. One place for the pill + sliding knob so every
-// settings toggle stays identical.
-export component Toggle inherits TouchArea {
+// On/off switch (Material). Stays controlled: the owner holds `checked` and
+// flips it in `toggled`. Material's Switch flips itself on click, which
+// drops its binding, so `changed checked` re-syncs it from the owner and
+// `toggled` only fires when the two disagree (no echo on the re-sync).
+export component Toggle {
     in property <bool> checked;
     callback toggled();
-    width: 42px + 2 * Tokens.zoom-delta;
-    height: 24px + Tokens.zoom-delta;
-    clicked => { root.toggled(); }
-    Rectangle {
-        border-radius: 12px;
-        background: root.checked ? Tokens.accent : Tokens.border-strong;
-        Rectangle {
-            width: 18px + Tokens.zoom-delta;
-            height: 18px + Tokens.zoom-delta;
-            border-radius: 9px;
-            background: #FFFFFF;
-            x: root.checked ? parent.width - self.width - 3px : 3px;
-            y: (parent.height - self.height) / 2;
+    sw := Switch {
+        checked: root.checked;
+        checked-state-changed(c) => {
+            if c != root.checked {
+                root.toggled();
+            }
         }
     }
+    changed checked => { sw.checked = root.checked; }
 }
 
 // A settings line: label (+ optional one-line description) on the left,
