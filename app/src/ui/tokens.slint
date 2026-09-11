@@ -151,7 +151,10 @@ export global Tokens {
         primary: accent,
         surfaceTint: accent,
         onPrimary: #FFFFFF,
-        primaryContainer: accent-tint,
+        // Opaque on purpose: Material paints the checked Switch handle with
+        // this over a `primary` track, so the translucent dark accent-tint
+        // made the handle vanish. Dark value = accent-tint flattened on card.
+        primaryContainer: dark ? #25324F : accent-tint,
         onPrimaryContainer: on-tint,
         secondary: text-dim,
         onSecondary: card,
