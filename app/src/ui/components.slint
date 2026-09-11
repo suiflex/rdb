@@ -6,7 +6,7 @@ import { ScrollView } from "std-widgets.slint";
 import {
     FilledButton, OutlineButton, TextButton as MaterialTextButton, IconButton as MaterialIconButton,
     MaterialPalette, MaterialStyleMetrics, MaterialTypography, StateLayer, StateLayerArea, Switch,
-    TextField, DropDownMenu, MenuItem as MaterialMenuItem, SegmentedButton, SecondaryTabBar,
+    TextField, DropDownMenu, MenuItem as MaterialMenuItem, SegmentedButton, TabBar,
     NavigationItem as MaterialNavigationItem
 } from "@material";
 
@@ -598,16 +598,17 @@ export component BreadcrumbChip inherits Rectangle {
 }
 
 // Result-pane footer tabs (Data/Structure/Indexes · Data/Message/Chart): a
-// Material secondary tab bar, controlled by the owner's index like Toggle —
-// the tab bar writes its own index on click, so it is re-synced from
-// `current`. Secondary tabs split the bar's width evenly, so the wrapper
-// sizes itself per tab rather than stretching across the footer.
+// Material primary tab bar — its indicator spans the label only, where the
+// secondary bar's ran the whole tab width up to the next tab. Controlled by
+// the owner's index like Toggle — the tab bar writes its own index on click,
+// so it is re-synced from `current`. Tabs split the bar's width evenly, so
+// the wrapper sizes itself per tab rather than stretching across the footer.
 export component FooterTabs {
     in property <[MaterialNavigationItem]> items;
     in property <int> current;
     callback picked(int);
     width: root.items.length * 96px;
-    tb := SecondaryTabBar {
+    tb := TabBar {
         width: 100%;
         items: root.items;
         current-index: root.current;
