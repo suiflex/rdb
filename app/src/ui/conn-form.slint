@@ -1,5 +1,6 @@
 import { Tokens } from "tokens.slint";
 import { PrimaryButton, SecondaryButton, DangerButton, FormField, SelectBox, Toggle } from "components.slint";
+import { ScrollView } from "std-widgets.slint";
 
 // 8 preset accent swatches — colors for UI rendering, hex strings for the Rust-side color field.
 // First entry is the app accent (Tokens.accent) so the default matches the design system.
@@ -113,10 +114,9 @@ export component ConnForm inherits Rectangle {
 
     if root.open: Rectangle {
         width: min(520px, parent.width - 2 * Tokens.sp4);
-        // Hug the compact row layout; add scrolling only if future fields make
-        // the form taller than the window.
-        // ponytail: wrap vbox in a ScrollView only if content ever exceeds the window.
-        height: vbox.preferred-height;
+        // Hug the rows, but never past the window: the 56px Material fields
+        // make the full form taller than a small window, so it scrolls.
+        height: min(vbox.preferred-height, parent.height - 2 * Tokens.sp4);
         x: (parent.width - self.width) / 2;
         y: max(Tokens.sp4, (parent.height - self.height) / 2);
         border-radius: Tokens.radius-lg;
@@ -128,6 +128,7 @@ export component ConnForm inherits Rectangle {
 
         TouchArea {}
 
+        ScrollView {
         vbox := VerticalLayout {
             padding: Tokens.sp4;
             spacing: Tokens.sp2;
@@ -141,7 +142,6 @@ export component ConnForm inherits Rectangle {
             }
 
             HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "Name"; }
                 FormField { horizontal-stretch: 1; text <=> root.f-name; }
@@ -153,7 +153,6 @@ export component ConnForm inherits Rectangle {
             Rectangle { height: Tokens.sp1; }
 
             HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "Engine"; }
                 SelectBox {
@@ -194,7 +193,6 @@ export component ConnForm inherits Rectangle {
 
             // SQLite is a local file: one path field, no host/port/user/ssl.
             if root.f-engine == "SQLite": HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "File"; }
                 FormField {
@@ -205,7 +203,6 @@ export component ConnForm inherits Rectangle {
             }
 
             if root.f-engine != "SQLite": HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "Host"; }
                 FormField { horizontal-stretch: 1; text <=> root.f-host; }
@@ -221,7 +218,6 @@ export component ConnForm inherits Rectangle {
 
             // Redis/Valkey have no user/database concept — hide those (and SQLite).
             if root.f-engine != "Redis" && root.f-engine != "Valkey" && root.f-engine != "SQLite": HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "User"; }
                 FormField { horizontal-stretch: 1; text <=> root.f-user; }
@@ -236,7 +232,6 @@ export component ConnForm inherits Rectangle {
             }
 
             if root.f-engine != "SQLite": HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "Password"; }
                 FormField {
@@ -257,7 +252,6 @@ export component ConnForm inherits Rectangle {
 
             // SSL mode applies to network engines with transport encryption.
             if root.f-engine == "PostgreSQL" || root.f-engine == "MySQL" || root.f-engine == "MariaDB" || root.f-engine == "SQL Server" || root.f-engine == "Oracle" || root.f-engine == "ClickHouse" || root.f-engine == "Cassandra": HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "SSL mode"; }
                 SelectBox {
@@ -270,7 +264,6 @@ export component ConnForm inherits Rectangle {
             // Mongo connection options: a query string merged into the URI, or a
             // full mongodb://…/mongodb+srv://… override for Atlas / replica sets.
             if root.f-engine == "MongoDB": HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "Options"; }
                 FormField {
@@ -294,7 +287,6 @@ export component ConnForm inherits Rectangle {
             if root.f-engine != "SQLite": Rectangle { height: Tokens.sp1; }
 
             if root.f-engine != "SQLite" && root.f-ssh-enabled: HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "SSH Host"; }
                 FormField { horizontal-stretch: 1; text <=> root.f-ssh-host; placeholder: "bastion.example.com"; }
@@ -309,7 +301,6 @@ export component ConnForm inherits Rectangle {
             }
 
             if root.f-engine != "SQLite" && root.f-ssh-enabled: HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "SSH User"; }
                 FormField { horizontal-stretch: 1; text <=> root.f-ssh-user; placeholder: "ubuntu"; }
@@ -344,7 +335,6 @@ export component ConnForm inherits Rectangle {
             }
 
             if root.f-engine != "SQLite" && root.f-ssh-enabled && root.f-ssh-auth-mode == "KeyFile": HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "Passphrase"; }
                 FormField {
@@ -356,7 +346,6 @@ export component ConnForm inherits Rectangle {
             }
 
             if root.f-engine != "SQLite" && root.f-ssh-enabled && root.f-ssh-auth-mode == "Password": HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "SSH Pass"; }
                 FormField {
@@ -373,7 +362,6 @@ export component ConnForm inherits Rectangle {
             Rectangle { height: Tokens.sp1; }
 
             HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "Color"; }
                 HorizontalLayout {
@@ -393,7 +381,6 @@ export component ConnForm inherits Rectangle {
             }
 
             HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "ENV"; }
                 HorizontalLayout {
@@ -419,7 +406,6 @@ export component ConnForm inherits Rectangle {
             }
 
             HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "Group"; }
                 SelectBox {
@@ -438,7 +424,6 @@ export component ConnForm inherits Rectangle {
                 }
             }
             if creating-new-group: HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: ""; }
                 FormField {
@@ -449,7 +434,6 @@ export component ConnForm inherits Rectangle {
             }
             // Nothing to nest under until a real group is picked.
             if root.has-parent-group: HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "Subgroup"; }
                 SelectBox {
@@ -459,7 +443,6 @@ export component ConnForm inherits Rectangle {
                 }
             }
             if root.has-parent-group && root.creating-new-subgroup: HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: ""; }
                 FormField {
@@ -497,6 +480,7 @@ export component ConnForm inherits Rectangle {
                 SecondaryButton { text: "Cancel"; clicked => { root.cancel(); } }
                 if root.edit-mode: DangerButton { text: "Delete"; clicked => { root.delete-requested(); } }
             }
+        }
         }
         if root.delete-confirm-open: Rectangle {
             x: 0px;

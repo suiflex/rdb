@@ -114,7 +114,6 @@ export component Sidebar inherits Rectangle {
             padding-right: Tokens.sp2;
             padding-bottom: Tokens.sp2;
             fld := FilterField {
-                height: 28px;
                 placeholder: root.mode == 1 ? "Filter queries..." : "Filter items...";
                 trailing-cap: root.mode == 0 ? Shortcut.primary + Shortcut.separator + "P" : "";
                 edited(t) => { root.filter-tree(t); }
