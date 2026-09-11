@@ -65,6 +65,8 @@ export component NavCluster inherits HorizontalLayout {
         width: 76px;
         connections: root.connections;
         selected-conn: root.selected-conn;
+        notch: root.sidebar-visible && !root.sidebar-rail;
+        mirror: root.mirror;
         connect-clicked(i) => { root.connect-clicked(i); }
         open-picker => { root.open-picker(); }
     }
@@ -95,6 +97,7 @@ export component NavCluster inherits HorizontalLayout {
         spacing: 0px;
 
         Sidebar {
+            mirror: root.mirror;
             focus-tick: root.focus-tick;
             horizontal-stretch: 1;
             tree: root.tree;
@@ -206,6 +209,8 @@ export component NavCluster inherits HorizontalLayout {
         width: 76px;
         connections: root.connections;
         selected-conn: root.selected-conn;
+        notch: root.sidebar-visible && !root.sidebar-rail;
+        mirror: root.mirror;
         connect-clicked(i) => { root.connect-clicked(i); }
         open-picker => { root.open-picker(); }
     }
