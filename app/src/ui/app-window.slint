@@ -3516,18 +3516,19 @@ callback create-table-commit();
     if root.own-tip || root.m3-tip: Rectangle {
         x: min(max((root.own-tip ? Tooltip.x : ToolTipState.x) - self.width / 2, 4px), root.width - self.width - 4px);
         y: root.own-tip ? Tooltip.y : ToolTipState.y;
-        width: min(tip.preferred-width + 2 * Tokens.sp2, Tooltip.max-width);
-        height: tip.preferred-height + Tokens.sp1;
-        border-radius: Tokens.radius;
-        background: Tokens.chrome;
-        border-width: 1px;
-        border-color: Tokens.border;
+        // Material plain tooltip (inverse surface) for both sources, a step up
+        // from its body-small text so it reads at a glance.
+        width: min(tip.preferred-width + 20px, Tooltip.max-width);
+        height: max(28px, tip.preferred-height + 12px);
+        border-radius: 4px;
+        background: MaterialPalette.inverse_surface;
         tip := Text {
-            x: Tokens.sp2;
-            width: parent.width - 2 * Tokens.sp2;
+            x: 10px;
+            y: (parent.height - self.height) / 2;
+            width: parent.width - 20px;
             text: root.own-tip ? Tooltip.text : ToolTipState.text;
-            color: Tokens.text;
-            font-size: Tokens.font-xs;
+            color: MaterialPalette.inverse_on_surface;
+            font-size: MaterialTypography.body_medium.font_size;
             wrap: word-wrap;
         }
     }
