@@ -1,18 +1,10 @@
 import { Tokens } from "tokens.slint";
 
-// Single tintable icon. `name` selects an embedded SVG; `color` recolors it via
-// Slint's `colorize` (the SVGs are black-stroke so any tint reads cleanly).
-// Keeping every glyph here means call sites stay declarative: AppIcon { name: "table"; }
-export component AppIcon inherits Image {
-    in property <string> name;
-    in property <length> size: Tokens.icon-md;
-    in property <color> color: Tokens.text;
-
-    width: size;
-    height: size;
-    colorize: color;
-    image-fit: contain;
-    source:
+// Icon name -> embedded SVG. Shared by AppIcon and by widgets that take an
+// `image` directly (the Material icon buttons).
+export global AppIcons {
+    public pure function get(name: string) -> image {
+        return
         name == "chevron"   ? @image-url("icons/chevron.svg")  :
         name == "table"     ? @image-url("icons/table.svg")    :
         name == "view"      ? @image-url("icons/view.svg")     :
@@ -57,4 +49,20 @@ export component AppIcon inherits Image {
         name == "db-clickhouse" ? @image-url("icons/db-clickhouse.svg") :
         name == "db-oracle"    ? @image-url("icons/db-oracle.svg")    :
         @image-url("icons/table.svg");
+    }
+}
+
+// Single tintable icon. `name` selects an embedded SVG; `color` recolors it via
+// Slint's `colorize` (the SVGs are black-stroke so any tint reads cleanly).
+// Keeping every glyph here means call sites stay declarative: AppIcon { name: "table"; }
+export component AppIcon inherits Image {
+    in property <string> name;
+    in property <length> size: Tokens.icon-md;
+    in property <color> color: Tokens.text;
+
+    width: size;
+    height: size;
+    colorize: color;
+    image-fit: contain;
+    source: AppIcons.get(name);
 }
