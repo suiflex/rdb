@@ -2,6 +2,7 @@ import { Theme } from "theme.slint";
 export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
+import { MaterialPalette, MaterialScheme } from "@material";
 import {
     SearchCommandPill, BreadcrumbChip, DbBadge, GlyphButton, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SelectBox, SettingsSectionHeader, TextButton, Toggle, ToggleRow, Tooltip, TooltipArea, Shortcut
 } from "components.slint";
@@ -43,6 +44,16 @@ export component MainWindow inherits Window {
     min-height: 500px;
     background: Tokens.chrome;
     default-font-size: 13px;
+
+    // Material follows `Palette.color-scheme` to pick light/dark; putting the
+    // same token-derived scheme in both slots makes it follow `Tokens.dark`
+    // instead, so the theme-mode override applies to Material widgets too.
+    property <MaterialScheme> material-scheme: Tokens.material-scheme;
+    changed material-scheme => { root.apply-material-scheme(); }
+    init => { root.apply-material-scheme(); }
+    function apply-material-scheme() {
+        MaterialPalette.schemes = { light: root.material-scheme, dark: root.material-scheme };
+    }
 
     // Native menu bar (renders as the macOS menu bar). Items are thin
     // wrappers over callbacks/properties that already exist.
