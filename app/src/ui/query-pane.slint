@@ -9,7 +9,7 @@ import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow, DocRow, Re
 import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "structs.slint";
-import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton, FilterField, ResultModeToggle, DbBadge, Tooltip, TooltipArea, Shortcut } from "components.slint";
+import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton, FilterField, ResultModeToggle, DbBadge, SelectBox, Tooltip, TooltipArea, Shortcut } from "components.slint";
 import { ScrollView, TextEdit, ComboBox } from "std-widgets.slint";
 import { AppIcon } from "icons.slint";
 
@@ -348,12 +348,12 @@ export component QueryPane inherits Rectangle {
                 padding-top: 4px;
                 padding-bottom: 4px;
                 spacing: Tokens.sp2;
-                ComboBox {
+                SelectBox {
                     width: 180px;
                     model: root.filter-columns;
                     current-value <=> root.filter-col;
                 }
-                ComboBox {
+                SelectBox {
                     width: 120px;
                     model: root.filter-operators;
                     current-value <=> root.filter-op;
