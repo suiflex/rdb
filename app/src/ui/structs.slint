@@ -61,6 +61,9 @@ export struct ConnItem {
     // Has an open driver right now (a workspace tab is bound to it). False
     // for headers and for connections never connected this session.
     live: bool,
+    // Inside a collapsed group: kept in the model (height animates to 0 in
+    // the picker) rather than dropped, so groups fold instead of popping.
+    hidden: bool,
 }
 // One top-level card in the sidebar: its own header row plus every row
 // nested under it (subgroup headers, direct connections), so the sidebar

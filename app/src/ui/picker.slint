@@ -337,7 +337,9 @@ export component ConnPicker inherits Rectangle {
                                 || (item.depth > 0 && grp.rows[i - 1].depth != item.depth);
                             property <bool> box-bottom: i == grp.rows.length - 1
                                 || grp.rows[i + 1].depth < item.depth
-                                || (grp.rows[i + 1].depth == item.depth && grp.rows[i + 1].is-header);
+                                || (grp.rows[i + 1].depth == item.depth && grp.rows[i + 1].is-header)
+                                // A collapsed header's hidden subtree follows it.
+                                || grp.rows[i + 1].hidden;
                             property <length> content-h: item.is-header ? 28px : 40px;
                             // A gap only belongs *between* sibling boxes at the
                             // same-or-shallower level (a new subgroup starting,
@@ -347,7 +349,12 @@ export component ConnPicker inherits Rectangle {
                             property <bool> needs-gap: box-top && i > 0
                                 && grp.rows[i - 1].depth >= item.depth;
 
-                            height: needs-gap ? content-h + Tokens.sp2 : content-h;
+                            // Collapsed rows stay in the model with `hidden` set, so a
+                            // group folds shut and opens as an animation instead of
+                            // its rows popping in and out.
+                            height: item.hidden ? 0px : (needs-gap ? content-h + Tokens.sp2 : content-h);
+                            clip: true;
+                            animate height { duration: 180ms; easing: ease-in-out; }
                             background: transparent;
 
                             // Card surface: the top-level group's card keeps its
@@ -369,6 +376,12 @@ export component ConnPicker inherits Rectangle {
                             if item.is-header: Rectangle {
                                 width: parent.width;
                                 height: parent.height;
+                                StateLayer {
+                                    background: MaterialPalette.on_surface;
+                                    border-radius: Tokens.radius-lg;
+                                    has-hover: hdr-ta.has-hover;
+                                    enabled: true;
+                                }
                                 hdr-ta := TouchArea {
                                     // `item.group` is the raw-case key stored on
                                     // SavedConnection; `item.name` is uppercased
@@ -408,29 +421,17 @@ export component ConnPicker inherits Rectangle {
                                     // (content-sized, so their stretch factor is 0)
                                     // and lets the trailing spacer Rectangle absorb
                                     // the remaining width instead.
-                                    // Same circular caret badge the ⌘O "Open
-                                    // Connection" modal uses for its group rows
-                                    // (palette.slint), rotated instead of swapping
-                                    // glyphs, so both surfaces read identically.
+                                    // Plain chevron that turns as the group opens
+                                    // and closes, in step with the rows' height
+                                    // animation below.
                                     VerticalLayout {
                                         alignment: center;
-                                        Rectangle {
-                                            width: 16px;
-                                            height: 16px;
-                                            border-radius: 8px;
-                                            border-width: 1.5px;
-                                            border-color: Tokens.warn;
-                                            AppIcon {
-                                                name: "caret";
-                                                size: 8px;
-                                                color: Tokens.warn;
-                                                // chevron glyph's visual mass sits at
-                                                // its bottom vertex, so geometric
-                                                // centering still reads slightly low —
-                                                // nudge up 1px to compensate
-                                                y: (parent.height - self.height) / 2 - 1px;
-                                                transform-rotation: item.expanded ? 0deg : -90deg;
-                                            }
+                                        AppIcon {
+                                            name: "caret";
+                                            size: 14px;
+                                            color: Tokens.text-dim;
+                                            transform-rotation: item.expanded ? 0deg : -90deg;
+                                            animate transform-rotation { duration: 180ms; easing: ease-in-out; }
                                         }
                                     }
                                     // All-caps text has no descenders, so its visible
