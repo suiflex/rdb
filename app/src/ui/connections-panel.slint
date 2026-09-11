@@ -3,7 +3,7 @@
 // a tab switch.
 import { Tokens } from "tokens.slint";
 import { TopLevelGroup } from "structs.slint";
-import { FloatingCard } from "components.slint";
+import { ElevatedCard } from "@material";
 import { ScrollView } from "std-widgets.slint";
 
 export component ConnectionsPanel inherits Rectangle {
@@ -16,7 +16,7 @@ export component ConnectionsPanel inherits Rectangle {
 
     background: Tokens.canvas;
 
-    card := FloatingCard {
+    card := ElevatedCard {
         x: Tokens.sp1;
         y: Tokens.sp1;
         width: parent.width - 2 * Tokens.sp1;
