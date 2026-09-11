@@ -119,6 +119,13 @@ async fn attempt_connect(
     }
 }
 
+/// The database/schema selector's entries and its starting value.
+///
+/// Postgres browses namespaces, not databases: the selector must say "public",
+/// never the db name (a `"dbname"."table"` query would fail). Scoped Mongo
+/// still lists every database so the switcher can reach them, and starts on
+/// the one it scoped to; everything else defaults to "public" when present,
+/// else the first name.
 fn build_schema_picker_names(
     engine: rdb_connstore::Engine,
     scoped_db: Option<&str>,
@@ -237,7 +244,6 @@ async fn finish_connect_success(
         Some(engine),
         "",
     );
-    // Postgres browses namespaces, not databases: the selector must say
     let (schema_names, schema_current) =
         build_schema_picker_names(engine, scoped_db.as_deref(), pg_schemas, &db_names, &schema);
     let sql_capable = matches!(
@@ -754,7 +760,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     // sidebar dot's source of truth in step here too.
                     {
                         let mut ids = connected_ids.lock().unwrap();
-                        ids.retain(|id| !evicted.contains(id));
+                        for id in &evicted {
+                            ids.remove(id);
+                        }
                     }
                     let weak = weak.clone();
                     let _ = slint::invoke_from_event_loop(move || {
