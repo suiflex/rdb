@@ -879,6 +879,7 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
             | "settings"
             | "settings-updates"
             | "tooltip"
+            | "zoom"
     ) {
         return;
     }
@@ -918,6 +919,9 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
                                 position: slint::LogicalPosition::new(516.0, 100.0),
                             });
                     }
+                    // Three ⌘+ steps (level 16 ≈ 123%): icons and Material
+                    // controls must scale with the text.
+                    "zoom" => w.invoke_zoom_step(3),
                     "settings" | "settings-updates" => {
                         w.set_settings_tab(if which == "settings" { 0 } else { 1 });
                         w.set_settings_open(true);
