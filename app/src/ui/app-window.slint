@@ -2806,8 +2806,9 @@ callback create-table-commit();
         Rectangle {
             width: 460px;
             x: (parent.width - self.width) / 2;
-            y: 120px;
-            height: settings-card.preferred-height;
+            y: min(120px, parent.height / 8);
+            // Never past the window's bottom edge; the content scrolls instead.
+            height: min(settings-card.preferred-height, parent.height - self.y - Tokens.sp4);
             border-radius: Tokens.modal-radius;
             background: MaterialPalette.surface_container_high;
             drop-shadow-blur: 24px;
@@ -2817,7 +2818,12 @@ callback create-table-commit();
             // swallow veil clicks under the card
             TouchArea {}
 
+            ScrollView {
             settings-card := VerticalLayout {
+                // Fixed width (= the card's): wrapped text makes the content's
+                // height depend on its width, and inside a ScrollView that width
+                // would otherwise come back from the viewport — a binding loop.
+                width: 460px;
                 padding: Tokens.sp4;
                 padding-top: 18px;
                 spacing: Tokens.sp3;
@@ -3133,6 +3139,7 @@ callback create-table-commit();
                     }
                 }
             }
+            }
         }
     }
 
@@ -3146,8 +3153,9 @@ callback create-table-commit();
         Rectangle {
             width: 420px;
             x: (parent.width - self.width) / 2;
-            y: 90px;
-            height: shortcuts-card.preferred-height;
+            y: min(90px, parent.height / 8);
+            // Never past the window's bottom edge; the list scrolls instead.
+            height: min(shortcuts-card.preferred-height, parent.height - self.y - Tokens.sp4);
             border-radius: Tokens.modal-radius;
             background: MaterialPalette.surface_container_high;
             drop-shadow-blur: 24px;
@@ -3156,7 +3164,9 @@ callback create-table-commit();
 
             TouchArea {}
 
+            ScrollView {
             shortcuts-card := VerticalLayout {
+                width: 420px; // = the card's; see settings-card
                 padding: Tokens.sp4;
                 padding-top: 18px;
                 spacing: Tokens.sp2;
@@ -3244,6 +3254,7 @@ callback create-table-commit();
                         clicked => { root.shortcuts-open = false; }
                     }
                 }
+            }
             }
         }
     }
