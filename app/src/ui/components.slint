@@ -449,27 +449,38 @@ export component KeyCap inherits Rectangle {
     }
 }
 
-// Titlebar search / command pill.
+// Titlebar search / command pill. Material's SearchBar is a live search field
+// with its own result list; this one opens the command palette instead, so it
+// keeps its button behavior and takes the M3 search-bar look: full pill,
+// surface-container-high, state-layer hover.
 export component SearchCommandPill inherits Rectangle {
     in property <string> placeholder: "Search or run a command...";
     callback activated;
-    height: Tokens.button-h + 2px;
-    border-radius: Tokens.radius;
+    height: MaterialStyleMetrics.size_36;
+    border-radius: self.height / 2;
+    // surface-container-high maps to the titlebar chrome itself, which made the
+    // pill vanish into the bar; one step lighter plus an outline keeps it found.
+    background: MaterialPalette.surface_container;
     border-width: 1px;
-    border-color: ta.has-hover ? Tokens.border-strong : Tokens.border;
-    background: Tokens.card;
+    border-color: MaterialPalette.outline_variant;
+    StateLayer {
+        background: MaterialPalette.on_surface;
+        border-radius: root.border-radius;
+        has-hover: ta.has-hover;
+        enabled: true;
+    }
     HorizontalLayout {
-        padding-left: Tokens.sp3;
-        padding-right: 5px;
-        spacing: Tokens.sp2;
+        padding-left: MaterialStyleMetrics.padding_16;
+        padding-right: MaterialStyleMetrics.padding_8;
+        spacing: MaterialStyleMetrics.spacing_8;
         VerticalLayout {
             alignment: center;
-            AppIcon { name: "search"; size: 14px; color: Tokens.text-faint; }
+            AppIcon { name: "search"; size: MaterialStyleMetrics.icon_size_18; color: MaterialPalette.on_surface_variant; }
         }
         Text {
             text: root.placeholder;
-            color: Tokens.text-faint;
-            font-size: Tokens.font-sm;
+            color: MaterialPalette.on_surface_variant;
+            font-size: MaterialTypography.body_medium.font_size;
             vertical-alignment: center;
             horizontal-stretch: 1;
             overflow: elide;
