@@ -38,6 +38,7 @@ export component NavCluster inherits HorizontalLayout {
     callback set-w(length);
 
     callback connect-clicked(int);
+    callback open-picker();
     callback disconnect();
     callback open-function(string);
     callback open-query(string, int);
@@ -85,10 +86,11 @@ export component NavCluster inherits HorizontalLayout {
 
         ConnectionsPanel {
             horizontal-stretch: 0;
-            width: 132px;
+            width: 76px;
             connections: root.connections;
             selected-conn: root.selected-conn;
             connect-clicked(i) => { root.connect-clicked(i); }
+            open-picker => { root.open-picker(); }
         }
 
         Sidebar {
