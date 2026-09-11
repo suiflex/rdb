@@ -5,7 +5,8 @@ import { PaletteItem } from "structs.slint";
 import { ScrollView } from "std-widgets.slint";
 import {
     FilledButton, OutlineButton, TextButton as MaterialTextButton, IconButton as MaterialIconButton,
-    MaterialStyleMetrics, MaterialTypography, StateLayerArea, Switch, TextField
+    MaterialPalette, MaterialStyleMetrics, MaterialTypography, StateLayer, StateLayerArea, Switch,
+    TextField
 } from "@material";
 
 // Rounded, bordered, drop-shadowed surface used for panels that should read
@@ -157,7 +158,13 @@ component EngineLogo inherits Image {
         : @image-url("");
 }
 
-export component SelectBox inherits Rectangle {
+// String-valued dropdown (model + current-value) drawn as a Material filled
+// field with a Material menu. Material's own DropDownMenu is index-based,
+// which the Rust-fed, string-bound selects (Engine, SSL, Group, filter
+// column/operator) can't use; the closed field is composed here instead of
+// wrapping TextField so the Engine picker keeps its full-color brand logos
+// (TextField tints its icons to one color).
+export component SelectBox {
     in property <[string]> model;
     in-out property <string> current-value;
     // Opt-in: prefixes the current value and every option row with its
@@ -165,52 +172,72 @@ export component SelectBox inherits Rectangle {
     // sets this — every other SelectBox (SSL mode, Group, …) is unaffected.
     in property <bool> show-logo: false;
     callback selected(string);
-    height: Tokens.button-h + 4px;
-    border-radius: Tokens.radius;
-    border-width: 1px;
-    border-color: ta.has-hover ? Tokens.border-strong : Tokens.border;
-    background: Tokens.card;
+    min-height: MaterialStyleMetrics.size_56;
+    accessible-role: combobox;
+    accessible-value: root.current-value;
+    Rectangle {
+        border-top-left-radius: MaterialStyleMetrics.border_radius_4;
+        border-top-right-radius: MaterialStyleMetrics.border_radius_4;
+        background: MaterialPalette.surface_container_highest;
+        StateLayer {
+            background: MaterialPalette.on_surface;
+            has-hover: ta.has-hover;
+            enabled: true;
+        }
+        HorizontalLayout {
+            padding-left: MaterialStyleMetrics.padding_16;
+            padding-right: MaterialStyleMetrics.padding_12;
+            spacing: MaterialStyleMetrics.spacing_8;
+            if root.show-logo: VerticalLayout {
+                alignment: center;
+                EngineLogo { label: root.current-value; }
+            }
+            Text {
+                text: root.current-value;
+                color: MaterialPalette.on_surface;
+                font-size: MaterialTypography.body_large.font_size;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+            VerticalLayout {
+                alignment: center;
+                AppIcon { name: "caret"; size: MaterialStyleMetrics.icon_size_18; color: MaterialPalette.on_surface_variant; }
+            }
+        }
+        // M3 filled-field active indicator.
+        Rectangle {
+            y: parent.height - self.height;
+            height: 1px;
+            background: MaterialPalette.on_surface_variant;
+        }
+    }
     ta := TouchArea {
         clicked => { popup.show(); }
     }
-    HorizontalLayout {
-        padding-left: Tokens.sp2;
-        padding-right: Tokens.sp2;
-        spacing: Tokens.sp2;
-        if root.show-logo: VerticalLayout {
-            alignment: center;
-            EngineLogo { label: root.current-value; }
-        }
-        Text {
-            text: root.current-value;
-            color: Tokens.text;
-            font-size: Tokens.font-sm;
-            vertical-alignment: center;
-            horizontal-stretch: 1;
-            overflow: elide;
-        }
-        VerticalLayout {
-            alignment: center;
-            AppIcon { name: "caret"; size: 14px; color: Tokens.text-faint; }
-        }
-    }
     popup := PopupWindow {
         x: 0;
-        y: root.height + 4px;
+        y: root.height;
         width: root.width;
+        close-policy: close-on-click-outside;
         Rectangle {
-            background: Tokens.card;
-            border-radius: Tokens.radius;
-            border-width: 1px;
-            border-color: Tokens.border-strong;
-            drop-shadow-blur: 12px;
-            drop-shadow-color: #00000022;
+            background: MaterialPalette.surface_container;
+            border-radius: MaterialStyleMetrics.border_radius_4;
+            drop-shadow-blur: 8px;
+            drop-shadow-color: MaterialPalette.shadow.with-alpha(0.3);
             VerticalLayout {
-                padding: 4px;
+                padding-top: MaterialStyleMetrics.padding_8;
+                padding-bottom: MaterialStyleMetrics.padding_8;
                 for opt in root.model: Rectangle {
-                    height: Tokens.button-h + 2px;
-                    border-radius: 6px;
-                    background: opt-ta.has-hover ? Tokens.accent-tint : transparent;
+                    height: MaterialStyleMetrics.size_48;
+                    background: opt == root.current-value ? MaterialPalette.secondary_container : transparent;
+                    StateLayer {
+                        background: MaterialPalette.on_surface;
+                        has-hover: opt-ta.has-hover;
+                        enabled: true;
+                    }
+                    // Emit before closing: closing the popup first cancels
+                    // the rest of this handler.
                     opt-ta := TouchArea {
                         clicked => {
                             root.current-value = opt;
@@ -219,16 +246,17 @@ export component SelectBox inherits Rectangle {
                         }
                     }
                     HorizontalLayout {
-                        padding-left: Tokens.sp2;
-                        spacing: Tokens.sp2;
+                        padding-left: MaterialStyleMetrics.padding_12;
+                        padding-right: MaterialStyleMetrics.padding_12;
+                        spacing: MaterialStyleMetrics.spacing_8;
                         if root.show-logo: VerticalLayout {
                             alignment: center;
                             EngineLogo { label: opt; }
                         }
                         Text {
                             text: opt;
-                            color: Tokens.text;
-                            font-size: Tokens.font-sm;
+                            color: MaterialPalette.on_surface;
+                            font-size: MaterialTypography.body_large.font_size;
                             vertical-alignment: center;
                         }
                     }
