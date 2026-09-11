@@ -875,6 +875,8 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
             | "function"
             | "palette"
             | "update-installing"
+            | "settings"
+            | "settings-updates"
     ) {
         return;
     }
@@ -904,6 +906,11 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
                         w.set_update_stage("restarting".into());
                         w.set_update_step("Copying".into());
                         w.set_update_available(true);
+                    }
+                    // Settings modal: Appearance (0) or Updates (1) tab.
+                    "settings" | "settings-updates" => {
+                        w.set_settings_tab(if which == "settings" { 0 } else { 1 });
+                        w.set_settings_open(true);
                     }
                     _ => w.invoke_open_function("uuid_generate_v3".into()),
                 }
