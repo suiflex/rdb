@@ -3237,21 +3237,42 @@ fn refresh_detail_pretty(w: &MainWindow, pane: usize, g: &model::GridModel, row:
     let rows = detail_pretty_row(g, row.max(0) as usize);
     set_p_detail_pretty(w, pane, ModelRc::from(Rc::new(VecModel::from(rows))));
 }
-/// Snapshot the live client-side grid view of a group, to stash on the result the
-/// user is leaving so switching back restores filters/sort/hidden/order/widths.
-fn capture_grid_state(w: &MainWindow, pane: usize, g: &GroupRuntime) -> GridState {
-    let mut hidden: Vec<usize> = g.hidden_cols.lock().unwrap().iter().copied().collect();
+/// Snapshot the live client-side grid view: filters, sort, hidden and reordered
+/// columns, widths. Takes the state handles rather than the `GroupRuntime` that
+/// owns them, because a query finishing on a tokio task holds only these. The
+/// group itself is `!Send`.
+fn capture_grid_view(
+    w: &MainWindow,
+    pane: usize,
+    hidden_cols: &Arc<std::sync::Mutex<HashSet<usize>>>,
+    col_filters: &Arc<std::sync::Mutex<Vec<String>>>,
+    sort_state: &Arc<std::sync::Mutex<(i32, bool)>>,
+    col_order: &Arc<std::sync::Mutex<Vec<usize>>>,
+) -> GridState {
+    let mut hidden: Vec<usize> = hidden_cols.lock().unwrap().iter().copied().collect();
     hidden.sort_unstable();
     GridState {
-        col_filters: g.col_filters.lock().unwrap().clone(),
-        sort: *g.sort_state.lock().unwrap(),
+        col_filters: col_filters.lock().unwrap().clone(),
+        sort: *sort_state.lock().unwrap(),
         hidden,
-        col_order: g.col_order.lock().unwrap().clone(),
+        col_order: col_order.lock().unwrap().clone(),
         col_widths: get_p_col_widths(w, pane),
         grid_filter: w.get_grid_filter().to_string(),
         filter_col: w.get_filter_col().to_string(),
         filter_op: w.get_filter_op().to_string(),
     }
+}
+/// A group's snapshot, stashed on the result the user is leaving so switching
+/// back restores its view.
+fn capture_grid_state(w: &MainWindow, pane: usize, g: &GroupRuntime) -> GridState {
+    capture_grid_view(
+        w,
+        pane,
+        &g.hidden_cols,
+        &g.col_filters,
+        &g.sort_state,
+        &g.col_order,
+    )
 }
 /// Re-apply a result's saved grid view after `present_view` reset it to defaults.
 /// No-op when nothing was saved (`col_order` empty = never touched).
