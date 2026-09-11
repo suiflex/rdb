@@ -829,11 +829,21 @@ fn schedule_connect_timer(
         .position(|s| s.name == "chat bot")
         .map(|i| i as i32)
         .unwrap_or(0);
+    connect_after(window, idx, 250);
+    // "rail": open a second connection, then switch back to the first
+    // through the pool, so the rail shows two live tiles.
+    if screen == "rail" {
+        connect_after(window, if idx == 0 { 1 } else { 0 }, 1500);
+        connect_after(window, idx, 2800);
+    }
+}
+
+fn connect_after(window: &MainWindow, idx: i32, ms: u64) {
     let weak = window.as_weak();
-    let t1 = Box::leak(Box::new(slint::Timer::default()));
-    t1.start(
+    let t = Box::leak(Box::new(slint::Timer::default()));
+    t.start(
         slint::TimerMode::SingleShot,
-        std::time::Duration::from_millis(250),
+        std::time::Duration::from_millis(ms),
         move || {
             if let Some(w) = weak.upgrade() {
                 w.invoke_connect_clicked(idx);
