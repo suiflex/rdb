@@ -58,6 +58,17 @@ export component NavCluster inherits HorizontalLayout {
 
     spacing: 0px;
 
+    // Open-connections rail on the outer edge. Outside the sidebar's own
+    // visibility: collapsing or hiding the sidebar keeps the connections.
+    if !root.mirror: ConnectionsPanel {
+        horizontal-stretch: 0;
+        width: 76px;
+        connections: root.connections;
+        selected-conn: root.selected-conn;
+        connect-clicked(i) => { root.connect-clicked(i); }
+        open-picker => { root.open-picker(); }
+    }
+
     // draggable vertical splitter (sidebar width) — leading edge when mirrored
     if root.sidebar-visible && root.mirror: splitter-l := Rectangle {
         width: 1px;
@@ -76,22 +87,12 @@ export component NavCluster inherits HorizontalLayout {
         }
     }
 
-    // Connections rail sits to the left of, and separate from, the Items/
-    // Queries/History card — its own column, not stacked above it.
+    // `sidebar-w` still covers rail + card, as when the rail lived in here.
     if root.sidebar-visible && !root.sidebar-rail: HorizontalLayout {
         horizontal-stretch: 0;
-        min-width: root.sidebar-w;
-        max-width: root.sidebar-w;
+        min-width: root.sidebar-w - 76px;
+        max-width: root.sidebar-w - 76px;
         spacing: 0px;
-
-        ConnectionsPanel {
-            horizontal-stretch: 0;
-            width: 76px;
-            connections: root.connections;
-            selected-conn: root.selected-conn;
-            connect-clicked(i) => { root.connect-clicked(i); }
-            open-picker => { root.open-picker(); }
-        }
 
         Sidebar {
             focus-tick: root.focus-tick;
@@ -198,5 +199,14 @@ export component NavCluster inherits HorizontalLayout {
                 }
             }
         }
+    }
+
+    if root.mirror: ConnectionsPanel {
+        horizontal-stretch: 0;
+        width: 76px;
+        connections: root.connections;
+        selected-conn: root.selected-conn;
+        connect-clicked(i) => { root.connect-clicked(i); }
+        open-picker => { root.open-picker(); }
     }
 }
