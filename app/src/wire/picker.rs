@@ -890,6 +890,8 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
             | "function"
             | "palette"
             | "update-installing"
+            | "update-ready"
+            | "whats-new"
             | "settings"
             | "settings-updates"
             | "tooltip"
@@ -925,6 +927,24 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
                         w.set_update_stage("restarting".into());
                         w.set_update_step("Copying".into());
                         w.set_update_available(true);
+                    }
+                    // Download finished: the install-now dialog.
+                    "update-ready" => {
+                        w.set_update_version("9.9.9".into());
+                        w.set_update_self_update_supported(true);
+                        w.set_update_stage("ready".into());
+                        w.set_update_available(true);
+                        w.set_update_ready_open(true);
+                    }
+                    // What's New with a release-please shaped sample body.
+                    "whats-new" => {
+                        let body = "## [9.9.9](https://example.com) (2026-01-01)\n\
+                            ### App Features\n\
+                            * **app:** show open connections as a rail ([abc1234](https://example.com))\n\
+                            * **app:** ask before installing a downloaded update\n\
+                            ### Bug Fixes\n\
+                            * **app:** stop tab titles truncating in the document tab strip\n";
+                        super::update::open_whats_new(&w, "9.9.9", crate::release_notes::parse(body));
                     }
                     // Settings modal: Appearance (0) or Updates (1) tab.
                     // Hover the picker's "+": a Material tooltip inside the
