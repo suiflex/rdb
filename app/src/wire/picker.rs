@@ -869,7 +869,12 @@ fn schedule_sql_open_timer(window: &MainWindow, screen: &str) {
 fn schedule_modal_timer(window: &MainWindow, screen: &str) {
     if !matches!(
         screen,
-        "modal-db" | "modal-conn" | "modal-add-mongo" | "function" | "palette"
+        "modal-db"
+            | "modal-conn"
+            | "modal-add-mongo"
+            | "function"
+            | "palette"
+            | "update-installing"
     ) {
         return;
     }
@@ -891,6 +896,15 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
                         w.set_f_import_url("mongodb://root:secret@203.0.113.31:32343/admin?authMechanism=DEFAULT&replicaSet=rs0".into());
                     }
                     "palette" => w.invoke_toggle_palette(),
+                    // Update banner mid-install: the swap itself never runs
+                    // in mock mode, so fake the state it reports.
+                    "update-installing" => {
+                        w.set_update_version("9.9.9".into());
+                        w.set_update_self_update_supported(true);
+                        w.set_update_stage("restarting".into());
+                        w.set_update_step("Copying".into());
+                        w.set_update_available(true);
+                    }
                     _ => w.invoke_open_function("uuid_generate_v3".into()),
                 }
             }
