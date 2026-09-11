@@ -5,6 +5,16 @@ import { MaterialText } from "./material_text.slint";
 import { MaterialPalette } from "../styling/material_palette.slint";
 import { MaterialTypography } from "../styling/material_typography.slint";
 
+// rdb patch (see PATCHES.md): the hovered control's tooltip, published here
+// instead of drawn in-tree, so the application can paint it on its topmost
+// layer where no clipping ancestor or later sibling can cover it.
+export global ToolTipState {
+    in-out property <string> text;
+    in-out property <length> x; // window coords: anchor center-x
+    in-out property <length> y; // window coords: just below the anchor
+    in-out property <bool> shown;
+}
+
 export component ToolTip {
     in property <string> text;
 
