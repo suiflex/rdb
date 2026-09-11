@@ -4,7 +4,7 @@
 import { Tokens } from "tokens.slint";
 import {
     DbBadge, OutlineChip, PrimaryButton, SecondaryButton, TextButton,
-    TagChip, FilterField, Tooltip, DangerButton, IconButton
+    TagChip, FilterField, Tooltip, DangerButton, IconButton, AppMenu
 } from "components.slint";
 import { AppIcon } from "icons.slint";
 import { ConnItem, KvRow, TopLevelGroup } from "structs.slint";
@@ -712,36 +712,13 @@ export component ConnPicker inherits Rectangle {
                                         // eats the press before the row click fires.
                                         close-policy: close-on-click-outside;
                                         x: 0;
-                                        y: -76px;
-                                        width: 130px;
-                                        height: menu-box.preferred-height;
-                                        menu-box := Rectangle {
-                                            background: Tokens.card;
-                                            border-width: 1px;
-                                            border-color: Tokens.border-strong;
-                                            border-radius: Tokens.radius;
-                                            drop-shadow-blur: 12px;
-                                            drop-shadow-color: #00000022;
-                                            VerticalLayout {
-                                                padding: 4px;
-                                                for opt[i] in ["JSON", "CSV"]: Rectangle {
-                                                    height: 28px;
-                                                    border-radius: 6px;
-                                                    background: exp-row-ta.has-hover ? Tokens.accent-tint : transparent;
-                                                    exp-row-ta := TouchArea {
-                                                        clicked => { root.export-conns(i); export-menu.close(); }
-                                                    }
-                                                    HorizontalLayout {
-                                                        padding-left: Tokens.sp2;
-                                                        Text {
-                                                            text: opt;
-                                                            color: Tokens.text;
-                                                            font-size: Tokens.font-sm;
-                                                            vertical-alignment: center;
-                                                        }
-                                                    }
-                                                }
-                                            }
+                                        // Opens upward from the footer by its own height.
+                                        y: -self.height - 4px;
+                                        width: 180px;
+                                        height: export-list.preferred-height;
+                                        export-list := AppMenu {
+                                            items: ["JSON", "CSV"];
+                                            activated(i) => { root.export-conns(i); export-menu.close(); }
                                         }
                                     }
                                     exp-btn := TextButton { text: "Export ▾"; clicked => { export-menu.show(); } }
@@ -948,51 +925,30 @@ export component ConnPicker inherits Rectangle {
         // Anchored to the "⋯" button's actual position (was hardcoded to
         // 60px — the reason the menu opened in an unrelated spot). Clamp so
         // it stays on screen if the button sits near the panel's edge.
-        x: min(root.group-menu-x, root.width - 148px);
-        y: min(root.group-menu-y, root.height - 124px);
-        width: 140px;
-        Rectangle {
-            background: Tokens.card;
-            border-radius: Tokens.radius;
-            border-width: 1px;
-            border-color: Tokens.border-strong;
-            drop-shadow-blur: 12px;
-            drop-shadow-color: Tokens.text.with-alpha(0.25);
-            VerticalLayout {
-                padding: 4px;
-                // "New Subgroup" only makes sense on a top-level group — the
-                // guided Group/Subgroup picker in the connection form is
-                // two levels deep, not a full tree, so a subfolder header
-                // doesn't offer it.
-                property <bool> target-is-top-level: root.group-menu-target-depth == 0;
-                for label[action] in ["New Subgroup", "Rename", "Delete"]: Rectangle {
-                    visible: action != 0 || target-is-top-level;
-                    height: self.visible ? 28px : 0px;
-                    border-radius: Tokens.radius;
-                    background: gmenu-ta.has-hover ? (action == 2 ? Tokens.error-tint : Tokens.accent-tint) : transparent;
-                    Text {
-                        x: Tokens.sp2;
-                        text: label;
-                        color: action == 2 ? Tokens.error : Tokens.text;
-                        font-size: Tokens.font-sm;
-                        vertical-alignment: center;
-                    }
-                    gmenu-ta := TouchArea {
-                        clicked => {
-                            if (action == 0) {
-                                root.add-conn-in-group(root.group-menu-target);
-                            } else if (action == 1) {
-                                root.rename-old = root.group-menu-target;
-                                root.rename-text = root.group-menu-target;
-                                root.rename-modal-open = true;
-                            } else {
-                                root.delete-confirm-target = root.group-menu-target;
-                                root.delete-confirm-open = true;
-                            }
-                            group-menu.close();
-                        }
-                    }
+        x: min(root.group-menu-x, root.width - self.width - 8px);
+        y: min(root.group-menu-y, root.height - self.height - 8px);
+        width: 180px;
+        height: group-list.preferred-height;
+        // "New Subgroup" only makes sense on a top-level group — the guided
+        // Group/Subgroup picker in the connection form is two levels deep, not
+        // a full tree, so a subfolder header doesn't offer it.
+        property <bool> target-is-top-level: root.group-menu-target-depth == 0;
+        group-list := AppMenu {
+            items: parent.target-is-top-level ? ["New Subgroup", "Rename", "Delete"] : ["Rename", "Delete"];
+            danger-index: parent.target-is-top-level ? 2 : 1;
+            activated(i) => {
+                // Map the visible row back to its action (0 New, 1 Rename, 2 Delete).
+                if (group-menu.target-is-top-level && i == 0) {
+                    root.add-conn-in-group(root.group-menu-target);
+                } else if (i == (group-menu.target-is-top-level ? 1 : 0)) {
+                    root.rename-old = root.group-menu-target;
+                    root.rename-text = root.group-menu-target;
+                    root.rename-modal-open = true;
+                } else {
+                    root.delete-confirm-target = root.group-menu-target;
+                    root.delete-confirm-open = true;
                 }
+                group-menu.close();
             }
         }
     }
