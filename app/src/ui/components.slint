@@ -162,8 +162,10 @@ export component SelectBox {
     accessible-role: combobox;
     accessible-value: root.current-value;
     Rectangle {
-        border-top-left-radius: MaterialStyleMetrics.border_radius_4;
-        border-top-right-radius: MaterialStyleMetrics.border_radius_4;
+        // 12px on all corners (the field rule); clip keeps the hover layer and
+        // the underline inside them.
+        clip: true;
+        border-radius: MaterialStyleMetrics.border_radius_12;
         background: MaterialPalette.surface_container_highest;
         StateLayer {
             background: MaterialPalette.on_surface;
@@ -208,7 +210,8 @@ export component SelectBox {
         close-policy: close-on-click-outside;
         Rectangle {
             background: MaterialPalette.surface_container;
-            border-radius: MaterialStyleMetrics.border_radius_4;
+            border-radius: MaterialStyleMetrics.border_radius_12;
+            clip: true;
             drop-shadow-blur: 8px;
             drop-shadow-color: MaterialPalette.shadow.with-alpha(0.3);
             VerticalLayout {
@@ -318,7 +321,7 @@ export component OutlineChip inherits Rectangle {
     in property <color> tint: Tokens.ok;
     height: 20px;
     width: label.preferred-width + 2 * MaterialStyleMetrics.padding_8;
-    border-radius: MaterialStyleMetrics.border_radius_8;
+    border-radius: self.height / 2;
     border-width: 1px;
     border-color: tint.with-alpha(0.55);
     background: tint.with-alpha(0.08);
@@ -428,9 +431,25 @@ export component ExportButton {
 
 // Form text input (conn form): Material filled text field. `placeholder`
 // becomes its label, which floats up once the field has text or focus.
-export component FormField inherits TextField {
+// Material's filled field only rounds its top corners; the clip gives it the
+// app's 12px on all four without patching the vendored field.
+export component FormField {
     in property <string> placeholder;
-    label: root.placeholder;
+    in-out property <string> text <=> tf.text;
+    in property <InputType> input-type <=> tf.input-type;
+    callback accepted(string);
+    min-height: MaterialStyleMetrics.size_56;
+    forward-focus: tf;
+    Rectangle {
+        clip: true;
+        border-radius: MaterialStyleMetrics.border_radius_12;
+        tf := TextField {
+            width: 100%;
+            height: 100%;
+            label: root.placeholder;
+            accepted(t) => { root.accepted(t); }
+        }
+    }
 }
 
 // Small bordered key cap (⌘K, ⌘P, ⌘↵).
@@ -507,7 +526,7 @@ export component BreadcrumbChip inherits Rectangle {
     callback clicked;
     height: MaterialStyleMetrics.size_32;
     width: content.preferred-width + 2 * MaterialStyleMetrics.padding_12;
-    border-radius: MaterialStyleMetrics.border_radius_8;
+    border-radius: self.height / 2;
     border-width: 1px;
     border-color: MaterialPalette.outline_variant;
     background: MaterialPalette.surface_container_low;
@@ -598,7 +617,7 @@ export component TagChip inherits Rectangle {
     in property <string> text;
     height: MaterialStyleMetrics.size_32;
     width: label.preferred-width + 2 * MaterialStyleMetrics.padding_12;
-    border-radius: MaterialStyleMetrics.border_radius_8;
+    border-radius: self.height / 2;
     background: MaterialPalette.surface_container_highest;
     label := Text {
         text: root.text;
@@ -729,35 +748,44 @@ export component FilterField {
     callback completion-key(string) -> bool;
     public function focus-input() { tf.focus(); }
     forward-focus: tf;
-    tf := TextField {
-        width: 100%;
-        label: root.placeholder;
-        leading-icon: AppIcons.get("search");
-        // Clearing an applied filter has no other route: ⌘Z only ever covered
-        // the code editor's own buffer, never a toolbar input, and by the time
-        // the box holds text the query behind it has already re-run.
-        trailing-icon: root.clearable && root.text != "" ? AppIcons.get("close") : @image-url("");
-        trailing-icon-clicked => {
-            tf.text = "";
-            // `submitted` is the existing apply path and already drops the
-            // suggestion popup, so no `edited` is needed.
-            root.submitted();
-        }
-        accepted => { root.submitted(); }
-        edited(t) => { root.edited(t); }
-        // Intercepted before the input sees them, so Up/Down move the popup
-        // selection instead of the caret and Enter accepts a candidate rather
-        // than submitting a half-typed filter. With no popup up, every one of
-        // these falls through untouched.
-        key-pressed(e) => {
-            if (root.completion-items.length > 0
-                && (e.text == Key.UpArrow || e.text == Key.DownArrow
-                    || e.text == Key.Tab || e.text == Key.Escape
-                    || e.text == Key.Return)
-                && root.completion-key(e.text)) {
-                return accept;
+    min-height: MaterialStyleMetrics.size_56;
+    // 12px on all corners (see FormField). Only the field is clipped, so the
+    // completion list below can still hang outside it.
+    Rectangle {
+        clip: true;
+        border-radius: MaterialStyleMetrics.border_radius_12;
+        tf := TextField {
+            width: 100%;
+            height: 100%;
+            label: root.placeholder;
+            leading-icon: AppIcons.get("search");
+            // Clearing an applied filter has no other route: ⌘Z only ever
+            // covered the code editor's own buffer, never a toolbar input, and
+            // by the time the box holds text the query behind it has already
+            // re-run.
+            trailing-icon: root.clearable && root.text != "" ? AppIcons.get("close") : @image-url("");
+            trailing-icon-clicked => {
+                tf.text = "";
+                // `submitted` is the existing apply path and already drops the
+                // suggestion popup, so no `edited` is needed.
+                root.submitted();
             }
-            return reject;
+            accepted => { root.submitted(); }
+            edited(t) => { root.edited(t); }
+            // Intercepted before the input sees them, so Up/Down move the popup
+            // selection instead of the caret and Enter accepts a candidate
+            // rather than submitting a half-typed filter. With no popup up,
+            // every one of these falls through untouched.
+            key-pressed(e) => {
+                if (root.completion-items.length > 0
+                    && (e.text == Key.UpArrow || e.text == Key.DownArrow
+                        || e.text == Key.Tab || e.text == Key.Escape
+                        || e.text == Key.Return)
+                    && root.completion-key(e.text)) {
+                    return accept;
+                }
+                return reject;
+            }
         }
     }
     // Shortcut hint (⌘P) while the field is idle.
