@@ -77,13 +77,7 @@ async fn execute_multi_statement_query(
     split: bool,
     query_console: &Arc<std::sync::Mutex<Vec<String>>>,
 ) -> MultiStatementOutcome {
-    let stmts = if matches!(
-        engine,
-        rdb_connstore::Engine::Postgres
-            | rdb_connstore::Engine::MySql
-            | rdb_connstore::Engine::Sqlite
-            | rdb_connstore::Engine::Cassandra
-    ) {
+    let stmts = if rdb_connstore::Engine::language(engine).is_statement_text() {
         editor::split_statements(sql)
     } else {
         vec![sql.to_string()]
@@ -290,17 +284,12 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                         // instead). NoSQL keeps the row-limit control's value.
                         // Browse text carries its own LIMIT either way, so
                         // cap_select no-ops it.
-                        let row_limit = if matches!(
-                            engine,
-                            rdb_connstore::Engine::Postgres
-                                | rdb_connstore::Engine::MySql
-                                | rdb_connstore::Engine::Sqlite
-                                | rdb_connstore::Engine::Cassandra
-                        ) {
-                            0
-                        } else {
-                            browse.lock().unwrap().limit
-                        };
+                        let row_limit =
+                            if rdb_connstore::Engine::language(*engine).is_statement_text() {
+                                0
+                            } else {
+                                browse.lock().unwrap().limit
+                            };
                         execute_multi_statement_query(
                             *engine,
                             driver,
