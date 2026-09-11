@@ -148,327 +148,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         fill_detail(idx);
     }
 
-    // RDB_SCREEN drives the app to a reference state for screenshots and the
-    // e2e harness: "workspace" connects + opens emiten; "sql" opens + runs the
-    // saved query; the rest open a specific modal/view.
-    if let Ok(screen) = std::env::var("RDB_SCREEN") {
-        let idx = store
-            .borrow()
-            .list()
-            .iter()
-            .position(|s| s.name == "chat bot")
-            .map(|i| i as i32)
-            .unwrap_or(0);
-        // "connections" IS the pre-connect screen; connecting would swap it
-        // for the workspace before the shot fires.
-        if screen != "connections" {
-            let weak = window.as_weak();
-            let t1 = Box::leak(Box::new(slint::Timer::default()));
-            t1.start(
-                slint::TimerMode::SingleShot,
-                std::time::Duration::from_millis(250),
-                move || {
-                    if let Some(w) = weak.upgrade() {
-                        w.invoke_connect_clicked(idx);
-                    }
-                },
-            );
-        }
-        if screen.starts_with("sql") {
-            let weak = window.as_weak();
-            let t2 = Box::leak(Box::new(slint::Timer::default()));
-            t2.start(
-                slint::TimerMode::SingleShot,
-                std::time::Duration::from_millis(1800),
-                move || {
-                    if let Some(w) = weak.upgrade() {
-                        w.set_sidebar_mode(1);
-                        w.invoke_open_query("emiten-per-sektor".into(), 0);
-                    }
-                },
-            );
-            let weak = window.as_weak();
-            let t3 = Box::leak(Box::new(slint::Timer::default()));
-            t3.start(
-                slint::TimerMode::SingleShot,
-                std::time::Duration::from_millis(2300),
-                move || {
-                    if let Some(w) = weak.upgrade() {
-                        w.invoke_run_query();
-                    }
-                },
-            );
-        }
-        if screen == "modal-db"
-            || screen == "modal-conn"
-            || screen == "modal-add-mongo"
-            || screen == "function"
-            || screen == "palette"
-        {
-            let weak = window.as_weak();
-            let which = screen.clone();
-            let t4 = Box::leak(Box::new(slint::Timer::default()));
-            t4.start(
-                slint::TimerMode::SingleShot,
-                std::time::Duration::from_millis(1800),
-                move || {
-                    if let Some(w) = weak.upgrade() {
-                        match which.as_str() {
-                            "modal-db" => w.invoke_open_db_modal(),
-                            "modal-conn" => w.invoke_open_conn_modal(),
-                            "modal-add-mongo" => {
-                                w.invoke_open_add_form();
-                                w.set_f_engine("MongoDB".into());
-                                w.set_f_port("27017".into());
-                                w.set_f_import_url("mongodb://root:secret@203.0.113.31:32343/admin?authMechanism=DEFAULT&replicaSet=rs0".into());
-                            }
-                            "palette" => w.invoke_toggle_palette(),
-                            _ => w.invoke_open_function("uuid_generate_v3".into()),
-                        }
-                    }
-                },
-            );
-        }
-        if screen.starts_with("workspace") {
-            let weak = window.as_weak();
-            // "workspace" opens the mock `emiten` fixture; "workspace-<name>"
-            // opens that table instead, so the harness can drive a real
-            // connection whose tables it cannot know in advance.
-            let table = match screen.strip_prefix("workspace-") {
-                Some(name) if !name.is_empty() => name.to_string(),
-                _ => "emiten".to_string(),
-            };
-            let t2 = Box::leak(Box::new(slint::Timer::default()));
-            t2.start(
-                slint::TimerMode::SingleShot,
-                std::time::Duration::from_millis(1800),
-                move || {
-                    if let Some(w) = weak.upgrade() {
-                        w.invoke_open_table("".into(), table.as_str().into());
-                    }
-                },
-            );
-        }
-
-        // E2E editing scenarios layered on the base screens above. Fixed
-        // delays race the async connect/browse pipeline, so each step fires
-        // when its precondition is observable, polling every 100ms.
-        let when = |cond: Rc<dyn Fn(&MainWindow) -> bool>, act: Rc<dyn Fn(&MainWindow)>| {
-            let weak = window.as_weak();
-            let t: &'static slint::Timer = Box::leak(Box::new(slint::Timer::default()));
-            t.start(
-                slint::TimerMode::Repeated,
-                std::time::Duration::from_millis(100),
-                move || {
-                    let Some(w) = weak.upgrade() else {
-                        t.stop();
-                        return;
-                    };
-                    if cond(&w) {
-                        t.stop();
-                        act(&w);
-                    }
-                },
-            );
-        };
-        use slint::Model as _;
-        // grid loaded with an editable page (pk fetched)
-        let grid_ready: Rc<dyn Fn(&MainWindow) -> bool> =
-            Rc::new(|w| w.get_grid_cells().row_count() > 0 && !w.get_grid_read_only());
-        let has_pending: Rc<dyn Fn(&MainWindow) -> bool> = Rc::new(|w| w.get_pending_count() > 0);
-        if matches!(
-            screen.as_str(),
-            "workspace-dirty" | "workspace-guard" | "workspace-commit" | "workspace-tabnav"
-        ) {
-            when(
-                grid_ready.clone(),
-                Rc::new(|w| w.invoke_cell_edited(0, 2, "Bayan EDITED".into())),
-            );
-        }
-        if screen == "workspace-active-commit" {
-            when(
-                grid_ready.clone(),
-                Rc::new(|w| {
-                    w.invoke_edit_cell(0, 2);
-                    w.set_editing_value("Bayan ACTIVE SAVE".into());
-                    w.invoke_commit_edits();
-                }),
-            );
-        }
-        if screen == "workspace-detail-commit" {
-            when(
-                grid_ready.clone(),
-                Rc::new(|w| {
-                    w.invoke_stage_cell(
-                        0,
-                        2,
-                        "Bayan Resources — long detail value saved from the right panel".into(),
-                    );
-                    w.invoke_commit_edits();
-                }),
-            );
-        }
-        if screen == "workspace-long-edit" {
-            when(
-                grid_ready.clone(),
-                Rc::new(|w| {
-                    w.invoke_cell_edited(
-                        0,
-                        2,
-                        "Bayan Resources — a deliberately long inline value remains visible while editing, wraps inside a bounded overlay, and still supports cursor navigation all the way to the final character."
-                            .into(),
-                    );
-                    w.invoke_edit_cell(0, 2);
-                }),
-            );
-        }
-        if screen == "workspace-pointer-edit" {
-            when(
-                grid_ready.clone(),
-                Rc::new(|w| {
-                    use slint::platform::{PointerEventButton, WindowEvent};
-                    let position = slint::LogicalPosition::new(650.0, 164.0);
-                    for _ in 0..2 {
-                        w.window().dispatch_event(WindowEvent::PointerPressed {
-                            position,
-                            button: PointerEventButton::Left,
-                        });
-                        w.window().dispatch_event(WindowEvent::PointerReleased {
-                            position,
-                            button: PointerEventButton::Left,
-                        });
-                    }
-                    assert_eq!((w.get_editing_row(), w.get_editing_col()), (0, 2));
-                }),
-            );
-        }
-        if screen == "workspace-dirty" {
-            // second pending change: a delete-marked row
-            when(
-                has_pending.clone(),
-                Rc::new(|w| {
-                    w.set_selected_row(2);
-                    w.invoke_mark_delete();
-                }),
-            );
-        }
-        if screen == "workspace-guard" {
-            // navigation with pending edits must be refused with a message
-            when(has_pending.clone(), Rc::new(|w| w.invoke_next_page()));
-        }
-        if screen == "workspace-commit" {
-            // full CRUD loop: buffer → WriteOps → mock commit → refetch
-            when(has_pending.clone(), Rc::new(|w| w.invoke_commit_edits()));
-        }
-        if screen == "workspace-tabnav" {
-            // Tab stores the edited cell and opens the neighbour's editor
-            when(
-                has_pending.clone(),
-                Rc::new(|w| w.invoke_cell_advance(0, 3, "TABBED".into(), true)),
-            );
-        }
-        if screen == "workspace-sql" {
-            // Real UI transition: table browse → global SQL button. The fresh
-            // query tab must not inherit the table request's loading state.
-            when(
-                Rc::new(|w| w.get_active_table() == "emiten"),
-                Rc::new(|w| w.invoke_new_tab()),
-            );
-        }
-        if screen == "workspace-tabflow" {
-            when(
-                Rc::new(|w| w.get_active_table() == "emiten" && w.get_tabs().row_count() == 1),
-                Rc::new(|w| w.invoke_open_table("".into(), "referral_sources".into())),
-            );
-            when(
-                Rc::new(|w| {
-                    w.get_active_table() == "referral_sources" && w.get_tabs().row_count() == 1
-                }),
-                Rc::new(|w| {
-                    w.invoke_pin_table("".into(), "referral_sources".into());
-                    w.invoke_open_table("".into(), "sectors".into());
-                }),
-            );
-            when(
-                Rc::new(|w| w.get_active_table() == "sectors" && w.get_tabs().row_count() == 2),
-                Rc::new(|w| w.invoke_new_tab()),
-            );
-        }
-        if screen == "workspace-filter" {
-            when(
-                grid_ready.clone(),
-                Rc::new(|w| {
-                    w.set_data_filter_open(true);
-                    w.set_filter_col("name".into());
-                    w.set_filter_op("ILIKE".into());
-                    w.set_grid_filter("mitra".into());
-                    w.invoke_apply_filter();
-                }),
-            );
-        }
-        if screen == "workspace-limit" {
-            when(
-                grid_ready.clone(),
-                Rc::new(|w| w.invoke_set_limit("25".into())),
-            );
-        }
-        if screen == "workspace-insert" {
-            when(grid_ready.clone(), Rc::new(|w| w.invoke_add_row()));
-        }
-        if screen == "workspace-users-bool" || screen == "workspace-users-date" {
-            when(grid_ready.clone(), Rc::new(|w| w.invoke_add_row()));
-            let date = screen == "workspace-users-date";
-            when(
-                has_pending.clone(),
-                Rc::new(move |w| {
-                    let rows = w.get_grid_cells().row_count() / w.get_grid_col_count() as usize;
-                    w.invoke_edit_cell(rows.saturating_sub(1) as i32, if date { 4 } else { 3 });
-                }),
-            );
-        }
-        if screen == "sql-select" {
-            // ⌘A select-all: the whole query gets the selection tint
-            when(
-                Rc::new(|w| !w.get_query_text().trim().is_empty()),
-                Rc::new(|w| {
-                    w.invoke_editor_key("a".into(), true, false, false);
-                }),
-            );
-        }
-        if screen == "sql-empty" {
-            // a query with zero rows shows the empty state, not a blank pane
-            let load = load_editor_text.clone();
-            when(
-                Rc::new(|w| !w.get_results_meta().is_empty()),
-                Rc::new(move |w| {
-                    load(0, "SELECT * FROM emiten OFFSET 99999");
-                    w.invoke_run_query();
-                }),
-            );
-        }
-        if screen == "sql-find" {
-            // ⌘F find bar: highlights the first match of a term
-            when(
-                Rc::new(|w| !w.get_query_text().trim().is_empty()),
-                Rc::new(|w| {
-                    w.invoke_toggle_find();
-                    w.set_find_text("sector".into());
-                    w.invoke_find_changed("sector".into());
-                }),
-            );
-        }
-        if screen == "sql-multi" {
-            // multi-statement run: status reads "N statements · …"
-            let load = load_editor_text.clone();
-            when(
-                Rc::new(|w| !w.get_results_meta().is_empty()),
-                Rc::new(move |w| {
-                    load(0, "SELECT 1;\nSELECT * FROM emiten LIMIT 5;");
-                    w.invoke_run_query();
-                }),
-            );
-        }
-    }
+    // RDB_SCREEN e2e harness: see `wire_screen_harness`.
+    wire_screen_harness(window, &store, &load_editor_text);
 
     // Last result view kept in memory so the client-side filter (Feature C)
     // can re-derive the visible rows without re-querying. Arc<Mutex<>> (not Rc)
@@ -1095,5 +776,405 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         window.on_open_url(move |u| {
             let _ = open::that(u.as_str());
         });
+    }
+}
+
+/// Drives the app to a reference state for screenshots and e2e tests,
+/// gated behind `RDB_SCREEN` (mock mode only). Kept out of `wire`: this is
+/// test harness plumbing, not a real callback.
+type ScreenCond = Rc<dyn Fn(&MainWindow) -> bool>;
+type ScreenAct = Rc<dyn Fn(&MainWindow)>;
+
+/// RDB_SCREEN drives the app to a reference state for screenshots and the
+/// e2e harness: "workspace" connects + opens emiten; "sql" opens + runs the
+/// saved query; the rest open a specific modal/view. Each `schedule_*`
+/// helper below owns one screen family and no-ops for any other screen, so
+/// this function is just the list of families, not their branching.
+fn wire_screen_harness(
+    window: &MainWindow,
+    store: &Rc<RefCell<rdb_connstore::ConnStore>>,
+    load_editor_text: &PaneTextFn,
+) {
+    let Ok(screen) = std::env::var("RDB_SCREEN") else {
+        return;
+    };
+    schedule_connect_timer(window, store, &screen);
+    schedule_sql_open_timer(window, &screen);
+    schedule_modal_timer(window, &screen);
+    schedule_workspace_open_timer(window, &screen);
+    schedule_grid_edit_scenarios(window, &screen);
+    schedule_tab_flow_scenarios(window, &screen);
+    schedule_sql_editor_scenarios(window, &screen, load_editor_text);
+}
+
+/// "connections" IS the pre-connect screen; connecting would swap it for
+/// the workspace before the shot fires.
+fn schedule_connect_timer(
+    window: &MainWindow,
+    store: &Rc<RefCell<rdb_connstore::ConnStore>>,
+    screen: &str,
+) {
+    if screen == "connections" {
+        return;
+    }
+    let idx = store
+        .borrow()
+        .list()
+        .iter()
+        .position(|s| s.name == "chat bot")
+        .map(|i| i as i32)
+        .unwrap_or(0);
+    let weak = window.as_weak();
+    let t1 = Box::leak(Box::new(slint::Timer::default()));
+    t1.start(
+        slint::TimerMode::SingleShot,
+        std::time::Duration::from_millis(250),
+        move || {
+            if let Some(w) = weak.upgrade() {
+                w.invoke_connect_clicked(idx);
+            }
+        },
+    );
+}
+
+fn schedule_sql_open_timer(window: &MainWindow, screen: &str) {
+    if !screen.starts_with("sql") {
+        return;
+    }
+    let weak = window.as_weak();
+    let t2 = Box::leak(Box::new(slint::Timer::default()));
+    t2.start(
+        slint::TimerMode::SingleShot,
+        std::time::Duration::from_millis(1800),
+        move || {
+            if let Some(w) = weak.upgrade() {
+                w.set_sidebar_mode(1);
+                w.invoke_open_query("emiten-per-sektor".into(), 0);
+            }
+        },
+    );
+    let weak = window.as_weak();
+    let t3 = Box::leak(Box::new(slint::Timer::default()));
+    t3.start(
+        slint::TimerMode::SingleShot,
+        std::time::Duration::from_millis(2300),
+        move || {
+            if let Some(w) = weak.upgrade() {
+                w.invoke_run_query();
+            }
+        },
+    );
+}
+
+fn schedule_modal_timer(window: &MainWindow, screen: &str) {
+    if !matches!(
+        screen,
+        "modal-db" | "modal-conn" | "modal-add-mongo" | "function" | "palette"
+    ) {
+        return;
+    }
+    let weak = window.as_weak();
+    let which = screen.to_string();
+    let t4 = Box::leak(Box::new(slint::Timer::default()));
+    t4.start(
+        slint::TimerMode::SingleShot,
+        std::time::Duration::from_millis(1800),
+        move || {
+            if let Some(w) = weak.upgrade() {
+                match which.as_str() {
+                    "modal-db" => w.invoke_open_db_modal(),
+                    "modal-conn" => w.invoke_open_conn_modal(),
+                    "modal-add-mongo" => {
+                        w.invoke_open_add_form();
+                        w.set_f_engine("MongoDB".into());
+                        w.set_f_port("27017".into());
+                        w.set_f_import_url("mongodb://root:secret@203.0.113.31:32343/admin?authMechanism=DEFAULT&replicaSet=rs0".into());
+                    }
+                    "palette" => w.invoke_toggle_palette(),
+                    _ => w.invoke_open_function("uuid_generate_v3".into()),
+                }
+            }
+        },
+    );
+}
+
+/// "workspace" opens the mock `emiten` fixture; "workspace-<name>" opens
+/// that table instead, so the harness can drive a real connection whose
+/// tables it cannot know in advance.
+fn schedule_workspace_open_timer(window: &MainWindow, screen: &str) {
+    if !screen.starts_with("workspace") {
+        return;
+    }
+    let weak = window.as_weak();
+    let table = match screen.strip_prefix("workspace-") {
+        Some(name) if !name.is_empty() => name.to_string(),
+        _ => "emiten".to_string(),
+    };
+    let t2 = Box::leak(Box::new(slint::Timer::default()));
+    t2.start(
+        slint::TimerMode::SingleShot,
+        std::time::Duration::from_millis(1800),
+        move || {
+            if let Some(w) = weak.upgrade() {
+                w.invoke_open_table("".into(), table.as_str().into());
+            }
+        },
+    );
+}
+
+/// Polls every 100ms until `cond` holds, then fires `act` once and stops.
+/// e2e editing scenarios are layered on the base screens with this instead
+/// of a fixed delay, since a fixed delay would race the async
+/// connect/browse pipeline.
+fn when(window: &MainWindow, cond: ScreenCond, act: ScreenAct) {
+    let weak = window.as_weak();
+    let t: &'static slint::Timer = Box::leak(Box::new(slint::Timer::default()));
+    t.start(
+        slint::TimerMode::Repeated,
+        std::time::Duration::from_millis(100),
+        move || {
+            let Some(w) = weak.upgrade() else {
+                t.stop();
+                return;
+            };
+            if cond(&w) {
+                t.stop();
+                act(&w);
+            }
+        },
+    );
+}
+
+/// grid loaded with an editable page (pk fetched)
+fn grid_ready_cond() -> ScreenCond {
+    Rc::new(|w| w.get_grid_cells().row_count() > 0 && !w.get_grid_read_only())
+}
+
+fn has_pending_cond() -> ScreenCond {
+    Rc::new(|w| w.get_pending_count() > 0)
+}
+
+/// Cell-edit scenarios against a freshly loaded grid: the initial edit
+/// (shared by four screens) plus each screen's own follow-up once that
+/// edit is pending.
+fn schedule_grid_edit_scenarios(window: &MainWindow, screen: &str) {
+    let grid_ready = grid_ready_cond();
+    if matches!(
+        screen,
+        "workspace-dirty" | "workspace-guard" | "workspace-commit" | "workspace-tabnav"
+    ) {
+        when(
+            window,
+            grid_ready.clone(),
+            Rc::new(|w| w.invoke_cell_edited(0, 2, "Bayan EDITED".into())),
+        );
+    }
+    match screen {
+        "workspace-active-commit" => when(
+            window,
+            grid_ready.clone(),
+            Rc::new(|w| {
+                w.invoke_edit_cell(0, 2);
+                w.set_editing_value("Bayan ACTIVE SAVE".into());
+                w.invoke_commit_edits();
+            }),
+        ),
+        "workspace-detail-commit" => when(
+            window,
+            grid_ready.clone(),
+            Rc::new(|w| {
+                w.invoke_stage_cell(
+                    0,
+                    2,
+                    "Bayan Resources — long detail value saved from the right panel".into(),
+                );
+                w.invoke_commit_edits();
+            }),
+        ),
+        "workspace-long-edit" => when(
+            window,
+            grid_ready.clone(),
+            Rc::new(|w| {
+                w.invoke_cell_edited(
+                    0,
+                    2,
+                    "Bayan Resources — a deliberately long inline value remains visible while editing, wraps inside a bounded overlay, and still supports cursor navigation all the way to the final character."
+                        .into(),
+                );
+                w.invoke_edit_cell(0, 2);
+            }),
+        ),
+        "workspace-pointer-edit" => when(
+            window,
+            grid_ready.clone(),
+            Rc::new(|w| {
+                use slint::platform::{PointerEventButton, WindowEvent};
+                let position = slint::LogicalPosition::new(650.0, 164.0);
+                for _ in 0..2 {
+                    w.window().dispatch_event(WindowEvent::PointerPressed {
+                        position,
+                        button: PointerEventButton::Left,
+                    });
+                    w.window().dispatch_event(WindowEvent::PointerReleased {
+                        position,
+                        button: PointerEventButton::Left,
+                    });
+                }
+                assert_eq!((w.get_editing_row(), w.get_editing_col()), (0, 2));
+            }),
+        ),
+        _ => {}
+    }
+    schedule_pending_edit_followups(window, screen);
+    schedule_standalone_grid_actions(window, screen, grid_ready);
+}
+
+/// Second step for the four screens above: fires once the initial edit is
+/// pending, each with its own distinct follow-up action.
+fn schedule_pending_edit_followups(window: &MainWindow, screen: &str) {
+    let has_pending = has_pending_cond();
+    match screen {
+        // second pending change: a delete-marked row
+        "workspace-dirty" => when(
+            window,
+            has_pending,
+            Rc::new(|w| {
+                w.set_selected_row(2);
+                w.invoke_mark_delete();
+            }),
+        ),
+        // navigation with pending edits must be refused with a message
+        "workspace-guard" => when(window, has_pending, Rc::new(|w| w.invoke_next_page())),
+        // full CRUD loop: buffer → WriteOps → mock commit → refetch
+        "workspace-commit" => when(window, has_pending, Rc::new(|w| w.invoke_commit_edits())),
+        // Tab stores the edited cell and opens the neighbour's editor
+        "workspace-tabnav" => when(
+            window,
+            has_pending,
+            Rc::new(|w| w.invoke_cell_advance(0, 3, "TABBED".into(), true)),
+        ),
+        _ => {}
+    }
+}
+
+/// Grid actions that don't chain off the shared initial edit above: each
+/// applies straight to the freshly loaded grid.
+fn schedule_standalone_grid_actions(window: &MainWindow, screen: &str, grid_ready: ScreenCond) {
+    match screen {
+        "workspace-filter" => when(
+            window,
+            grid_ready,
+            Rc::new(|w| {
+                w.set_data_filter_open(true);
+                w.set_filter_col("name".into());
+                w.set_filter_op("ILIKE".into());
+                w.set_grid_filter("mitra".into());
+                w.invoke_apply_filter();
+            }),
+        ),
+        "workspace-limit" => when(
+            window,
+            grid_ready,
+            Rc::new(|w| w.invoke_set_limit("25".into())),
+        ),
+        "workspace-insert" => when(window, grid_ready, Rc::new(|w| w.invoke_add_row())),
+        "workspace-users-bool" | "workspace-users-date" => {
+            when(window, grid_ready, Rc::new(|w| w.invoke_add_row()));
+            let date = screen == "workspace-users-date";
+            when(
+                window,
+                has_pending_cond(),
+                Rc::new(move |w| {
+                    let rows = w.get_grid_cells().row_count() / w.get_grid_col_count() as usize;
+                    w.invoke_edit_cell(rows.saturating_sub(1) as i32, if date { 4 } else { 3 });
+                }),
+            );
+        }
+        _ => {}
+    }
+}
+
+/// Real UI transition: table browse → global SQL button, and a multi-tab
+/// pin-and-switch flow. The fresh query tab must not inherit the table
+/// request's loading state.
+fn schedule_tab_flow_scenarios(window: &MainWindow, screen: &str) {
+    use slint::Model as _;
+    match screen {
+        "workspace-sql" => when(
+            window,
+            Rc::new(|w| w.get_active_table() == "emiten"),
+            Rc::new(|w| w.invoke_new_tab()),
+        ),
+        "workspace-tabflow" => {
+            when(
+                window,
+                Rc::new(|w| w.get_active_table() == "emiten" && w.get_tabs().row_count() == 1),
+                Rc::new(|w| w.invoke_open_table("".into(), "referral_sources".into())),
+            );
+            when(
+                window,
+                Rc::new(|w| {
+                    w.get_active_table() == "referral_sources" && w.get_tabs().row_count() == 1
+                }),
+                Rc::new(|w| {
+                    w.invoke_pin_table("".into(), "referral_sources".into());
+                    w.invoke_open_table("".into(), "sectors".into());
+                }),
+            );
+            when(
+                window,
+                Rc::new(|w| w.get_active_table() == "sectors" && w.get_tabs().row_count() == 2),
+                Rc::new(|w| w.invoke_new_tab()),
+            );
+        }
+        _ => {}
+    }
+}
+
+fn schedule_sql_editor_scenarios(window: &MainWindow, screen: &str, load_editor_text: &PaneTextFn) {
+    match screen {
+        // ⌘A select-all: the whole query gets the selection tint
+        "sql-select" => when(
+            window,
+            Rc::new(|w| !w.get_query_text().trim().is_empty()),
+            Rc::new(|w| {
+                w.invoke_editor_key("a".into(), true, false, false);
+            }),
+        ),
+        // a query with zero rows shows the empty state, not a blank pane
+        "sql-empty" => {
+            let load = load_editor_text.clone();
+            when(
+                window,
+                Rc::new(|w| !w.get_results_meta().is_empty()),
+                Rc::new(move |w| {
+                    load(0, "SELECT * FROM emiten OFFSET 99999");
+                    w.invoke_run_query();
+                }),
+            );
+        }
+        // ⌘F find bar: highlights the first match of a term
+        "sql-find" => when(
+            window,
+            Rc::new(|w| !w.get_query_text().trim().is_empty()),
+            Rc::new(|w| {
+                w.invoke_toggle_find();
+                w.set_find_text("sector".into());
+                w.invoke_find_changed("sector".into());
+            }),
+        ),
+        // multi-statement run: status reads "N statements · …"
+        "sql-multi" => {
+            let load = load_editor_text.clone();
+            when(
+                window,
+                Rc::new(|w| !w.get_results_meta().is_empty()),
+                Rc::new(move |w| {
+                    load(0, "SELECT 1;\nSELECT * FROM emiten LIMIT 5;");
+                    w.invoke_run_query();
+                }),
+            );
+        }
+        _ => {}
     }
 }

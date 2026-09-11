@@ -14,6 +14,44 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::*;
 
+/// PK-aware editing for a single-table SELECT, buffered or streamed.
+/// Shared by `run_sql` and `run_stream` — they used to each carry their own
+/// copy of this.
+async fn resolve_pk_hint(
+    engine: rdb_connstore::Engine,
+    driver: &AnyDriver,
+    stmt: &str,
+    cur_db: &str,
+    columns: &[String],
+) -> Option<(rdb_core::write::TableRef, Vec<String>)> {
+    if !matches!(
+        engine,
+        rdb_connstore::Engine::Postgres
+            | rdb_connstore::Engine::MySql
+            | rdb_connstore::Engine::Sqlite
+    ) {
+        return None;
+    }
+    let (qualifier, name) = crate::query_parse::single_table_name(stmt)?;
+    // The query's own `schema.table`/`db.table` prefix wins when it named one
+    // explicitly; otherwise fall back to the connection's active
+    // schema/database selection.
+    let qualifier = qualifier.or_else(|| (!cur_db.is_empty()).then(|| cur_db.to_string()));
+    let table = rdb_core::write::TableRef {
+        database: (!matches!(engine, rdb_connstore::Engine::Postgres))
+            .then(|| qualifier.clone())
+            .flatten(),
+        schema: matches!(engine, rdb_connstore::Engine::Postgres)
+            .then(|| qualifier.clone())
+            .flatten(),
+        name,
+    };
+    match driver.primary_key(&table).await {
+        Ok(pk) if !pk.is_empty() && pk.iter().all(|k| columns.contains(k)) => Some((table, pk)),
+        _ => None,
+    }
+}
+
 pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSqlFn) {
     let AppState {
         rt,
@@ -260,54 +298,13 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                 // PK columns come back in the result, treat it the same as a
                 // browsed table: editable, PK-aware. Anything ambiguous just
                 // stays read-only, same as before this existed.
-                let pk_hint: Option<(rdb_core::write::TableRef, Vec<String>)> = if let (
-                    Some((engine, driver)),
-                    Some(model::ResultView::Table(g)),
-                    Some(stmt),
-                ) =
-                    (picked.as_ref(), view.as_ref(), last_stmt.as_deref())
-                {
-                    if matches!(
-                        engine,
-                        rdb_connstore::Engine::Postgres
-                            | rdb_connstore::Engine::MySql
-                            | rdb_connstore::Engine::Sqlite
-                    ) {
-                        if let Some((qualifier, name)) = crate::query_parse::single_table_name(stmt)
-                        {
-                            // The query's own `schema.table`/`db.table` prefix wins
-                            // when it named one explicitly; otherwise fall back to
-                            // the connection's active schema/database selection.
-                            let qualifier =
-                                qualifier.or_else(|| (!cur_db.is_empty()).then(|| cur_db.clone()));
-                            let table = rdb_core::write::TableRef {
-                                database: (!matches!(engine, rdb_connstore::Engine::Postgres))
-                                    .then(|| qualifier.clone())
-                                    .flatten(),
-                                schema: matches!(engine, rdb_connstore::Engine::Postgres)
-                                    .then(|| qualifier.clone())
-                                    .flatten(),
-                                name,
-                            };
-                            match driver.primary_key(&table).await {
-                                Ok(pk)
-                                    if !pk.is_empty()
-                                        && pk
-                                            .iter()
-                                            .all(|k| g.columns.iter().any(|c| &c.name == k)) =>
-                                {
-                                    Some((table, pk))
-                                }
-                                _ => None,
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
+                let pk_hint = match (picked.as_ref(), view.as_ref(), last_stmt.as_deref()) {
+                    (Some((engine, driver)), Some(model::ResultView::Table(g)), Some(stmt)) => {
+                        let columns: Vec<String> =
+                            g.columns.iter().map(|c| c.name.clone()).collect();
+                        resolve_pk_hint(*engine, driver, stmt, &cur_db, &columns).await
                     }
-                } else {
-                    None
+                    _ => None,
                 };
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak2.upgrade() {
@@ -953,53 +950,13 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                         // (inside the same task, before Done ships) so it lands
                         // atomically with the result — see the StreamMsg::Done doc
                         // comment for why this replaced a separately spawned task.
-                        let pk_hint: Option<(rdb_core::write::TableRef, Vec<String>)> =
-                            if let Some((engine, driver)) = picked.as_ref() {
-                                if matches!(
-                                    engine,
-                                    rdb_connstore::Engine::Postgres
-                                        | rdb_connstore::Engine::MySql
-                                        | rdb_connstore::Engine::Sqlite
-                                ) {
-                                    if let Some((qualifier, name)) =
-                                        crate::query_parse::single_table_name(&sql_for_pk)
-                                    {
-                                        let qualifier = qualifier.or_else(|| {
-                                            (!cur_db.is_empty()).then(|| cur_db.clone())
-                                        });
-                                        let table = rdb_core::write::TableRef {
-                                            database: (!matches!(
-                                                engine,
-                                                rdb_connstore::Engine::Postgres
-                                            ))
-                                            .then(|| qualifier.clone())
-                                            .flatten(),
-                                            schema: matches!(
-                                                engine,
-                                                rdb_connstore::Engine::Postgres
-                                            )
-                                            .then(|| qualifier.clone())
-                                            .flatten(),
-                                            name,
-                                        };
-                                        match driver.primary_key(&table).await {
-                                            Ok(pk)
-                                                if !pk.is_empty()
-                                                    && pk.iter().all(|k| col_names.contains(k)) =>
-                                            {
-                                                Some((table, pk))
-                                            }
-                                            _ => None,
-                                        }
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            };
+                        let pk_hint = match picked.as_ref() {
+                            Some((engine, driver)) => {
+                                resolve_pk_hint(*engine, driver, &sql_for_pk, &cur_db, &col_names)
+                                    .await
+                            }
+                            None => None,
+                        };
                         let _ = ui_tx.send(StreamMsg::Done {
                             capped,
                             elapsed_ms,
