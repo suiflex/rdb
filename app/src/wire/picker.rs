@@ -819,7 +819,10 @@ fn schedule_connect_timer(
     screen: &str,
 ) {
     // "tooltip" hovers a control on this same pre-connect screen.
-    if screen == "connections" || screen == "tooltip" || screen == "export-menu" {
+    if matches!(
+        screen,
+        "connections" | "tooltip" | "export-menu" | "menu-hover"
+    ) {
         return;
     }
     let idx = store
@@ -881,6 +884,35 @@ fn schedule_sql_open_timer(window: &MainWindow, screen: &str) {
     );
 }
 
+/// Chrome review screens: the picker's Export menu (opened, or opened and
+/// hovered), the rail notch in the light theme (in dark the card is nearly
+/// the canvas colour), and the collapsed sidebar with the rail kept.
+fn show_chrome_screen(w: &MainWindow, which: &str) {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    match which {
+        "notch-light" => w.invoke_set_theme_mode(1),
+        "sidebar-collapsed" => w.set_sidebar_rail(true),
+        _ => {
+            // The picker footer's "Export ▾".
+            let position = slint::LogicalPosition::new(466.0, 722.0);
+            w.window().dispatch_event(WindowEvent::PointerPressed {
+                position,
+                button: PointerEventButton::Left,
+            });
+            w.window().dispatch_event(WindowEvent::PointerReleased {
+                position,
+                button: PointerEventButton::Left,
+            });
+            if which == "menu-hover" {
+                // A row of the menu, which opens upward from the button.
+                w.window().dispatch_event(WindowEvent::PointerMoved {
+                    position: slint::LogicalPosition::new(466.0, 680.0),
+                });
+            }
+        }
+    }
+}
+
 /// Update screens: neither the download, the swap nor the version check runs
 /// in mock mode, so fake the state each one reports.
 fn show_update_screen(w: &MainWindow, which: &str) {
@@ -926,6 +958,9 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
             | "zoom"
             | "shortcuts"
             | "export-menu"
+            | "menu-hover"
+            | "notch-light"
+            | "sidebar-collapsed"
     ) {
         return;
     }
@@ -966,17 +1001,8 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
                     "shortcuts" => w.set_shortcuts_open(true),
                     // Click the picker footer's "Export ▾" so the popup menu
                     // (not reachable any other way) shows in the screenshot.
-                    "export-menu" => {
-                        use slint::platform::{PointerEventButton, WindowEvent};
-                        let position = slint::LogicalPosition::new(471.0, 742.0);
-                        w.window().dispatch_event(WindowEvent::PointerPressed {
-                            position,
-                            button: PointerEventButton::Left,
-                        });
-                        w.window().dispatch_event(WindowEvent::PointerReleased {
-                            position,
-                            button: PointerEventButton::Left,
-                        });
+                    "export-menu" | "menu-hover" | "notch-light" | "sidebar-collapsed" => {
+                        show_chrome_screen(&w, &which)
                     }
                     "settings" | "settings-updates" => {
                         w.set_settings_tab(if which == "settings" { 0 } else { 1 });
