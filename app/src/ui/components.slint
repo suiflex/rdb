@@ -475,7 +475,7 @@ export component KeyCap inherits Rectangle {
 export component SearchCommandPill inherits Rectangle {
     in property <string> placeholder: "Search or run a command...";
     callback activated;
-    height: MaterialStyleMetrics.size_36;
+    height: MaterialStyleMetrics.size_40; // same as the other titlebar controls
     border-radius: self.height / 2;
     // surface-container-high maps to the titlebar chrome itself, which made the
     // pill vanish into the bar; one step lighter plus an outline keeps it found.
@@ -524,7 +524,8 @@ export component BreadcrumbChip inherits Rectangle {
     in property <bool> mono: false;
     in property <string> tooltip;            // optional hover label
     callback clicked;
-    height: MaterialStyleMetrics.size_32;
+    // 40px like every titlebar control (Material buttons can't go lower).
+    height: MaterialStyleMetrics.size_40;
     width: content.preferred-width + 2 * MaterialStyleMetrics.padding_12;
     border-radius: self.height / 2;
     border-width: 1px;

@@ -983,7 +983,9 @@ callback create-table-commit();
                     }
                     if root.active-env-tag-label != "": VerticalLayout {
                         alignment: center;
-                        OutlineChip { text: root.active-env-tag-label; tint: root.active-env-tag-color; }
+                        // 40px like the other titlebar controls (OutlineChip keeps
+                        // its compact 20px default in list rows).
+                        OutlineChip { height: 40px; text: root.active-env-tag-label; tint: root.active-env-tag-color; }
                     }
                     // Status word only when it needs attention; the healthy case
                     // is already conveyed by the green dot on the chip above.
