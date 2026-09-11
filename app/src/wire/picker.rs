@@ -815,7 +815,7 @@ fn schedule_connect_timer(
     screen: &str,
 ) {
     // "tooltip" hovers a control on this same pre-connect screen.
-    if screen == "connections" || screen == "tooltip" {
+    if screen == "connections" || screen == "tooltip" || screen == "export-menu" {
         return;
     }
     let idx = store
@@ -881,6 +881,7 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
             | "tooltip"
             | "zoom"
             | "shortcuts"
+            | "export-menu"
     ) {
         return;
     }
@@ -925,6 +926,20 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
                     "zoom" => w.invoke_zoom_step(3),
                     // Keyboard Shortcuts modal (long list; scrolls in a short window).
                     "shortcuts" => w.set_shortcuts_open(true),
+                    // Click the picker footer's "Export ▾" so the popup menu
+                    // (not reachable any other way) shows in the screenshot.
+                    "export-menu" => {
+                        use slint::platform::{PointerEventButton, WindowEvent};
+                        let position = slint::LogicalPosition::new(471.0, 742.0);
+                        w.window().dispatch_event(WindowEvent::PointerPressed {
+                            position,
+                            button: PointerEventButton::Left,
+                        });
+                        w.window().dispatch_event(WindowEvent::PointerReleased {
+                            position,
+                            button: PointerEventButton::Left,
+                        });
+                    }
                     "settings" | "settings-updates" => {
                         w.set_settings_tab(if which == "settings" { 0 } else { 1 });
                         w.set_settings_open(true);
