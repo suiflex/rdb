@@ -131,6 +131,227 @@ async fn execute_multi_statement_query(
     }
 }
 
+/// Rows a view puts in the grid.
+fn view_row_count(v: &model::ResultView) -> u64 {
+    match v {
+        model::ResultView::Table(g) => g.rows.len() as u64,
+        model::ResultView::Documents(d) => d.grid.rows.len() as u64,
+        model::ResultView::Affected(_) => 0,
+    }
+}
+
+/// The connection and timing a finished run stamps onto every result it
+/// produced. Captured when the run started, not read back from the tab: a
+/// long-lived tab can be re-run after the user switches connection.
+struct RunStamp {
+    connection_id: Option<String>,
+    badge: ConnBadgeInfo,
+    elapsed_ms: u64,
+    queue_ms: u64,
+    driver_ms: u64,
+    model_ms: u64,
+}
+
+impl RunStamp {
+    fn stored(&self, view: model::ResultView, rows: u64, statements: usize) -> StoredResult {
+        StoredResult {
+            view: Arc::new(view),
+            meta: query_timing_meta(
+                rows,
+                statements,
+                self.elapsed_ms,
+                self.queue_ms,
+                self.driver_ms,
+                self.model_ms,
+            ),
+            latency: model::format_latency(self.elapsed_ms),
+            grid: GridState::default(),
+            connection_id: self.connection_id.clone(),
+            engine: self.badge.engine.clone(),
+            connection_name: self.badge.name.clone(),
+            color: self.badge.color,
+            has_custom_color: self.badge.has_custom_color,
+        }
+    }
+}
+
+/// Where a finished run writes itself: the pane it draws into, the tab it
+/// belongs to, and the client-side grid state `present_view` resets. Grouped
+/// because each `apply_*` path below needs most of it and would otherwise take
+/// more than a dozen arguments.
+struct ResultTargets<'a> {
+    window: &'a MainWindow,
+    pane: usize,
+    tab_id: &'a str,
+    /// False once the user has switched tabs mid-run: the tab still takes its
+    /// result, the visible pane does not.
+    is_active: bool,
+    workspace_tabs: &'a Arc<std::sync::Mutex<Vec<WorkspaceTab>>>,
+    results: &'a Arc<std::sync::Mutex<Vec<StoredResult>>>,
+    active_result: &'a Arc<std::sync::Mutex<usize>>,
+    last_view: &'a Arc<std::sync::Mutex<Option<model::ResultView>>>,
+    displayed_grid: &'a Arc<std::sync::Mutex<Option<model::GridModel>>>,
+    hidden_cols: &'a Arc<std::sync::Mutex<HashSet<usize>>>,
+    sort_state: &'a Arc<std::sync::Mutex<(i32, bool)>>,
+    col_order: &'a Arc<std::sync::Mutex<Vec<usize>>>,
+    col_filters: &'a Arc<std::sync::Mutex<Vec<String>>>,
+    edit_buf: &'a Arc<std::sync::Mutex<model::EditBuffer>>,
+    browse: &'a Arc<std::sync::Mutex<BrowseState>>,
+}
+
+impl ResultTargets<'_> {
+    fn present(&self, view: &model::ResultView, meta: &str, latency: &str) {
+        present_view(
+            self.window,
+            self.pane,
+            view,
+            meta,
+            latency,
+            self.last_view,
+            self.displayed_grid,
+            self.hidden_cols,
+            self.sort_state,
+            self.col_order,
+            self.col_filters,
+            self.edit_buf,
+            self.browse,
+        );
+    }
+
+    /// Applies `edit` to the tab this run belongs to. `None` means the tab was
+    /// closed while the query was in flight, and the caller stops there.
+    fn with_tab<T>(&self, edit: impl FnOnce(&mut WorkspaceTab) -> T) -> Option<T> {
+        let mut tabs = self.workspace_tabs.lock().unwrap();
+        tabs.iter_mut().find(|tab| tab.id == self.tab_id).map(edit)
+    }
+
+    /// The live grid state, so a result about to be pushed off-screen comes
+    /// back with its sort, filters, hidden and reordered columns intact.
+    fn grid_snapshot(&self) -> GridState {
+        capture_grid_view(
+            self.window,
+            self.pane,
+            self.hidden_cols,
+            self.col_filters,
+            self.sort_state,
+            self.col_order,
+        )
+    }
+}
+
+/// Run Selection over two or more statements: one result tab per statement,
+/// showing the first.
+fn apply_split_results(t: &ResultTargets, splits: &[SplitResult], stamp: &RunStamp) {
+    let stored: Vec<StoredResult> = splits
+        .iter()
+        .map(|SplitResult { view, verb }| {
+            let rows = view_row_count(view);
+            let view = match view {
+                model::ResultView::Affected(status) => model::ResultView::Affected(
+                    model::format_affected(status, *verb, &model::format_latency(stamp.elapsed_ms)),
+                ),
+                other => other.clone(),
+            };
+            stamp.stored(view, rows, 1)
+        })
+        .collect();
+    let Some((first, all)) = t.with_tab(|tab| {
+        tab.loading = false;
+        tab.results = stored;
+        tab.active_result = 0;
+        tab.view = tab.results.first().cloned();
+        (tab.results[0].clone(), tab.results.clone())
+    }) else {
+        return;
+    };
+    if !t.is_active {
+        return;
+    }
+    *t.active_result.lock().unwrap() = 0;
+    set_result_tabs(t.window, t.pane, &all, 0);
+    *t.results.lock().unwrap() = all;
+    t.present(&first.view, &first.meta, &first.latency);
+}
+
+/// The ordinary path: one result for the run, appended as a new result tab or
+/// replacing the active one.
+fn apply_single_result(
+    t: &ResultTargets,
+    view: model::ResultView,
+    stamp: &RunStamp,
+    n_stmts: usize,
+    new_tab: bool,
+    pk_hint: Option<(rdb_core::write::TableRef, Vec<String>)>,
+) {
+    let sr = stamp.stored(view.clone(), view_row_count(&view), n_stmts);
+    let meta = sr.meta.clone();
+    let latency = sr.latency.clone();
+    let Some((is_browse, tab_results, tab_active)) = t.with_tab(|tab| {
+        tab.loading = false;
+        tab.view = Some(sr.clone());
+        let is_browse = tab.kind == "table";
+        // ⌘\ opens a new result tab; snapshot the outgoing result's live grid
+        // so returning to it keeps its state. A browse tab takes the same path:
+        // it used to drop every result, which made ⌘\ and the Run New button
+        // silently do nothing there.
+        if new_tab && t.is_active {
+            let snapshot = t.grid_snapshot();
+            if let Some(r) = tab.results.get_mut(tab.active_result) {
+                r.grid = snapshot;
+            }
+        }
+        store_result(&mut tab.results, &mut tab.active_result, sr, new_tab);
+        (is_browse, tab.results.clone(), tab.active_result)
+    }) else {
+        return;
+    };
+    if !t.is_active {
+        return;
+    }
+    *t.results.lock().unwrap() = tab_results;
+    *t.active_result.lock().unwrap() = tab_active;
+    set_result_tabs(t.window, t.pane, &t.results.lock().unwrap(), tab_active);
+    t.present(&view, &meta, &latency);
+    // present_view seeds edit_buf from `browse`, which only carries a table for
+    // the table-browse path. For a hand-typed single-table SELECT, apply the PK
+    // hint computed in the worker instead so the grid can go from view-only to
+    // editable.
+    if is_browse {
+        return;
+    }
+    if let Some((table, pk)) = pk_hint {
+        let mut buf = t.edit_buf.lock().unwrap();
+        buf.table = Some(table);
+        buf.pk_cols = pk;
+    }
+    let editable = !t.edit_buf.lock().unwrap().pk_cols.is_empty();
+    set_p_read_only(t.window, t.pane, !editable);
+}
+
+/// The run failed: clear the pane and mark the offending statement.
+fn apply_query_error(
+    t: &ResultTargets,
+    err: &rdb_core::error::RdbError,
+    mark: Option<ErrorMark>,
+    error_mark_state: &Arc<std::sync::Mutex<Option<ErrorMark>>>,
+) {
+    t.with_tab(|tab| tab.loading = false);
+    if !t.is_active {
+        return;
+    }
+    *t.last_view.lock().unwrap() = None;
+    *error_mark_state.lock().unwrap() = mark;
+    set_p_error_mark(t.window, t.pane, mark);
+    apply_result(
+        t.window,
+        t.pane,
+        &model::ResultView::Affected(format!(
+            "error: {}",
+            editor::strip_error_marker(&err.to_string())
+        )),
+    );
+}
+
 /// PK-aware editing for a single-table SELECT, buffered or streamed.
 /// Shared by `run_sql` and `run_stream` — they used to each carry their own
 /// copy of this.
@@ -372,214 +593,58 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                     _ => None,
                 };
                 let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(w) = weak2.upgrade() {
-                        sync_query_console(&w, &query_console);
-                        let active_id = if pane == 1 {
-                            &active_group1_tab_id
-                        } else {
-                            &active_tab_id
-                        };
-                        let is_active = active_id.lock().unwrap().as_deref() == Some(&target_id);
-                        if is_active {
-                            set_p_query_running(&w, pane, false);
-                        }
-                        match (view, err) {
-                            (Some(v), _) => {
-                                *error_mark_state.lock().unwrap() = None;
-                                set_p_error_mark(&w, pane, None);
-                                // Run Selection over 2+ statements: store one
-                                // result tab per statement and show the first.
-                                if split && splits.len() >= 2 {
-                                    let stored: Vec<StoredResult> = splits
-                                        .iter()
-                                        .map(|SplitResult { view: vw, verb }| {
-                                            let rows = match vw {
-                                                model::ResultView::Table(g) => g.rows.len(),
-                                                model::ResultView::Documents(d) => {
-                                                    d.grid.rows.len()
-                                                }
-                                                model::ResultView::Affected(_) => 0,
-                                            }
-                                                as u64;
-                                            let vw = match vw {
-                                                model::ResultView::Affected(status) => {
-                                                    model::ResultView::Affected(
-                                                        model::format_affected(
-                                                            status,
-                                                            *verb,
-                                                            &model::format_latency(elapsed_ms),
-                                                        ),
-                                                    )
-                                                }
-                                                other => other.clone(),
-                                            };
-                                            StoredResult {
-                                                view: Arc::new(vw),
-                                                meta: query_timing_meta(
-                                                    rows, 1, elapsed_ms, queue_ms, driver_ms,
-                                                    model_ms,
-                                                ),
-                                                latency: model::format_latency(elapsed_ms),
-                                                grid: GridState::default(),
-                                                connection_id: query_connection_id.clone(),
-                                                engine: query_badge.engine.clone(),
-                                                connection_name: query_badge.name.clone(),
-                                                color: query_badge.color,
-                                                has_custom_color: query_badge.has_custom_color,
-                                            }
-                                        })
-                                        .collect();
-                                    let (first, all) = {
-                                        let mut tabs = workspace_tabs.lock().unwrap();
-                                        let Some(tab) =
-                                            tabs.iter_mut().find(|tab| tab.id == target_id)
-                                        else {
-                                            return;
-                                        };
-                                        tab.loading = false;
-                                        tab.results = stored;
-                                        tab.active_result = 0;
-                                        tab.view = tab.results.first().cloned();
-                                        (tab.results[0].clone(), tab.results.clone())
-                                    };
-                                    if !is_active {
-                                        return;
-                                    }
-                                    *active_result.lock().unwrap() = 0;
-                                    set_result_tabs(&w, pane, &all, 0);
-                                    *results.lock().unwrap() = all;
-                                    present_view(
-                                        &w,
-                                        pane,
-                                        &first.view,
-                                        &first.meta,
-                                        &first.latency,
-                                        &last_view,
-                                        &displayed_grid,
-                                        &hidden_cols,
-                                        &sort_state,
-                                        &col_order,
-                                        &col_filters,
-                                        &edit_buf,
-                                        &browse,
-                                    );
-                                    return;
-                                }
-                                let shown = match &v {
-                                    model::ResultView::Table(g) => g.rows.len(),
-                                    model::ResultView::Documents(d) => d.grid.rows.len(),
-                                    model::ResultView::Affected(_) => 0,
-                                } as u64;
-                                let meta = query_timing_meta(
-                                    shown, n_stmts, elapsed_ms, queue_ms, driver_ms, model_ms,
-                                );
-                                let latency = model::format_latency(elapsed_ms);
-                                let sr = StoredResult {
-                                    view: Arc::new(v.clone()),
-                                    meta: meta.clone(),
-                                    latency: latency.clone(),
-                                    grid: GridState::default(),
-                                    connection_id: query_connection_id.clone(),
-                                    engine: query_badge.engine.clone(),
-                                    connection_name: query_badge.name.clone(),
-                                    color: query_badge.color,
-                                    has_custom_color: query_badge.has_custom_color,
-                                };
-                                let mut tabs = workspace_tabs.lock().unwrap();
-                                let Some(tab) = tabs.iter_mut().find(|tab| tab.id == target_id)
-                                else {
-                                    return;
-                                };
-                                tab.loading = false;
-                                tab.view = Some(sr.clone());
-                                let is_browse = tab.kind == "table";
-                                // ⌘\ opens a new result tab; snapshot the
-                                // outgoing result's live grid (sort/filters/
-                                // search) so returning to it keeps its state.
-                                // A browse tab takes the same path: it used to
-                                // drop every result, which made ⌘\ and the Run
-                                // New button silently do nothing there.
-                                if new_tab && is_active {
-                                    if let Some(r) = tab.results.get_mut(tab.active_result) {
-                                        let mut hidden: Vec<usize> =
-                                            hidden_cols.lock().unwrap().iter().copied().collect();
-                                        hidden.sort_unstable();
-                                        r.grid = GridState {
-                                            col_filters: col_filters.lock().unwrap().clone(),
-                                            sort: *sort_state.lock().unwrap(),
-                                            hidden,
-                                            col_order: col_order.lock().unwrap().clone(),
-                                            col_widths: get_p_col_widths(&w, pane),
-                                            grid_filter: w.get_grid_filter().to_string(),
-                                            filter_col: w.get_filter_col().to_string(),
-                                            filter_op: w.get_filter_op().to_string(),
-                                        };
-                                    }
-                                }
-                                store_result(&mut tab.results, &mut tab.active_result, sr, new_tab);
-                                let tab_results = tab.results.clone();
-                                let tab_active = tab.active_result;
-                                if !is_active {
-                                    return;
-                                }
-                                *results.lock().unwrap() = tab_results;
-                                *active_result.lock().unwrap() = tab_active;
-                                set_result_tabs(&w, pane, &results.lock().unwrap(), tab_active);
-                                present_view(
-                                    &w,
-                                    pane,
-                                    &v,
-                                    &meta,
-                                    &latency,
-                                    &last_view,
-                                    &displayed_grid,
-                                    &hidden_cols,
-                                    &sort_state,
-                                    &col_order,
-                                    &col_filters,
-                                    &edit_buf,
-                                    &browse,
-                                );
-                                // present_view seeds edit_buf from `browse`, which
-                                // only carries a table for the table-browse path.
-                                // For a hand-typed single-table SELECT, apply the
-                                // PK hint computed above instead so the grid can
-                                // go from view-only to editable.
-                                if !is_browse {
-                                    if let Some((table, pk)) = pk_hint {
-                                        edit_buf.lock().unwrap().table = Some(table);
-                                        edit_buf.lock().unwrap().pk_cols = pk;
-                                    }
-                                    let editable = !edit_buf.lock().unwrap().pk_cols.is_empty();
-                                    set_p_read_only(&w, pane, !editable);
-                                }
+                    let Some(w) = weak2.upgrade() else {
+                        return;
+                    };
+                    sync_query_console(&w, &query_console);
+                    let active_id = if pane == 1 {
+                        &active_group1_tab_id
+                    } else {
+                        &active_tab_id
+                    };
+                    let is_active = active_id.lock().unwrap().as_deref() == Some(&target_id);
+                    if is_active {
+                        set_p_query_running(&w, pane, false);
+                    }
+                    let targets = ResultTargets {
+                        window: &w,
+                        pane,
+                        tab_id: &target_id,
+                        is_active,
+                        workspace_tabs: &workspace_tabs,
+                        results: &results,
+                        active_result: &active_result,
+                        last_view: &last_view,
+                        displayed_grid: &displayed_grid,
+                        hidden_cols: &hidden_cols,
+                        sort_state: &sort_state,
+                        col_order: &col_order,
+                        col_filters: &col_filters,
+                        edit_buf: &edit_buf,
+                        browse: &browse,
+                    };
+                    let stamp = RunStamp {
+                        connection_id: query_connection_id,
+                        badge: query_badge,
+                        elapsed_ms,
+                        queue_ms,
+                        driver_ms,
+                        model_ms,
+                    };
+                    match (view, err) {
+                        (Some(v), _) => {
+                            *error_mark_state.lock().unwrap() = None;
+                            set_p_error_mark(&w, pane, None);
+                            if split && splits.len() >= 2 {
+                                apply_split_results(&targets, &splits, &stamp);
+                            } else {
+                                apply_single_result(&targets, v, &stamp, n_stmts, new_tab, pk_hint);
                             }
-                            (None, Some(e)) => {
-                                if let Some(tab) = workspace_tabs
-                                    .lock()
-                                    .unwrap()
-                                    .iter_mut()
-                                    .find(|tab| tab.id == target_id)
-                                {
-                                    tab.loading = false;
-                                }
-                                if !is_active {
-                                    return;
-                                }
-                                *last_view.lock().unwrap() = None;
-                                *error_mark_state.lock().unwrap() = error_mark_value;
-                                set_p_error_mark(&w, pane, error_mark_value);
-                                apply_result(
-                                    &w,
-                                    pane,
-                                    &model::ResultView::Affected(format!(
-                                        "error: {}",
-                                        editor::strip_error_marker(&e.to_string())
-                                    )),
-                                );
-                            }
-                            _ => {}
                         }
+                        (None, Some(e)) => {
+                            apply_query_error(&targets, &e, error_mark_value, &error_mark_state)
+                        }
+                        _ => {}
                     }
                 });
             });
