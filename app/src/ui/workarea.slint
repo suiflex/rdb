@@ -12,7 +12,7 @@ import {
 import { ScrollView } from "std-widgets.slint";
 import { AppIcon } from "icons.slint";
 import { QueryPane } from "query-pane.slint";
-import { MenuItem as MaterialMenuItem } from "@material";
+import { MaterialPalette, MenuItem as MaterialMenuItem } from "@material";
 
 export component WorkArea inherits Rectangle {
     // ----- editor / results state (wired 1:1 from MainWindow) -----
@@ -747,9 +747,11 @@ export component WorkArea inherits Rectangle {
         if !root.split: Rectangle { height: 1px; background: Tokens.border; }
         if !root.split: Rectangle {
             height: Tokens.status-bar-h;
-            background: Tokens.chrome;
+            // Same surface as the Material tab bar, and no left inset, so the
+            // tabs sit flush instead of as an offset block of another colour.
+            background: MaterialPalette.surface;
             HorizontalLayout {
-                padding-left: Tokens.sp3;
+                padding-left: 0;
                 padding-right: Tokens.sp3;
                 spacing: Tokens.sp4;
 
@@ -915,14 +917,14 @@ export component WorkArea inherits Rectangle {
         }
         if root.split: Rectangle {
             height: Tokens.status-bar-h;
-            background: Tokens.chrome;
+            background: MaterialPalette.surface;
             left-footer := Rectangle {
                 x: 0;
                 width: (parent.width - 6px) * root.split-ratio;
                 height: parent.height;
-                background: Tokens.chrome;
+                background: MaterialPalette.surface;
                 HorizontalLayout {
-                    padding-left: Tokens.sp3;
+                    padding-left: 0;
                     padding-right: Tokens.sp3;
                     spacing: Tokens.sp3;
                     if root.browse-mode: FooterTabs {
@@ -952,9 +954,9 @@ export component WorkArea inherits Rectangle {
                 x: (parent.width - 6px) * root.split-ratio + 6px;
                 width: (parent.width - 6px) * (1 - root.split-ratio);
                 height: parent.height;
-                background: Tokens.chrome;
+                background: MaterialPalette.surface;
                 HorizontalLayout {
-                    padding-left: Tokens.sp3;
+                    padding-left: 0;
                     padding-right: Tokens.sp3;
                     spacing: Tokens.sp3;
                     if root.p1-active-table != "": FooterTabs {
