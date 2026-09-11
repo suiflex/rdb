@@ -86,6 +86,23 @@ pub(crate) fn apply_zoom(w: &MainWindow, level: i32) {
     });
 }
 
+/// Apply the saved zoom level once the platform window exists: winit sets its
+/// own scale factor when it creates the window, so an earlier dispatch would
+/// be overwritten.
+/// ponytail: fixed short delay after startup; hook window creation if it ever
+/// races on a slow launch.
+fn schedule_saved_zoom(window: &MainWindow, level: i32) {
+    if level == BASE_ZOOM_LEVEL {
+        return;
+    }
+    let weak = window.as_weak();
+    slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
+        if let Some(w) = weak.upgrade() {
+            apply_zoom(&w, level);
+        }
+    });
+}
+
 fn shortcut_labels(
     os: &str,
 ) -> (
@@ -5685,18 +5702,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
     #[cfg(feature = "mock")]
     shot::install(&window);
-    // winit applies its own scale factor when it creates the window, so the
-    // saved zoom has to land after that.
-    // ponytail: fixed short delay after startup; hook window creation if it
-    // ever races on a slow launch.
-    if zoom_level != BASE_ZOOM_LEVEL {
-        let weak = window.as_weak();
-        slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
-            if let Some(w) = weak.upgrade() {
-                apply_zoom(&w, zoom_level);
-            }
-        });
-    }
+    schedule_saved_zoom(&window, zoom_level);
     let run_result = window.run();
     // On exit, capture each pane's active tab (edits made without a tab switch)
     // and persist, so a plain type-then-quit is not lost. Both panes: quitting
