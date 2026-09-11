@@ -14,6 +14,14 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::*;
 
+/// Marks the tab as loading, saves the text it is about to run, and returns
+/// the connection that run must go to.
+///
+/// First run on a scratch tab (opened before any connection was tracked, or
+/// restored from disk without one) locks it to whatever it runs against now —
+/// otherwise it keeps following `current_connection_id` around on every later
+/// click, and never counts as "live" for a given connection (disconnect's
+/// other-still-live check, the sidebar dot) since nothing ever points at it.
 fn bind_tab_connection_for_runner(
     workspace_tabs: &std::sync::Mutex<Vec<WorkspaceTab>>,
     current_connection_id: &std::sync::Mutex<Option<String>>,
@@ -37,7 +45,29 @@ fn bind_tab_connection_for_runner(
     }
     tab_connection_id
 }
-#[allow(clippy::too_many_arguments)]
+/// One statement's result, kept only when Run Selection asked for a result
+/// tab per statement.
+struct SplitResult {
+    view: model::ResultView,
+    verb: Option<&'static str>,
+}
+
+/// What running one editor buffer produced.
+struct MultiStatementOutcome {
+    /// The last statement's result — what the grid shows (TablePlus semantics).
+    result: Result<rdb_core::result::ResultSet, rdb_core::error::RdbError>,
+    /// How many statements ran, used to prefix errors with `statement i/n`.
+    count: usize,
+    /// The last statement's text, for the PK hint and the editor's error mark.
+    last: Option<String>,
+    /// Empty unless `split` was set.
+    splits: Vec<SplitResult>,
+}
+
+/// Runs the buffer statement by statement, stopping at the first error.
+///
+/// SQL engines split on top-level `;`; Redis and Mongo take the whole text as
+/// one command.
 async fn execute_multi_statement_query(
     engine: rdb_connstore::Engine,
     driver: &AnyDriver,
@@ -46,13 +76,7 @@ async fn execute_multi_statement_query(
     cur_db: &str,
     split: bool,
     query_console: &Arc<std::sync::Mutex<Vec<String>>>,
-    split_views: &mut Vec<model::ResultView>,
-    split_verbs: &mut Vec<Option<&'static str>>,
-) -> (
-    Result<rdb_core::result::ResultSet, rdb_core::error::RdbError>,
-    usize,
-    Option<String>,
-) {
+) -> MultiStatementOutcome {
     let stmts = if matches!(
         engine,
         rdb_connstore::Engine::Postgres
@@ -65,6 +89,7 @@ async fn execute_multi_statement_query(
         vec![sql.to_string()]
     };
     let n = stmts.len().max(1);
+    let mut splits = Vec::new();
     let mut out = Err(rdb_core::error::RdbError::Query("empty query".into()));
     for (i, s) in stmts.iter().enumerate() {
         let s = cap_select(engine, s, row_limit);
@@ -91,17 +116,22 @@ async fn execute_multi_statement_query(
         }
         if split {
             if let Ok(rs) = &out {
-                split_views.push(model::to_result_view(rs));
-                split_verbs.push(model::sql_verb(&s));
+                splits.push(SplitResult {
+                    view: model::to_result_view(rs),
+                    verb: model::sql_verb(&s),
+                });
             }
         }
     }
-    (out, n, stmts.last().cloned())
+    MultiStatementOutcome {
+        result: out,
+        count: n,
+        last: stmts.last().cloned(),
+        splits,
+    }
 }
 
 /// PK-aware editing for a single-table SELECT, buffered or streamed.
-/// Shared by `run_sql` and `run_stream` — they used to each carry their own
-/// copy of this.
 /// Shared by `run_sql` and `run_stream` — they used to each carry their own
 /// copy of this.
 async fn resolve_pk_hint(
@@ -252,15 +282,14 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                     resolve_driver(&driver_pool, &current, query_connection_id.as_deref()).await;
                 let queue_ms = started.elapsed().as_millis() as u64;
                 let driver_started = std::time::Instant::now();
-                // Multi-statement: SQL engines split on top-level `;` and run
-                // each in order, stopping at the first error. The last result
-                // is what the grid shows (TablePlus semantics). Redis/Mongo
-                // take the whole text as a single command.
-                let mut split_views: Vec<model::ResultView> = Vec::new();
-                let mut split_verbs: Vec<Option<&'static str>> = Vec::new();
                 let stmt_offsets = editor::statement_offsets(&sql);
-                let (outcome, n_stmts, last_stmt) = match picked.as_ref() {
+                let run = match picked.as_ref() {
                     Some((engine, driver)) => {
+                        // SQL engines are never auto-capped — the user's SELECT
+                        // runs as written (bare reads take the streaming path
+                        // instead). NoSQL keeps the row-limit control's value.
+                        // Browse text carries its own LIMIT either way, so
+                        // cap_select no-ops it.
                         let row_limit = if matches!(
                             engine,
                             rdb_connstore::Engine::Postgres
@@ -280,19 +309,24 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                             &cur_db,
                             split,
                             &query_console,
-                            &mut split_views,
-                            &mut split_verbs,
                         )
                         .await
                     }
-                    None => (
-                        Err(rdb_core::error::RdbError::Connection(
+                    None => MultiStatementOutcome {
+                        result: Err(rdb_core::error::RdbError::Connection(
                             "not connected".into(),
                         )),
-                        1,
-                        None,
-                    ),
+                        count: 1,
+                        last: None,
+                        splits: Vec::new(),
+                    },
                 };
+                let MultiStatementOutcome {
+                    result: outcome,
+                    count: n_stmts,
+                    last: last_stmt,
+                    splits,
+                } = run;
                 let driver_ms = driver_started.elapsed().as_millis() as u64;
                 let model_started = std::time::Instant::now();
                 let view = outcome.as_ref().ok().map(model::to_result_view);
@@ -355,11 +389,10 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                                 set_p_error_mark(&w, pane, None);
                                 // Run Selection over 2+ statements: store one
                                 // result tab per statement and show the first.
-                                if split && split_views.len() >= 2 {
-                                    let stored: Vec<StoredResult> = split_views
+                                if split && splits.len() >= 2 {
+                                    let stored: Vec<StoredResult> = splits
                                         .iter()
-                                        .zip(split_verbs.iter())
-                                        .map(|(vw, verb)| {
+                                        .map(|SplitResult { view: vw, verb }| {
                                             let rows = match vw {
                                                 model::ResultView::Table(g) => g.rows.len(),
                                                 model::ResultView::Documents(d) => {
@@ -612,11 +645,13 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                 return;
             };
             let new_tab = result_new_tab.swap(false, std::sync::atomic::Ordering::SeqCst);
+            // Stop any in-flight stream, then arm a fresh cancel flag.
             if let Some(prev) = stream_cancel.borrow().as_ref() {
                 prev.store(true, std::sync::atomic::Ordering::SeqCst);
             }
             let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
             *stream_cancel.borrow_mut() = Some(cancel.clone());
+            // Log the RAW sql (clean `SELECT * FROM t`, no injected LIMIT).
             append_query_console(&query_console, sql.clone());
             sync_query_console(&w, &query_console);
             let tab_connection_id = bind_tab_connection_for_runner(
