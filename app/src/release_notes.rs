@@ -49,21 +49,26 @@ fn clean(s: &str) -> String {
     unlink(s).replace("**", "")
 }
 
+/// One pass: keeps a link's `[text]`, drops the `(url)` right after it.
+/// ponytail: every `[`/`]` goes, even outside a link — fine for notes text.
 fn unlink(s: &str) -> String {
-    let mut out = String::new();
-    let mut rest = s;
-    while let Some(open) = rest.find('[') {
-        let Some(mid) = rest[open..].find("](").map(|m| open + m) else {
-            break;
-        };
-        let Some(close) = rest[mid..].find(')').map(|c| mid + c) else {
-            break;
-        };
-        out.push_str(&rest[..open]);
-        out.push_str(&rest[open + 1..mid]);
-        rest = &rest[close + 1..];
+    let mut out = String::with_capacity(s.len());
+    let mut in_url = false;
+    let mut after_bracket = false;
+    for c in s.chars() {
+        match c {
+            ')' if in_url => in_url = false,
+            _ if in_url => {}
+            '(' if after_bracket => in_url = true,
+            '[' => {}
+            ']' => {
+                after_bracket = true;
+                continue;
+            }
+            _ => out.push(c),
+        }
+        after_bracket = false;
     }
-    out.push_str(rest);
     out
 }
 
