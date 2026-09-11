@@ -881,6 +881,34 @@ fn schedule_sql_open_timer(window: &MainWindow, screen: &str) {
     );
 }
 
+/// Update screens: neither the download, the swap nor the version check runs
+/// in mock mode, so fake the state each one reports.
+fn show_update_screen(w: &MainWindow, which: &str) {
+    if which == "whats-new" {
+        // A release-please shaped sample body.
+        let body = "## [9.9.9](https://example.com) (2026-01-01)\n\
+            ### App Features\n\
+            * **app:** show open connections as a rail ([abc1234](https://example.com))\n\
+            * **app:** ask before installing a downloaded update\n\
+            ### Bug Fixes\n\
+            * **app:** stop tab titles truncating in the document tab strip\n";
+        super::update::open_whats_new(w, "9.9.9", crate::release_notes::parse(body));
+        return;
+    }
+    w.set_update_version("9.9.9".into());
+    w.set_update_self_update_supported(true);
+    w.set_update_available(true);
+    if which == "update-ready" {
+        // Download finished: the install-now dialog.
+        w.set_update_stage("ready".into());
+        w.set_update_ready_open(true);
+    } else {
+        // Banner mid-install.
+        w.set_update_stage("restarting".into());
+        w.set_update_step("Copying".into());
+    }
+}
+
 fn schedule_modal_timer(window: &MainWindow, screen: &str) {
     if !matches!(
         screen,
@@ -919,32 +947,8 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
                         w.set_f_import_url("mongodb://root:secret@203.0.113.31:32343/admin?authMechanism=DEFAULT&replicaSet=rs0".into());
                     }
                     "palette" => w.invoke_toggle_palette(),
-                    // Update banner mid-install: the swap itself never runs
-                    // in mock mode, so fake the state it reports.
-                    "update-installing" => {
-                        w.set_update_version("9.9.9".into());
-                        w.set_update_self_update_supported(true);
-                        w.set_update_stage("restarting".into());
-                        w.set_update_step("Copying".into());
-                        w.set_update_available(true);
-                    }
-                    // Download finished: the install-now dialog.
-                    "update-ready" => {
-                        w.set_update_version("9.9.9".into());
-                        w.set_update_self_update_supported(true);
-                        w.set_update_stage("ready".into());
-                        w.set_update_available(true);
-                        w.set_update_ready_open(true);
-                    }
-                    // What's New with a release-please shaped sample body.
-                    "whats-new" => {
-                        let body = "## [9.9.9](https://example.com) (2026-01-01)\n\
-                            ### App Features\n\
-                            * **app:** show open connections as a rail ([abc1234](https://example.com))\n\
-                            * **app:** ask before installing a downloaded update\n\
-                            ### Bug Fixes\n\
-                            * **app:** stop tab titles truncating in the document tab strip\n";
-                        super::update::open_whats_new(&w, "9.9.9", crate::release_notes::parse(body));
+                    "update-installing" | "update-ready" | "whats-new" => {
+                        show_update_screen(&w, &which)
                     }
                     // Settings modal: Appearance (0) or Updates (1) tab.
                     // Hover the picker's "+": a Material tooltip inside the
