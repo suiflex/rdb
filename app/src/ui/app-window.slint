@@ -3,7 +3,7 @@ export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
-    CircularProgressIndicator, DropDownMenu, LinearProgressIndicator, MaterialPalette, MaterialScheme,
+    CheckBox, CheckState, CircularProgressIndicator, DropDownMenu, LinearProgressIndicator, MaterialPalette, MaterialScheme,
     MaterialTypography, ToolTipState,
     // Aliased: the native MenuBar below uses the built-in `MenuItem` element.
     MenuItem as MaterialMenuItem
@@ -16,7 +16,7 @@ import { NavCluster } from "nav-cluster.slint";
 import { ConnPicker } from "picker.slint";
 import { WorkArea } from "workarea.slint";
 import { CommandPalette, ListModal, PaletteGroup } from "palette.slint";
-import { PaletteItem } from "structs.slint";
+import { NoteLine, PaletteItem } from "structs.slint";
 import { ConnForm } from "conn-form.slint";
 import { AppIcon } from "icons.slint";
 import { ScrollView } from "std-widgets.slint";
@@ -664,6 +664,14 @@ callback create-table-commit();
     in property <string> update-step;          // install phase while stage == restarting ("Copying", …)
     callback restart-to-update();              // idle/error: download; ready: swap + relaunch
 
+    // ----- "ready to install" dialog, and What's New after the relaunch -----
+    in-out property <bool> update-ready-open: false; // opened when a download lands
+    in property <bool> update-auto-install: false;
+    callback set-auto-install(bool);
+    in-out property <bool> whats-new-open: false;
+    in property <string> whats-new-version;
+    in property <[NoteLine]> whats-new-lines;
+
     // ----- app settings modal -----
     in-out property <bool> settings-open: false;
     in property <bool> update-check-enabled: true;
@@ -748,11 +756,14 @@ callback create-table-commit();
         key-pressed(e) => {
             if (e.text == Key.Escape) {
                 if (root.db-modal-open || root.conn-modal-open || root.palette-open
-                    || root.settings-open || root.shortcuts-open) {
+                    || root.settings-open || root.shortcuts-open
+                    || root.update-ready-open || root.whats-new-open) {
                     root.db-modal-open = false;
                     root.conn-modal-open = false;
                     root.settings-open = false;
                     root.shortcuts-open = false;
+                    root.update-ready-open = false;
+                    root.whats-new-open = false;
                     if (root.palette-open) { root.toggle-palette(); }
                     return accept;
                 }
@@ -3297,6 +3308,201 @@ callback create-table-commit();
                     }
                 }
             }
+            }
+        }
+    }
+
+    // ----- update downloaded: install now? (veil + card) -----
+    if root.update-ready-open: Rectangle {
+        background: Tokens.veil;
+        TouchArea {}
+
+        Rectangle {
+            width: min(560px, parent.width - 2 * Tokens.sp4);
+            height: ready-card.preferred-height;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            border-radius: Tokens.modal-radius;
+            background: MaterialPalette.surface_container_high;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: MaterialPalette.shadow.with-alpha(0.3);
+
+            TouchArea {}
+
+            ready-card := VerticalLayout {
+                padding: Tokens.sp4 + Tokens.sp2;
+                spacing: Tokens.sp4;
+                HorizontalLayout {
+                    spacing: Tokens.sp4;
+                    VerticalLayout {
+                        alignment: start;
+                        Image {
+                            source: @image-url("../../assets/icon.png");
+                            width: 64px;
+                            height: 64px;
+                        }
+                    }
+                    VerticalLayout {
+                        spacing: Tokens.sp2;
+                        Text {
+                            text: "A new version of RDB is ready to install!";
+                            color: Tokens.text;
+                            font-size: MaterialTypography.title_large.font_size;
+                            font-weight: Tokens.weight-emphasis;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: "RDB " + root.update-version
+                                + " has been downloaded and is ready to use. Would you like to install it and relaunch RDB now?";
+                            color: Tokens.text-dim;
+                            font-size: MaterialTypography.body_large.font_size;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: Tokens.sp1;
+                    CheckBox {
+                        horizontal-stretch: 0;
+                        // Created fresh each time the dialog opens, so seeding
+                        // once is enough; the box then owns its state.
+                        init => {
+                            self.check-state = root.update-auto-install ? CheckState.checked : CheckState.unchecked;
+                        }
+                        checked-state-changed(s) => { root.set-auto-install(s == CheckState.checked); }
+                    }
+                    Text {
+                        horizontal-stretch: 1;
+                        text: "Automatically download and install updates in the future";
+                        color: Tokens.text;
+                        font-size: MaterialTypography.body_medium.font_size;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: Tokens.sp2;
+                    SecondaryButton {
+                        text: "Not now";
+                        clicked => { root.update-ready-open = false; }
+                    }
+                    PrimaryButton {
+                        text: "Install and Relaunch";
+                        clicked => {
+                            root.update-ready-open = false;
+                            root.restart-to-update();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- What's New: first launch after an upgrade (veil + card) -----
+    if root.whats-new-open: Rectangle {
+        background: Tokens.veil;
+        TouchArea {}
+
+        Rectangle {
+            width: 460px;
+            x: (parent.width - self.width) / 2;
+            y: min(80px, parent.height / 10);
+            // Never past the window's bottom edge; the notes scroll instead.
+            height: min(wn-card.preferred-height, parent.height - self.y - Tokens.sp4);
+            border-radius: Tokens.modal-radius;
+            background: MaterialPalette.surface_container_high;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: MaterialPalette.shadow.with-alpha(0.3);
+
+            TouchArea {}
+
+            wn-card := VerticalLayout {
+                padding-top: Tokens.sp4 + Tokens.sp2;
+                padding-bottom: Tokens.sp4;
+                spacing: Tokens.sp3;
+                HorizontalLayout {
+                    alignment: center;
+                    Image {
+                        source: @image-url("../../assets/icon.png");
+                        width: 72px;
+                        height: 72px;
+                    }
+                }
+                Text {
+                    text: "What's new in RDB";
+                    color: Tokens.text;
+                    font-size: MaterialTypography.headline_small.font_size;
+                    font-weight: Tokens.weight-emphasis;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "Version " + root.whats-new-version;
+                    color: Tokens.text-faint;
+                    font-size: MaterialTypography.body_medium.font_size;
+                    horizontal-alignment: center;
+                }
+                ScrollView {
+                    vertical-stretch: 1;
+                    min-height: 80px;
+                    preferred-height: notes.preferred-height;
+                    notes := VerticalLayout {
+                        width: 460px; // = the card's; see settings-card
+                        padding-left: Tokens.sp4 + Tokens.sp2;
+                        padding-right: Tokens.sp4 + Tokens.sp2;
+                        spacing: Tokens.sp2;
+                        if root.whats-new-lines.length == 0: Text {
+                            text: "Release notes aren't available right now.";
+                            color: Tokens.text-dim;
+                            font-size: MaterialTypography.body_medium.font_size;
+                            horizontal-alignment: center;
+                        }
+                        for line in root.whats-new-lines: VerticalLayout {
+                            padding-top: line.heading ? Tokens.sp2 : 0px;
+                            if line.heading: Text {
+                                text: line.text;
+                                color: Tokens.text;
+                                font-size: MaterialTypography.title_medium.font_size;
+                                font-weight: MaterialTypography.title_medium.font_weight;
+                                wrap: word-wrap;
+                            }
+                            if !line.heading: HorizontalLayout {
+                                spacing: Tokens.sp2;
+                                VerticalLayout {
+                                    alignment: start;
+                                    padding-top: 5px;
+                                    Rectangle {
+                                        width: 6px;
+                                        height: 6px;
+                                        border-radius: 3px;
+                                        background: Tokens.accent;
+                                    }
+                                }
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: line.text;
+                                    color: Tokens.text-dim;
+                                    font-size: MaterialTypography.body_medium.font_size;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+                    }
+                }
+                Rectangle {
+                    height: 1px;
+                    background: Tokens.border;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    padding-right: Tokens.sp4;
+                    PrimaryButton {
+                        text: "Continue";
+                        clicked => { root.whats-new-open = false; }
+                    }
+                }
             }
         }
     }

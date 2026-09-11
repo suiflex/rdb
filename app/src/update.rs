@@ -109,7 +109,20 @@ pub fn due_for_check(last_check: Option<i64>, now: i64) -> bool {
 /// Blocking GitHub API call returning the latest release tag. Returns `None` on
 /// any network/parse error — a failed check is silent, never fatal.
 pub fn fetch_latest_tag() -> Option<String> {
-    let mut response = ureq::get(RELEASES_LATEST)
+    release_field(RELEASES_LATEST, "tag_name")
+}
+
+/// The release body (markdown notes) for `version`, e.g. "0.46.0", for the
+/// What's New dialog. Silent `None` on failure, like the tag check.
+pub fn fetch_release_notes(version: &str) -> Option<String> {
+    release_field(
+        &format!("https://api.github.com/repos/suiflex/rdb/releases/tags/v{version}"),
+        "body",
+    )
+}
+
+fn release_field(url: &str, field: &str) -> Option<String> {
+    let mut response = ureq::get(url)
         .header("User-Agent", "rdb-update-check")
         .header("Accept", "application/vnd.github+json")
         .config()
@@ -119,7 +132,7 @@ pub fn fetch_latest_tag() -> Option<String> {
         .ok()?;
     let body = response.body_mut().read_to_string().ok()?;
     let json: serde_json::Value = serde_json::from_str(&body).ok()?;
-    json.get("tag_name")?.as_str().map(str::to_string)
+    json.get(field)?.as_str().map(str::to_string)
 }
 
 #[cfg(test)]
