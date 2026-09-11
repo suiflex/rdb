@@ -999,7 +999,6 @@ callback create-table-commit();
                         alignment: center;
                         IconButton {
                             icon: "close";
-                            icon-size: Tokens.icon-sm;
                             tooltip: "Cancel connecting";
                             clicked => { root.cancel-connect(); }
                         }
@@ -1011,7 +1010,6 @@ callback create-table-commit();
                             text: "↻ Reconnect";
                             tooltip: "Reconnect to this database  " + Shortcut.primary
                                 + Shortcut.separator + Shortcut.shift + Shortcut.separator + "R";
-                            height: 24px;
                             clicked => { root.reconnect(); }
                         }
                     }
@@ -1083,7 +1081,6 @@ callback create-table-commit();
                         SecondaryButton {
                             text: root.new-tab-label;
                             tooltip: "New query tab  " + Shortcut.primary + Shortcut.separator + "T";
-                            height: 28px;
                             clicked => { root.new-tab(); }
                         }
                     }
@@ -2353,12 +2350,10 @@ callback create-table-commit();
                     alignment: end;
                     SecondaryButton {
                         text: "Cancel";
-                        height: 30px;
                         clicked => { root.rename-modal-open = false; }
                     }
                     PrimaryButton {
                         text: "Rename";
-                        height: 30px;
                         clicked => {
                             root.rename-commit();
                             root.rename-modal-open = false;
@@ -2429,12 +2424,10 @@ callback create-table-commit();
                     alignment: end;
                     SecondaryButton {
                         text: "Cancel";
-                        height: 30px;
                         clicked => { root.create-modal-open = false; }
                     }
                     PrimaryButton {
                         text: "Create";
-                        height: 30px;
                         clicked => { root.create-commit(); }
                     }
                 }
@@ -2605,7 +2598,6 @@ callback create-table-commit();
                 HorizontalLayout {
                     SecondaryButton {
                         text: "+ Add column";
-                        height: 28px;
                         clicked => { root.table-add-col(); }
                     }
                     Rectangle { horizontal-stretch: 1; }
@@ -2621,12 +2613,10 @@ callback create-table-commit();
                     alignment: end;
                     SecondaryButton {
                         text: "Cancel";
-                        height: 30px;
                         clicked => { root.table-modal-open = false; }
                     }
                     PrimaryButton {
                         text: "Create";
-                        height: 30px;
                         clicked => { root.create-table-commit(); }
                     }
                 }

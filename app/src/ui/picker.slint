@@ -799,7 +799,6 @@ export component ConnPicker inherits Rectangle {
                     alignment: center;
                     PrimaryButton {
                         text: "+ New Connection";
-                        height: 34px;
                         clicked => { root.add-clicked(); }
                     }
                 }
@@ -865,22 +864,18 @@ export component ConnPicker inherits Rectangle {
                                 PrimaryButton {
                                     text: root.connecting ? "Connecting…" : "Connect";
                                     enabled: !root.connecting;
-                                    height: 30px;
                                     clicked => { root.connect-clicked(root.selected-conn); }
                                 }
                                 if root.connecting: SecondaryButton {
                                     text: "Cancel";
-                                    height: 30px;
                                     clicked => { root.cancel-connect(); }
                                 }
                                 SecondaryButton {
                                     text: "Test";
-                                    height: 30px;
                                     clicked => { root.test-clicked(root.selected-conn); }
                                 }
                                 SecondaryButton {
                                     text: "Edit";
-                                    height: 30px;
                                     clicked => { root.edit-clicked(root.selected-conn); }
                                 }
                             }
@@ -1074,12 +1069,10 @@ export component ConnPicker inherits Rectangle {
                     alignment: end;
                     SecondaryButton {
                         text: "Cancel";
-                        height: 30px;
                         clicked => { root.rename-modal-open = false; }
                     }
                     PrimaryButton {
                         text: "Rename";
-                        height: 30px;
                         clicked => {
                             root.group-rename(root.rename-old, root.rename-text);
                             root.rename-modal-open = false;
@@ -1130,12 +1123,10 @@ export component ConnPicker inherits Rectangle {
                     alignment: end;
                     SecondaryButton {
                         text: "Cancel";
-                        height: 30px;
                         clicked => { root.delete-confirm-open = false; }
                     }
                     DangerButton {
                         text: "Delete";
-                        height: 30px;
                         clicked => {
                             root.group-delete(root.delete-confirm-target);
                             root.delete-confirm-open = false;
