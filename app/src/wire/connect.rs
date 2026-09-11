@@ -735,7 +735,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 // existing tick rather than a second timer — up to 10s of a
                 // closed tab's connection lingering is a fine trade for one
                 // fewer moving part.
-                let evicted: Vec<String> = {
+                let evicted: HashSet<String> = {
                     let mut live = live_connection_ids(&workspace_tabs.lock().unwrap());
                     if let Some(id) = current_connection_id.lock().unwrap().clone() {
                         live.insert(id);
@@ -743,11 +743,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     // Single pass: `retain` decides what stays, and the ids it
                     // drops are exactly the ones eviction needs downstream —
                     // no separate filter pass over the same keys beforehand.
-                    let mut evicted = Vec::new();
+                    let mut evicted = HashSet::new();
                     driver_pool.write().await.retain(|id, _| {
                         let keep = live.contains(id);
                         if !keep {
-                            evicted.push(id.clone());
+                            evicted.insert(id.clone());
                         }
                         keep
                     });
@@ -760,9 +760,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     // sidebar dot's source of truth in step here too.
                     {
                         let mut ids = connected_ids.lock().unwrap();
-                        for id in &evicted {
-                            ids.remove(id);
-                        }
+                        ids.retain(|id| !evicted.contains(id));
                     }
                     let weak = weak.clone();
                     let _ = slint::invoke_from_event_loop(move || {
