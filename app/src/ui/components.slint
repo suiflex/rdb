@@ -168,6 +168,8 @@ export component SelectBox {
         border-radius: MaterialStyleMetrics.border_radius_12;
         background: MaterialPalette.surface_container_highest;
         StateLayer {
+            width: 100%;
+            height: 100%;
             background: MaterialPalette.on_surface;
             has-hover: ta.has-hover;
             enabled: true;
@@ -221,6 +223,8 @@ export component SelectBox {
                     height: MaterialStyleMetrics.size_48;
                     background: opt == root.current-value ? MaterialPalette.secondary_container : transparent;
                     StateLayer {
+                        width: 100%;
+                        height: 100%;
                         background: MaterialPalette.on_surface;
                         has-hover: opt-ta.has-hover;
                         enabled: true;
@@ -273,7 +277,11 @@ export component AppMenu inherits Rectangle {
         padding-bottom: MaterialStyleMetrics.padding_8;
         for label[i] in root.items: Rectangle {
             height: MaterialStyleMetrics.size_48;
+            // Sized explicitly (as the vendored StateLayerArea does): left
+            // unsized it painted nothing, so the menu had no hover feedback.
             StateLayer {
+                width: 100%;
+                height: 100%;
                 background: MaterialPalette.on_surface;
                 has-hover: row-ta.has-hover;
                 enabled: true;
@@ -498,6 +506,8 @@ export component SearchCommandPill inherits Rectangle {
     border-width: 1px;
     border-color: MaterialPalette.outline_variant;
     StateLayer {
+        width: 100%;
+        height: 100%;
         background: MaterialPalette.on_surface;
         border-radius: root.border-radius;
         has-hover: ta.has-hover;
@@ -547,6 +557,8 @@ export component BreadcrumbChip inherits Rectangle {
     border-color: MaterialPalette.outline_variant;
     background: MaterialPalette.surface_container_low;
     StateLayer {
+        width: 100%;
+        height: 100%;
         background: MaterialPalette.on_surface;
         border-radius: root.border-radius;
         has-hover: ta.has-hover;
