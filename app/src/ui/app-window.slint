@@ -2,9 +2,9 @@ import { Theme } from "theme.slint";
 export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
-import { CircularProgressIndicator, LinearProgressIndicator, MaterialPalette, MaterialScheme } from "@material";
+import { CircularProgressIndicator, DropDownMenu, LinearProgressIndicator, MaterialPalette, MaterialScheme } from "@material";
 import {
-    SearchCommandPill, BreadcrumbChip, DbBadge, GlyphButton, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SelectBox, SettingsSectionHeader, TextButton, Toggle, ToggleRow, Tooltip, TooltipArea, Shortcut
+    SearchCommandPill, BreadcrumbChip, DbBadge, GlyphButton, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SettingsSectionHeader, TextButton, Toggle, ToggleRow, Tooltip, TooltipArea, Shortcut
 } from "components.slint";
 export { Shortcut }
 import { NavCluster } from "nav-cluster.slint";
@@ -2885,15 +2885,19 @@ callback create-table-commit();
                                     font-size: 13px;
                                 }
                             }
-                            SelectBox {
-                                width: 110px;
-                                model: ["System", "Light", "Dark"];
-                                current-value: Tokens.theme-mode == 1 ? "Light"
-                                    : Tokens.theme-mode == 2 ? "Dark" : "System";
-                                selected(value) => {
-                                    root.set-theme-mode(value == "Light" ? 1
-                                        : value == "Dark" ? 2 : 0);
-                                }
+                            // Material DropDownMenu only fills its text when
+                            // current-index changes, so seed it in init (the
+                            // settings content is rebuilt on every open).
+                            DropDownMenu {
+                                width: 160px;
+                                items: [
+                                    { text: "System", enabled: true },
+                                    { text: "Light", enabled: true },
+                                    { text: "Dark", enabled: true },
+                                ];
+                                // Indices match Tokens.theme-mode: 0 System, 1 Light, 2 Dark.
+                                init => { self.current-index = Tokens.theme-mode; }
+                                selected(i) => { root.set-theme-mode(i); }
                             }
                         }
                         ToggleRow {
@@ -2920,15 +2924,22 @@ callback create-table-commit();
                                     font-size: 13px;
                                 }
                             }
-                            SelectBox {
-                                width: 82px;
-                                model: ["25", "50", "100", "200"];
-                                current-value: root.history-max-entries == 25 ? "25"
-                                    : root.history-max-entries == 100 ? "100"
-                                    : root.history-max-entries == 200 ? "200" : "50";
-                                selected(value) => {
-                                    root.set-history-max-entries(value == "25" ? 25
-                                        : value == "100" ? 100 : value == "200" ? 200 : 50);
+                            DropDownMenu {
+                                width: 128px;
+                                items: [
+                                    { text: "25", enabled: true },
+                                    { text: "50", enabled: true },
+                                    { text: "100", enabled: true },
+                                    { text: "200", enabled: true },
+                                ];
+                                init => {
+                                    self.current-index = root.history-max-entries == 25 ? 0
+                                        : root.history-max-entries == 100 ? 2
+                                        : root.history-max-entries == 200 ? 3 : 1;
+                                }
+                                selected(i) => {
+                                    root.set-history-max-entries(i == 0 ? 25
+                                        : i == 2 ? 100 : i == 3 ? 200 : 50);
                                 }
                             }
                         }
@@ -2945,17 +2956,24 @@ callback create-table-commit();
                                     font-size: 13px;
                                 }
                             }
-                            SelectBox {
-                                width: 82px;
-                                model: ["50", "100", "200", "500", "1000"];
-                                current-value: root.nosql-collection-limit == 50 ? "50"
-                                    : root.nosql-collection-limit == 100 ? "100"
-                                    : root.nosql-collection-limit == 500 ? "500"
-                                    : root.nosql-collection-limit == 1000 ? "1000" : "200";
-                                selected(value) => {
-                                    root.set-nosql-collection-limit(value == "50" ? 50
-                                        : value == "100" ? 100 : value == "500" ? 500
-                                        : value == "1000" ? 1000 : 200);
+                            DropDownMenu {
+                                width: 128px;
+                                items: [
+                                    { text: "50", enabled: true },
+                                    { text: "100", enabled: true },
+                                    { text: "200", enabled: true },
+                                    { text: "500", enabled: true },
+                                    { text: "1000", enabled: true },
+                                ];
+                                init => {
+                                    self.current-index = root.nosql-collection-limit == 50 ? 0
+                                        : root.nosql-collection-limit == 100 ? 1
+                                        : root.nosql-collection-limit == 500 ? 3
+                                        : root.nosql-collection-limit == 1000 ? 4 : 2;
+                                }
+                                selected(i) => {
+                                    root.set-nosql-collection-limit(i == 0 ? 50
+                                        : i == 1 ? 100 : i == 3 ? 500 : i == 4 ? 1000 : 200);
                                 }
                             }
                         }
