@@ -1299,6 +1299,7 @@ callback create-table-commit();
                     connections: root.connections;
                     selected-conn: root.selected-conn;
                     connect-clicked(i) => { root.connect-clicked(i); }
+                    open-picker => { root.open-conn-modal(); }
                     set-rail(v) => { root.sidebar-rail = v; }
                     set-visible(v) => { root.sidebar-visible = v; }
                     set-w(v) => { root.sidebar-w = v; }
@@ -2247,6 +2248,7 @@ callback create-table-commit();
                     connections: root.connections;
                     selected-conn: root.selected-conn;
                     connect-clicked(i) => { root.connect-clicked(i); }
+                    open-picker => { root.open-conn-modal(); }
                     set-rail(v) => { root.sidebar-rail = v; }
                     set-visible(v) => { root.sidebar-visible = v; }
                     set-w(v) => { root.sidebar-w = v; }
