@@ -4,7 +4,7 @@ import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
     CircularProgressIndicator, DropDownMenu, LinearProgressIndicator, MaterialPalette, MaterialScheme,
-    MaterialTypography,
+    MaterialTypography, ToolTipState,
     // Aliased: the native MenuBar below uses the built-in `MenuItem` element.
     MenuItem as MaterialMenuItem
 } from "@material";
@@ -3258,9 +3258,13 @@ callback create-table-commit();
 
     // Shared tooltip overlay — topmost sibling so it paints above all content
     // and modals; anchored in window coords via each button's absolute-position.
-    if Tooltip.shown && Tooltip.text != "": Rectangle {
-        x: min(max(Tooltip.x - self.width / 2, 4px), root.width - self.width - 4px);
-        y: Tooltip.y;
+    // Our TooltipArea tooltips win; otherwise a Material control's, which the
+    // vendored touch area publishes to ToolTipState (app/vendor/material/PATCHES.md).
+    property <bool> own-tip: Tooltip.shown && Tooltip.text != "";
+    property <bool> m3-tip: ToolTipState.shown && ToolTipState.text != "";
+    if root.own-tip || root.m3-tip: Rectangle {
+        x: min(max((root.own-tip ? Tooltip.x : ToolTipState.x) - self.width / 2, 4px), root.width - self.width - 4px);
+        y: root.own-tip ? Tooltip.y : ToolTipState.y;
         width: min(tip.preferred-width + 2 * Tokens.sp2, Tooltip.max-width);
         height: tip.preferred-height + Tokens.sp1;
         border-radius: Tokens.radius;
@@ -3270,7 +3274,7 @@ callback create-table-commit();
         tip := Text {
             x: Tokens.sp2;
             width: parent.width - 2 * Tokens.sp2;
-            text: Tooltip.text;
+            text: root.own-tip ? Tooltip.text : ToolTipState.text;
             color: Tokens.text;
             font-size: Tokens.font-xs;
             wrap: word-wrap;

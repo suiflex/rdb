@@ -3,7 +3,7 @@
 
 import { MaterialAnimations } from "../styling/material_animations.slint";
 import { MaterialPalette } from "../styling/material_palette.slint";
-import { ToolTip } from "tooltip.slint";
+import { ToolTipState } from "tooltip.slint";
 
 export component ExtendedTouchArea inherits TouchArea {
     in property <string> tooltip;
@@ -50,8 +50,18 @@ export component ExtendedTouchArea inherits TouchArea {
 
     @children
 
-    if root.tooltip != "" && root.has-hover && !root.pressed : ToolTip {
-        y: root.tooltip_offset;
-        text: root.tooltip;
+    // rdb patch (see PATCHES.md): publish to ToolTipState for the app's
+    // top-level overlay instead of an in-tree ToolTip. Same show condition.
+    changed has-hover => { root.sync_tooltip(); }
+    changed pressed => { root.sync_tooltip(); }
+    function sync_tooltip() {
+        if root.tooltip != "" && root.has-hover && !root.pressed {
+            ToolTipState.text = root.tooltip;
+            ToolTipState.x = root.absolute-position.x + root.width / 2;
+            ToolTipState.y = root.absolute-position.y + root.height + 4px;
+            ToolTipState.shown = true;
+        } else if ToolTipState.text == root.tooltip {
+            ToolTipState.shown = false;
+        }
     }
 }
