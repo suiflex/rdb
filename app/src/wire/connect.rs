@@ -119,6 +119,42 @@ async fn attempt_connect(
     }
 }
 
+fn build_schema_picker_names(
+    engine: rdb_connstore::Engine,
+    scoped_db: Option<&str>,
+    pg_schemas: Vec<SharedString>,
+    db_names: &[SharedString],
+    schema: &rdb_core::schema::Schema,
+) -> (Vec<SharedString>, SharedString) {
+    let mut schema_names: Vec<SharedString> = if matches!(engine, rdb_connstore::Engine::Postgres) {
+        if pg_schemas.is_empty() {
+            vec![SharedString::from("public")]
+        } else {
+            pg_schemas
+        }
+    } else if scoped_db.is_some() && !db_names.is_empty() {
+        db_names.to_vec()
+    } else {
+        schema
+            .databases
+            .iter()
+            .map(|d| SharedString::from(d.name.clone()))
+            .collect()
+    };
+    if schema_names.is_empty() {
+        schema_names.push(SharedString::from("public"));
+    }
+    let schema_current = match scoped_db {
+        Some(db) => SharedString::from(db),
+        None => schema_names
+            .iter()
+            .find(|s| s.as_str() == "public")
+            .unwrap_or(&schema_names[0])
+            .clone(),
+    };
+    (schema_names, schema_current)
+}
+
 /// Publishes the driver, builds the sidebar tree and autocomplete seed,
 /// pushes it to the UI, then keeps loading every other Postgres schema in
 /// the background so cross-schema completion fills in without blocking the
@@ -202,38 +238,8 @@ async fn finish_connect_success(
         "",
     );
     // Postgres browses namespaces, not databases: the selector must say
-    // "public", never the db name (a `"dbname"."table"` query would fail).
-    let mut schema_names: Vec<SharedString> = if matches!(engine, rdb_connstore::Engine::Postgres) {
-        if pg_schemas.is_empty() {
-            vec![SharedString::from("public")]
-        } else {
-            pg_schemas
-        }
-    } else if scoped_db.is_some() && !db_names.is_empty() {
-        // Mongo scoped its tree to one database: still list every database
-        // so the switcher can reach them.
-        db_names.clone()
-    } else {
-        schema
-            .databases
-            .iter()
-            .map(|d| SharedString::from(d.name.clone()))
-            .collect()
-    };
-    if schema_names.is_empty() {
-        schema_names.push(SharedString::from("public"));
-    }
-    // Scoped Mongo starts on its selected database; otherwise default to
-    // "public" when present, else the first name.
-    let schema_current = match &scoped_db {
-        Some(db) => SharedString::from(db.clone()),
-        None => schema_names
-            .iter()
-            .find(|s| s.as_str() == "public")
-            .unwrap_or(&schema_names[0])
-            .clone(),
-    };
-    // Format only makes sense for text query languages.
+    let (schema_names, schema_current) =
+        build_schema_picker_names(engine, scoped_db.as_deref(), pg_schemas, &db_names, &schema);
     let sql_capable = matches!(
         rdb_connstore::Engine::language(engine),
         rdb_connstore::QueryLanguage::Sql | rdb_connstore::QueryLanguage::Cql
@@ -260,11 +266,11 @@ async fn finish_connect_success(
     {
         let mut defs = fn_defs.lock().unwrap();
         defs.clear();
-        for db in &schema.databases {
-            for f in &db.functions {
-                defs.insert(f.name.clone(), f.definition.clone());
-            }
-        }
+        defs.extend(schema.databases.iter().flat_map(|db| {
+            db.functions
+                .iter()
+                .map(|f| (f.name.clone(), f.definition.clone()))
+        }));
     }
     let _ = slint::invoke_from_event_loop(move || {
         if let Some(w) = weak.upgrade() {
@@ -748,9 +754,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     // sidebar dot's source of truth in step here too.
                     {
                         let mut ids = connected_ids.lock().unwrap();
-                        for id in &evicted {
-                            ids.remove(id);
-                        }
+                        ids.retain(|id| !evicted.contains(id));
                     }
                     let weak = weak.clone();
                     let _ = slint::invoke_from_event_loop(move || {

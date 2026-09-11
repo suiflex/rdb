@@ -14,7 +14,94 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::*;
 
+fn bind_tab_connection_for_runner(
+    workspace_tabs: &std::sync::Mutex<Vec<WorkspaceTab>>,
+    current_connection_id: &std::sync::Mutex<Option<String>>,
+    target_id: &str,
+    sql: &str,
+) -> Option<String> {
+    let mut tab_connection_id = None;
+    if let Some(tab) = workspace_tabs
+        .lock()
+        .unwrap()
+        .iter_mut()
+        .find(|tab| tab.id == target_id)
+    {
+        tab.loading = true;
+        tab.query_text = sql.to_string();
+        tab_connection_id = tab.connection_id.clone();
+        if tab_connection_id.is_none() {
+            tab_connection_id = current_connection_id.lock().unwrap().clone();
+            tab.connection_id = tab_connection_id.clone();
+        }
+    }
+    tab_connection_id
+}
+#[allow(clippy::too_many_arguments)]
+async fn execute_multi_statement_query(
+    engine: rdb_connstore::Engine,
+    driver: &AnyDriver,
+    sql: &str,
+    row_limit: u64,
+    cur_db: &str,
+    split: bool,
+    query_console: &Arc<std::sync::Mutex<Vec<String>>>,
+    split_views: &mut Vec<model::ResultView>,
+    split_verbs: &mut Vec<Option<&'static str>>,
+) -> (
+    Result<rdb_core::result::ResultSet, rdb_core::error::RdbError>,
+    usize,
+    Option<String>,
+) {
+    let stmts = if matches!(
+        engine,
+        rdb_connstore::Engine::Postgres
+            | rdb_connstore::Engine::MySql
+            | rdb_connstore::Engine::Sqlite
+            | rdb_connstore::Engine::Cassandra
+    ) {
+        editor::split_statements(sql)
+    } else {
+        vec![sql.to_string()]
+    };
+    let n = stmts.len().max(1);
+    let mut out = Err(rdb_core::error::RdbError::Query("empty query".into()));
+    for (i, s) in stmts.iter().enumerate() {
+        let s = cap_select(engine, s, row_limit);
+        append_query_console(query_console, s.clone());
+        out = match crate::query_parse::parse_query(engine, &s) {
+            Ok(mut q) => {
+                if let rdb_core::query::Query::Mongo(op) = &mut q {
+                    if op.database.is_none() && !cur_db.is_empty() {
+                        op.database = Some(cur_db.to_string());
+                    }
+                }
+                driver.query(&q).await
+            }
+            Err(msg) => Err(rdb_core::error::RdbError::Query(msg)),
+        };
+        if let Err(e) = &out {
+            if n > 1 {
+                out = Err(rdb_core::error::RdbError::Query(format!(
+                    "statement {}/{n}: {e}",
+                    i + 1
+                )));
+            }
+            break;
+        }
+        if split {
+            if let Ok(rs) = &out {
+                split_views.push(model::to_result_view(rs));
+                split_verbs.push(model::sql_verb(&s));
+            }
+        }
+    }
+    (out, n, stmts.last().cloned())
+}
+
 /// PK-aware editing for a single-table SELECT, buffered or streamed.
+/// Shared by `run_sql` and `run_stream` — they used to each carry their own
+/// copy of this.
 /// Shared by `run_sql` and `run_stream` — they used to each carry their own
 /// copy of this.
 async fn resolve_pk_hint(
@@ -116,28 +203,12 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             let Some(target_id) = active_id.lock().unwrap().clone() else {
                 return;
             };
-            let mut tab_connection_id = None;
-            if let Some(tab) = workspace_tabs
-                .lock()
-                .unwrap()
-                .iter_mut()
-                .find(|tab| tab.id == target_id)
-            {
-                tab.loading = true;
-                tab.query_text = sql.clone();
-                tab_connection_id = tab.connection_id.clone();
-                // First run on a scratch tab (opened before any connection was
-                // tracked, or restored from disk without one) locks it to
-                // whatever it runs against now — otherwise it keeps following
-                // `current_connection_id` around on every later click, and
-                // never counts as "live" for a given connection (disconnect's
-                // other-still-live check, the sidebar dot) since nothing ever
-                // points at it.
-                if tab_connection_id.is_none() {
-                    tab_connection_id = current_connection_id.lock().unwrap().clone();
-                    tab.connection_id = tab_connection_id.clone();
-                }
-            }
+            let tab_connection_id = bind_tab_connection_for_runner(
+                &workspace_tabs,
+                &current_connection_id,
+                &target_id,
+                &sql,
+            );
             let weak2 = weak.clone();
             let current = current.clone();
             let driver_pool = driver_pool.clone();
@@ -190,22 +261,6 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                 let stmt_offsets = editor::statement_offsets(&sql);
                 let (outcome, n_stmts, last_stmt) = match picked.as_ref() {
                     Some((engine, driver)) => {
-                        let stmts = if matches!(
-                            engine,
-                            rdb_connstore::Engine::Postgres
-                                | rdb_connstore::Engine::MySql
-                                | rdb_connstore::Engine::Sqlite
-                                | rdb_connstore::Engine::Cassandra
-                        ) {
-                            editor::split_statements(&sql)
-                        } else {
-                            vec![sql.clone()]
-                        };
-                        let n = stmts.len().max(1);
-                        // SQL engines are never auto-capped — the user's SELECT runs
-                        // as written (bare reads take the streaming path instead).
-                        // NoSQL keeps the row-limit control's value. Browse text
-                        // carries its own LIMIT either way, so cap_select no-ops it.
                         let row_limit = if matches!(
                             engine,
                             rdb_connstore::Engine::Postgres
@@ -217,42 +272,18 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                         } else {
                             browse.lock().unwrap().limit
                         };
-                        let mut out = Err(rdb_core::error::RdbError::Query("empty query".into()));
-                        for (i, s) in stmts.iter().enumerate() {
-                            let s = cap_select(*engine, s, row_limit);
-                            append_query_console(&query_console, s.clone());
-                            out = match crate::query_parse::parse_query(*engine, &s) {
-                                Ok(mut q) => {
-                                    // Fill the selected database for a Mongo query
-                                    // that didn't name one via `use(...)`.
-                                    if let rdb_core::query::Query::Mongo(op) = &mut q {
-                                        if op.database.is_none() && !cur_db.is_empty() {
-                                            op.database = Some(cur_db.clone());
-                                        }
-                                    }
-                                    driver.query(&q).await
-                                }
-                                Err(msg) => Err(rdb_core::error::RdbError::Query(msg)),
-                            };
-                            if let Err(e) = &out {
-                                // Point the user at the offending statement.
-                                if n > 1 {
-                                    out = Err(rdb_core::error::RdbError::Query(format!(
-                                        "statement {}/{n}: {e}",
-                                        i + 1
-                                    )));
-                                }
-                                break;
-                            }
-                            // Run Selection multi-tab: keep each statement's result.
-                            if split {
-                                if let Ok(rs) = &out {
-                                    split_views.push(model::to_result_view(rs));
-                                    split_verbs.push(model::sql_verb(&s));
-                                }
-                            }
-                        }
-                        (out, n, stmts.last().cloned())
+                        execute_multi_statement_query(
+                            *engine,
+                            driver,
+                            &sql,
+                            row_limit,
+                            &cur_db,
+                            split,
+                            &query_console,
+                            &mut split_views,
+                            &mut split_verbs,
+                        )
+                        .await
                     }
                     None => (
                         Err(rdb_core::error::RdbError::Connection(
@@ -581,32 +612,19 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                 return;
             };
             let new_tab = result_new_tab.swap(false, std::sync::atomic::Ordering::SeqCst);
-            // Stop any in-flight stream, then arm a fresh cancel flag.
             if let Some(prev) = stream_cancel.borrow().as_ref() {
                 prev.store(true, std::sync::atomic::Ordering::SeqCst);
             }
             let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
             *stream_cancel.borrow_mut() = Some(cancel.clone());
-
-            // Log the RAW sql (clean `SELECT * FROM t`, no injected LIMIT).
             append_query_console(&query_console, sql.clone());
             sync_query_console(&w, &query_console);
-            let mut tab_connection_id = None;
-            if let Some(tab) = workspace_tabs
-                .lock()
-                .unwrap()
-                .iter_mut()
-                .find(|t| t.id == target_id)
-            {
-                tab.loading = true;
-                tab.query_text = sql.clone();
-                tab_connection_id = tab.connection_id.clone();
-                // Same first-run lock as run_sql: see the comment there.
-                if tab_connection_id.is_none() {
-                    tab_connection_id = current_connection_id.lock().unwrap().clone();
-                    tab.connection_id = tab_connection_id.clone();
-                }
-            }
+            let tab_connection_id = bind_tab_connection_for_runner(
+                &workspace_tabs,
+                &current_connection_id,
+                &target_id,
+                &sql,
+            );
             set_p_query_running(&w, pane, true);
             set_p_streaming(&w, pane, true);
             set_p_read_only(&w, pane, true);
