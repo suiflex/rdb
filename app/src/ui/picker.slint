@@ -31,6 +31,8 @@ component SocialBanner {
                 border-width: 1px;
                 border-color: Tokens.border;
                 StateLayer {
+                    width: 100%;
+                    height: 100%;
                     background: MaterialPalette.on_surface;
                     border-radius: parent.border-radius;
                     has-hover: ph-ta.has-hover;
@@ -67,6 +69,8 @@ component SocialBanner {
                 border-width: 1px;
                 border-color: Tokens.border;
                 StateLayer {
+                    width: 100%;
+                    height: 100%;
                     background: MaterialPalette.on_surface;
                     border-radius: parent.border-radius;
                     has-hover: gh-ta.has-hover;
@@ -377,6 +381,8 @@ export component ConnPicker inherits Rectangle {
                                 width: parent.width;
                                 height: parent.height;
                                 StateLayer {
+                                    width: 100%;
+                                    height: 100%;
                                     background: MaterialPalette.on_surface;
                                     border-radius: Tokens.radius-lg;
                                     has-hover: hdr-ta.has-hover;
@@ -645,6 +651,8 @@ export component ConnPicker inherits Rectangle {
                                             opacity: item.favorite || row-ta.has-hover || star-ta.has-hover ? 1.0 : 0.0;
                                             border-radius: self.width / 2;
                                             StateLayer {
+                                                width: 100%;
+                                                height: 100%;
                                                 background: MaterialPalette.on_surface;
                                                 border-radius: parent.border-radius;
                                                 has-hover: star-ta.has-hover;
