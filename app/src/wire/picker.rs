@@ -880,6 +880,7 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
             | "settings-updates"
             | "tooltip"
             | "zoom"
+            | "shortcuts"
     ) {
         return;
     }
@@ -922,6 +923,8 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
                     // Three ⌘+ steps (level 16 ≈ 123%): icons and Material
                     // controls must scale with the text.
                     "zoom" => w.invoke_zoom_step(3),
+                    // Keyboard Shortcuts modal (long list; scrolls in a short window).
+                    "shortcuts" => w.set_shortcuts_open(true),
                     "settings" | "settings-updates" => {
                         w.set_settings_tab(if which == "settings" { 0 } else { 1 });
                         w.set_settings_open(true);
