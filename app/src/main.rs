@@ -23,6 +23,7 @@ mod mock;
 mod model;
 mod pane;
 mod query_parse;
+mod release_notes;
 mod self_update;
 #[cfg(feature = "mock")]
 mod shot;

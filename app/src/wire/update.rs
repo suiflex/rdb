@@ -4,7 +4,9 @@
 //!
 //! Split out of `main`; the handler bodies are unchanged.
 
-use slint::{ComponentHandle, SharedString};
+use std::rc::Rc;
+
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::*;
 
@@ -87,6 +89,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                                     if let Some(w) = weak2.upgrade() {
                                         w.set_update_progress(1.0);
                                         w.set_update_stage(SharedString::from("ready"));
+                                        w.set_update_ready_open(true);
                                     }
                                 });
                             }
@@ -147,6 +150,19 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             }
         });
     }
+    // ----- "ready to install" dialog: the auto-install opt-in -----
+    {
+        window.set_update_auto_install(settings.borrow().get().auto_install_updates);
+        let settings = settings.clone();
+        let weak = window.as_weak();
+        window.on_set_auto_install(move |v| {
+            let _ = settings.borrow_mut().update(|s| s.auto_install_updates = v);
+            if let Some(w) = weak.upgrade() {
+                w.set_update_auto_install(v);
+            }
+        });
+    }
+    show_whats_new_if_upgraded(window, state);
 
     // ----- manual "Check now" from settings: bypasses the daily throttle and
     // reports the outcome inline so the toggle no longer feels like a no-op -----
@@ -228,9 +244,58 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                         w.set_update_self_update_supported(self_update_supported_now());
                         w.set_update_stage(SharedString::from("idle"));
                         w.set_update_available(true);
+                        // Opted in: download now; the dialog still asks before
+                        // swapping the running app.
+                        if w.get_update_auto_install() && w.get_update_self_update_supported() {
+                            w.invoke_restart_to_update();
+                        }
                     }
                 });
             });
         }
     }
+}
+
+/// First launch on a newer version than last ran: show its release notes.
+/// A fresh install only records the version — there is no upgrade to announce.
+fn show_whats_new_if_upgraded(window: &MainWindow, state: &AppState) {
+    if mock::mock_mode() {
+        return;
+    }
+    let current = env!("CARGO_PKG_VERSION");
+    let seen = state.settings.borrow().get().last_seen_version.clone();
+    if seen.as_deref() == Some(current) {
+        return;
+    }
+    let _ = state
+        .settings
+        .borrow_mut()
+        .update(|s| s.last_seen_version = Some(current.to_string()));
+    if seen.is_none() {
+        return;
+    }
+    let weak = window.as_weak();
+    std::thread::spawn(move || {
+        let lines = update::fetch_release_notes(current)
+            .map(|body| release_notes::parse(&body))
+            .unwrap_or_default();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(w) = weak.upgrade() {
+                open_whats_new(&w, current, lines);
+            }
+        });
+    });
+}
+
+pub(crate) fn open_whats_new(w: &MainWindow, version: &str, lines: Vec<release_notes::Line>) {
+    let rows: Vec<NoteLine> = lines
+        .into_iter()
+        .map(|l| NoteLine {
+            heading: l.heading,
+            text: l.text.into(),
+        })
+        .collect();
+    w.set_whats_new_version(version.into());
+    w.set_whats_new_lines(ModelRc::from(Rc::new(VecModel::from(rows))));
+    w.set_whats_new_open(true);
 }
