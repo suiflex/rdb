@@ -3997,6 +3997,45 @@ fn apply_result(w: &MainWindow, pane: usize, view: &model::ResultView) {
     }
 }
 
+/// Chart pickers: reset to the auto-pick for every fresh result, since the
+/// columns behind the old indices are gone.
+fn reset_chart_pickers(w: &MainWindow, pane: usize, v: &model::ResultView) {
+    match v {
+        model::ResultView::Table(g) => {
+            let numeric = model::numeric_columns(g);
+            // Material menu rows; `enabled` defaults to false on the struct.
+            let item = |name: &str| MenuItem {
+                text: name.into(),
+                enabled: true,
+                ..Default::default()
+            };
+            let value_cols: Vec<MenuItem> = numeric
+                .iter()
+                .filter_map(|&c| g.columns.get(c))
+                .map(|c| item(&c.name))
+                .collect();
+            let mut label_cols: Vec<MenuItem> = g.columns.iter().map(|c| item(&c.name)).collect();
+            // Past the real columns: label the bars by row number instead.
+            label_cols.push(item("row number"));
+            let auto_label = (0..g.columns.len())
+                .find(|c| !numeric.contains(c))
+                .unwrap_or(g.columns.len()) as i32;
+            set_p_chart_label_cols(w, pane, ModelRc::from(Rc::new(VecModel::from(label_cols))));
+            set_p_chart_value_cols(w, pane, ModelRc::from(Rc::new(VecModel::from(value_cols))));
+            set_p_chart_cols_index(w, pane, auto_label, 0);
+            CHART_VALUE_MAP.with(|m| m.borrow_mut()[pane] = numeric);
+            rebuild_chart(w, pane, g);
+        }
+        _ => {
+            set_p_chart_label_cols(w, pane, ModelRc::from(Rc::new(VecModel::default())));
+            set_p_chart_value_cols(w, pane, ModelRc::from(Rc::new(VecModel::default())));
+            set_p_chart_cols_index(w, pane, 0, 0);
+            CHART_VALUE_MAP.with(|m| m.borrow_mut()[pane].clear());
+            set_p_chart_bars(w, pane, ModelRc::from(Rc::new(VecModel::default())));
+        }
+    }
+}
+
 /// Present a fresh result view: reset all client-side view state (filter, sort,
 /// hidden, order, per-column filters, pending edits), rebuild the column
 /// metadata + widths + chart, and push it to the grid. Shared by a new query
@@ -4096,42 +4135,7 @@ fn present_view(
         _ => vec![140.0; ncols],
     };
     set_p_col_widths(w, pane, ModelRc::from(Rc::new(VecModel::from(widths))));
-    // Chart pickers: reset to the auto-pick for every fresh result, since the
-    // columns behind the old indices are gone.
-    match v {
-        model::ResultView::Table(g) => {
-            let numeric = model::numeric_columns(g);
-            // Material menu rows; `enabled` defaults to false on the struct.
-            let item = |name: &str| MenuItem {
-                text: name.into(),
-                enabled: true,
-                ..Default::default()
-            };
-            let value_cols: Vec<MenuItem> = numeric
-                .iter()
-                .filter_map(|&c| g.columns.get(c))
-                .map(|c| item(&c.name))
-                .collect();
-            let mut label_cols: Vec<MenuItem> = g.columns.iter().map(|c| item(&c.name)).collect();
-            // Past the real columns: label the bars by row number instead.
-            label_cols.push(item("row number"));
-            let auto_label = (0..g.columns.len())
-                .find(|c| !numeric.contains(c))
-                .unwrap_or(g.columns.len()) as i32;
-            set_p_chart_label_cols(w, pane, ModelRc::from(Rc::new(VecModel::from(label_cols))));
-            set_p_chart_value_cols(w, pane, ModelRc::from(Rc::new(VecModel::from(value_cols))));
-            set_p_chart_cols_index(w, pane, auto_label, 0);
-            CHART_VALUE_MAP.with(|m| m.borrow_mut()[pane] = numeric);
-            rebuild_chart(w, pane, g);
-        }
-        _ => {
-            set_p_chart_label_cols(w, pane, ModelRc::from(Rc::new(VecModel::default())));
-            set_p_chart_value_cols(w, pane, ModelRc::from(Rc::new(VecModel::default())));
-            set_p_chart_cols_index(w, pane, 0, 0);
-            CHART_VALUE_MAP.with(|m| m.borrow_mut()[pane].clear());
-            set_p_chart_bars(w, pane, ModelRc::from(Rc::new(VecModel::default())));
-        }
-    }
+    reset_chart_pickers(w, pane, v);
     apply_result(w, pane, v);
     // A fresh result starts on the first row. A stale selection left over from a
     // larger previous result is out of range for the new (smaller) one, and the
