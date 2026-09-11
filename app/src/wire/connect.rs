@@ -729,10 +729,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         rt,
         store,
         current,
-        driver_pool,
         collapsed,
-        workspace_tabs,
-        current_connection_id,
         connected_ids,
         connect_handle,
         conn_modal_map,
@@ -746,53 +743,14 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
     {
         let weak = window.as_weak();
         let current = current.clone();
-        let driver_pool = driver_pool.clone();
-        let workspace_tabs = workspace_tabs.clone();
-        let current_connection_id = current_connection_id.clone();
-        let connected_ids = connected_ids.clone();
+        // No idle eviction here any more: a pooled connection used to be
+        // closed once no open tab referenced it, which pulled it out of the
+        // connections rail on the next tick (a third connection with no tab
+        // of its own vanished as soon as you switched away). Open connections
+        // now stay until they are disconnected explicitly.
         rt.spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-                // Close every pooled connection no open tab references anymore
-                // (plus whichever one is actively focused, even between its
-                // last tab closing and a new one opening). Piggybacked on this
-                // existing tick rather than a second timer — up to 10s of a
-                // closed tab's connection lingering is a fine trade for one
-                // fewer moving part.
-                let evicted: HashSet<String> = {
-                    let mut live = live_connection_ids(&workspace_tabs.lock().unwrap());
-                    if let Some(id) = current_connection_id.lock().unwrap().clone() {
-                        live.insert(id);
-                    }
-                    // Single pass: `retain` decides what stays, and the ids it
-                    // drops are exactly the ones eviction needs downstream —
-                    // no separate filter pass over the same keys beforehand.
-                    let mut evicted = HashSet::new();
-                    driver_pool.write().await.retain(|id, _| {
-                        let keep = live.contains(id);
-                        if !keep {
-                            evicted.insert(id.clone());
-                        }
-                        keep
-                    });
-                    evicted
-                };
-                if !evicted.is_empty() {
-                    // A connection can go from "connected" to evicted without
-                    // ever going through the explicit disconnect handler
-                    // (every tab that named it just got closed) — keep the
-                    // sidebar dot's source of truth in step here too.
-                    {
-                        let mut ids = connected_ids.lock().unwrap();
-                        ids.retain(|id| !evicted.contains(id));
-                    }
-                    let weak = weak.clone();
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(w) = weak.upgrade() {
-                            w.invoke_refresh_connections();
-                        }
-                    });
-                }
                 // None = no driver (picker); Some(ok) = pinged a live connection.
                 // Clone the driver out of the mutex before pinging so a slow ping
                 // never blocks an in-flight query.
