@@ -6,6 +6,7 @@
 // supported way to read the live OS appearance: there is no Rust API for it in
 // this version. std-widgets is already compiled in, so this costs nothing.
 import { Palette } from "std-widgets.slint";
+import { MaterialScheme } from "@material";
 import "../../assets/fonts/IBMPlexMono-Regular.ttf";
 import "../../assets/fonts/IBMPlexMono-Medium.ttf";
 import "../../assets/fonts/IBMPlexMono-SemiBold.ttf";
@@ -140,4 +141,61 @@ export global Tokens {
 
     // ----- motion -----
     out property <duration> fade: 100ms;
+
+    // ----- Material 3 scheme -----
+    // The @material components read their colors from `MaterialPalette`;
+    // this maps our tokens onto its roles so they keep the brand look.
+    // Follows `dark` like every other token — `MainWindow` pushes it into
+    // `MaterialPalette.schemes`.
+    out property <MaterialScheme> material-scheme: {
+        primary: accent,
+        surfaceTint: accent,
+        onPrimary: #FFFFFF,
+        primaryContainer: accent-tint,
+        onPrimaryContainer: on-tint,
+        secondary: text-dim,
+        onSecondary: card,
+        secondaryContainer: accent-tint,
+        onSecondaryContainer: on-tint,
+        tertiary: syn-function,
+        onTertiary: #FFFFFF,
+        tertiaryContainer: syn-function.with-alpha(0.16),
+        onTertiaryContainer: text,
+        error: error,
+        onError: #FFFFFF,
+        errorContainer: error-tint,
+        onErrorContainer: error,
+        background: canvas,
+        onBackground: text,
+        surface: canvas,
+        onSurface: text,
+        surfaceVariant: sidebar,
+        onSurfaceVariant: text-dim,
+        outline: border-strong,
+        outlineVariant: border,
+        shadow: #000000,
+        scrim: veil,
+        inverseSurface: text,
+        inverseOnSurface: card,
+        inversePrimary: accent-hover,
+        primaryFixed: accent-tint,
+        onPrimaryFixed: on-tint,
+        primaryFixedDim: accent-hover,
+        onPrimaryFixedVariant: on-tint,
+        secondaryFixed: accent-tint,
+        onSecondaryFixed: on-tint,
+        secondaryFixedDim: text-faint,
+        onSecondaryFixedVariant: text,
+        tertiaryFixed: syn-function.with-alpha(0.16),
+        onTertiaryFixed: text,
+        tertiaryFixedDim: syn-function,
+        onTertiaryFixedVariant: text,
+        surfaceDim: sidebar,
+        surfaceBright: card,
+        surfaceContainerLowest: canvas,
+        surfaceContainerLow: card,
+        surfaceContainer: card,
+        surfaceContainerHigh: chrome,
+        surfaceContainerHighest: sidebar,
+    };
 }
