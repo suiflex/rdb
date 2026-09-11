@@ -3,7 +3,7 @@
 // Reference: design/2-workspace.png (left column).
 import { Tokens } from "tokens.slint";
 import { TreeNode } from "structs.slint";
-import { DbBadge, FilterField, KeyCap, Tooltip, Shortcut } from "components.slint";
+import { DbBadge, FilterField, IconButton, KeyCap, Tooltip, Shortcut } from "components.slint";
 import { AppIcon } from "icons.slint";
 import { ScrollView } from "std-widgets.slint";
 import { CircularProgressIndicator, ElevatedCard } from "@material";
@@ -417,16 +417,12 @@ export component Sidebar inherits Rectangle {
                         clicked => { root.select-schema(root.schema-name); }
                     }
                 }
-                Rectangle {
-                    width: 30px;
-                    border-radius: Tokens.radius;
-                    background: plus-ta.has-hover ? Tokens.border : transparent;
-                    Text {
-                        text: "+";
-                        color: Tokens.text-dim;
-                        font-size: 16px;
+                VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        icon: "plus";
+                        clicked => { root.add-item(); }
                     }
-                    plus-ta := TouchArea { clicked => { root.add-item(); } }
                 }
             }
         }
