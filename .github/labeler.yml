@@ -14,6 +14,54 @@
       - any-glob-to-any-file:
           - "app/**"
 
+# Finer areas inside the app, so a reviewer can tell a UI tweak from a wiring
+# or updater change without opening the diff. They sit alongside "area: app",
+# not instead of it.
+"area: app-ui":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "app/src/ui/**"
+          - "app/assets/**"
+
+"area: app-material":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "app/vendor/**"
+
+"area: app-wiring":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "app/src/wire/**"
+          - "app/src/main.rs"
+          - "app/src/pane.rs"
+          - "app/src/dispatch.rs"
+          - "app/src/model.rs"
+
+"area: app-editor":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "app/src/editor.rs"
+          - "app/src/editor/**"
+          - "app/src/completion.rs"
+          - "app/src/completion/**"
+          - "app/src/format.rs"
+          - "app/src/format/**"
+          - "app/src/query_parse.rs"
+
+"area: app-update":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "app/src/update.rs"
+          - "app/src/self_update.rs"
+          - "app/src/wire/update.rs"
+
+"area: app-harness":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "app/src/mock.rs"
+          - "app/src/mock/**"
+          - "app/src/shot.rs"
+
 "area: core":
   - changed-files:
       - any-glob-to-any-file:
