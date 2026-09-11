@@ -6,7 +6,7 @@ import { ScrollView } from "std-widgets.slint";
 import {
     FilledButton, OutlineButton, TextButton as MaterialTextButton, IconButton as MaterialIconButton,
     MaterialPalette, MaterialStyleMetrics, MaterialTypography, StateLayer, StateLayerArea, Switch,
-    TextField, DropDownMenu, MenuItem as MaterialMenuItem, SegmentedButton, TabBar,
+    TextField, DropDownMenu, MenuItem as MaterialMenuItem, SegmentedButton,
     NavigationItem as MaterialNavigationItem
 } from "@material";
 
@@ -597,28 +597,56 @@ export component BreadcrumbChip inherits Rectangle {
     }
 }
 
-// Result-pane footer tabs (Data/Structure/Indexes · Data/Message/Chart): a
-// Material primary tab bar — its indicator spans the label only, where the
-// secondary bar's ran the whole tab width up to the next tab. Controlled by
-// the owner's index like Toggle — the tab bar writes its own index on click,
-// so it is re-synced from `current`. Tabs split the bar's width evenly, so
-// the wrapper sizes itself per tab rather than stretching across the footer.
+// Result-pane footer tabs (Data/Structure/Indexes · Data/Message/Chart),
+// drawn like the document tabs: a pill hover and a 3px indicator exactly as
+// wide as the label, centred under it. Material's tab bars didn't fit here —
+// the secondary bar's indicator ran into the next tab, the primary bar's was
+// sized off its own label measurement and left a focus tint after a click.
+// Controlled: `current` comes from the owner, clicks only report `picked`.
 export component FooterTabs {
     in property <[MaterialNavigationItem]> items;
     in property <int> current;
     callback picked(int);
-    width: root.items.length * 96px;
-    tb := TabBar {
-        width: 100%;
-        items: root.items;
-        current-index: root.current;
-        index-changed(i) => {
-            if i != root.current {
-                root.picked(i);
+    min-height: 40px;
+    HorizontalLayout {
+        for item[i] in root.items: Rectangle {
+            width: 96px;
+            StateLayer {
+                x: 4px;
+                y: 6px;
+                width: parent.width - 8px;
+                height: parent.height - 12px;
+                border-radius: self.height / 2;
+                background: MaterialPalette.on_surface;
+                has-hover: tab-ta.has-hover;
+                enabled: true;
+            }
+            label := Text {
+                text: item.text;
+                color: i == root.current ? MaterialPalette.primary : MaterialPalette.on_surface_variant;
+                font-size: MaterialTypography.title_small.font_size;
+                font-weight: MaterialTypography.title_small.font_weight;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            if i == root.current: Rectangle {
+                x: (parent.width - label.preferred-width) / 2;
+                y: parent.height - self.height;
+                width: label.preferred-width;
+                height: 3px;
+                border-top-left-radius: 3px;
+                border-top-right-radius: 3px;
+                background: MaterialPalette.primary;
+            }
+            tab-ta := TouchArea {
+                clicked => {
+                    if i != root.current {
+                        root.picked(i);
+                    }
+                }
             }
         }
     }
-    changed current => { tb.current-index = root.current; }
 }
 
 // Grid/Tree toggle used by both query results and direct collection browsing:
