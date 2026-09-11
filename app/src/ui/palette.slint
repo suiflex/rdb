@@ -296,18 +296,15 @@ export component ListModal inherits Rectangle {
                 spacing: Tokens.sp2;
                 SecondaryButton {
                     text: "Cancel";
-                    height: 30px;
                     clicked => { root.dismiss(); }
                 }
                 Rectangle { horizontal-stretch: 1; }
                 SecondaryButton {
                     text: "New...";
-                    height: 30px;
                     clicked => { root.new-item(); }
                 }
                 PrimaryButton {
                     text: root.confirm-label;
-                    height: 30px;
                     clicked => { root.choose(root.selected); }
                 }
             }

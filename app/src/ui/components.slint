@@ -1,8 +1,12 @@
 // Shared Tabula components. All colors/metrics come from Tokens.
 import { Tokens } from "tokens.slint";
-import { AppIcon } from "icons.slint";
+import { AppIcon, AppIcons } from "icons.slint";
 import { PaletteItem } from "structs.slint";
 import { ScrollView } from "std-widgets.slint";
+import {
+    FilledButton, OutlineButton, TextButton as MaterialTextButton, IconButton as MaterialIconButton,
+    MaterialStyleMetrics, MaterialTypography, StateLayerArea
+} from "@material";
 
 // Rounded, bordered, drop-shadowed surface used for panels that should read
 // as floating above the canvas (connection picker, workspace sidebar) rather
@@ -287,141 +291,55 @@ export component OutlineChip inherits Rectangle {
     }
 }
 
-export component PrimaryButton inherits Rectangle {
-    in property <string> text;
-    in property <bool> enabled: true;
-    in property <string> tooltip;            // optional hover label
-    callback clicked;
-    height: Tokens.button-h;
-    width: label.preferred-width + 2 * Tokens.sp4;
-    border-radius: Tokens.radius;
-    background: !enabled ? Tokens.accent.with-alpha(0.4)
-        : ta.has-hover ? Tokens.accent-hover : Tokens.accent;
-    animate background { duration: Tokens.fade; }
-    label := Text {
-        text: root.text;
-        color: white;
-        font-size: Tokens.font-sm;
-        font-weight: Tokens.weight-emphasis;
-    }
-    ta := TouchArea {
-        enabled: root.enabled;
-        clicked => { root.clicked(); }
-        changed has-hover => {
-            if self.has-hover && root.tooltip != "" {
-                Tooltip.text = root.tooltip;
-                Tooltip.x = root.absolute-position.x + root.width / 2;
-                Tooltip.y = root.absolute-position.y + root.height + 4px;
-                Tooltip.shown = true;
-            } else if Tooltip.text == root.tooltip {
-                Tooltip.shown = false;
-            }
-        }
-    }
-}
+// The main call to action. Material's filled button already has the same
+// surface (text / enabled / tooltip / clicked), so this is just its app name.
+export component PrimaryButton inherits FilledButton {}
 
-export component SecondaryButton inherits Rectangle {
-    in property <string> text;
-    in property <bool> enabled: true;
-    in property <string> tooltip;            // optional hover label
-    callback clicked;
-    height: Tokens.button-h;
-    width: label.preferred-width + 2 * Tokens.sp4;
-    border-radius: Tokens.radius;
-    border-width: 1px;
-    border-color: enabled ? Tokens.border-strong : Tokens.border;
-    background: !enabled ? transparent
-        : ta.has-hover ? Tokens.chrome : Tokens.card;
-    animate background { duration: Tokens.fade; }
-    label := Text {
-        text: root.text;
-        color: enabled ? Tokens.text : Tokens.text-ghost;
-        font-size: Tokens.font-sm;
-        font-weight: 500;
-    }
-    ta := TouchArea {
-        enabled: root.enabled;
-        clicked => { root.clicked(); }
-        // report hover to the shared Tooltip overlay (drawn in app-window)
-        changed has-hover => {
-            if self.has-hover && root.tooltip != "" {
-                Tooltip.text = root.tooltip;
-                Tooltip.x = root.absolute-position.x + root.width / 2;
-                Tooltip.y = root.absolute-position.y + root.height + 4px;
-                Tooltip.shown = true;
-            } else if Tooltip.text == root.tooltip {
-                Tooltip.shown = false;
-            }
-        }
-    }
-}
+// Secondary action next to a PrimaryButton (Cancel, Test, Copy…).
+export component SecondaryButton inherits OutlineButton {}
 
 // Destructive / warning action (Cancel a running query, abort a stream).
-// Red outline + text so it reads as "stop this", distinct from a plain button.
-export component DangerButton inherits Rectangle {
+// Material's outlined-button shape in the error color, so it reads as "stop
+// this". Built on StateLayerArea (hover/press layer + ripple) because the
+// Material buttons hard-wire their color to the primary role.
+export component DangerButton inherits StateLayerArea {
     in property <string> text;
-    in property <bool> enabled: true;
-    callback clicked;
-    height: Tokens.button-h;
-    width: label.preferred-width + 2 * Tokens.sp4;
-    border-radius: Tokens.radius;
-    border-width: 1px;
-    border-color: Tokens.error;
-    background: ta.has-hover ? Tokens.error-tint : transparent;
-    animate background { duration: Tokens.fade; }
+    color: Tokens.error;
+    border-radius: self.height / 2;
+    min-width: label.preferred-width + 2 * MaterialStyleMetrics.padding_24;
+    preferred-width: self.min-width;
+    min-height: MaterialStyleMetrics.size_40;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    Rectangle {
+        border-radius: root.border-radius;
+        border-width: 1px;
+        border-color: root.enabled ? Tokens.error : Tokens.text-ghost;
+    }
     label := Text {
         text: root.text;
-        color: Tokens.error;
-        font-size: Tokens.font-sm;
-        font-weight: 600;
-    }
-    ta := TouchArea {
-        enabled: root.enabled;
-        clicked => { root.clicked(); }
+        color: root.enabled ? Tokens.error : Tokens.text-ghost;
+        font-size: MaterialTypography.label_large.font_size;
+        font-weight: MaterialTypography.label_large.font_weight;
+        horizontal-alignment: center;
+        vertical-alignment: center;
     }
 }
 
 // Plain text button (footer actions: Import, Backup, Copy, Export CSV…).
-export component TextButton inherits Rectangle {
-    in property <string> text;
-    in property <bool> active: false;
-    in property <string> tooltip;            // optional hover label
-    callback clicked;
-    height: Tokens.button-h;
-    width: label.preferred-width + 2 * Tokens.sp2;
-    border-radius: Tokens.radius;
-    background: ta.has-hover ? Tokens.border : transparent;
-    animate background { duration: Tokens.fade; }
-    label := Text {
-        text: root.text;
-        color: active ? Tokens.accent : Tokens.text-dim;
-        font-size: Tokens.font-sm;
-        font-weight: 500;
-        vertical-alignment: center;
-    }
-    ta := TooltipArea {
-        tip: root.tooltip;
-        clicked => { root.clicked(); }
-    }
-}
+export component TextButton inherits MaterialTextButton {}
 
-// Export dropdown: sized/styled exactly like TextButton so it aligns and
-// spaces with the other toolbar buttons, but opens a format menu. `export(i)`
-// reports the chosen row index into the option list below.
-export component ExportButton inherits Rectangle {
+// Export dropdown: the same Material text button as TextButton, so it aligns
+// and spaces with the other toolbar buttons, but opens a format menu.
+// `export(i)` reports the chosen row index into the option list below.
+export component ExportButton {
     in property <string> tooltip;            // optional hover label
     callback export(int);
-    height: Tokens.button-h;
-    width: label.preferred-width + 2 * Tokens.sp2;
-    border-radius: Tokens.radius;
-    background: ta.has-hover ? Tokens.border : transparent;
-    animate background { duration: Tokens.fade; }
-    label := Text {
+    MaterialTextButton {
         text: "Export ▾";
-        color: Tokens.text-dim;
-        font-size: Tokens.font-sm;
-        font-weight: 500;
-        vertical-alignment: center;
+        tooltip: root.tooltip;
+        clicked => { menu.show(); }
     }
     menu := PopupWindow {
         // Default close-on-click swallows the press and closes before the inner
@@ -465,10 +383,6 @@ export component ExportButton inherits Rectangle {
                 }
             }
         }
-    }
-    ta := TooltipArea {
-        tip: root.tooltip;
-        clicked => { menu.show(); }
     }
 }
 
@@ -737,37 +651,18 @@ export component GlyphButton inherits Rectangle {
     }
 }
 
-// Like GlyphButton but draws a crisp SVG (AppIcon) instead of a font glyph —
-// used for header actions whose symbols aren't in the mono font.
-export component IconButton inherits Rectangle {
+// Header/toolbar icon action. Takes an AppIcons name; `active` paints it in
+// the checked (primary) state for toggles like the sidebar/panel switches.
+export component IconButton {
     in property <string> icon;
-    in property <length> icon-size: Tokens.icon-sm;
     in property <bool> active: false;
     in property <string> tooltip;            // optional hover label
     callback clicked;
-    width: 28px;
-    height: 28px;
-    border-radius: Tokens.radius;
-    background: ta.has-hover ? Tokens.border
-        : root.active ? Tokens.accent-tint : transparent;
-    animate background { duration: Tokens.fade; }
-    AppIcon {
-        name: root.icon;
-        size: root.icon-size;
-        color: root.active ? Tokens.accent : Tokens.text-dim;
-    }
-    ta := TouchArea {
+    MaterialIconButton {
+        icon: AppIcons.get(root.icon);
+        checked: root.active;
+        tooltip: root.tooltip;
         clicked => { root.clicked(); }
-        changed has-hover => {
-            if self.has-hover && root.tooltip != "" {
-                Tooltip.text = root.tooltip;
-                Tooltip.x = root.absolute-position.x + root.width / 2;
-                Tooltip.y = root.absolute-position.y + root.height + 4px;
-                Tooltip.shown = true;
-            } else if Tooltip.text == root.tooltip {
-                Tooltip.shown = false;
-            }
-        }
     }
 }
 

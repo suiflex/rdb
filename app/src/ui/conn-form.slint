@@ -166,7 +166,6 @@ export component ConnForm inherits Rectangle {
             }
 
             import-row := HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "URL"; }
                 FormField {
@@ -188,7 +187,6 @@ export component ConnForm inherits Rectangle {
                 }
                 SecondaryButton {
                     text: "Import";
-                    height: 30px;
                     tooltip: "Fill the form from a connection URL";
                     clicked => { root.import-url(); }
                 }
@@ -330,7 +328,6 @@ export component ConnForm inherits Rectangle {
             }
 
             if root.f-engine != "SQLite" && root.f-ssh-enabled && root.f-ssh-auth-mode == "KeyFile": HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 FormLabel { text: "Key File"; }
                 FormField {
@@ -341,7 +338,6 @@ export component ConnForm inherits Rectangle {
                 }
                 SecondaryButton {
                     text: "Browse";
-                    height: 30px;
                     tooltip: "Choose private key file";
                     clicked => { root.browse-ssh-key(); }
                 }
@@ -490,18 +486,16 @@ export component ConnForm inherits Rectangle {
             }
 
             HorizontalLayout {
-                height: 30px;
                 spacing: Tokens.sp2;
                 Rectangle { horizontal-stretch: 1; }
                 SecondaryButton {
                     text: "Test";
-                    height: 30px;
                     enabled: !root.test-busy;
                     clicked => { root.test-conn(); }
                 }
-                PrimaryButton { text: "Save"; height: 30px; clicked => { root.save(); } }
-                SecondaryButton { text: "Cancel"; height: 30px; clicked => { root.cancel(); } }
-                if root.edit-mode: DangerButton { text: "Delete"; height: 30px; clicked => { root.delete-requested(); } }
+                PrimaryButton { text: "Save"; clicked => { root.save(); } }
+                SecondaryButton { text: "Cancel"; clicked => { root.cancel(); } }
+                if root.edit-mode: DangerButton { text: "Delete"; clicked => { root.delete-requested(); } }
             }
         }
         if root.delete-confirm-open: Rectangle {
@@ -532,10 +526,9 @@ export component ConnForm inherits Rectangle {
                     HorizontalLayout {
                         spacing: Tokens.sp2;
                         alignment: end;
-                        SecondaryButton { text: "Cancel"; height: 30px; clicked => { root.delete-confirm-open = false; } }
+                        SecondaryButton { text: "Cancel"; clicked => { root.delete-confirm-open = false; } }
                         DangerButton {
                             text: "Delete";
-                            height: 30px;
                             clicked => {
                                 root.delete-confirm-open = false;
                                 root.delete-confirmed();

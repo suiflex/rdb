@@ -186,7 +186,7 @@ export component QueryPane inherits Rectangle {
         // Each pane owns its toolbar so the split (right) pane keeps full
         // browse actions — parity with the primary pane.
         if root.browse-mode: Rectangle {
-            height: 42px;
+            height: 48px; // fits the 40px Material buttons
             background: Tokens.canvas;
             HorizontalLayout {
                 padding-left: Tokens.sp3;
@@ -368,7 +368,6 @@ export component QueryPane inherits Rectangle {
                 }
                 PrimaryButton {
                     text: "Apply";
-                    height: 28px;
                     clicked => { root.apply-filter(); }
                 }
                 Rectangle { horizontal-stretch: 1; }
@@ -400,7 +399,6 @@ export component QueryPane inherits Rectangle {
                         PrimaryButton {
                             text: root.query-running ? "Running…" : "▶ Run  " + Shortcut.primary + Shortcut.separator + Shortcut.enter;
                             tooltip: "Run selected SQL or the current statement  " + Shortcut.primary + Shortcut.separator + Shortcut.enter;
-                            height: 28px;
                             enabled: !root.query-running;
                             clicked => { root.run(); }
                         }
@@ -410,7 +408,6 @@ export component QueryPane inherits Rectangle {
                         SecondaryButton {
                             text: "Run New  " + Shortcut.primary + Shortcut.separator + "\\";
                             tooltip: "Run the current statement in a new result tab  " + Shortcut.primary + Shortcut.separator + "\\";
-                            height: 28px;
                             clicked => { root.run-new-tab(); }
                         }
                     }
@@ -420,7 +417,6 @@ export component QueryPane inherits Rectangle {
                         SecondaryButton {
                             text: "Format";
                             tooltip: "Format the active editor line";
-                            height: 28px;
                             clicked => { root.format-sql(); }
                         }
                     }
@@ -430,7 +426,6 @@ export component QueryPane inherits Rectangle {
                         SecondaryButton {
                             text: "Explain";
                             tooltip: "Run EXPLAIN for the active editor line";
-                            height: 28px;
                             clicked => { root.explain-query(); }
                         }
                     }
@@ -475,7 +470,6 @@ export component QueryPane inherits Rectangle {
                         alignment: center;
                         DangerButton {
                             text: "⏹ Cancel";
-                            height: 28px;
                             clicked => { root.cancel-stream(); }
                         }
                     }
@@ -485,7 +479,6 @@ export component QueryPane inherits Rectangle {
                         alignment: center;
                         DangerButton {
                             text: "⏹ Cancel";
-                            height: 28px;
                             clicked => { root.cancel-query(); }
                         }
                     }
@@ -499,7 +492,7 @@ export component QueryPane inherits Rectangle {
                 }
                 // find bar (⌘F): input + match count + prev/next + close
                 if root.find-open: Rectangle {
-                    height: 36px;
+                    height: 48px; // fits the 40px Material buttons
                     background: Tokens.chrome;
                     // Focus the input one tick after the bar mounts. Calling
                     // .focus() from the input's own `init` recurses through the
@@ -553,11 +546,11 @@ export component QueryPane inherits Rectangle {
                         Rectangle { horizontal-stretch: 1; }
                         VerticalLayout {
                             alignment: center;
-                            SecondaryButton { text: "‹ Prev"; height: 26px; clicked => { root.find-prev(); } }
+                            SecondaryButton { text: "‹ Prev"; clicked => { root.find-prev(); } }
                         }
                         VerticalLayout {
                             alignment: center;
-                            SecondaryButton { text: "Next ›"; height: 26px; clicked => { root.find-next(); } }
+                            SecondaryButton { text: "Next ›"; clicked => { root.find-next(); } }
                         }
                         VerticalLayout {
                             alignment: center;
@@ -611,7 +604,7 @@ export component QueryPane inherits Rectangle {
                 Rectangle { height: 1px; background: Tokens.border; }
                 // results header strip
                 HorizontalLayout {
-                    height: 34px;
+                    height: 48px; // fits the 40px Material text button
                     padding-left: Tokens.sp3;
                     padding-right: Tokens.sp3;
                     spacing: Tokens.sp2;
@@ -1037,7 +1030,6 @@ export component QueryPane inherits Rectangle {
                             alignment: center;
                             DangerButton {
                                 text: "⏹ Cancel";
-                                height: 28px;
                                 clicked => { root.cancel-query(); }
                             }
                         }

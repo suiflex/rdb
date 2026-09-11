@@ -694,7 +694,7 @@ export component WorkArea inherits Rectangle {
         property <int> active-pending-count: root.split && root.active-pane == 1
             ? root.p1-pending-count : root.pending-count;
         if active-pending-count > 0: Rectangle {
-            height: 30px;
+            height: 48px; // fits the 40px Material buttons
             background: Tokens.warn-tint;
             HorizontalLayout {
                 padding-left: Tokens.sp3;
@@ -713,7 +713,6 @@ export component WorkArea inherits Rectangle {
                     SecondaryButton {
                         text: "Discard";
                         tooltip: "Throw away every pending edit in this grid";
-                        height: 22px;
                         clicked => {
                             if (root.split && root.active-pane == 1) { root.p1-discard-edits(); } else { root.discard-edits(); }
                         }
@@ -724,7 +723,6 @@ export component WorkArea inherits Rectangle {
                     SecondaryButton {
                         text: "Copy SQL";
                         tooltip: "Copy the statements a commit would run, without writing anything";
-                        height: 22px;
                         clicked => {
                             root.copy-edit-sql();
                         }
@@ -736,7 +734,6 @@ export component WorkArea inherits Rectangle {
                         text: "Commit  " + Shortcut.primary + Shortcut.separator + "S";
                         tooltip: "Write the pending edits to the database  "
                             + Shortcut.primary + Shortcut.separator + "S";
-                        height: 22px;
                         clicked => {
                             if (root.split && root.active-pane == 1) { root.p1-commit-edits(); } else { root.commit-edits(); }
                         }
@@ -891,7 +888,7 @@ export component WorkArea inherits Rectangle {
                     alignment: end;
                     VerticalLayout {
                         alignment: center;
-                        SecondaryButton { text: "Columns"; height: 24px; clicked => { root.columns-open = !root.columns-open; } }
+                        SecondaryButton { text: "Columns"; clicked => { root.columns-open = !root.columns-open; } }
                     }
                 }
                 if root.console-open: VerticalLayout {
@@ -910,7 +907,6 @@ export component WorkArea inherits Rectangle {
                         alignment: center;
                         SecondaryButton {
                             text: "Reconnect";
-                            height: 20px;
                             clicked => { root.reconnect(); }
                         }
                     }
