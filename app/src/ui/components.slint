@@ -326,22 +326,23 @@ export component DbBadge inherits Rectangle {
     }
 }
 
-// Green outline chip: LOCAL / status labels.
+// Status label chip (LOCAL, env tags). Non-interactive, so it takes the M3
+// chip corner and label type rather than Material's clickable chips.
 export component OutlineChip inherits Rectangle {
     in property <string> text;
     in property <color> tint: Tokens.ok;
-    height: 18px;
-    width: label.preferred-width + 2 * Tokens.sp2;
-    border-radius: self.height / 2;
+    height: 20px;
+    width: label.preferred-width + 2 * MaterialStyleMetrics.padding_8;
+    border-radius: MaterialStyleMetrics.border_radius_8;
     border-width: 1px;
     border-color: tint.with-alpha(0.55);
-    background: transparent;
+    background: tint.with-alpha(0.08);
     label := Text {
         text: root.text;
         color: tint;
-        font-size: 9px;
-        font-weight: 700;
-        letter-spacing: 0.8px;
+        font-size: MaterialTypography.label_small.font_size;
+        font-weight: MaterialTypography.label_small.font_weight;
+        letter-spacing: 0.5px;
     }
 }
 
@@ -496,7 +497,10 @@ export component SearchCommandPill inherits Rectangle {
     ta := TouchArea { clicked => { root.activated(); } }
 }
 
-// Breadcrumb chip: white hairline card, optional status dot / trailing caret.
+// Breadcrumb chip (titlebar connection / database / schema): Material
+// assist-chip shape — 32px, 8px corners, outline, state-layer hover — keeping
+// the status dot, caret and mono label, which Material's ActionChip has no
+// slots for.
 export component BreadcrumbChip inherits Rectangle {
     in property <string> text;
     in property <bool> show-dot: false;
@@ -505,13 +509,18 @@ export component BreadcrumbChip inherits Rectangle {
     in property <bool> mono: false;
     in property <string> tooltip;            // optional hover label
     callback clicked;
-    height: Tokens.button-h + 2px;
-    width: content.preferred-width + 2 * Tokens.sp3;
-    border-radius: Tokens.radius;
+    height: MaterialStyleMetrics.size_32;
+    width: content.preferred-width + 2 * MaterialStyleMetrics.padding_12;
+    border-radius: MaterialStyleMetrics.border_radius_8;
     border-width: 1px;
-    border-color: Tokens.border;
-    background: ta.has-hover ? Tokens.canvas : Tokens.card;
-    animate background { duration: Tokens.fade; }
+    border-color: MaterialPalette.outline_variant;
+    background: MaterialPalette.surface_container_low;
+    StateLayer {
+        background: MaterialPalette.on_surface;
+        border-radius: root.border-radius;
+        has-hover: ta.has-hover;
+        enabled: true;
+    }
     content := HorizontalLayout {
         alignment: center;
         spacing: Tokens.sp2;
@@ -526,9 +535,9 @@ export component BreadcrumbChip inherits Rectangle {
         }
         Text {
             text: root.text;
-            color: Tokens.text;
-            font-size: Tokens.font-sm;
-            font-weight: 500;
+            color: MaterialPalette.on_surface;
+            font-size: MaterialTypography.label_large.font_size;
+            font-weight: MaterialTypography.label_large.font_weight;
             font-family: root.mono ? Tokens.mono : "";
             vertical-alignment: center;
         }
@@ -587,17 +596,18 @@ export component ResultModeToggle {
     changed mode => { sb.current-index = root.mode; }
 }
 
-// Grey tag chip (mono text: acme, fintech).
+// Tag chip (mono text: acme, fintech). Non-interactive label in the M3 chip
+// shape and surface.
 export component TagChip inherits Rectangle {
     in property <string> text;
-    height: Tokens.button-h - 2px;
-    width: label.preferred-width + 2 * Tokens.sp3;
-    border-radius: Tokens.radius;
-    background: Tokens.chrome;
+    height: MaterialStyleMetrics.size_32;
+    width: label.preferred-width + 2 * MaterialStyleMetrics.padding_12;
+    border-radius: MaterialStyleMetrics.border_radius_8;
+    background: MaterialPalette.surface_container_highest;
     label := Text {
         text: root.text;
-        color: Tokens.text-dim;
-        font-size: Tokens.font-sm;
+        color: MaterialPalette.on_surface_variant;
+        font-size: MaterialTypography.label_large.font_size;
         font-family: Tokens.mono;
     }
 }
