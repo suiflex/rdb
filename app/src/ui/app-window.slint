@@ -1338,7 +1338,14 @@ callback create-table-commit();
                                 ? (parent.width - 6px) * root.split-ratio : parent.width;
                             height: parent.height;
                             clip: true;
-                            HorizontalLayout {
+                            // Too many tabs scroll with the wheel/trackpad instead
+                            // of clipping; drag stays with the tabs (reorder/split).
+                            left-flick := Flickable {
+                            interactive: false;
+                            viewport-width: max(self.width, left-row.preferred-width);
+                            left-row := HorizontalLayout {
+                                width: left-flick.viewport-width;
+                                height: left-flick.height;
                                 padding-left: Tokens.sp2;
                                 padding-top: Tokens.doc-tab-row-h - Tokens.doc-tab-h;
                                 spacing: Tokens.sp1;
@@ -1354,7 +1361,7 @@ callback create-table-commit();
                                 property <bool> hovered: tab-ta.has-hover
                                     || rename-ta.has-hover || move-ta.has-hover
                                     || close-ta.has-hover;
-                                width: min(170px, tab-content.preferred-width + 2 * Tokens.sp3);
+                                width: min(240px, tab-content.preferred-width);
                                 height: Tokens.doc-tab-h;
                                 // Which tab is selected is otherwise only a
                                 // background colour, so nothing outside the
@@ -1364,9 +1371,10 @@ callback create-table-commit();
                                 accessible-label: tab.title;
                                 accessible-checkable: true;
                                 accessible-checked: i == root.active-tab;
-                                background: i == root.active-tab ? Tokens.card
-                                    : (tab-ta.has-hover ? Tokens.card.with-alpha(0.5) : transparent);
-                                border-radius: Tokens.radius;
+                                // Solid on hover so the action overlay below blends in.
+                                background: i == root.active-tab || tab-root.hovered ? Tokens.card : transparent;
+                                border-top-left-radius: Tokens.radius;
+                                border-top-right-radius: Tokens.radius;
                                 clip: true;
                                 tab-ta := TouchArea {
                                     property <bool> dragging: false;
@@ -1415,7 +1423,9 @@ callback create-table-commit();
 
                                 tab-content := HorizontalLayout {
                                     padding-left: Tokens.sp3;
-                                    padding-right: Tokens.sp1;
+                                    // Only the active tab reserves room for the
+                                    // action overlay; the rest give it to the title.
+                                    padding-right: i == root.active-tab ? 58px + Tokens.sp2 : Tokens.sp3;
                                     spacing: Tokens.sp2;
                                     // connection color dot
                                     if tab.engine != "": VerticalLayout {
@@ -1459,13 +1469,25 @@ callback create-table-commit();
                                         font-italic: tab.preview;
                                         overflow: elide;
                                     }
+                                }
+                                // Tab actions as an overlay at the right edge, so an
+                                // inactive tab keeps its title width and doesn't grow
+                                // when hovered (the old in-layout buttons reserved
+                                // their 54px on every tab, cutting titles to 2–4
+                                // characters).
+                                Rectangle {
+                                    x: parent.width - self.width - Tokens.sp1;
+                                    width: 58px;
+                                    height: parent.height;
+                                    background: Tokens.card;
+                                    visible: i == root.active-tab || tab-root.hovered;
                                     Rectangle {
+                                        x: 0;
                                         width: 18px;
                                         height: 18px;
                                         y: (parent.height - self.height) / 2;
-                                        border-radius: 4px;
-                                        background: rename-ta.has-hover ? Tokens.card : transparent;
-                                        visible: i == root.active-tab || tab-root.hovered;
+                                        border-radius: self.width / 2;
+                                        background: rename-ta.has-hover ? Tokens.border : transparent;
                                         rename-ta := TouchArea {
                                             clicked => {
                                                 root.rename-target = i;
@@ -1491,12 +1513,12 @@ callback create-table-commit();
                                         }
                                     }
                                     Rectangle {
+                                        x: 20px;
                                         width: 18px;
                                         height: 18px;
                                         y: (parent.height - self.height) / 2;
-                                        border-radius: 4px;
+                                        border-radius: self.width / 2;
                                         background: move-ta.has-hover ? Tokens.accent-tint : transparent;
-                                        visible: i == root.active-tab || tab-root.hovered;
                                         move-ta := TouchArea {
                                             clicked => { root.move-tab-group(i, 1); }
                                             changed has-hover => {
@@ -1518,12 +1540,12 @@ callback create-table-commit();
                                     }
                                     // close affordance (active or hovered tab)
                                     Rectangle {
+                                        x: 40px;
                                         width: 18px;
                                         height: 18px;
                                         y: (parent.height - self.height) / 2;
-                                        border-radius: 4px;
+                                        border-radius: self.width / 2;
                                         background: close-ta.has-hover ? Tokens.error : transparent;
-                                        visible: i == root.active-tab || tab-root.hovered;
                                         close-ta := TooltipArea {
                                             tip: "Close tab  " + Shortcut.primary
                                                 + Shortcut.separator + "W";
@@ -1544,7 +1566,7 @@ callback create-table-commit();
                                     width: 26px;
                                     height: 26px;
                                     y: (parent.height - self.height) / 2;
-                                    border-radius: Tokens.radius;
+                                    border-radius: self.width / 2;
                                     background: add-ta.has-hover ? Tokens.accent-tint : transparent;
                                     Text { text: "+"; color: add-ta.has-hover ? Tokens.accent : Tokens.text-dim; horizontal-alignment: center; vertical-alignment: center; font-size: 16px; }
                                     add-ta := TooltipArea {
@@ -1554,6 +1576,7 @@ callback create-table-commit();
                                     }
                                 }
                                 Rectangle { horizontal-stretch: 1; }
+                            }
                             }
                         }
                         if root.split || root.tab-drag-source == 0: right-group := Rectangle {
@@ -1569,7 +1592,12 @@ callback create-table-commit();
                                 vertical-alignment: center;
                                 font-size: Tokens.font-sm;
                             }
-                            HorizontalLayout {
+                            right-flick := Flickable {
+                            interactive: false;
+                            viewport-width: max(self.width, right-row.preferred-width);
+                            right-row := HorizontalLayout {
+                                width: right-flick.viewport-width;
+                                height: right-flick.height;
                                 padding-left: Tokens.sp2;
                                 padding-top: Tokens.doc-tab-row-h - Tokens.doc-tab-h;
                                 spacing: Tokens.sp1;
@@ -1578,16 +1606,16 @@ callback create-table-commit();
                                 property <bool> hovered: p1-tab-ta.has-hover
                                     || p1-rename-ta.has-hover || p1-move-ta.has-hover
                                     || p1-close-ta.has-hover;
-                                width: min(170px, p1-tab-content.preferred-width + 2 * Tokens.sp3);
+                                width: min(240px, p1-tab-content.preferred-width);
                                 height: Tokens.doc-tab-h;
                                 // Same reasoning as the left group above.
                                 accessible-role: AccessibleRole.tab;
                                 accessible-label: tab.title;
                                 accessible-checkable: true;
                                 accessible-checked: i == root.p1-active-tab;
-                                background: i == root.p1-active-tab ? Tokens.card
-                                    : (p1-tab-ta.has-hover ? Tokens.card.with-alpha(0.5) : transparent);
-                                border-radius: Tokens.radius;
+                                background: i == root.p1-active-tab || p1-tab-root.hovered ? Tokens.card : transparent;
+                                border-top-left-radius: Tokens.radius;
+                                border-top-right-radius: Tokens.radius;
                                 clip: true;
                                 p1-tab-ta := TouchArea {
                                     property <bool> dragging: false;
@@ -1633,7 +1661,8 @@ callback create-table-commit();
                                 }
                                 p1-tab-content := HorizontalLayout {
                                     padding-left: Tokens.sp3;
-                                    padding-right: Tokens.sp2;
+                                    // Same overlay reserve rule as the left strip.
+                                    padding-right: i == root.p1-active-tab ? 58px + Tokens.sp2 : Tokens.sp3;
                                     spacing: Tokens.sp2;
                                     if tab.engine != "": VerticalLayout {
                                         alignment: center;
@@ -1658,13 +1687,21 @@ callback create-table-commit();
                                         font-weight: i == root.p1-active-tab ? Tokens.weight-emphasis : 400;
                                         overflow: elide;
                                     }
+                                }
+                                // Action overlay — same as the left strip.
+                                Rectangle {
+                                    x: parent.width - self.width - Tokens.sp1;
+                                    width: 58px;
+                                    height: parent.height;
+                                    background: Tokens.card;
+                                    visible: i == root.p1-active-tab || p1-tab-root.hovered;
                                     Rectangle {
+                                        x: 0;
                                         width: 18px;
                                         height: 18px;
                                         y: (parent.height - self.height) / 2;
-                                        border-radius: 4px;
-                                        background: p1-rename-ta.has-hover ? Tokens.card : transparent;
-                                        visible: i == root.p1-active-tab || p1-tab-root.hovered;
+                                        border-radius: self.width / 2;
+                                        background: p1-rename-ta.has-hover ? Tokens.border : transparent;
                                         p1-rename-ta := TouchArea {
                                             clicked => {
                                                 root.rename-target = i;
@@ -1690,12 +1727,12 @@ callback create-table-commit();
                                         }
                                     }
                                     Rectangle {
+                                        x: 20px;
                                         width: 18px;
                                         height: 18px;
                                         y: (parent.height - self.height) / 2;
-                                        border-radius: 4px;
+                                        border-radius: self.width / 2;
                                         background: p1-move-ta.has-hover ? Tokens.accent-tint : transparent;
-                                        visible: i == root.p1-active-tab || p1-tab-root.hovered;
                                         p1-move-ta := TouchArea {
                                             clicked => { root.move-tab-group(i, 0); }
                                             changed has-hover => {
@@ -1716,12 +1753,12 @@ callback create-table-commit();
                                         }
                                     }
                                     Rectangle {
+                                        x: 40px;
                                         width: 18px;
                                         height: 18px;
                                         y: (parent.height - self.height) / 2;
-                                        border-radius: 4px;
+                                        border-radius: self.width / 2;
                                         background: p1-close-ta.has-hover ? Tokens.error : transparent;
-                                        visible: i == root.p1-active-tab || p1-tab-root.hovered;
                                         p1-close-ta := TooltipArea {
                                             tip: "Close tab  " + Shortcut.primary
                                                 + Shortcut.separator + "W";
@@ -1739,7 +1776,7 @@ callback create-table-commit();
                                     width: 26px;
                                     height: 26px;
                                     y: (parent.height - self.height) / 2;
-                                    border-radius: Tokens.radius;
+                                    border-radius: self.width / 2;
                                     background: p1-add-ta.has-hover ? Tokens.accent-tint : transparent;
                                     Text { text: "+"; color: p1-add-ta.has-hover ? Tokens.accent : Tokens.text-dim; horizontal-alignment: center; vertical-alignment: center; font-size: 16px; }
                                     p1-add-ta := TooltipArea {
@@ -1749,6 +1786,7 @@ callback create-table-commit();
                                     }
                                 }
                                 Rectangle { horizontal-stretch: 1; }
+                            }
                             }
                         }
                     }
