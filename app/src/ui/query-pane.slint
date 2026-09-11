@@ -9,9 +9,9 @@ import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow, DocRow, Re
 import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "structs.slint";
-import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton, FilterField, IndexDropDown, ResultModeToggle, DbBadge, SelectBox, Tooltip, TooltipArea, Shortcut } from "components.slint";
+import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton, IconButton, FilterField, IndexDropDown, ResultModeToggle, DbBadge, SelectBox, Tooltip, TooltipArea, Shortcut } from "components.slint";
 import { ScrollView, TextEdit } from "std-widgets.slint";
-import { MenuItem as MaterialMenuItem } from "@material";
+import { MaterialPalette, MenuItem as MaterialMenuItem, StateLayer } from "@material";
 import { AppIcon } from "icons.slint";
 
 export component QueryPane inherits Rectangle {
@@ -199,12 +199,18 @@ export component QueryPane inherits Rectangle {
                 VerticalLayout {
                     alignment: center;
                     Rectangle {
-                        height: 26px;
+                        height: 32px;
                         width: fl.preferred-width + 2 * Tokens.sp3;
-                        border-radius: Tokens.radius;
+                        border-radius: self.height / 2;
                         border-width: 1px;
-                        border-color: filter-ta.has-hover ? Tokens.text-faint : Tokens.border-strong;
+                        border-color: Tokens.border-strong;
                         background: root.filter-open ? Tokens.accent-tint : Tokens.card;
+                        StateLayer {
+                            background: MaterialPalette.on_surface;
+                            border-radius: parent.border-radius;
+                            has-hover: filter-ta.has-hover;
+                            enabled: true;
+                        }
                         fl := Text {
                             text: "+ Filter";
                             color: root.filter-open ? Tokens.on-tint : Tokens.text-dim;
@@ -313,23 +319,11 @@ export component QueryPane inherits Rectangle {
                 }
                 VerticalLayout {
                     alignment: center;
-                    Rectangle {
-                        width: 26px;
-                        height: 26px;
-                        border-radius: Tokens.radius;
-                        border-width: 1px;
-                        border-color: Tokens.border-strong;
-                        background: refresh-ta.has-hover ? Tokens.chrome : Tokens.card;
-                        AppIcon {
-                            name: "refresh";
-                            size: 14px;
-                            color: Tokens.text-dim;
-                        }
-                        refresh-ta := TooltipArea {
-                            tip: "Refresh this page of rows  " + Shortcut.primary
-                                + Shortcut.separator + "R";
-                            clicked => { root.refresh-page(); }
-                        }
+                    IconButton {
+                        icon: "refresh";
+                        tooltip: "Refresh this page of rows  " + Shortcut.primary
+                            + Shortcut.separator + "R";
+                        clicked => { root.refresh-page(); }
                     }
                 }
             }
@@ -555,20 +549,10 @@ export component QueryPane inherits Rectangle {
                         }
                         VerticalLayout {
                             alignment: center;
-                            Rectangle {
-                                width: 26px;
-                                height: 26px;
-                                border-radius: Tokens.radius;
-                                background: close-ta.has-hover ? Tokens.chrome : transparent;
-                                animate background { duration: Tokens.fade; }
-                                close-ta := TouchArea {
-                                    clicked => { root.find-close(); }
-                                }
-                                AppIcon {
-                                    name: "close";
-                                    size: 12px;
-                                    color: close-ta.has-hover ? Tokens.text : Tokens.text-dim;
-                                }
+                            IconButton {
+                                icon: "close";
+                                tooltip: "Close find";
+                                clicked => { root.find-close(); }
                             }
                         }
                     }

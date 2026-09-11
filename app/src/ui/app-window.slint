@@ -2765,29 +2765,21 @@ callback create-table-commit();
                 }
             }
 
-            TouchArea {
-                width: root.update-self-update-supported ? 116px : 62px;
-                clicked => {
-                    if root.update-self-update-supported {
-                        root.restart-to-update();
-                    } else {
-                        root.update-open();
-                    }
-                }
-                Rectangle {
-                    background: parent.has-hover ? Tokens.accent-hover : Tokens.accent;
-                    border-radius: Tokens.radius;
-                    Text {
-                        text: !root.update-self-update-supported ? "Update"
-                            : root.update-stage == "ready" ? "Restart to Update"
-                            : root.update-stage == "downloading" ? "Downloading…"
-                            : root.update-stage == "restarting" ? "Installing…"
-                            : root.update-stage == "error" ? "Retry"
-                            : "Download";
-                        font-size: 12px;
-                        font-weight: 600;
-                        color: #FFFFFF;
-                        horizontal-alignment: center;
+            VerticalLayout {
+                alignment: center;
+                PrimaryButton {
+                    text: !root.update-self-update-supported ? "Update"
+                        : root.update-stage == "ready" ? "Restart to Update"
+                        : root.update-stage == "downloading" ? "Downloading…"
+                        : root.update-stage == "restarting" ? "Installing…"
+                        : root.update-stage == "error" ? "Retry"
+                        : "Download";
+                    clicked => {
+                        if root.update-self-update-supported {
+                            root.restart-to-update();
+                        } else {
+                            root.update-open();
+                        }
                     }
                 }
             }

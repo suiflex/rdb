@@ -9,7 +9,7 @@ import {
 import { AppIcon } from "icons.slint";
 import { ConnItem, KvRow, TopLevelGroup } from "structs.slint";
 import { ScrollView } from "std-widgets.slint";
-import { ElevatedCard, MaterialPalette, MaterialTypography } from "@material";
+import { ElevatedCard, MaterialPalette, MaterialTypography, StateLayer } from "@material";
 
 // Social badges: Product Hunt launch + GitHub star, plus supported-engine
 // trust badges ("Works with"). Shared between the empty state and the
@@ -27,10 +27,15 @@ component SocialBanner {
             Rectangle {
                 height: 32px;
                 horizontal-stretch: 0;
-                border-radius: 8px;
+                border-radius: self.height / 2;
                 border-width: 1px;
                 border-color: Tokens.border;
-                background: ph-ta.has-hover ? Tokens.card : transparent;
+                StateLayer {
+                    background: MaterialPalette.on_surface;
+                    border-radius: parent.border-radius;
+                    has-hover: ph-ta.has-hover;
+                    enabled: true;
+                }
                 HorizontalLayout {
                     padding-left: Tokens.sp3;
                     padding-right: Tokens.sp3;
@@ -58,10 +63,15 @@ component SocialBanner {
             Rectangle {
                 height: 32px;
                 horizontal-stretch: 0;
-                border-radius: 8px;
+                border-radius: self.height / 2;
                 border-width: 1px;
                 border-color: Tokens.border;
-                background: gh-ta.has-hover ? Tokens.card : transparent;
+                StateLayer {
+                    background: MaterialPalette.on_surface;
+                    border-radius: parent.border-radius;
+                    has-hover: gh-ta.has-hover;
+                    enabled: true;
+                }
                 HorizontalLayout {
                     padding-left: Tokens.sp3;
                     padding-right: Tokens.sp3;
@@ -632,8 +642,13 @@ export component ConnPicker inherits Rectangle {
                                             width: 22px;
                                             height: 22px;
                                             opacity: item.favorite || row-ta.has-hover || star-ta.has-hover ? 1.0 : 0.0;
-                                            border-radius: Tokens.radius;
-                                            background: star-ta.has-hover ? Tokens.card.with-alpha(0.4) : transparent;
+                                            border-radius: self.width / 2;
+                                            StateLayer {
+                                                background: MaterialPalette.on_surface;
+                                                border-radius: parent.border-radius;
+                                                has-hover: star-ta.has-hover;
+                                                enabled: true;
+                                            }
                                             Text {
                                                 text: item.favorite ? "★" : "☆";
                                                 color: item.favorite
@@ -677,36 +692,11 @@ export component ConnPicker inherits Rectangle {
                         spacing: Tokens.sp4;
                         VerticalLayout {
                             alignment: center;
-                            Rectangle {
-                            width: new-row.preferred-width;
-                            height: 30px;
-                            border-radius: Tokens.radius;
-                            background: new-ta.has-hover ? Tokens.border : transparent;
-                            animate background { duration: Tokens.fade; }
-                            new-row := HorizontalLayout {
-                                spacing: Tokens.sp2;
-                                padding-left: Tokens.sp3;
-                                padding-right: Tokens.sp3;
-                                alignment: center;
-                                Text {
-                                    text: "+";
-                                    color: Tokens.text;
-                                    font-size: Tokens.font-md;
-                                    font-weight: 500;
-                                    vertical-alignment: center;
-                                }
-                                Text {
-                                    text: "New Connection";
-                                    color: Tokens.text;
-                                    font-size: Tokens.font-md;
-                                    font-weight: 500;
-                                    vertical-alignment: center;
-                                }
-                            }
-                            new-ta := TouchArea {
-                                mouse-cursor: pointer;
+                            // Same Material text button as Export beside it, so
+                            // both footer actions share one hover shape.
+                            TextButton {
+                                text: "+ New Connection";
                                 clicked => { root.add-clicked(); }
-                            }
                             }
                         }
                         Rectangle { horizontal-stretch: 1; }
