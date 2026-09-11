@@ -4101,18 +4101,20 @@ fn present_view(
     match v {
         model::ResultView::Table(g) => {
             let numeric = model::numeric_columns(g);
-            let value_cols: Vec<SharedString> = numeric
+            // Material menu rows; `enabled` defaults to false on the struct.
+            let item = |name: &str| MenuItem {
+                text: name.into(),
+                enabled: true,
+                ..Default::default()
+            };
+            let value_cols: Vec<MenuItem> = numeric
                 .iter()
                 .filter_map(|&c| g.columns.get(c))
-                .map(|c| SharedString::from(c.name.clone()))
+                .map(|c| item(&c.name))
                 .collect();
-            let mut label_cols: Vec<SharedString> = g
-                .columns
-                .iter()
-                .map(|c| SharedString::from(c.name.clone()))
-                .collect();
+            let mut label_cols: Vec<MenuItem> = g.columns.iter().map(|c| item(&c.name)).collect();
             // Past the real columns: label the bars by row number instead.
-            label_cols.push(SharedString::from("row number"));
+            label_cols.push(item("row number"));
             let auto_label = (0..g.columns.len())
                 .find(|c| !numeric.contains(c))
                 .unwrap_or(g.columns.len()) as i32;

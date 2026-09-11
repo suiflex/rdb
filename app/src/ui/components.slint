@@ -6,7 +6,7 @@ import { ScrollView } from "std-widgets.slint";
 import {
     FilledButton, OutlineButton, TextButton as MaterialTextButton, IconButton as MaterialIconButton,
     MaterialPalette, MaterialStyleMetrics, MaterialTypography, StateLayer, StateLayerArea, Switch,
-    TextField
+    TextField, DropDownMenu, MenuItem as MaterialMenuItem
 } from "@material";
 
 // Rounded, bordered, drop-shadowed surface used for panels that should read
@@ -264,6 +264,31 @@ export component SelectBox {
             }
         }
     }
+}
+
+// Material DropDownMenu whose index is owned outside (Rust resets it). The
+// stock menu only refreshes its text when the index changes, so a fresh item
+// list with the same index — every new chart result starts at 0 — kept the
+// previous result's label. Re-sync on init, index change and new items.
+export component IndexDropDown {
+    in property <[MaterialMenuItem]> items;
+    in-out property <int> current-index;
+    callback selected(int);
+    dd := DropDownMenu {
+        width: 100%;
+        items: root.items;
+        selected(i) => {
+            root.current-index = i;
+            root.selected(i);
+        }
+    }
+    function sync() {
+        dd.current-index = -1;
+        dd.current-index = root.current-index;
+    }
+    init => { root.sync(); }
+    changed current-index => { root.sync(); }
+    changed items => { root.sync(); }
 }
 
 // Engine badge: rounded square with 2-letter code, engine color fill.

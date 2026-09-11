@@ -9,8 +9,9 @@ import { GridColumn, GridCell, StructField, Span, ChartBar, IndexRow, DocRow, Re
 import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "structs.slint";
-import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton, FilterField, ResultModeToggle, DbBadge, SelectBox, Tooltip, TooltipArea, Shortcut } from "components.slint";
-import { ScrollView, TextEdit, ComboBox } from "std-widgets.slint";
+import { SecondaryButton, PrimaryButton, TextButton, ExportButton, DangerButton, FilterField, IndexDropDown, ResultModeToggle, DbBadge, SelectBox, Tooltip, TooltipArea, Shortcut } from "components.slint";
+import { ScrollView, TextEdit } from "std-widgets.slint";
+import { MenuItem as MaterialMenuItem } from "@material";
 import { AppIcon } from "icons.slint";
 
 export component QueryPane inherits Rectangle {
@@ -169,8 +170,8 @@ export component QueryPane inherits Rectangle {
     in property <[ChartBar]> chart-bars;
     // Chart column pickers. The value list only holds columns the chart can
     // measure, so its index is its own — Rust maps it back to a grid column.
-    in property <[string]> chart-label-cols;
-    in property <[string]> chart-value-cols;
+    in property <[MaterialMenuItem]> chart-label-cols;
+    in property <[MaterialMenuItem]> chart-value-cols;
     in-out property <int> chart-label-index;
     in-out property <int> chart-value-index;
     callback chart-cols-changed();
@@ -1220,9 +1221,9 @@ export component QueryPane inherits Rectangle {
                             font-size: Tokens.font-sm;
                             vertical-alignment: center;
                         }
-                        ComboBox {
+                        IndexDropDown {
                             width: 180px;
-                            model: root.chart-label-cols;
+                            items: root.chart-label-cols;
                             current-index <=> root.chart-label-index;
                             selected => { root.chart-cols-changed(); }
                         }
@@ -1232,9 +1233,9 @@ export component QueryPane inherits Rectangle {
                             font-size: Tokens.font-sm;
                             vertical-alignment: center;
                         }
-                        ComboBox {
+                        IndexDropDown {
                             width: 180px;
-                            model: root.chart-value-cols;
+                            items: root.chart-value-cols;
                             current-index <=> root.chart-value-index;
                             selected => { root.chart-cols-changed(); }
                         }

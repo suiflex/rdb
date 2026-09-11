@@ -2,7 +2,11 @@ import { Theme } from "theme.slint";
 export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
-import { CircularProgressIndicator, DropDownMenu, LinearProgressIndicator, MaterialPalette, MaterialScheme } from "@material";
+import {
+    CircularProgressIndicator, DropDownMenu, LinearProgressIndicator, MaterialPalette, MaterialScheme,
+    // Aliased: the native MenuBar below uses the built-in `MenuItem` element.
+    MenuItem as MaterialMenuItem
+} from "@material";
 import {
     SearchCommandPill, BreadcrumbChip, DbBadge, GlyphButton, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SettingsSectionHeader, TextButton, Toggle, ToggleRow, Tooltip, TooltipArea, Shortcut
 } from "components.slint";
@@ -347,8 +351,8 @@ callback create-table-commit();
     callback copy-text(string);
     callback export-results(int);
     in property <[ChartBar]> chart-bars;
-    in property <[string]> chart-label-cols;
-    in property <[string]> chart-value-cols;
+    in property <[MaterialMenuItem]> chart-label-cols;
+    in property <[MaterialMenuItem]> chart-value-cols;
     in-out property <int> chart-label-index;
     in-out property <int> chart-value-index;
     callback chart-cols-changed();
@@ -565,8 +569,8 @@ callback create-table-commit();
     in property <[StructField]> p1-structure-columns;
     in property <[IndexRow]> p1-index-rows;
     in property <[ChartBar]> p1-chart-bars;
-    in property <[string]> p1-chart-label-cols;
-    in property <[string]> p1-chart-value-cols;
+    in property <[MaterialMenuItem]> p1-chart-label-cols;
+    in property <[MaterialMenuItem]> p1-chart-value-cols;
     in-out property <int> p1-chart-label-index;
     in-out property <int> p1-chart-value-index;
     callback p1-chart-cols-changed();

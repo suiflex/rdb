@@ -12,6 +12,7 @@ import {
 import { ScrollView, ComboBox } from "std-widgets.slint";
 import { AppIcon } from "icons.slint";
 import { QueryPane } from "query-pane.slint";
+import { MenuItem as MaterialMenuItem } from "@material";
 
 export component WorkArea inherits Rectangle {
     // ----- editor / results state (wired 1:1 from MainWindow) -----
@@ -218,8 +219,8 @@ export component WorkArea inherits Rectangle {
     in property <[StructField]> p1-structure-columns;
     in property <[IndexRow]> p1-index-rows;
     in property <[ChartBar]> p1-chart-bars;
-    in property <[string]> p1-chart-label-cols;
-    in property <[string]> p1-chart-value-cols;
+    in property <[MaterialMenuItem]> p1-chart-label-cols;
+    in property <[MaterialMenuItem]> p1-chart-value-cols;
     in-out property <int> p1-chart-label-index;
     in-out property <int> p1-chart-value-index;
     callback p1-chart-cols-changed();
@@ -301,8 +302,8 @@ export component WorkArea inherits Rectangle {
     // Opening/switching a browsed table lands on the grid, not a leftover chart.
     changed active-table => { root.sql-view-mode = 0; root.columns-open = false; }
     in property <[ChartBar]> chart-bars;
-    in property <[string]> chart-label-cols;
-    in property <[string]> chart-value-cols;
+    in property <[MaterialMenuItem]> chart-label-cols;
+    in property <[MaterialMenuItem]> chart-value-cols;
     in-out property <int> chart-label-index;
     in-out property <int> chart-value-index;
     callback chart-cols-changed();
