@@ -784,11 +784,14 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let store = store.clone();
         let collapsed = collapsed.clone();
         let conn_modal_map = conn_modal_map.clone();
+        let connected_ids = connected_ids.clone();
         window.on_open_conn_modal(move || {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let (items, map) = build_conn_palette_items(&store.borrow(), &collapsed.borrow(), "");
+            let skip = conn_modal_skip(&w, &connected_ids);
+            let (items, map) =
+                build_conn_palette_items(&store.borrow(), &collapsed.borrow(), "", &skip);
             *conn_modal_map.borrow_mut() = map;
             w.set_conn_items(ModelRc::from(Rc::new(VecModel::from(group_palette_items(
                 items,

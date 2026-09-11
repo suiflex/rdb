@@ -329,8 +329,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             );
             // Keep the ⌘O modal in sync too, whichever surface triggered this.
             if w.get_conn_modal_open() {
+                let skip = conn_modal_skip(&w, &connected_ids);
                 let (items, map) =
-                    build_conn_palette_items(&store.borrow(), &collapsed.borrow(), "");
+                    build_conn_palette_items(&store.borrow(), &collapsed.borrow(), "", &skip);
                 *conn_modal_map.borrow_mut() = map;
                 w.set_conn_items(ModelRc::from(Rc::new(VecModel::from(group_palette_items(
                     items,
