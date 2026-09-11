@@ -255,6 +255,48 @@ export component SelectBox {
     }
 }
 
+// Popup menu surface in the Material look (and the app's 12px rule): one row
+// per item, state-layer hover, an optional destructive row in the error
+// colour. The caller owns the PopupWindow (placement differs everywhere) and
+// closes it after `activated`.
+export component AppMenu inherits Rectangle {
+    in property <[string]> items;
+    in property <int> danger-index: -1;
+    callback activated(int);
+    background: MaterialPalette.surface_container;
+    border-radius: MaterialStyleMetrics.border_radius_12;
+    clip: true;
+    drop-shadow-blur: 12px;
+    drop-shadow-color: MaterialPalette.shadow.with-alpha(0.3);
+    VerticalLayout {
+        padding-top: MaterialStyleMetrics.padding_8;
+        padding-bottom: MaterialStyleMetrics.padding_8;
+        for label[i] in root.items: Rectangle {
+            height: MaterialStyleMetrics.size_48;
+            StateLayer {
+                background: MaterialPalette.on_surface;
+                has-hover: row-ta.has-hover;
+                enabled: true;
+            }
+            HorizontalLayout {
+                padding-left: MaterialStyleMetrics.padding_16;
+                padding-right: MaterialStyleMetrics.padding_16;
+                Text {
+                    text: label;
+                    color: i == root.danger-index ? MaterialPalette.error : MaterialPalette.on_surface;
+                    font-size: MaterialTypography.body_large.font_size;
+                    vertical-alignment: center;
+                }
+            }
+            // Emits before the caller closes the popup: closing first would
+            // cancel the rest of the click handler.
+            row-ta := TouchArea {
+                clicked => { root.activated(i); }
+            }
+        }
+    }
+}
+
 // Material DropDownMenu whose index is owned outside (Rust resets it). The
 // stock menu only refreshes its text when the index changes, so a fresh item
 // list with the same index — every new chart result starts at 0 — kept the
@@ -391,40 +433,13 @@ export component ExportButton {
         close-policy: close-on-click-outside;
         x: 0;
         y: parent.height + 2px;
-        width: 150px;
+        width: 200px;
         // No explicit height: let the popup size to its content. Binding it to
         // the child's preferred-height is a parent↔child cycle that collapses
         // the popup to zero, so the menu never appears (see SelectBox above).
-        Rectangle {
-            background: Tokens.card;
-            border-width: 1px;
-            border-color: Tokens.border-strong;
-            border-radius: Tokens.radius;
-            drop-shadow-blur: 12px;
-            drop-shadow-color: #00000022;
-            VerticalLayout {
-                padding: 4px;
-                for opt[i] in ["CSV", "JSON", "TSV", "SQL INSERT", "Markdown"]: Rectangle {
-                    height: 28px;
-                    border-radius: 6px;
-                    background: row-ta.has-hover ? Tokens.accent-tint : transparent;
-                    row-ta := TouchArea {
-                        // Emit BEFORE close: closing the popup first cancels the
-                        // rest of this handler, so export(i) never ran (SelectBox
-                        // works because it emits before closing).
-                        clicked => { root.export(i); menu.close(); }
-                    }
-                    HorizontalLayout {
-                        padding-left: Tokens.sp2;
-                        Text {
-                            text: opt;
-                            color: Tokens.text;
-                            font-size: Tokens.font-sm;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-            }
+        AppMenu {
+            items: ["CSV", "JSON", "TSV", "SQL INSERT", "Markdown"];
+            activated(i) => { root.export(i); menu.close(); }
         }
     }
 }
