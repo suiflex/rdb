@@ -1,7 +1,7 @@
-// Open-connections rail (TablePlus-style), to the left of the Items/Queries/
-// History card: one tile per connection that is live or being opened. Saved
-// but closed connections and their groups stay in the picker, which the "+"
-// at the bottom opens.
+// Open-connections rail (TablePlus-style), on the outer side of the Items/
+// Queries/History card: one tile per connection that is live or being opened.
+// Saved but closed connections and their groups stay in the picker, which
+// the "+" at the bottom opens.
 import { Tokens } from "tokens.slint";
 import { TopLevelGroup } from "structs.slint";
 import { DbBadge, TooltipArea } from "components.slint";
@@ -14,10 +14,16 @@ export component ConnectionsPanel inherits Rectangle {
     // uses (`selected-conn`), so "active" always means the same row
     // everywhere instead of drifting on a name-string comparison.
     in property <int> selected-conn: -1;
+    // The sidebar card is showing next to the rail: the active tile joins it.
+    in property <bool> notch;
+    // Rail on the right edge: the card (and the notch) is to its left.
+    in property <bool> mirror;
     callback connect-clicked(int);
     callback open-picker();
 
-    background: Tokens.canvas;
+    // A strip distinct from the card: Material's `surface` (the card) is the
+    // canvas colour in both themes, so a canvas rail hid the notch.
+    background: Tokens.sidebar;
 
     VerticalLayout {
         padding-top: Tokens.sp2;
@@ -33,18 +39,26 @@ export component ConnectionsPanel inherits Rectangle {
                         // rail keeps the open ones plus the one being opened.
                         property <bool> open: !item.is-header && (item.live || item.index == root.selected-conn);
                         property <bool> active: !item.is-header && item.index == root.selected-conn;
+                        // Active tile in the card's colour, running into the card
+                        // on its inner edge: a tab, not a separate highlight.
+                        property <bool> joined: active && root.notch;
                         visible: open;
                         height: open ? 72px : 0px;
                         tile := Rectangle {
-                            x: Tokens.sp1;
+                            x: joined && root.mirror ? 0 : Tokens.sp1;
                             y: Tokens.sp1;
-                            width: parent.width - 2 * Tokens.sp1;
+                            width: parent.width - (joined ? Tokens.sp1 : 2 * Tokens.sp1);
                             height: parent.height - 2 * Tokens.sp1;
-                            border-radius: Tokens.radius;
-                            background: active ? Tokens.accent-tint : transparent;
+                            border-top-left-radius: joined && root.mirror ? 0 : Tokens.radius;
+                            border-bottom-left-radius: joined && root.mirror ? 0 : Tokens.radius;
+                            border-top-right-radius: joined && !root.mirror ? 0 : Tokens.radius;
+                            border-bottom-right-radius: joined && !root.mirror ? 0 : Tokens.radius;
+                            background: joined ? MaterialPalette.surface : active ? Tokens.accent-tint : transparent;
                             StateLayer {
+                                width: 100%;
+                                height: 100%;
                                 background: MaterialPalette.on_surface;
-                                border-radius: parent.border-radius;
+                                border-radius: Tokens.radius;
                                 has-hover: tile-ta.has-hover;
                                 enabled: true;
                             }
@@ -73,14 +87,14 @@ export component ConnectionsPanel inherits Rectangle {
                                             height: 10px;
                                             border-radius: self.width / 2;
                                             border-width: 2px;
-                                            border-color: Tokens.canvas;
+                                            border-color: joined ? MaterialPalette.surface : Tokens.sidebar;
                                             background: item.live ? Tokens.ok : Tokens.warn;
                                         }
                                     }
                                 }
                                 Text {
                                     text: item.name;
-                                    color: active ? Tokens.on-tint : Tokens.text-dim;
+                                    color: joined ? Tokens.text : active ? Tokens.on-tint : Tokens.text-dim;
                                     font-size: Tokens.font-xs;
                                     font-weight: active ? Tokens.weight-emphasis : 400;
                                     horizontal-alignment: center;
@@ -90,6 +104,42 @@ export component ConnectionsPanel inherits Rectangle {
                             tile-ta := TooltipArea {
                                 tip: item.name;
                                 clicked => { root.connect-clicked(item.index); }
+                            }
+                        }
+                        // Concave corners above and below the joined tile, on the
+                        // card side, so the tab flows into the card. A card-coloured
+                        // square with a rail-coloured quarter-circle cut out of it
+                        // (plain rectangular clip, no layer).
+                        if joined: Rectangle {
+                            x: root.mirror ? 0 : parent.width - self.width;
+                            y: tile.y - self.height;
+                            width: Tokens.radius;
+                            height: Tokens.radius;
+                            clip: true;
+                            background: MaterialPalette.surface;
+                            Rectangle {
+                                x: root.mirror ? 0 : -parent.width;
+                                y: -parent.height;
+                                width: 2 * parent.width;
+                                height: 2 * parent.height;
+                                border-radius: parent.width;
+                                background: Tokens.sidebar;
+                            }
+                        }
+                        if joined: Rectangle {
+                            x: root.mirror ? 0 : parent.width - self.width;
+                            y: tile.y + tile.height;
+                            width: Tokens.radius;
+                            height: Tokens.radius;
+                            clip: true;
+                            background: MaterialPalette.surface;
+                            Rectangle {
+                                x: root.mirror ? 0 : -parent.width;
+                                y: 0;
+                                width: 2 * parent.width;
+                                height: 2 * parent.height;
+                                border-radius: parent.width;
+                                background: Tokens.sidebar;
                             }
                         }
                     }
@@ -103,6 +153,8 @@ export component ConnectionsPanel inherits Rectangle {
                 height: 40px;
                 border-radius: self.width / 2;
                 StateLayer {
+                    width: 100%;
+                    height: 100%;
                     background: MaterialPalette.on_surface;
                     border-radius: parent.border-radius;
                     has-hover: add-ta.has-hover;

@@ -66,10 +66,15 @@ export component Sidebar inherits Rectangle {
     // (matches the connection-picker's left column) instead of a flush column.
     background: Tokens.canvas;
 
+    // Sidebar on the right (rail beyond it on the right edge).
+    in property <bool> mirror;
+
+    // Flush against the connections rail so the active rail tile runs
+    // straight into the card (the notch); the gutter stays on the other side.
     card := ElevatedCard {
-        x: Tokens.sp1;
+        x: root.mirror ? Tokens.sp1 : 0;
         y: Tokens.sp1;
-        width: parent.width - 2 * Tokens.sp1;
+        width: parent.width - Tokens.sp1;
         height: parent.height - 2 * Tokens.sp1;
 
     VerticalLayout {
