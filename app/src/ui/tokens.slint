@@ -116,8 +116,11 @@ export global Tokens {
     out property <length> grid-row-h: 24px + zoom-delta;
     out property <length> grid-header-h: 27px + zoom-delta;
     out property <length> status-bar-h: 56px + zoom-delta; // hosts 49px Material tabs + 40px buttons
-    out property <length> radius: 7px;
-    out property <length> radius-lg: 8px;
+    // Corner rule: buttons, chips and hover pills are full pills; fields,
+    // dropdowns, cards, menus and list rows are 12px on all four corners;
+    // dialogs use modal-radius.
+    out property <length> radius: 12px;
+    out property <length> radius-lg: 12px;
     out property <length> button-h: 26px + zoom-delta;
     out property <length> selection-bar-w: 2px; // accent left bar on selection
 
