@@ -30,6 +30,10 @@ export component FloatingCard inherits Rectangle {
 export component Toggle {
     in property <bool> checked;
     callback toggled();
+    // Switch only sets a minimum and stretches to whatever it is given, which
+    // left it floating off the right edge of settings rows. Pin its M3 size.
+    width: MaterialStyleMetrics.size_52;
+    height: MaterialStyleMetrics.size_32;
     sw := Switch {
         checked: root.checked;
         checked-state-changed(c) => {
