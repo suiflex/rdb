@@ -3208,7 +3208,7 @@ callback create-table-commit();
             x: (parent.width - self.width) / 2;
             y: min(90px, parent.height / 8);
             // Never past the window's bottom edge; the list scrolls instead.
-            height: min(shortcuts-card.preferred-height, parent.height - self.y - Tokens.sp4);
+            height: min(sc-col.preferred-height, parent.height - self.y - Tokens.sp4);
             border-radius: Tokens.modal-radius;
             background: MaterialPalette.surface_container_high;
             drop-shadow-blur: 24px;
@@ -3217,12 +3217,11 @@ callback create-table-commit();
 
             TouchArea {}
 
-            ScrollView {
-            shortcuts-card := VerticalLayout {
-                width: 420px; // = the card's; see settings-card
-                padding: Tokens.sp4;
+            // Title and Done stay put; only the list scrolls.
+            sc-col := VerticalLayout {
                 padding-top: 18px;
-                spacing: Tokens.sp2;
+                padding-bottom: Tokens.sp4;
+                spacing: Tokens.sp3;
 
                 Text {
                     text: "Keyboard Shortcuts";
@@ -3300,14 +3299,16 @@ callback create-table-commit();
                     }
                 }
 
+            }
+            }
                 HorizontalLayout {
                     alignment: end;
+                    padding-right: Tokens.sp4;
                     PrimaryButton {
                         text: "Done";
                         clicked => { root.shortcuts-open = false; }
                     }
                 }
-            }
             }
         }
     }
