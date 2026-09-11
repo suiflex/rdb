@@ -1501,7 +1501,9 @@ callback create-table-commit();
                                 Rectangle {
                                     x: parent.width - self.width - Tokens.sp1;
                                     width: 58px;
-                                    // Stops above the active tab's indicator.
+                                    // Stops above the active tab's indicator (pinned to
+                                    // the top: centred, it covered the indicator's top).
+                                    y: 0;
                                     height: parent.height - 3px;
                                     background: Tokens.card;
                                     visible: i == root.active-tab || tab-root.hovered;
@@ -1718,7 +1720,9 @@ callback create-table-commit();
                                 Rectangle {
                                     x: parent.width - self.width - Tokens.sp1;
                                     width: 58px;
-                                    // Stops above the active tab's indicator.
+                                    // Stops above the active tab's indicator (pinned to
+                                    // the top: centred, it covered the indicator's top).
+                                    y: 0;
                                     height: parent.height - 3px;
                                     background: Tokens.card;
                                     visible: i == root.p1-active-tab || p1-tab-root.hovered;
