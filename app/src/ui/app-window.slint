@@ -9,7 +9,7 @@ import {
     MenuItem as MaterialMenuItem
 } from "@material";
 import {
-    SearchCommandPill, BreadcrumbChip, DbBadge, GlyphButton, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SettingsSectionHeader, TextButton, Toggle, ToggleRow, Tooltip, TooltipArea, Shortcut
+    SearchCommandPill, BreadcrumbChip, DbBadge, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SettingsSectionHeader, TextButton, Toggle, ToggleRow, Tooltip, TooltipArea, Shortcut
 } from "components.slint";
 export { Shortcut }
 import { NavCluster } from "nav-cluster.slint";
@@ -1022,9 +1022,8 @@ callback create-table-commit();
                     // (which lists every connection = switch to another DB)
                     VerticalLayout {
                         alignment: center;
-                        GlyphButton {
-                            glyph: "⏏";
-                            danger-hover: true;
+                        IconButton {
+                            icon: "eject";
                             tooltip: "Disconnect";
                             clicked => { root.disconnect(); }
                         }
