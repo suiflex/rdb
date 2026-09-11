@@ -117,7 +117,7 @@ export component ConnForm inherits Rectangle {
         width: min(520px, parent.width - 2 * Tokens.sp4);
         // Hug the rows, but never past the window: the 56px Material fields
         // make the full form taller than a small window, so it scrolls.
-        height: min(vbox.preferred-height, parent.height - 2 * Tokens.sp4);
+        height: min(form-col.preferred-height, parent.height - 2 * Tokens.sp4);
         x: (parent.width - self.width) / 2;
         y: max(Tokens.sp4, (parent.height - self.height) / 2);
         border-radius: Tokens.modal-radius;
@@ -128,10 +128,12 @@ export component ConnForm inherits Rectangle {
 
         TouchArea {}
 
-        ScrollView {
-        vbox := VerticalLayout {
-            padding: Tokens.sp4;
-            spacing: Tokens.sp2;
+        // Title and the Test/Save/Cancel row (with its status line) stay put;
+        // only the fields scroll.
+        form-col := VerticalLayout {
+            padding-top: Tokens.sp4;
+            padding-bottom: Tokens.sp4;
+            spacing: Tokens.sp3;
 
             Text {
                 text: (root.edit-mode ? "Edit " : "") + root.f-engine + " connection";
@@ -140,6 +142,15 @@ export component ConnForm inherits Rectangle {
                 font-weight: Tokens.weight-emphasis;
                 horizontal-alignment: center;
             }
+
+        ScrollView {
+            vertical-stretch: 1;
+            min-height: 80px;
+            preferred-height: vbox.preferred-height;
+        vbox := VerticalLayout {
+            padding-left: Tokens.sp4;
+            padding-right: Tokens.sp4;
+            spacing: Tokens.sp2;
 
             HorizontalLayout {
                 spacing: Tokens.sp2;
@@ -452,35 +463,42 @@ export component ConnForm inherits Rectangle {
                 }
             }
 
-            if root.form-error != "": Text {
-                text: root.form-error;
-                color: Tokens.error;
-                font-size: Tokens.font-sm;
-                horizontal-alignment: center;
-                wrap: word-wrap;
-            }
-
-            if root.test-busy || root.test-result != "": Text {
-                text: root.test-busy ? "Testing connection…" : root.test-result;
-                color: root.test-ok ? Tokens.ok : Tokens.text-dim;
-                font-size: Tokens.font-sm;
-                horizontal-alignment: center;
-                wrap: word-wrap;
-            }
-
-            HorizontalLayout {
-                spacing: Tokens.sp2;
-                Rectangle { horizontal-stretch: 1; }
-                SecondaryButton {
-                    text: "Test";
-                    enabled: !root.test-busy;
-                    clicked => { root.test-conn(); }
-                }
-                PrimaryButton { text: "Save"; clicked => { root.save(); } }
-                SecondaryButton { text: "Cancel"; clicked => { root.cancel(); } }
-                if root.edit-mode: DangerButton { text: "Delete"; clicked => { root.delete-requested(); } }
-            }
         }
+        }
+            VerticalLayout {
+                padding-left: Tokens.sp4;
+                padding-right: Tokens.sp4;
+                spacing: Tokens.sp2;
+
+                if root.form-error != "": Text {
+                    text: root.form-error;
+                    color: Tokens.error;
+                    font-size: Tokens.font-sm;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+
+                if root.test-busy || root.test-result != "": Text {
+                    text: root.test-busy ? "Testing connection…" : root.test-result;
+                    color: root.test-ok ? Tokens.ok : Tokens.text-dim;
+                    font-size: Tokens.font-sm;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    Rectangle { horizontal-stretch: 1; }
+                    SecondaryButton {
+                        text: "Test";
+                        enabled: !root.test-busy;
+                        clicked => { root.test-conn(); }
+                    }
+                    PrimaryButton { text: "Save"; clicked => { root.save(); } }
+                    SecondaryButton { text: "Cancel"; clicked => { root.cancel(); } }
+                    if root.edit-mode: DangerButton { text: "Delete"; clicked => { root.delete-requested(); } }
+                }
+            }
         }
         if root.delete-confirm-open: Rectangle {
             x: 0px;
