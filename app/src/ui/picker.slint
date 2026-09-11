@@ -9,7 +9,7 @@ import {
 import { AppIcon } from "icons.slint";
 import { ConnItem, KvRow, TopLevelGroup } from "structs.slint";
 import { ScrollView } from "std-widgets.slint";
-import { MaterialPalette } from "@material";
+import { MaterialPalette, MaterialTypography } from "@material";
 
 // Social badges: Product Hunt launch + GitHub star, plus supported-engine
 // trust badges ("Works with"). Shared between the empty state and the
@@ -1032,8 +1032,8 @@ export component ConnPicker inherits Rectangle {
                 Text {
                     text: "Rename group";
                     color: Tokens.text;
-                    font-size: 15px;
-                    font-weight: 700;
+                    font-size: MaterialTypography.headline_small.font_size;
+                    font-weight: MaterialTypography.headline_small.font_weight;
                     horizontal-alignment: center;
                 }
                 Rectangle {
@@ -1097,8 +1097,8 @@ export component ConnPicker inherits Rectangle {
                 Text {
                     text: "Delete group?";
                     color: Tokens.text;
-                    font-size: 15px;
-                    font-weight: 700;
+                    font-size: MaterialTypography.headline_small.font_size;
+                    font-weight: MaterialTypography.headline_small.font_weight;
                     horizontal-alignment: center;
                 }
                 Text {

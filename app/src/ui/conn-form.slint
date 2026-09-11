@@ -1,7 +1,7 @@
 import { Tokens } from "tokens.slint";
 import { PrimaryButton, SecondaryButton, DangerButton, FormField, SelectBox, Toggle } from "components.slint";
 import { ScrollView } from "std-widgets.slint";
-import { MaterialPalette } from "@material";
+import { MaterialPalette, MaterialTypography } from "@material";
 
 // 8 preset accent swatches — colors for UI rendering, hex strings for the Rust-side color field.
 // First entry is the app accent (Tokens.accent) so the default matches the design system.
@@ -503,7 +503,7 @@ export component ConnForm inherits Rectangle {
                 confirm-box := VerticalLayout {
                     padding: Tokens.sp4;
                     spacing: Tokens.sp3;
-                    Text { text: "Delete connection?"; color: Tokens.text; font-size: 15px; font-weight: 700; horizontal-alignment: center; }
+                    Text { text: "Delete connection?"; color: Tokens.text; font-size: MaterialTypography.headline_small.font_size; font-weight: MaterialTypography.headline_small.font_weight; horizontal-alignment: center; }
                     Text { text: "This removes the saved connection and its password."; color: Tokens.text-dim; font-size: Tokens.font-sm; horizontal-alignment: center; wrap: word-wrap; }
                     HorizontalLayout {
                         spacing: Tokens.sp2;
