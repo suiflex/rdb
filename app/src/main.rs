@@ -51,6 +51,41 @@ fn clamp_font_size(size: i32) -> i32 {
     size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE)
 }
 
+/// The persisted `editor.font_size` doubles as the zoom level: 13 is 100%.
+const BASE_ZOOM_LEVEL: i32 = 13;
+
+thread_local! {
+    /// The platform's own scale factor, sampled the first time zoom is applied
+    /// (before any zoom dispatch), so zoom multiplies it instead of replacing it.
+    static OS_SCALE: Cell<Option<f32>> = const { Cell::new(None) };
+}
+
+/// Whole-UI zoom: rescale the window rather than only the font tokens, so
+/// icons, Material controls and spacing grow with the text — Material sizes
+/// are fixed pixels and never read our tokens.
+/// ponytail: the OS scale is sampled once; moving to a display with another
+/// scale resets zoom until the next ⌘+/⌘−. Track winit scale changes if that
+/// matters.
+pub(crate) fn apply_zoom(w: &MainWindow, level: i32) {
+    use slint::platform::WindowEvent;
+    let window = w.window();
+    let os = OS_SCALE.with(|s| {
+        if s.get().is_none() {
+            s.set(Some(window.scale_factor()));
+        }
+        s.get().unwrap_or(1.0)
+    });
+    let scale = os * clamp_font_size(level) as f32 / BASE_ZOOM_LEVEL as f32;
+    let physical = window.size();
+    window.dispatch_event(WindowEvent::ScaleFactorChanged {
+        scale_factor: scale,
+    });
+    // Same physical window, more (or fewer) logical px: re-layout to fit it.
+    window.dispatch_event(WindowEvent::Resized {
+        size: physical.to_logical(scale),
+    });
+}
+
 fn shortcut_labels(
     os: &str,
 ) -> (
@@ -4821,9 +4856,9 @@ fn main() -> Result<(), slint::PlatformError> {
     window
         .global::<Theme>()
         .set_mode(settings.borrow().get().theme.to_index());
-    window
-        .global::<Tokens>()
-        .set_font_base(clamp_font_size(settings.borrow().get().editor.font_size as i32) as f32);
+    // Zoom level (13 = 100%); applied as a window scale factor just before
+    // `run()`, once the platform window exists. `Tokens.font-base` stays put.
+    let zoom_level = clamp_font_size(settings.borrow().get().editor.font_size as i32);
     window.set_update_check_enabled(settings.borrow().get().update_check);
     window.set_sidebar_right(settings.borrow().get().ui_state.sidebar_right);
     let history_cap = Rc::new(Cell::new(
@@ -5571,6 +5606,18 @@ fn main() -> Result<(), slint::PlatformError> {
 
     #[cfg(feature = "mock")]
     shot::install(&window);
+    // winit applies its own scale factor when it creates the window, so the
+    // saved zoom has to land after that.
+    // ponytail: fixed short delay after startup; hook window creation if it
+    // ever races on a slow launch.
+    if zoom_level != BASE_ZOOM_LEVEL {
+        let weak = window.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
+            if let Some(w) = weak.upgrade() {
+                apply_zoom(&w, zoom_level);
+            }
+        });
+    }
     let run_result = window.run();
     // On exit, capture each pane's active tab (edits made without a tab switch)
     // and persist, so a plain type-then-quit is not lost. Both panes: quitting

@@ -415,7 +415,7 @@ callback create-table-commit();
     // Place the sidebar on the right (detail panel flips to the left).
     in-out property <bool> sidebar-right: false;
     callback set-sidebar-side(bool);
-    callback set-font-size(int);
+    callback zoom-step(int); // ⌘+ / ⌘−: +1 / −1 zoom level (whole-UI scale)
     in-out property <bool> results-collapsed: false;
     callback editor-key(string, bool, bool, bool) -> bool;
     callback editor-press(int, int, bool);
@@ -760,11 +760,11 @@ callback create-table-commit();
             }
             if (e.modifiers.control || e.modifiers.meta) {
                 if (e.text == "+" || e.text == "=") {
-                    root.set-font-size(round(Tokens.font-base / 1px) + 1);
+                    root.zoom-step(1);
                     return accept;
                 }
                 if (e.text == "-") {
-                    root.set-font-size(round(Tokens.font-base / 1px) - 1);
+                    root.zoom-step(-1);
                     return accept;
                 }
                 if (e.text == "k") {
