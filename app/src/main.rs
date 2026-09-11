@@ -829,14 +829,26 @@ fn sync_rows(cur: &ModelRc<ConnItem>, next: &ModelRc<ConnItem>) {
     }
 }
 
-/// Connections the ⌘O modal leaves out: the open ones when the rail's "+"
-/// opened it to add a connection, none for a plain ⌘O switch.
-fn conn_modal_skip(w: &MainWindow, connected_ids: &Mutex<HashSet<String>>) -> HashSet<String> {
-    if w.get_conn_modal_adding() {
+/// Fill the ⌘O connection modal's list and its row → store-index map, for
+/// both opening it and a group toggle inside it. Opened from the rail's "+"
+/// to add a connection, it leaves out the ones that are already open.
+fn fill_conn_modal(
+    w: &MainWindow,
+    store: &rdb_connstore::ConnStore,
+    collapsed: &HashSet<String>,
+    connected_ids: &Mutex<HashSet<String>>,
+    conn_modal_map: &RefCell<Vec<i32>>,
+) {
+    let skip = if w.get_conn_modal_adding() {
         connected_ids.lock().unwrap().clone()
     } else {
         HashSet::new()
-    }
+    };
+    let (items, map) = build_conn_palette_items(store, collapsed, "", &skip);
+    *conn_modal_map.borrow_mut() = map;
+    w.set_conn_items(ModelRc::from(Rc::new(VecModel::from(group_palette_items(
+        items,
+    )))));
 }
 
 /// Flatten `build_conn_items`'s output into the ⌘O "Open Connection" modal's
