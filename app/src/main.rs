@@ -4471,6 +4471,29 @@ fn driver_for<'a, V>(
     }
 }
 
+/// Locks `driver_pool` and `current` just long enough to clone the `Arc`
+/// `driver_for` picks. Replaces the same lock-then-lookup copied across
+/// every wiring module.
+async fn resolve_driver(
+    driver_pool: &DriverPool,
+    current: &DriverSlot,
+    connection_id: Option<&str>,
+) -> Option<(rdb_connstore::Engine, Arc<AnyDriver>)> {
+    let pool = driver_pool.read().await;
+    let guard = current.lock().await;
+    driver_for(&pool, guard.as_ref(), connection_id).map(|(e, d)| (*e, d.clone()))
+}
+
+/// True only if `pool[id]` is still exactly `driver` (identity, not value) —
+/// guards against a disconnect racing a fast reconnect on the same id.
+fn still_the_disconnected_driver<V>(
+    pool: &HashMap<String, (rdb_connstore::Engine, Arc<V>)>,
+    id: &str,
+    driver: &Arc<V>,
+) -> bool {
+    pool.get(id).is_some_and(|(_, d)| Arc::ptr_eq(d, driver))
+}
+
 #[cfg(test)]
 mod driver_pool_tests {
     use super::driver_for;
@@ -4508,6 +4531,44 @@ mod driver_pool_tests {
     fn none_when_nothing_matches() {
         let pool: HashMap<String, &str> = HashMap::new();
         assert_eq!(driver_for(&pool, None, Some("conn-a")), None);
+    }
+
+    #[test]
+    fn evicts_when_pool_still_holds_the_disconnected_driver() {
+        use super::still_the_disconnected_driver;
+        use std::sync::Arc;
+        let driver = Arc::new(1);
+        let mut pool = HashMap::new();
+        pool.insert(
+            "conn-a".to_string(),
+            (rdb_connstore::Engine::Postgres, driver.clone()),
+        );
+        assert!(still_the_disconnected_driver(&pool, "conn-a", &driver));
+    }
+
+    #[test]
+    fn refuses_to_evict_a_driver_a_fast_reconnect_already_replaced() {
+        // Regression: a disconnect-then-reconnect race on the same id must
+        // never let the disconnect's async cleanup remove the *new* driver.
+        use super::still_the_disconnected_driver;
+        use std::sync::Arc;
+        let old_driver = Arc::new(1);
+        let new_driver = Arc::new(1); // equal value, distinct connection
+        let mut pool = HashMap::new();
+        pool.insert(
+            "conn-a".to_string(),
+            (rdb_connstore::Engine::Postgres, new_driver.clone()),
+        );
+        assert!(!still_the_disconnected_driver(&pool, "conn-a", &old_driver));
+    }
+
+    #[test]
+    fn refuses_to_evict_when_entry_already_gone() {
+        use super::still_the_disconnected_driver;
+        use std::sync::Arc;
+        let driver = Arc::new(1);
+        let pool: HashMap<String, (rdb_connstore::Engine, Arc<i32>)> = HashMap::new();
+        assert!(!still_the_disconnected_driver(&pool, "conn-a", &driver));
     }
 }
 
