@@ -7,7 +7,7 @@ import { CodeEditor } from "code-editor.slint";
 import { TabularGrid } from "tabular-grid.slint";
 import { PaletteItem } from "structs.slint";
 import {
-    UnderlineSegment, SecondaryButton, PrimaryButton, TextButton, ExportButton, FilterField, KeyCap, Shortcut
+    FooterTabs, SecondaryButton, PrimaryButton, TextButton, ExportButton, FilterField, KeyCap, Shortcut
 } from "components.slint";
 import { ScrollView } from "std-widgets.slint";
 import { AppIcon } from "icons.slint";
@@ -743,7 +743,7 @@ export component WorkArea inherits Rectangle {
             }
         }
 
-        // ================= footer strip (34px) =================
+        // ================= footer strip (Tokens.status-bar-h) =================
         if !root.split: Rectangle { height: 1px; background: Tokens.border; }
         if !root.split: Rectangle {
             height: Tokens.status-bar-h;
@@ -753,44 +753,19 @@ export component WorkArea inherits Rectangle {
                 padding-right: Tokens.sp3;
                 spacing: Tokens.sp4;
 
-                // view segments
-                if root.browse-mode: HorizontalLayout {
-                    spacing: Tokens.sp4;
-                    alignment: start;
-                    UnderlineSegment {
-                        text: "Data";
-                        active: root.view-mode == 0;
-                        clicked => { root.view-mode = 0; root.show-structure = false; }
-                    }
-                    UnderlineSegment {
-                        text: "Structure";
-                        active: root.view-mode == 1;
-                        clicked => { root.view-mode = 1; root.show-structure = true; }
-                    }
-                    UnderlineSegment {
-                        text: "Indexes";
-                        active: root.view-mode == 2;
-                        clicked => { root.view-mode = 2; root.show-structure = false; }
+                // view tabs
+                if root.browse-mode: FooterTabs {
+                    items: [{ text: "Data" }, { text: "Structure" }, { text: "Indexes" }];
+                    current: root.view-mode;
+                    picked(i) => {
+                        root.view-mode = i;
+                        root.show-structure = i == 1;
                     }
                 }
-                if !root.browse-mode: HorizontalLayout {
-                    spacing: Tokens.sp4;
-                    alignment: start;
-                    UnderlineSegment {
-                        text: "Data";
-                        active: root.sql-view-mode == 0;
-                        clicked => { root.sql-view-mode = 0; }
-                    }
-                    UnderlineSegment {
-                        text: "Message";
-                        active: root.sql-view-mode == 1;
-                        clicked => { root.sql-view-mode = 1; }
-                    }
-                    UnderlineSegment {
-                        text: "Chart";
-                        active: root.sql-view-mode == 2;
-                        clicked => { root.sql-view-mode = 2; }
-                    }
+                if !root.browse-mode: FooterTabs {
+                    items: [{ text: "Data" }, { text: "Message" }, { text: "Chart" }];
+                    current: root.sql-view-mode;
+                    picked(i) => { root.sql-view-mode = i; }
                 }
 
                 Rectangle { horizontal-stretch: 1; }
@@ -950,11 +925,16 @@ export component WorkArea inherits Rectangle {
                     padding-left: Tokens.sp3;
                     padding-right: Tokens.sp3;
                     spacing: Tokens.sp3;
-                    if root.browse-mode: UnderlineSegment { text: "Data"; active: !root.show-structure; clicked => { root.show-structure = false; } }
-                    if root.browse-mode: UnderlineSegment { text: "Structure"; active: root.show-structure; clicked => { root.show-structure = true; } }
-                    if !root.browse-mode: UnderlineSegment { text: "Data"; active: root.sql-view-mode == 0; clicked => { root.sql-view-mode = 0; } }
-                    if !root.browse-mode: UnderlineSegment { text: "Message"; active: root.sql-view-mode == 1; clicked => { root.sql-view-mode = 1; } }
-                    if !root.browse-mode: UnderlineSegment { text: "Chart"; active: root.sql-view-mode == 2; clicked => { root.sql-view-mode = 2; } }
+                    if root.browse-mode: FooterTabs {
+                        items: [{ text: "Data" }, { text: "Structure" }];
+                        current: root.show-structure ? 1 : 0;
+                        picked(i) => { root.show-structure = i == 1; }
+                    }
+                    if !root.browse-mode: FooterTabs {
+                        items: [{ text: "Data" }, { text: "Message" }, { text: "Chart" }];
+                        current: root.sql-view-mode;
+                        picked(i) => { root.sql-view-mode = i; }
+                    }
                     Rectangle { horizontal-stretch: 1; }
                     if root.browse-mode: Text { text: root.total-rows >= 0 ? root.page-start + "–" + root.page-end + " of " + root.total-rows : root.page-start + "–" + root.page-end; color: Tokens.text-dim; font-size: Tokens.font-sm; }
                     if root.browse-mode: TextButton { text: "‹"; clicked => { root.prev-page(); } }
@@ -977,11 +957,16 @@ export component WorkArea inherits Rectangle {
                     padding-left: Tokens.sp3;
                     padding-right: Tokens.sp3;
                     spacing: Tokens.sp3;
-                    if root.p1-active-table != "": UnderlineSegment { text: "Data"; active: !root.p1-show-structure; clicked => { root.p1-show-structure = false; } }
-                    if root.p1-active-table != "": UnderlineSegment { text: "Structure"; active: root.p1-show-structure; clicked => { root.p1-show-structure = true; } }
-                    if root.p1-active-table == "": UnderlineSegment { text: "Data"; active: root.p1-sql-view-mode == 0; clicked => { root.p1-sql-view-mode = 0; } }
-                    if root.p1-active-table == "": UnderlineSegment { text: "Message"; active: root.p1-sql-view-mode == 1; clicked => { root.p1-sql-view-mode = 1; } }
-                    if root.p1-active-table == "": UnderlineSegment { text: "Chart"; active: root.p1-sql-view-mode == 2; clicked => { root.p1-sql-view-mode = 2; } }
+                    if root.p1-active-table != "": FooterTabs {
+                        items: [{ text: "Data" }, { text: "Structure" }];
+                        current: root.p1-show-structure ? 1 : 0;
+                        picked(i) => { root.p1-show-structure = i == 1; }
+                    }
+                    if root.p1-active-table == "": FooterTabs {
+                        items: [{ text: "Data" }, { text: "Message" }, { text: "Chart" }];
+                        current: root.p1-sql-view-mode;
+                        picked(i) => { root.p1-sql-view-mode = i; }
+                    }
                     Rectangle { horizontal-stretch: 1; }
                     if root.p1-active-table != "": Text { text: root.p1-total-rows >= 0 ? root.p1-page-start + "–" + root.p1-page-end + " of " + root.p1-total-rows : root.p1-page-start + "–" + root.p1-page-end; color: Tokens.text-dim; font-size: Tokens.font-sm; }
                     if root.p1-active-table != "": TextButton { text: "‹"; clicked => { root.p1-prev-page(); } }
