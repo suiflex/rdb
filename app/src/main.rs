@@ -76,7 +76,11 @@ pub(crate) fn apply_zoom(w: &MainWindow, level: i32) {
         }
         s.get().unwrap_or(1.0)
     });
-    let scale = os * clamp_font_size(level) as f32 / BASE_ZOOM_LEVEL as f32;
+    let zoom = clamp_font_size(level) as f32 / BASE_ZOOM_LEVEL as f32;
+    let scale = os * zoom;
+    // Shrink the window's logical minimum first, so the new scale never
+    // pushes the physical window past its original minimum.
+    w.set_zoom(zoom);
     let physical = window.size();
     window.dispatch_event(WindowEvent::ScaleFactorChanged {
         scale_factor: scale,
