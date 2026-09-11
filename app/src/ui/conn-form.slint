@@ -1,6 +1,7 @@
 import { Tokens } from "tokens.slint";
 import { PrimaryButton, SecondaryButton, DangerButton, FormField, SelectBox, Toggle } from "components.slint";
 import { ScrollView } from "std-widgets.slint";
+import { MaterialPalette } from "@material";
 
 // 8 preset accent swatches — colors for UI rendering, hex strings for the Rust-side color field.
 // First entry is the app accent (Tokens.accent) so the default matches the design system.
@@ -119,12 +120,11 @@ export component ConnForm inherits Rectangle {
         height: min(vbox.preferred-height, parent.height - 2 * Tokens.sp4);
         x: (parent.width - self.width) / 2;
         y: max(Tokens.sp4, (parent.height - self.height) / 2);
-        border-radius: Tokens.radius-lg;
-        background: Tokens.card;
-        border-width: 1px;
-        border-color: Tokens.border;
+        border-radius: Tokens.modal-radius;
+        background: MaterialPalette.surface_container_high;
         drop-shadow-blur: 24px;
-        drop-shadow-color: Tokens.text.with-alpha(0.35);
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: MaterialPalette.shadow.with-alpha(0.3);
 
         TouchArea {}
 
@@ -495,12 +495,10 @@ export component ConnForm inherits Rectangle {
                 y: (parent.height - self.height) / 2;
                 height: confirm-box.preferred-height;
                 border-radius: Tokens.modal-radius;
-                background: Tokens.card;
-                border-width: 1px;
-                border-color: Tokens.border;
-                drop-shadow-blur: 42px;
-                drop-shadow-offset-y: 12px;
-                drop-shadow-color: #1C191426;
+                background: MaterialPalette.surface_container_high;
+                drop-shadow-blur: 24px;
+                drop-shadow-offset-y: 8px;
+                drop-shadow-color: MaterialPalette.shadow.with-alpha(0.3);
                 TouchArea {}
                 confirm-box := VerticalLayout {
                     padding: Tokens.sp4;

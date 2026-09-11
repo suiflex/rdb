@@ -9,6 +9,7 @@ import {
 import { AppIcon } from "icons.slint";
 import { ConnItem, KvRow, TopLevelGroup } from "structs.slint";
 import { ScrollView } from "std-widgets.slint";
+import { MaterialPalette } from "@material";
 
 // Social badges: Product Hunt launch + GitHub star, plus supported-engine
 // trust badges ("Works with"). Shared between the empty state and the
@@ -1020,12 +1021,10 @@ export component ConnPicker inherits Rectangle {
             y: 140px;
             height: rbox.preferred-height;
             border-radius: Tokens.modal-radius;
-            background: Tokens.card;
-            border-width: 1px;
-            border-color: Tokens.border;
-            drop-shadow-blur: 42px;
-            drop-shadow-offset-y: 12px;
-            drop-shadow-color: #1C191426;
+            background: MaterialPalette.surface_container_high;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: MaterialPalette.shadow.with-alpha(0.3);
             TouchArea {}
             rbox := VerticalLayout {
                 padding: Tokens.sp4;
@@ -1087,12 +1086,10 @@ export component ConnPicker inherits Rectangle {
             y: 140px;
             height: dbox.preferred-height;
             border-radius: Tokens.modal-radius;
-            background: Tokens.card;
-            border-width: 1px;
-            border-color: Tokens.border;
-            drop-shadow-blur: 42px;
-            drop-shadow-offset-y: 12px;
-            drop-shadow-color: #1C191426;
+            background: MaterialPalette.surface_container_high;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: MaterialPalette.shadow.with-alpha(0.3);
             TouchArea {}
             dbox := VerticalLayout {
                 padding: Tokens.sp4;
