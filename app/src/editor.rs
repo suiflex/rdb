@@ -743,6 +743,12 @@ impl EditorState {
     fn statement_bounds(&self) -> (usize, usize) {
         let text = self.text();
         let chars: Vec<char> = text.chars().collect();
+        // A block body ends its own inner statements with `;`, so segmenting on
+        // `;` would leave Run a fragment that doesn't parse. The whole buffer is
+        // the statement then, same rule `scan_statements` follows.
+        if opens_block_body(&text) {
+            return (0, chars.len());
+        }
         // cursor position as a char offset into the joined text
         let mut offset = 0;
         for (i, l) in self.lines.iter().enumerate() {
@@ -899,46 +905,102 @@ impl EditorState {
     }
 }
 
-/// Split SQL text into individual statements on top-level semicolons,
-/// ignoring semicolons inside single-quoted literals and `-- line comments`.
-/// Trailing `;` and blank/comment-only segments are dropped. Text with no
-/// real statement yields an empty vec; a single statement (no `;`) yields one.
-/// Byte offset into `text` where each split statement's trimmed text begins.
-/// Parallel to `split_statements`; used to map a per-statement error position
-/// back to the full editor buffer for highlighting.
-pub fn statement_offsets(text: &str) -> Vec<usize> {
-    let chars: Vec<char> = text.chars().collect();
-    let mut out: Vec<usize> = Vec::new();
+/// One top-level statement of an editor buffer: its trimmed text, and the
+/// byte offset in the buffer where that text begins.
+struct Statement<'a> {
+    offset: usize,
+    text: &'a str,
+}
+
+/// Scan SQL text into statements on top-level semicolons, ignoring semicolons
+/// inside single-quoted literals and `-- line comments`. Trailing `;` and
+/// blank/comment-only segments are dropped, so text with no real statement
+/// yields nothing and a single statement (no `;`) yields one.
+fn scan_statements(text: &str) -> Vec<Statement<'_>> {
+    let mut out: Vec<Statement> = Vec::new();
+    if opens_block_body(text) {
+        push_statement(&mut out, text, 0, text.len());
+        return out;
+    }
+    // Byte scan: every character this looks for is ASCII, and no byte of a
+    // multibyte character can equal one, so a byte index is always a char
+    // boundary here and the slices below are safe.
+    let bytes = text.as_bytes();
     let mut seg_start = 0usize;
     let mut in_str = false;
+    let mut in_comment = false;
     let mut i = 0usize;
-    while i < chars.len() {
-        let c = chars[i];
-        if c == '\'' {
-            in_str = !in_str;
-        } else if !in_str && c == '-' && chars.get(i + 1) == Some(&'-') {
-            while i < chars.len() && chars[i] != '\n' {
-                i += 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\n' => in_comment = false,
+            _ if in_comment => {}
+            b'\'' => in_str = !in_str,
+            b'-' if !in_str && bytes.get(i + 1) == Some(&b'-') => in_comment = true,
+            b';' if !in_str => {
+                push_statement(&mut out, text, seg_start, i);
+                seg_start = i + 1;
             }
-            continue;
-        } else if c == ';' && !in_str {
-            let seg: String = chars[seg_start..i].iter().collect();
-            if !is_blank_sql(&seg) {
-                let trimmed = seg.trim_start();
-                out.push(seg_start + (seg.len() - trimmed.len()));
-            }
-            seg_start = i + 1;
+            _ => {}
         }
         i += 1;
     }
-    if seg_start < chars.len() {
-        let seg: String = chars[seg_start..].iter().collect();
-        if !is_blank_sql(&seg) {
-            let trimmed = seg.trim_start();
-            out.push(seg_start + (seg.len() - trimmed.len()));
-        }
-    }
+    push_statement(&mut out, text, seg_start, text.len());
     out
+}
+
+/// Append `text[start..end]` to `out` unless it is blank or comment-only.
+fn push_statement<'a>(out: &mut Vec<Statement<'a>>, text: &'a str, start: usize, end: usize) {
+    let seg = &text[start..end];
+    if is_blank_sql(seg) {
+        return;
+    }
+    let trimmed = seg.trim_start();
+    out.push(Statement {
+        offset: start + (seg.len() - trimmed.len()),
+        text: trimmed.trim_end(),
+    });
+}
+
+/// True when `text` opens a block that ends its own inner statements with `;`:
+/// a PL/SQL anonymous block (`DECLARE` / `BEGIN`) or a stored program
+/// (`CREATE [OR REPLACE] PROCEDURE | FUNCTION | TRIGGER | PACKAGE`, which
+/// Oracle, Postgres and MySQL all write that way). Those semicolons terminate
+/// nothing at the top level, so splitting on them hands the driver fragments
+/// that do not parse. The whole buffer runs as one statement instead, which
+/// also means a block is not followed by a second statement in the same run.
+fn opens_block_body(text: &str) -> bool {
+    let mut words = text
+        .lines()
+        .map(|l| l.split("--").next().unwrap_or(""))
+        .flat_map(str::split_whitespace)
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric() && c != '_'))
+        .filter(|w| !w.is_empty())
+        .take(5)
+        .map(str::to_ascii_uppercase);
+    let Some(first) = words.next() else {
+        return false;
+    };
+    match first.as_str() {
+        "DECLARE" | "BEGIN" => true,
+        "CREATE" => words
+            .find(|w| {
+                !matches!(
+                    w.as_str(),
+                    "OR" | "REPLACE" | "EDITIONABLE" | "NONEDITIONABLE"
+                )
+            })
+            .is_some_and(|w| {
+                matches!(w.as_str(), "PROCEDURE" | "FUNCTION" | "TRIGGER" | "PACKAGE")
+            }),
+        _ => false,
+    }
+}
+
+/// Byte offset into `text` where each statement's trimmed text begins. Used to
+/// map a per-statement error position back to the full editor buffer for
+/// highlighting.
+pub fn statement_offsets(text: &str) -> Vec<usize> {
+    scan_statements(text).iter().map(|s| s.offset).collect()
 }
 
 /// Where a failed query points in the editor buffer.
@@ -1050,38 +1112,12 @@ pub fn strip_error_marker(msg: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(out)
 }
 
+/// Split SQL text into individual statements, in buffer order.
 pub fn split_statements(text: &str) -> Vec<String> {
-    let chars: Vec<char> = text.chars().collect();
-    let mut out: Vec<String> = Vec::new();
-    let mut seg_start = 0usize;
-    let mut in_str = false;
-    let mut i = 0usize;
-    while i < chars.len() {
-        let c = chars[i];
-        if c == '\'' {
-            in_str = !in_str;
-        } else if !in_str && c == '-' && chars.get(i + 1) == Some(&'-') {
-            // skip to end of line
-            while i < chars.len() && chars[i] != '\n' {
-                i += 1;
-            }
-            continue;
-        } else if c == ';' && !in_str {
-            let seg: String = chars[seg_start..i].iter().collect();
-            if !is_blank_sql(&seg) {
-                out.push(seg.trim().to_string());
-            }
-            seg_start = i + 1;
-        }
-        i += 1;
-    }
-    if seg_start < chars.len() {
-        let seg: String = chars[seg_start..].iter().collect();
-        if !is_blank_sql(&seg) {
-            out.push(seg.trim().to_string());
-        }
-    }
-    out
+    scan_statements(text)
+        .iter()
+        .map(|s| s.text.to_string())
+        .collect()
 }
 
 /// Case-insensitive find of every occurrence of `needle` across `lines`.
@@ -1421,6 +1457,18 @@ mod tests {
     }
 
     #[test]
+    fn statement_under_cursor_keeps_a_block_whole() {
+        // Run with the cursor anywhere inside a PL/SQL block must send the
+        // whole block: cutting it on the first inner `;` gives Oracle a
+        // fragment that ends mid-block and fails to parse.
+        let text = "BEGIN\n  UPDATE t SET a = 1;\n  COMMIT;\nEND;";
+        let mut ed = EditorState::from_text(text);
+        ed.line = 2; // on `COMMIT;`
+        ed.col = 0;
+        assert_eq!(ed.current_statement(), text);
+    }
+
+    #[test]
     fn replace_current_statement_preserves_other_statements() {
         let mut ed = EditorState::from_text("select 1;\nselect 2;\nselect 3;");
         ed.line = 1;
@@ -1613,6 +1661,36 @@ mod tests {
     fn split_ignores_semicolon_in_literal() {
         let got = split_statements("INSERT INTO t VALUES ('a;b'); SELECT 2;");
         assert_eq!(got, vec!["INSERT INTO t VALUES ('a;b')", "SELECT 2"]);
+    }
+
+    #[test]
+    fn statement_offsets_are_byte_offsets_past_multibyte_text() {
+        // A driver reports a byte position, so a multibyte literal ahead of the
+        // failing statement has to shift the offset by its byte length.
+        let sql = "SELECT 'café';\nSELECT 2";
+        let offsets = statement_offsets(sql);
+        assert_eq!(offsets, vec![0, sql.find("SELECT 2").unwrap()]);
+    }
+
+    #[test]
+    fn split_keeps_a_plsql_block_whole() {
+        let block = "BEGIN\n  UPDATE t SET a = 1;\n  COMMIT;\nEND;";
+        assert_eq!(split_statements(block), vec![block]);
+        assert_eq!(statement_offsets(block), vec![0]);
+    }
+
+    #[test]
+    fn split_keeps_a_stored_program_whole() {
+        let proc = "CREATE OR REPLACE PROCEDURE p AS BEGIN NULL; END;";
+        assert_eq!(split_statements(proc), vec![proc]);
+        let decl = "DECLARE n NUMBER; BEGIN n := 1; END;";
+        assert_eq!(split_statements(decl), vec![decl]);
+    }
+
+    #[test]
+    fn split_still_splits_a_plain_create() {
+        let got = split_statements("CREATE TABLE t (a INT); SELECT 1;");
+        assert_eq!(got, vec!["CREATE TABLE t (a INT)", "SELECT 1"]);
     }
 
     #[test]

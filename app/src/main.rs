@@ -2791,10 +2791,7 @@ fn browse_text(
 /// inside a subquery conservatively returns false, so we never mangle it).
 fn is_bare_select(engine: rdb_connstore::Engine, sql: &str) -> bool {
     use rdb_connstore::Engine;
-    if !matches!(
-        engine,
-        Engine::Postgres | Engine::MySql | Engine::Sqlite | Engine::Cassandra
-    ) {
+    if !Engine::language(engine).is_statement_text() {
         return false;
     }
     // Multiple statements can't stream as one cursor (Postgres rejects multiple

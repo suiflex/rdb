@@ -41,6 +41,15 @@ pub enum QueryLanguage {
     Mongo,
 }
 
+impl QueryLanguage {
+    /// True when a query buffer is text made of `;`-separated statements that
+    /// run in order: `Sql` and `Cql`. A `Command` or `Mongo` buffer is a single
+    /// operation whatever its punctuation, so it is never split.
+    pub fn is_statement_text(self) -> bool {
+        matches!(self, QueryLanguage::Sql | QueryLanguage::Cql)
+    }
+}
+
 /// Everything about an engine that is otherwise re-spelled as a string
 /// somewhere in the app: the display label, the badge key, the URL scheme, the
 /// default port, and the query dialect.
@@ -518,6 +527,29 @@ mod tests {
     /// makes adding an `Engine` without an `ENGINES` entry a test failure
     /// rather than a runtime panic. The `match` is exhaustive on purpose: a
     /// new variant stops compiling here until it is listed.
+    #[test]
+    fn statement_text_covers_every_engine() {
+        let split = [
+            Engine::Postgres,
+            Engine::MySql,
+            Engine::MariaDb,
+            Engine::Sqlite,
+            Engine::Mssql,
+            Engine::Oracle,
+            Engine::Clickhouse,
+            Engine::Cassandra,
+        ];
+        let whole = [Engine::Redis, Engine::Valkey, Engine::Mongo];
+        for e in split {
+            assert!(e.language().is_statement_text(), "{e:?} should split");
+        }
+        for e in whole {
+            assert!(!e.language().is_statement_text(), "{e:?} should not split");
+        }
+        // A new engine has to land in one list or the other, deliberately.
+        assert_eq!(split.len() + whole.len(), ENGINES.len());
+    }
+
     #[test]
     fn every_engine_has_a_row() {
         let all = [

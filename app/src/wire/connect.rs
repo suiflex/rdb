@@ -246,10 +246,7 @@ async fn finish_connect_success(
     );
     let (schema_names, schema_current) =
         build_schema_picker_names(engine, scoped_db.as_deref(), pg_schemas, &db_names, &schema);
-    let sql_capable = matches!(
-        rdb_connstore::Engine::language(engine),
-        rdb_connstore::QueryLanguage::Sql | rdb_connstore::QueryLanguage::Cql
-    );
+    let sql_capable = rdb_connstore::Engine::language(engine).is_statement_text();
     *raw_nodes.lock().unwrap() = nodes;
     // Seed autocomplete with the active schema's tables plus a bare node for
     // every other schema name, so `schema.` autocompletes immediately. The
