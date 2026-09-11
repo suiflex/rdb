@@ -5,6 +5,7 @@ import { Tokens } from "tokens.slint";
 import { PaletteItem } from "structs.slint";
 import { DbBadge, OutlineChip, PrimaryButton, SecondaryButton, FilterField } from "components.slint";
 import { AppIcon } from "icons.slint";
+import { MaterialPalette } from "@material";
 
 // One top-level card of grouped items: the ⌘O "Open Connection" picker's own
 // header + nested subgroups + connections, boxed with a continuous outline
@@ -51,12 +52,10 @@ export component ListModal inherits Rectangle {
         // cap to the window so the footer buttons never fall off-screen
         height: min(card.preferred-height, parent.height - self.y - 24px);
         border-radius: Tokens.modal-radius;
-        background: Tokens.card;
-        border-width: 1px;
-        border-color: Tokens.border;
-        drop-shadow-blur: 42px;
-        drop-shadow-offset-y: 12px;
-        drop-shadow-color: #1C191426;
+        background: MaterialPalette.surface_container_high;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: MaterialPalette.shadow.with-alpha(0.3);
 
         // swallow veil clicks under the card
         card-ta := TouchArea {}
