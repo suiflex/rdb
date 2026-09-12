@@ -3,8 +3,8 @@ import Base from "../layouts/Base.astro";
 import Engines from "../components/Engines.astro";
 import Screenshot from "../components/Screenshot.astro";
 import { REPO_LINKS, url } from "../config";
-import shotSql from "../assets/shots/sql.png";
 import shotConnections from "../assets/shots/connections.png";
+import shotSql from "../assets/shots/sql.png";
 
 const groups = [
   {
@@ -37,7 +37,7 @@ const groups = [
       ["Virtualized rendering", "Only visible cells are drawn, so huge results stay smooth."],
       ["Server-side filters", "Column filters compile to WHERE clauses and run on the database, not in the app."],
       ["Safe editing", "Edit cells with a pending-changes model: review, commit, or roll back. Tables without a primary key stay read-only, and the grid tells you why."],
-      ["Export results", "CSV or JSON through your OS's native save dialog."],
+      ["Export results", "CSV or JSON through your OS native save dialog."],
     ],
   },
   {
@@ -54,50 +54,59 @@ const groups = [
 ---
 
 <Base
-  title="RDB features: editor, data grid, and six database engines"
-  description="What ships in RDB today: a real SQL editor with split panes, a virtualized data grid with server-side filters, keychain-backed credentials, and support for six database engines."
+  title="RDB features: editor, data grid, and eleven database engines"
+  description="What ships in RDB today: a real SQL editor with split panes, a virtualized data grid with server-side filters, keychain-backed credentials, and support for eleven database engines."
   path="/features"
 >
-  <section class="mx-auto max-w-6xl px-4 pt-16 pb-12 sm:px-6">
-    <h1 class="max-w-2xl font-display text-4xl font-semibold tracking-tight sm:text-5xl">
-      Everything here ships today.
-    </h1>
-    <p class="mt-4 max-w-xl text-lg leading-relaxed text-fg-2">
-      No roadmap promises on this page. If a feature is listed, it is in the
-      current release and you can try it in the next five minutes.
-    </p>
+  <section class="page-hero">
+    <div class="page-hero-inner wide">
+      <p class="page-kicker">Features in the current release</p>
+      <h1 class="page-title wide">Everything here ships today.</h1>
+      <p class="page-lede">
+        No roadmap promises on this page. If a feature is listed, it is in the
+        current release and you can try it in the next five minutes.
+      </p>
+    </div>
   </section>
 
-  <section class="mx-auto max-w-6xl px-4 pb-8 sm:px-6" aria-label="Screenshots">
-    <div class="grid gap-6 lg:grid-cols-2">
-      <Screenshot
-        src={shotConnections}
-        alt="RDB connection picker with saved PostgreSQL, MySQL, and Redis connections organized in groups"
-        sizes="(min-width: 1024px) 560px, 94vw"
-        priority
-      />
-      <Screenshot
-        src={shotSql}
-        alt="RDB SQL editor with a query and its results grid"
-        sizes="(min-width: 1024px) 560px, 94vw"
-        priority
-      />
+  <section class="page-section">
+    <div class="section-inner wide">
+      <div class="card-grid two">
+        <Screenshot
+          src={shotConnections}
+          alt="RDB connection picker with saved PostgreSQL, MySQL, and Redis connections organized in groups"
+          sizes="(min-width: 1024px) 640px, 94vw"
+          priority
+          chrome
+          label="connections / saved"
+          status="ready"
+        />
+        <Screenshot
+          src={shotSql}
+          alt="RDB SQL editor with a query and its results grid"
+          sizes="(min-width: 1024px) 640px, 94vw"
+          priority
+          chrome
+          label="editor / query"
+          status="running"
+        />
+      </div>
     </div>
   </section>
 
   {
-    groups.map((group, i) => (
-      <section class:list={["border-line", i === 0 ? "" : "border-t"]}>
-        <div class="mx-auto grid max-w-6xl gap-6 px-4 py-14 sm:px-6 lg:grid-cols-[280px_1fr] lg:gap-16">
+    groups.map((group) => (
+      <section class="page-section">
+        <div class="section-inner wide section-grid">
           <div>
-            <h2 class="font-display text-2xl font-semibold tracking-tight">{group.title}</h2>
-            <p class="mt-2 text-sm text-fg-3">{group.intro}</p>
+            <p class="page-kicker">{group.title}</p>
+            <h2 class="section-title">{group.intro}</h2>
           </div>
-          <dl class="grid gap-x-10 gap-y-6 sm:grid-cols-2">
+          <dl class="card-grid two">
             {group.items.map(([term, detail]) => (
-              <div>
-                <dt class="text-sm font-semibold">{term}</dt>
-                <dd class="mt-1 text-sm leading-relaxed text-fg-2">{detail}</dd>
+              <div class="card">
+                <dt>{term}</dt>
+                <dd>{detail}</dd>
               </div>
             ))}
           </dl>
@@ -106,36 +115,37 @@ const groups = [
     ))
   }
 
-  <section id="databases" class="border-t border-line bg-panel">
-    <div class="mx-auto max-w-6xl px-4 py-16 sm:px-6">
-      <div class="max-w-2xl">
-        <h2 class="font-display text-3xl font-semibold tracking-tight">Supported databases</h2>
-        <p class="mt-4 leading-relaxed text-fg-2">
+  <section id="databases" class="page-section light">
+    <div class="section-inner wide">
+      <div class="stream-head">
+        <div>
+          <p class="page-kicker">Supported databases</p>
+          <h2 class="section-title">Eleven engines in one release.</h2>
+        </div>
+        <p>
           Each engine is its own Rust driver crate speaking the native
-          protocol. All six below are stable and included in every download.
+          protocol. They share the same workspace without flattening every
+          database into the same query model.
         </p>
       </div>
-      <div class="mt-8 max-w-3xl">
-        <Engines />
+      <div class="mt-10">
+        <Engines compact />
       </div>
-      <p class="mt-6 text-sm text-fg-3">
+      <p class="page-note">
         Want an engine that is not listed?
-        <a href={REPO_LINKS.newIssue} rel="noopener" class="underline decoration-line underline-offset-4 hover:text-fg">Open a feature request</a>
-        or read <a href={url("/open-source")} class="underline decoration-line underline-offset-4 hover:text-fg">how drivers are added</a>.
+        <a href={REPO_LINKS.newIssue} rel="noopener">Open a feature request</a>
+        or read <a href={url("/open-source")}>how drivers are added</a>.
       </p>
     </div>
   </section>
 
-  <section class="border-t border-line">
-    <div class="mx-auto max-w-6xl px-4 py-20 text-center sm:px-6">
-      <h2 class="font-display text-3xl font-semibold tracking-tight">See it on your own data.</h2>
-      <div class="mt-8">
-        <a
-          href={url("/download")}
-          class="inline-block rounded-lg bg-accent px-5 py-3 font-semibold text-accent-ink transition-colors hover:bg-accent-soft"
-        >
-          Download RDB
-        </a>
+  <section class="page-section">
+    <div class="section-inner wide">
+      <div class="closing-line mt-0">
+        <h2>See it on your own <em>data.</em></h2>
+        <div class="closing-actions">
+          <a href={url("/download")} class="home-button primary">Download RDB <span aria-hidden="true">↓</span></a>
+        </div>
       </div>
     </div>
   </section>

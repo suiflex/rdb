@@ -1,16 +1,132 @@
 ---
+import { Image } from "astro:assets";
 import Base from "../layouts/Base.astro";
 import Engines from "../components/Engines.astro";
 import Screenshot from "../components/Screenshot.astro";
-import CodeBlock from "../components/CodeBlock.astro";
 import { GITHUB, REPO_LINKS, url } from "../config";
 import release from "../data/release.json";
-import shotWorkspace from "../assets/shots/workspace.png";
-import shotSql from "../assets/shots/sql.png";
+import shotConnections from "../assets/shots/connections.png";
 import shotPalette from "../assets/shots/palette.png";
+import shotSql from "../assets/shots/sql.png";
+import shotWorkspace from "../assets/shots/workspace.png";
 
 const macDmg = release.assets.find((a) => a.name === "rdb-aarch64-apple-darwin.dmg");
-const dmgMb = macDmg ? (macDmg.size / 1_000_000).toFixed(1) : null;
+const macDmgMb = macDmg ? `${(macDmg.size / 1_000_000).toFixed(1)} MB` : "current release";
+const downloadHref = macDmg?.url ?? REPO_LINKS.releases;
+
+const engines = [
+  {
+    key: "postgresql",
+    name: "PostgreSQL",
+    description: "Browse schemas, run SQL, filter result sets, and inspect rows through the native PostgreSQL protocol.",
+    protocol: "tokio-postgres",
+    query: "SQL",
+    result: "Tabular results",
+  },
+  {
+    key: "mysql",
+    name: "MySQL",
+    description: "Move through databases and tables, execute MySQL syntax, and work with tabular results from a dedicated async driver.",
+    protocol: "mysql_async",
+    query: "SQL",
+    result: "Tabular results",
+  },
+  {
+    key: "mariadb",
+    name: "MariaDB",
+    description: "Use the familiar RDB workspace with MariaDB through its MySQL-protocol-compatible driver path.",
+    protocol: "mysql_async",
+    query: "SQL",
+    result: "Tabular results",
+  },
+  {
+    key: "redis",
+    name: "Redis",
+    description: "Browse keys and run tokenized Redis commands without forcing key-value work into a SQL-shaped interface.",
+    protocol: "RESP",
+    query: "Commands",
+    result: "Key-value results",
+  },
+  {
+    key: "valkey",
+    name: "Valkey",
+    description: "Connect over RESP, inspect keys, and run Valkey commands through the same fast native workspace.",
+    protocol: "RESP",
+    query: "Commands",
+    result: "Key-value results",
+  },
+  {
+    key: "mongodb",
+    name: "MongoDB",
+    description: "Navigate databases and collections, write familiar mongosh-style chains, and inspect complete JSON documents.",
+    protocol: "MongoDB wire",
+    query: "Mongo operations",
+    result: "Documents",
+  },
+  {
+    key: "sqlite",
+    name: "SQLite",
+    description: "Open local database files, browse tables, and query them without configuring a server or background service.",
+    protocol: "rusqlite",
+    query: "SQL",
+    result: "Tabular results",
+  },
+  {
+    key: "cassandra",
+    name: "Cassandra",
+    description: "Explore keyspaces and tables, then run CQL through the Scylla-compatible asynchronous driver.",
+    protocol: "Scylla driver",
+    query: "CQL",
+    result: "Tabular results",
+  },
+  {
+    key: "sqlserver",
+    name: "SQL Server",
+    description: "Connect to Microsoft SQL Server, browse schemas, and execute T-SQL from the shared editor surface.",
+    protocol: "TDS / tiberius",
+    query: "SQL",
+    result: "Tabular results",
+  },
+  {
+    key: "oracle",
+    name: "Oracle",
+    description: "Access Oracle through its thin driver, navigate schemas, and keep results in the same consistent data grid.",
+    protocol: "Oracle thin",
+    query: "SQL",
+    result: "Tabular results",
+  },
+  {
+    key: "clickhouse",
+    name: "ClickHouse",
+    description: "Query analytical datasets through ClickHouse HTTP while keeping results inside the native RDB grid.",
+    protocol: "HTTP",
+    query: "SQL",
+    result: "Tabular results",
+  },
+];
+
+const tourShots = {
+  connections: {
+    src: shotConnections.src,
+    alt: "RDB connection manager showing configured database connections",
+    caption: "Connection management across database engines",
+  },
+  sql: {
+    src: shotSql.src,
+    alt: "RDB query editor showing a saved SQL query and results area",
+    caption: "Saved queries, SQL editor, and execution controls",
+  },
+  workspace: {
+    src: shotWorkspace.src,
+    alt: "RDB workspace showing schema navigation and a company data table",
+    caption: "Schema browser, data grid, and row inspector",
+  },
+  palette: {
+    src: shotPalette.src,
+    alt: "RDB command palette listing database connections",
+    caption: "Keyboard-first command palette and connection search",
+  },
+};
 
 const structuredData = {
   "@context": "https://schema.org",
@@ -26,301 +142,376 @@ const structuredData = {
 ---
 
 <Base
-  title="RDB: fast, lightweight, open-source database management"
-  description="RDB is a free, open-source desktop database client for PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite, Cassandra, SQL Server, Oracle, and ClickHouse. One native Rust binary for macOS, Windows, and Linux."
+  title="RDB: your databases, one native workspace"
+  description="RDB is a free, native database manager for PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite, Cassandra, SQL Server, Oracle, and ClickHouse. One Rust binary for macOS, Windows, and Linux."
   path="/"
 >
   <script type="application/ld+json" set:html={JSON.stringify(structuredData)} slot="head" />
 
-  <!-- Hero -->
-  <section class="mx-auto max-w-6xl px-4 pt-16 pb-10 sm:px-6 sm:pt-20">
-    <div class="max-w-3xl">
-      <h1 class="font-display text-4xl font-semibold tracking-tight text-balance sm:text-5xl lg:text-6xl">
-        Your database, without the
-        <span class="text-accent">heavyweight</span> client.
-      </h1>
-      <p class="mt-5 max-w-xl text-lg leading-relaxed text-fg-2">
-        RDB is a free, open-source desktop client for PostgreSQL, MySQL,
-        MariaDB, Redis, Valkey, MongoDB, SQLite, Cassandra, SQL Server, Oracle, and
-        ClickHouse. One native Rust binary.
-      </p>
-      <div class="mt-8 flex flex-wrap items-center gap-3">
-        <a
-          href={url("/download")}
-          class="rounded-lg bg-accent px-5 py-3 font-semibold text-accent-ink transition-colors hover:bg-accent-soft"
-        >
-          Download RDB
-        </a>
-        <a
-          href={GITHUB}
-          rel="noopener"
-          class="rounded-lg border border-line px-5 py-3 font-semibold text-fg transition-colors hover:border-line-2 hover:bg-panel"
-        >
-          View on GitHub
-        </a>
+  <section class="home-hero" id="top">
+    <div class="home-container hero-intro">
+      <div data-reveal="left">
+        <p class="hero-kicker"><i aria-hidden="true"></i>Native database workspace</p>
+        <h1>RD<span>B</span></h1>
       </div>
-      <p class="mt-6 font-mono text-xs text-fg-3">
-        {release.tag} for macOS, Windows, and Linux. Apache-2.0 licensed.
-      </p>
-      <a
-        href="https://www.producthunt.com/products/rdb?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-rdb"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="mt-6 inline-block"
-      >
-        <img
-          src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1202790&theme=light"
-          alt="RDB - Multi database editor | Product Hunt"
-          width="250"
-          height="54"
-          loading="lazy"
-        />
-      </a>
-    </div>
-  </section>
-
-  <!-- Product showcase: real screenshot from the mock-data harness -->
-  <section class="mx-auto max-w-6xl px-4 pb-24 sm:px-6" aria-label="Product screenshot">
-    <Screenshot
-      src={shotWorkspace}
-      alt="RDB workspace: schema sidebar on the left, a tabbed SQL editor, and a results grid showing rows from a PostgreSQL table"
-      priority
-    />
-  </section>
-
-  <!-- Supported databases -->
-  <section id="databases" class="border-t border-line">
-    <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
-      <div class="grid gap-10 lg:grid-cols-[1fr_1.4fr] lg:gap-16">
-        <div>
-          <h2 class="font-display text-3xl font-semibold tracking-tight">
-            Six engines, one window.
-          </h2>
-          <p class="mt-4 leading-relaxed text-fg-2">
-            Stop juggling one client per database. RDB speaks each engine's
-            native protocol through its own Rust driver, so the same sidebar,
-            editor, and grid work everywhere.
-          </p>
-        </div>
-        <Engines />
-      </div>
-    </div>
-  </section>
-
-  <!-- Lightweight -->
-  <section class="border-t border-line">
-    <div class="mx-auto grid max-w-6xl gap-10 px-4 py-20 sm:px-6 lg:grid-cols-2 lg:items-center lg:gap-16">
-      <div>
-        <h2 class="font-display text-3xl font-semibold tracking-tight">
-          Lightweight by design.
-        </h2>
-        <p class="mt-4 leading-relaxed text-fg-2">
-          No Electron, no bundled browser, no background services. The UI is
-          GPU-rendered by <a href="https://slint.dev" rel="noopener" class="underline decoration-line underline-offset-4 hover:text-fg">Slint</a>
-          and the whole app compiles to a single small binary that starts
-          instantly and stays out of your memory.
+      <div class="hero-copy" data-reveal="right">
+        <h2>Your databases, finally moving as one.</h2>
+        <p>
+          Browse schemas, write queries, inspect rows, and move between eleven
+          engines without leaving one fast native workspace.
         </p>
+        <div class="home-actions">
+          <a class="home-button primary" href={url("/download")}>Download RDB <span aria-hidden="true">↓</span></a>
+          <a class="home-button" href={GITHUB} rel="noopener">View source <span aria-hidden="true">↗</span></a>
+        </div>
+        <p class="release-line">{release.tag} · macOS / Windows / Linux · Apache-2.0</p>
       </div>
-      <dl class="grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-line bg-line text-center">
-        <div class="bg-panel px-3 py-6">
-          <dt class="font-mono text-xs text-fg-3">macOS download</dt>
-          <dd class="mt-2 font-display text-2xl font-semibold text-accent">{dmgMb} MB</dd>
-        </div>
-        <div class="bg-panel px-3 py-6">
-          <dt class="font-mono text-xs text-fg-3">runtime deps</dt>
-          <dd class="mt-2 font-display text-2xl font-semibold text-accent">none</dd>
-        </div>
-        <div class="bg-panel px-3 py-6">
-          <dt class="font-mono text-xs text-fg-3">UI stack</dt>
-          <dd class="mt-2 font-display text-2xl font-semibold text-accent">native</dd>
-        </div>
-      </dl>
     </div>
-  </section>
 
-  <!-- Query editor -->
-  <section class="border-t border-line">
-    <div class="mx-auto grid max-w-6xl gap-10 px-4 py-20 sm:px-6 lg:grid-cols-[1.4fr_1fr] lg:items-center lg:gap-16">
+    <div class="query-pulse" aria-label="Live query example">
+      <div class="home-container query-inner">
+        <span class="query-label">Live statement</span>
+        <p class="query-line" id="live-query">
+          <span class="keyword">SELECT</span> * <span class="keyword">FROM</span> customers <span class="keyword">LIMIT</span> 50<span class="cursor" aria-hidden="true"></span>
+        </p>
+        <span class="query-state">Ready</span>
+      </div>
+      <span class="query-progress" aria-hidden="true"></span>
+    </div>
+
+    <div class="workspace-hero" data-reveal="up">
       <Screenshot
-        src={shotSql}
-        alt="RDB SQL editor running a query, with syntax highlighting and a results grid below"
-        sizes="(min-width: 1024px) 640px, 94vw"
-        class="order-last lg:order-first"
+        src={shotWorkspace}
+        alt="RDB workspace showing schema navigation, a data grid, and row inspector"
+        priority
+        chrome
+        label="workspace / production"
+        status="connected"
       />
-      <div>
-        <h2 class="font-display text-3xl font-semibold tracking-tight">
-          Query without friction.
-        </h2>
-        <p class="mt-4 leading-relaxed text-fg-2">
-          A real editor, not a text box: syntax highlighting, multi-statement
-          runs, selection execution, find, and SQL formatting. Split the
-          editor into panes and keep one query running while you write the next.
-        </p>
-        <ul class="mt-6 space-y-2 font-mono text-sm text-fg-2">
-          <li><kbd class="rounded border border-line bg-code px-1.5 py-0.5 text-xs">⌘ Enter</kbd> run query</li>
-          <li><kbd class="rounded border border-line bg-code px-1.5 py-0.5 text-xs">⌘ F</kbd> find in editor</li>
-          <li><kbd class="rounded border border-line bg-code px-1.5 py-0.5 text-xs">⌘ K</kbd> jump anywhere</li>
+      <div class="float-note" aria-hidden="true"><span>QUERY COMPLETE</span>One workspace. Eleven engines.</div>
+    </div>
+  </section>
+
+  <section class="engine-stream" id="engines">
+    <div class="home-container stream-head" data-reveal="up">
+      <h2>Speak every database.</h2>
+      <p>
+        SQL, documents, keys, and analytical workloads keep their own query
+        model while sharing the same native workspace.
+      </p>
+    </div>
+    <div class="engine-loop" aria-label="Choose a supported database engine">
+      {
+        [false, true].map((hidden) => (
+          <div class="engine-set" aria-hidden={hidden ? "true" : undefined}>
+            {engines.map((engine, index) => (
+              <button
+                class="engine-chip"
+                type="button"
+                data-engine={engine.key}
+                aria-pressed={!hidden && index === 0 ? "true" : "false"}
+                tabindex={hidden ? "-1" : undefined}
+              >
+                {engine.name}
+              </button>
+            ))}
+          </div>
+        ))
+      }
+    </div>
+    <div class="home-container engine-readout" aria-live="polite" data-reveal="up">
+      <span class="engine-count" id="engine-count">01 / {engines.length}</span>
+      <h3 id="engine-name">{engines[0].name}</h3>
+      <div class="engine-detail">
+        <p id="engine-description">{engines[0].description}</p>
+        <div class="engine-meta">
+          <span id="engine-protocol">{engines[0].protocol}</span>
+          <span id="engine-query">{engines[0].query}</span>
+          <span id="engine-result">{engines[0].result}</span>
+        </div>
+      </div>
+    </div>
+    <div class="home-container engine-grid-wrap" data-reveal="up">
+      <Engines compact />
+    </div>
+  </section>
+
+  <section class="flow" id="workflow">
+    <div class="home-container">
+      <div class="flow-heading" data-reveal="left">
+        <p class="overline">One continuous workflow</p>
+        <h2>From connection to answer, without the <em>drag.</em></h2>
+      </div>
+      <div class="tour">
+        <div class="tour-nav" role="group" aria-label="Product workflow">
+          <button class="tour-step" type="button" data-shot="connections" aria-pressed="true">
+            <small>01</small><div><strong>Connect</strong><span>Keep every engine within reach.</span></div>
+          </button>
+          <button class="tour-step" type="button" data-shot="sql" aria-pressed="false">
+            <small>02</small><div><strong>Query</strong><span>Write, format, and execute.</span></div>
+          </button>
+          <button class="tour-step" type="button" data-shot="workspace" aria-pressed="false">
+            <small>03</small><div><strong>Inspect</strong><span>Move through rows and schema.</span></div>
+          </button>
+          <button class="tour-step" type="button" data-shot="palette" aria-pressed="false">
+            <small>04</small><div><strong>Navigate</strong><span>Jump anywhere with Cmd+K.</span></div>
+          </button>
+        </div>
+        <div class="tour-stage" data-reveal="right">
+          <div class="tour-frame">
+            <Image
+              id="tour-image"
+              src={shotConnections}
+              alt={tourShots.connections.alt}
+              widths={[640, 1024, 1600]}
+              sizes="(min-width: 1024px) 900px, 94vw"
+              loading="lazy"
+            />
+          </div>
+          <div class="tour-caption">
+            <strong id="tour-caption">{tourShots.connections.caption}</strong>
+            <span>REAL APP CAPTURE · 1280 × 800</span>
+          </div>
+        </div>
+      </div>
+      <div class="result-river" id="result-river" aria-label="Workflow capabilities">
+        <div class="result-cell"><small>Connect</small><span>Paste a DSN</span></div>
+        <div class="result-cell"><small>Execute</small><span>Run a selection</span></div>
+        <div class="result-cell"><small>Inspect</small><span>Open row detail</span></div>
+        <div class="result-cell"><small>Navigate</small><span>Jump with Cmd+K</span></div>
+        <div class="result-cell"><small>Export</small><span>Save CSV or JSON</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="native-band">
+    <div class="home-container native-statement">
+      <h2 data-reveal="left">Native by default. Private by design.</h2>
+      <div class="native-copy" data-reveal="right">
+        <p>Built in Rust with a Slint interface. RDB connects directly to your database and stays out of the way.</p>
+        <ul class="native-points">
+          <li><span aria-hidden="true">✓</span>No account and no telemetry</li>
+          <li><span aria-hidden="true">✓</span>Works fully offline after installation</li>
+          <li><span aria-hidden="true">✓</span>Credentials use your OS keychain</li>
         </ul>
       </div>
     </div>
   </section>
 
-  <!-- Large results -->
-  <section class="border-t border-line bg-panel">
-    <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
-      <div class="mx-auto max-w-2xl text-center">
-        <h2 class="font-display text-3xl font-semibold tracking-tight">
-          Big tables don't freeze the app.
-        </h2>
-        <p class="mt-4 leading-relaxed text-fg-2">
-          Run <code class="rounded bg-code px-1.5 py-0.5 font-mono text-sm">SELECT * FROM huge_table</code>
-          and keep working. RDB loads rows in batches as you scroll and
-          virtualizes the grid, so a million-row result never lands in memory
-          all at once.
+  <section class="download-panel" id="download">
+    <div class="home-container">
+      <div class="download-head" data-reveal="up">
+        <h2>Open it. Start querying.</h2>
+        <p>
+          Choose your platform, install the current release, and connect to a
+          database. No account sits between download and the first query.
         </p>
       </div>
-    </div>
-  </section>
-
-  <!-- Everyday features bento -->
-  <section class="border-t border-line">
-    <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
-      <h2 class="font-display text-3xl font-semibold tracking-tight">
-        The everyday things, done right.
-      </h2>
-      <div class="mt-10 grid gap-4 lg:grid-cols-3">
-        <div class="overflow-hidden rounded-xl border border-line bg-panel lg:col-span-2">
-          <div class="p-6">
-            <h3 class="font-display text-lg font-semibold">Command palette</h3>
-            <p class="mt-2 max-w-md text-sm leading-relaxed text-fg-2">
-              Press <kbd class="rounded border border-line bg-code px-1.5 py-0.5 font-mono text-xs">⌘ K</kbd>
-              and fuzzy-search every saved connection, table, and collection.
-              Your hands never leave the keyboard.
-            </p>
+      <div class="install-surface">
+        <div class="platform-copy" data-reveal="left">
+          <span class="latest">LATEST RELEASE / {release.tag}</span>
+          <h3 id="platform-title">RDB for macOS</h3>
+          <p id="platform-description">Install the native app through Homebrew, or download the Apple Silicon disk image directly.</p>
+          <div class="platform-picker" role="group" aria-label="Choose operating system">
+            <button class="platform-button" type="button" data-platform="mac" aria-pressed="true">macOS</button>
+            <button class="platform-button" type="button" data-platform="linux" aria-pressed="false">Linux</button>
+            <button class="platform-button" type="button" data-platform="windows" aria-pressed="false">Windows</button>
           </div>
-          <Screenshot
-            src={shotPalette}
-            alt="RDB command palette open over the workspace, listing saved PostgreSQL, MySQL, Redis, and MongoDB connections"
-            sizes="(min-width: 1024px) 640px, 94vw"
-            class="mx-6 mb-0 translate-y-2 rounded-b-none border-b-0"
-          />
+          <a class="home-button primary download-action" id="download-link" href={downloadHref}>
+            Download DMG · {macDmgMb}
+          </a>
         </div>
-        <div class="grid gap-4">
-          <div class="rounded-xl border border-line bg-panel p-6">
-            <h3 class="font-display text-lg font-semibold">Credentials in your keychain</h3>
-            <p class="mt-2 text-sm leading-relaxed text-fg-2">
-              Passwords go to the OS keychain (Keychain, libsecret, Credential
-              Manager), with an AES-GCM encrypted file as the headless
-              fallback. Never plaintext config.
-            </p>
+        <div class="install-terminal" data-reveal="right">
+          <div class="terminal-top"><span>INSTALL / PACKAGE MANAGER</span><span id="platform-arch">APPLE SILICON</span></div>
+          <div>
+            <p class="terminal-command" id="install-command">brew install --cask suiflex/tap/rdb</p>
+            <button class="copy-button" type="button" id="copy-command">
+              <span aria-hidden="true">□</span>
+              <span>Copy command</span>
+            </button>
           </div>
-          <div class="rounded-xl border border-line bg-panel p-6">
-            <h3 class="font-display text-lg font-semibold">Filter and export</h3>
-            <p class="mt-2 text-sm leading-relaxed text-fg-2">
-              Per-column filters compile to server-side WHERE clauses. Export
-              results as CSV or JSON through the native save dialog.
-            </p>
-          </div>
+          <p class="terminal-note">FREE · OPEN SOURCE · APACHE-2.0 · NO SIGN-UP</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Open source -->
-  <section class="border-t border-line">
-    <div class="mx-auto grid max-w-6xl gap-10 px-4 py-20 sm:px-6 lg:grid-cols-2 lg:gap-16">
-      <div>
-        <h2 class="font-display text-3xl font-semibold tracking-tight">
-          Built in the open.
-        </h2>
-        <p class="mt-4 leading-relaxed text-fg-2">
-          RDB is Apache-2.0 licensed and developed entirely on GitHub. Read the
-          code, report a bug, or help shape what comes next: every engine is
-          a self-contained Rust crate behind one
-          <code class="rounded bg-code px-1.5 py-0.5 font-mono text-sm">Driver</code>
-          trait, so there is a clear path to adding your favorite database.
-        </p>
-        <div class="mt-6">
-          <CodeBlock
-            code="git clone https://github.com/suiflex/rdb && cd rdb && cargo build --release -p rdb"
-            label="build from source"
-          />
+  <section class="open-source-home" id="source">
+    <div class="home-container">
+      <div class="source-flow">
+        <div data-reveal="left">
+          <p class="overline">Open architecture</p>
+          <h2>The boundary is yours to inspect.</h2>
+          <p>
+            The Slint interface depends on <span class="mono">rdb-core</span>,
+            not concrete database crates. Every engine implements the same
+            asynchronous driver contract.
+          </p>
+          <div class="home-actions">
+            <a class="home-button primary" href={GITHUB} rel="noopener">Explore GitHub <span aria-hidden="true">↗</span></a>
+            <a class="home-button" href={url("/open-source")}>Contribute</a>
+          </div>
+        </div>
+        <div data-reveal="right">
+          <pre class="driver-code" aria-label="Rust driver trait example"><span class="keyword">pub trait</span> <span class="type">Driver</span>: Send + Sync &#123;
+  <span class="keyword">async fn</span> connect(config: &amp;ConnConfig);
+  <span class="keyword">async fn</span> schema(&amp;self);
+  <span class="keyword">async fn</span> query(&amp;self, query: &amp;Query);
+  <span class="keyword">async fn</span> close(self);
+&#125;</pre>
+          <nav class="source-links" aria-label="Project resources">
+            <a class="source-link" href={REPO_LINKS.vision} rel="noopener"><strong>Product vision</strong><span>VISION.MD ↗</span></a>
+            <a class="source-link" href={REPO_LINKS.goodFirstIssues} rel="noopener"><strong>Good first issues</strong><span>CONTRIBUTE ↗</span></a>
+            <a class="source-link" href={url("/changelog")}><strong>Release history</strong><span>CHANGELOG ↗</span></a>
+          </nav>
         </div>
       </div>
-      <ul class="grid content-start gap-3 sm:grid-cols-2">
-        {
-          [
-            { label: "Source code", note: "the whole app, Apache-2.0 licensed", href: GITHUB },
-            { label: "Good first issues", note: "a gentle place to start", href: REPO_LINKS.goodFirstIssues },
-            { label: "Contributing guide", note: "setup, style, PR flow", href: REPO_LINKS.contributing },
-            { label: "Discussions", note: "questions and ideas", href: REPO_LINKS.discussions },
-            { label: "Roadmap", note: "where RDB is headed", href: REPO_LINKS.vision },
-            { label: "Releases", note: "binaries and notes", href: REPO_LINKS.releases },
-          ].map((item) => (
-            <li>
-              <a
-                href={item.href}
-                rel="noopener"
-                class="block rounded-xl border border-line bg-panel px-4 py-3.5 transition-colors hover:border-line-2 hover:bg-panel-2"
-              >
-                <span class="block text-sm font-medium">{item.label}</span>
-                <span class="block text-xs text-fg-3">{item.note}</span>
-              </a>
-            </li>
-          ))
-        }
-      </ul>
+
+      <div class="closing-line" data-reveal="up">
+        <h2>One native place for every <em>database.</em></h2>
+        <div class="closing-actions">
+          <a class="home-button primary" href={url("/download")}>Download RDB <span aria-hidden="true">↓</span></a>
+          <a class="home-button" href={REPO_LINKS.newIssue} rel="noopener">Open an issue <span aria-hidden="true">↗</span></a>
+        </div>
+      </div>
     </div>
   </section>
 
-  <!-- Privacy -->
-  <section class="border-t border-line bg-panel">
-    <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
-      <div class="max-w-2xl">
-        <h2 class="font-display text-3xl font-semibold tracking-tight">
-          No account. No telemetry.
-        </h2>
-        <p class="mt-4 leading-relaxed text-fg-2">
-          RDB is a local tool. Your queries travel between you and your
-          database, and nowhere else.
-        </p>
-      </div>
-      <ul class="mt-8 grid gap-x-10 gap-y-4 text-sm text-fg-2 sm:grid-cols-2">
-        <li class="flex gap-3"><span class="mt-1 text-accent" aria-hidden="true">✓</span> Works fully offline; no sign-up, ever.</li>
-        <li class="flex gap-3"><span class="mt-1 text-accent" aria-hidden="true">✓</span> No usage tracking or crash reporting of any kind.</li>
-        <li class="flex gap-3"><span class="mt-1 text-accent" aria-hidden="true">✓</span> Connection secrets live in your OS keychain, not in config files.</li>
-        <li class="flex gap-3"><span class="mt-1 text-accent" aria-hidden="true">✓</span> The only outbound request is an update check against GitHub Releases, and you can turn it off in Settings.</li>
-      </ul>
-      <p class="mt-6 text-sm text-fg-3">
-        Details on the <a href={url("/privacy")} class="underline decoration-line underline-offset-4 hover:text-fg">privacy page</a>.
-      </p>
-    </div>
-  </section>
+  <script define:vars={{ engines, tourShots, releaseTag: release.tag, macDmgMb, macHref: downloadHref, releasesHref: REPO_LINKS.releases }}>
+    const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  <!-- Final CTA -->
-  <section class="border-t border-line">
-    <div class="mx-auto max-w-6xl px-4 py-24 text-center sm:px-6">
-      <h2 class="font-display text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
-        Download RDB and connect to your first database.
-      </h2>
-      <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
-        <a
-          href={url("/download")}
-          class="rounded-lg bg-accent px-5 py-3 font-semibold text-accent-ink transition-colors hover:bg-accent-soft"
-        >
-          Download RDB
-        </a>
-        <a
-          href={GITHUB}
-          rel="noopener"
-          class="rounded-lg border border-line px-5 py-3 font-semibold transition-colors hover:border-line-2 hover:bg-panel"
-        >
-          View on GitHub
-        </a>
-      </div>
-      <p class="mt-6 font-mono text-xs text-fg-3">
-        Free forever under the Apache-2.0 license.
-      </p>
-    </div>
-  </section>
+    const queries = [
+      '<span class="keyword">SELECT</span> * <span class="keyword">FROM</span> customers <span class="keyword">LIMIT</span> 50',
+      '<span class="keyword">EXPLAIN</span> <span class="keyword">ANALYZE</span> active_subscriptions',
+      'db.orders.<span class="keyword">find</span>({ status: "open" })',
+      '<span class="keyword">SCAN</span> 0 <span class="keyword">MATCH</span> session:*',
+    ];
+    let queryIndex = 0;
+    if (!reducedMotion) {
+      setInterval(() => {
+        queryIndex = (queryIndex + 1) % queries.length;
+        const line = document.querySelector("#live-query");
+        if (!line) return;
+        line.style.opacity = "0";
+        setTimeout(() => {
+          line.innerHTML = `${queries[queryIndex]}<span class="cursor" aria-hidden="true"></span>`;
+          line.style.opacity = "1";
+        }, 160);
+      }, 4000);
+    }
+
+    const engineMap = Object.fromEntries(engines.map((engine) => [engine.key, engine]));
+    const engineButtons = [...document.querySelectorAll("[data-engine]")];
+    engineButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const key = button.dataset.engine;
+        const engine = engineMap[key];
+        if (!engine) return;
+        engineButtons.forEach((item) => item.setAttribute("aria-pressed", String(item.dataset.engine === key)));
+        document.querySelector("#engine-count").textContent = `${String(engines.findIndex((item) => item.key === key) + 1).padStart(2, "0")} / ${engines.length}`;
+        document.querySelector("#engine-name").textContent = engine.name;
+        document.querySelector("#engine-description").textContent = engine.description;
+        document.querySelector("#engine-protocol").textContent = engine.protocol;
+        document.querySelector("#engine-query").textContent = engine.query;
+        document.querySelector("#engine-result").textContent = engine.result;
+      });
+    });
+
+    const tourButtons = [...document.querySelectorAll("[data-shot]")];
+    let tourIndex = 0;
+    let tourTimer;
+    const selectShot = (index, userInitiated = false) => {
+      tourIndex = index;
+      const button = tourButtons[index];
+      const shot = tourShots[button.dataset.shot];
+      const image = document.querySelector("#tour-image");
+      if (!shot || !image) return;
+      tourButtons.forEach((item, itemIndex) => item.setAttribute("aria-pressed", String(itemIndex === index)));
+      image.classList.add("is-switching");
+      setTimeout(() => {
+        image.src = shot.src;
+        image.alt = shot.alt;
+        document.querySelector("#tour-caption").textContent = shot.caption;
+        image.classList.remove("is-switching");
+        const river = document.querySelector("#result-river");
+        river.classList.remove("is-pulsing");
+        void river.offsetWidth;
+        river.classList.add("is-pulsing");
+      }, reducedMotion ? 0 : 150);
+      if (userInitiated && !reducedMotion) restartTour();
+    };
+    const restartTour = () => {
+      clearInterval(tourTimer);
+      tourTimer = setInterval(() => selectShot((tourIndex + 1) % tourButtons.length), 6000);
+    };
+    tourButtons.forEach((button, index) => button.addEventListener("click", () => selectShot(index, true)));
+    if (!reducedMotion) restartTour();
+
+    const platforms = {
+      mac: {
+        title: "RDB for macOS",
+        description: "Install the native app through Homebrew, or download the Apple Silicon disk image directly.",
+        arch: "APPLE SILICON",
+        command: "brew install --cask suiflex/tap/rdb",
+        label: `Download DMG · ${macDmgMb}`,
+        href: macHref,
+      },
+      linux: {
+        title: "RDB for Linux",
+        description: "Use the install script to place the native binary in the first writable standard binary directory.",
+        arch: "ARM64 / X86-64",
+        command: "curl -fsSL https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install.sh | bash",
+        label: "Download from GitHub",
+        href: releasesHref,
+      },
+      windows: {
+        title: "RDB for Windows",
+        description: "Run the PowerShell installer, or download a standalone executable from the current release.",
+        arch: "ARM64 / X86-64",
+        command: "irm https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install.ps1 | iex",
+        label: "Download from GitHub",
+        href: releasesHref,
+      },
+    };
+    const platformButtons = [...document.querySelectorAll("[data-platform]")];
+    platformButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const platform = platforms[button.dataset.platform];
+        if (!platform) return;
+        platformButtons.forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
+        document.querySelector("#platform-title").textContent = platform.title;
+        document.querySelector("#platform-description").textContent = platform.description;
+        document.querySelector("#platform-arch").textContent = platform.arch;
+        document.querySelector("#install-command").textContent = platform.command;
+        const link = document.querySelector("#download-link");
+        link.textContent = platform.label;
+        link.href = platform.href;
+        document.querySelector("#copy-command span:last-child").textContent = "Copy command";
+      });
+    });
+
+    const copyButton = document.querySelector("#copy-command");
+    copyButton?.addEventListener("click", async () => {
+      const command = document.querySelector("#install-command")?.textContent ?? "";
+      try {
+        await navigator.clipboard.writeText(command);
+        copyButton.querySelector("span:last-child").textContent = "Copied";
+      } catch {
+        copyButton.querySelector("span:last-child").textContent = "Select command above";
+      }
+    });
+
+    if (!reducedMotion) {
+      const observer = new IntersectionObserver(
+        (entries) => entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("is-visible");
+            observer.unobserve(entry.target);
+          }
+        }),
+        { threshold: 0.12 },
+      );
+      document.querySelectorAll("[data-reveal]").forEach((element) => observer.observe(element));
+    }
+  </script>
 </Base>
