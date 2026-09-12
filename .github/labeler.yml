@@ -26,6 +26,13 @@
 "area: app-material":
   - changed-files:
       - any-glob-to-any-file:
+          - "app/vendor/material/**"
+
+# Everything vendored, Material included: upstream source carried in-tree and
+# patched (see each directory's PATCHES.md), not code written here.
+"area: app-vendor":
+  - changed-files:
+      - any-glob-to-any-file:
           - "app/vendor/**"
 
 "area: app-wiring":
