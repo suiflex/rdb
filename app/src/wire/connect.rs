@@ -373,6 +373,28 @@ fn finish_connect_failure(weak: slint::Weak<MainWindow>, e: rdb_core::error::Rdb
     });
 }
 
+/// A connect task that panicked still has to clear the picker's
+/// "Connecting…" state; nothing else will, and the task it was waiting on is
+/// gone. An abort is not a failure — Cancel and a superseding connect both
+/// use it — so that reports nothing.
+///
+/// Debug builds only: `panic = "abort"` in the release profile takes the whole
+/// process down before the join can ever resolve.
+fn panic_to_connection_error(e: tokio::task::JoinError) -> Option<rdb_core::error::RdbError> {
+    e.is_panic()
+        .then(|| rdb_core::error::RdbError::Connection("connect failed unexpectedly".into()))
+}
+
+/// Passes an abort through to the task it wraps, so watching a task from
+/// another one leaves `abort()` on the watcher meaning what it meant before.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// `on_connect_clicked`: flush the active tab, resolve the picked
 /// connection, reset workspace state for it, paint the UI immediately,
 /// then spawn the driver connect on tokio.
@@ -670,7 +692,7 @@ fn spawn_connect_task(
         .upgrade()
         .map(|w| w.get_nosql_collection_limit().max(1) as usize)
         .unwrap_or(200);
-    let handle = rt.spawn(async move {
+    let inner = rt.spawn(async move {
         let slot = match claimed {
             Some(g) => g,
             None => store_driver.clone().lock_owned().await,
@@ -713,6 +735,19 @@ fn spawn_connect_task(
                 // `current` untouched.
                 drop(slot);
                 finish_connect_failure(weak2, e);
+            }
+        }
+    });
+    // Watch that task, so a panic inside it still clears "Connecting…"
+    // instead of leaving the picker spinning on a task that is already gone.
+    // The stored handle is this watcher, and `AbortOnDrop` passes an abort
+    // through to the connect itself, so Cancel behaves exactly as before.
+    let watch_weak = weak.clone();
+    let handle = rt.spawn(async move {
+        let mut connect = AbortOnDrop(inner);
+        if let Err(join) = (&mut connect.0).await {
+            if let Some(err) = panic_to_connection_error(join) {
+                finish_connect_failure(watch_weak, err);
             }
         }
     });
