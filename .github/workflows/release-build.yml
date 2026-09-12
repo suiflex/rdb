@@ -164,6 +164,7 @@ jobs:
       - name: Refresh website release data
         env:
           RELEASE_TAG: ${{ github.ref_name }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm --prefix website run fetch-release
       - name: Open and merge website release data PR
         env:
