@@ -258,6 +258,7 @@ Everything here is env-var driven; there are no CLI flags.
 | `RDB_MOCK=1` | Seeded in-memory data and an in-process driver, no network. Needs `--features mock`. |
 | `RDB_WIN=WxH` | Fixed logical window size, for deterministic screenshots. |
 | `RDB_SCREEN=<name>` | Auto-drives the UI to a named screen (mock mode only). |
+| `RDB_THEME=light\|dark` | Pins the theme for a reference shot, whatever the OS is set to (only read alongside `RDB_SCREEN`). |
 | `RDB_SHOT=<path.bmp>` | Screenshot after `RDB_SHOT_DELAY_MS` (default 1200), then quit. Needs `--features mock`. |
 
 **`RDB_MOCK` disables persistence.** `save_query_tabs` and the startup restore
