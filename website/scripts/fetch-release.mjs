@@ -9,10 +9,15 @@ const API = TAG
   : "https://api.github.com/repos/suiflex/rdb/releases/latest";
 const OUT = new URL("../src/data/release.json", import.meta.url);
 
+// Unauthenticated the API allows 60 requests/hour per IP, which shared CI
+// runners exhaust; a token raises that to 5000. Optional so a local run
+// without one still works.
+const TOKEN = process.env.GITHUB_TOKEN?.trim();
+const HEADERS = { Accept: "application/vnd.github+json" };
+if (TOKEN) HEADERS.Authorization = `Bearer ${TOKEN}`;
+
 try {
-  const res = await fetch(API, {
-    headers: { Accept: "application/vnd.github+json" },
-  });
+  const res = await fetch(API, { headers: HEADERS });
   if (!res.ok) throw new Error(`GitHub API responded ${res.status}`);
   const data = await res.json();
   const release = {
