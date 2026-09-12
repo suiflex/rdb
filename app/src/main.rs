@@ -4868,6 +4868,16 @@ struct AppFns {
 }
 
 fn main() -> Result<(), slint::PlatformError> {
+    // Pick the rustls crypto provider for the whole process, before any driver
+    // can reach TLS. Both backends are linked in — aws-lc-rs through rustls'
+    // own default feature and through russh, ring through ureq — and rustls
+    // refuses to guess between them: the first TLS handshake panics on a tokio
+    // worker instead of returning an error (issue #291). The default SslMode is
+    // `Prefer`, so a connection nobody configured takes that path.
+    // `Err` here only means a provider is already installed, which is the state
+    // this line wants anyway, so it is not worth failing startup over.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     // Name this build to every server it connects to, so RDB is attributable in
     // pg_stat_activity / SHOW PROCESSLIST / currentOp rather than showing up as
     // an anonymous client. Set before any connection can be opened. The version
