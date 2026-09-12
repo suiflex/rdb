@@ -106,8 +106,11 @@ pub fn bare_word(
             // Columns of the statement's own FROM/JOIN tables come first (they
             // are what's actually in scope, cross-schema included), then the
             // active-schema columns/tables and keywords as a fallback.
-            let mut c = from_table_columns(stmt, nodes);
-            c.extend(all_columns(scope));
+            let (has_scope, mut c) =
+                from_table_columns(stmt, nodes, rdb_connstore::QueryLanguage::Sql);
+            if !has_scope {
+                c.extend(all_columns(scope));
+            }
             c.extend(tables(scope));
             c.extend(keywords());
             c
