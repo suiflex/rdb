@@ -346,12 +346,12 @@ fn from_table_columns(
 ) -> (bool, Vec<Candidate>) {
     let refs = table_refs(stmt, language);
     let mut seen = std::collections::HashSet::new();
-    let cols = refs
+    let cols: Vec<Candidate> = refs
         .iter()
         .flat_map(|(table, _)| columns_of(nodes, table))
         .filter(|c| seen.insert(c.label.to_lowercase()))
         .collect();
-    (!refs.is_empty(), cols)
+    (!cols.is_empty(), cols)
 }
 
 /// The last keyword token in `text` for `language`, uppercased (via the editor
@@ -1207,6 +1207,28 @@ mod tests {
         );
         assert!(c2.iter().any(|x| x.label == "step_id"));
         assert!(!c2.iter().any(|x| x.label == "id"));
+    }
+
+    /// A FROM table not yet in the schema tree (still loading, or a typo)
+    /// must not blank the popup — the active schema's columns still show.
+    #[test]
+    fn where_falls_back_when_from_table_not_in_tree() {
+        let mk = |l: &str, k: &str| VmTreeNode {
+            label: l.into(),
+            kind: k.into(),
+        };
+        let n = vec![
+            mk("public", "database"),
+            mk("users", "table"),
+            mk("id", "field"),
+        ];
+        let (_, c) = sug(
+            "select * from not_loaded_yet where i",
+            &n,
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
+        assert!(c.iter().any(|x| x.label == "id"));
     }
 
     /// Going back to replace the `*` in an already-written
