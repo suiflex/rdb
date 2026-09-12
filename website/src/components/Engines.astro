@@ -11,9 +11,14 @@ import {
 } from "simple-icons";
 import { REPO_LINKS } from "../config";
 
+interface Props {
+  compact?: boolean;
+}
+const { compact = false } = Astro.props;
+
 // simple-icons has no Microsoft SQL Server mark (it only covers open brands),
 // no Valkey mark yet (requested upstream, not shipped), and no Oracle mark in
-// the 15.x line we pin — all three render without an `icon`, see the
+// the 15.x line we pin. All three render without an `icon`, see the
 // conditional <svg> below.
 const engines = [
   { icon: siPostgresql, name: "PostgreSQL", detail: "via tokio-postgres" },
@@ -30,13 +35,13 @@ const engines = [
 ];
 ---
 
-<ul class="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-3">
+<ul class={compact ? "engine-mini-grid" : "grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-3"}>
   {
     engines.map((engine) => (
-      <li class="flex items-center gap-3 bg-panel px-4 py-4 transition-colors hover:bg-panel-2 sm:px-5">
+      <li class={compact ? "engine-mini-item" : "flex items-center gap-3 bg-panel px-4 py-4 transition-colors hover:bg-panel-2 sm:px-5"}>
         {
           engine.icon && (
-            <svg viewBox="0 0 24 24" class="h-6 w-6 shrink-0 fill-fg-2" aria-hidden="true">
+            <svg viewBox="0 0 24 24" class={compact ? "engine-mini-icon" : "h-6 w-6 shrink-0 fill-fg-2"} aria-hidden="true">
               <path d={engine.icon.path} />
             </svg>
           )
@@ -49,7 +54,7 @@ const engines = [
     ))
   }
 </ul>
-<p class="mt-4 text-sm text-fg-3">
+<p class={compact ? "engine-mini-note" : "mt-4 text-sm text-fg-3"}>
   All eleven ship in the current release. BigQuery is
   <a
     href={REPO_LINKS.vision}

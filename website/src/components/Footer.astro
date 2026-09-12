@@ -5,12 +5,12 @@ import { FOOTER, GITHUB, PRODUCT, url } from "../config";
 const year = new Date().getFullYear();
 ---
 
-<footer class="border-t border-line">
-  <div class="mx-auto max-w-6xl px-4 py-14 sm:px-6">
-    <div class="grid gap-10 sm:grid-cols-2 lg:grid-cols-5">
-      <div class="lg:col-span-2">
-        <a href={url("/")} class="flex items-center gap-2.5 font-display text-lg font-semibold tracking-tight">
-          <Logo class="h-7 w-7 rounded-[7px] ring-1 ring-line" />
+<footer class="site-footer">
+  <div class="home-container py-14">
+    <div class="footer-grid">
+      <div>
+        <a href={url("/")} class="flex items-center gap-2.5 font-display text-lg font-semibold tracking-[0]">
+          <Logo class="h-7 w-7 rounded-[6px] ring-1 ring-line" />
           {PRODUCT}
         </a>
         <p class="mt-4 max-w-xs text-sm leading-relaxed text-fg-3">
@@ -20,7 +20,7 @@ const year = new Date().getFullYear();
         <a
           href="https://suiflex.dev"
           rel="noopener"
-          class="mt-4 inline-flex items-center gap-2 rounded-full border border-line px-3 py-1.5 text-sm text-fg-3 transition-colors hover:border-line-2 hover:text-fg"
+          class="footer-badge"
         >
           <img src={url("/assets/brand/logo-mark.png")} alt="" aria-hidden="true" class="h-5 w-5 rounded-md" />
           Suiflex Org
@@ -36,7 +36,7 @@ const year = new Date().getFullYear();
                   <a
                     href={item.external ? item.href : url(item.href)}
                     rel={item.external ? "noopener" : undefined}
-                    class="text-sm text-fg-2 transition-colors hover:text-fg"
+                    class="footer-link"
                   >
                     {item.label}
                   </a>
@@ -47,7 +47,7 @@ const year = new Date().getFullYear();
         ))
       }
     </div>
-    <div class="mt-12 flex flex-col justify-between gap-3 border-t border-line pt-6 text-sm text-fg-3 sm:flex-row">
+    <div class="footer-bottom">
       <p>Apache-2.0 licensed. Copyright {year} the RDB contributors.</p>
       <p>
         Built in the open at
