@@ -1390,7 +1390,9 @@ callback create-table-commit();
                                 property <bool> hovered: tab-ta.has-hover
                                     || rename-ta.has-hover || move-ta.has-hover
                                     || close-ta.has-hover;
-                                width: min(240px, tab-content.preferred-width);
+                                // Floor as well as cap: a short title still gives a
+                                // comfortable click target.
+                                width: clamp(tab-content.preferred-width, 110px, 240px);
                                 height: Tokens.doc-tab-h;
                                 // Which tab is selected is otherwise only a
                                 // background colour, so nothing outside the
@@ -1518,7 +1520,10 @@ callback create-table-commit();
                                     y: 0;
                                     height: parent.height - 3px;
                                     background: Tokens.card;
-                                    visible: i == root.active-tab || tab-root.hovered;
+                                    // Active tab only: on an inactive tab the overlay
+                                    // covered the title on hover, so a click landed on
+                                    // rename or split instead of selecting the tab.
+                                    visible: i == root.active-tab;
                                     Rectangle {
                                         x: 0;
                                         width: 18px;
@@ -1644,7 +1649,7 @@ callback create-table-commit();
                                 property <bool> hovered: p1-tab-ta.has-hover
                                     || p1-rename-ta.has-hover || p1-move-ta.has-hover
                                     || p1-close-ta.has-hover;
-                                width: min(240px, p1-tab-content.preferred-width);
+                                width: clamp(p1-tab-content.preferred-width, 110px, 240px);
                                 height: Tokens.doc-tab-h;
                                 // Same reasoning as the left group above.
                                 accessible-role: AccessibleRole.tab;
@@ -1737,7 +1742,8 @@ callback create-table-commit();
                                     y: 0;
                                     height: parent.height - 3px;
                                     background: Tokens.card;
-                                    visible: i == root.p1-active-tab || p1-tab-root.hovered;
+                                    // Active tab only — same as the left strip.
+                                    visible: i == root.p1-active-tab;
                                     Rectangle {
                                         x: 0;
                                         width: 18px;
