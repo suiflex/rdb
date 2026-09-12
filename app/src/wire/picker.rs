@@ -960,6 +960,7 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
             | "whats-new"
             | "settings"
             | "settings-updates"
+            | "settings-about"
             | "tooltip"
             | "zoom"
             | "shortcuts"
@@ -1012,8 +1013,12 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
                     | "conn-add" => {
                         show_chrome_screen(&w, &which)
                     }
-                    "settings" | "settings-updates" => {
-                        w.set_settings_tab(if which == "settings" { 0 } else { 1 });
+                    "settings" | "settings-updates" | "settings-about" => {
+                        w.set_settings_tab(match which.as_str() {
+                            "settings" => 0,
+                            "settings-updates" => 1,
+                            _ => 2,
+                        });
                         w.set_settings_open(true);
                     }
                     _ => w.invoke_open_function("uuid_generate_v3".into()),
