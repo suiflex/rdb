@@ -6,7 +6,7 @@ import { REPO_LINKS } from "../config";
 
 // The real license file from the repository root, embedded at build time.
 // Resolved from process.cwd() (astro build always runs from website/), not
-// import.meta.url — see changelog.astro for why.
+// import.meta.url. See changelog.astro for why.
 const licenseText = readFileSync(resolve(process.cwd(), "../LICENSE"), "utf-8").trim();
 ---
 
@@ -15,20 +15,26 @@ const licenseText = readFileSync(resolve(process.cwd(), "../LICENSE"), "utf-8").
   description="RDB is released under the Apache License 2.0: free to use, modify, and redistribute, commercially or otherwise."
   path="/license"
 >
-  <section class="mx-auto max-w-3xl px-4 pt-16 pb-20 sm:px-6">
-    <h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">License</h1>
-    <p class="mt-4 text-lg leading-relaxed text-fg-2">
+  <section class="page-hero">
+    <div class="page-hero-inner">
+      <p class="page-kicker">Apache-2.0</p>
+      <h1 class="page-title">License</h1>
+      <p class="page-lede">
       RDB is released under the Apache License 2.0. In practice that means
       you can use it at work, modify it, and redistribute it, free of charge,
       and every contributor grants you a patent licence for their work. In
       return, keep the licence and NOTICE files with any copy you pass on, and
       say which files you changed.
-    </p>
-    <pre
-      class="mt-10 overflow-x-auto rounded-xl border border-line bg-code p-6 font-mono text-xs leading-relaxed whitespace-pre-wrap text-fg-2">{licenseText}</pre>
-    <p class="mt-6 text-sm text-fg-3">
+      </p>
+    </div>
+  </section>
+  <section class="page-section">
+    <div class="section-inner">
+      <pre class="legal-text">{licenseText}</pre>
+      <p class="page-note">
       Canonical copy:
-      <a href={REPO_LINKS.license} rel="noopener" class="underline decoration-line underline-offset-4 hover:text-fg">LICENSE in the repository</a>.
-    </p>
+        <a href={REPO_LINKS.license} rel="noopener">LICENSE in the repository</a>.
+      </p>
+    </div>
   </section>
 </Base>
