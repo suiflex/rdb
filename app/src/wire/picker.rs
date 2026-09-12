@@ -885,6 +885,15 @@ fn schedule_sql_open_timer(window: &MainWindow, screen: &str) {
     );
 }
 
+/// Settings tab a `settings*` screen opens on: Appearance, Updates, About.
+fn settings_screen_tab(which: &str) -> i32 {
+    match which {
+        "settings" => 0,
+        "settings-updates" => 1,
+        _ => 2,
+    }
+}
+
 /// Chrome review screens: the picker's Export menu (opened, or opened and
 /// hovered), the rail notch in the light theme (in dark the card is nearly
 /// the canvas colour), and the collapsed sidebar with the rail kept.
@@ -1014,11 +1023,7 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
                         show_chrome_screen(&w, &which)
                     }
                     "settings" | "settings-updates" | "settings-about" => {
-                        w.set_settings_tab(match which.as_str() {
-                            "settings" => 0,
-                            "settings-updates" => 1,
-                            _ => 2,
-                        });
+                        w.set_settings_tab(settings_screen_tab(&which));
                         w.set_settings_open(true);
                     }
                     _ => w.invoke_open_function("uuid_generate_v3".into()),
