@@ -9,7 +9,7 @@ import {
     MenuItem as MaterialMenuItem
 } from "@material";
 import {
-    SearchCommandPill, BreadcrumbChip, DbBadge, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SettingsSectionHeader, TextButton, Toggle, ToggleRow, Tooltip, TooltipArea, Shortcut
+    AppMenu, SearchCommandPill, BreadcrumbChip, DbBadge, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SettingsSectionHeader, TextButton, Toggle, ToggleRow, Tooltip, TooltipArea, Shortcut
 } from "components.slint";
 export { Shortcut }
 import { NavCluster } from "nav-cluster.slint";
@@ -1421,17 +1421,10 @@ callback create-table-commit();
                                 padding-top: Tokens.doc-tab-row-h - Tokens.doc-tab-h;
                                 spacing: Tokens.sp2;
                             for tab[i] in root.tabs: tab-root := Rectangle {
-                                // The action buttons sit on top of `tab-ta`, so
-                                // hovering one takes the hover away from it. A
-                                // gate on `tab-ta` alone therefore hid the button
-                                // the pointer had just reached — and a hidden
-                                // element takes no input, so the hover bounced
-                                // back and the button flickered instead of being
-                                // clickable. Count any of the four as hovering
-                                // the tab.
-                                property <bool> hovered: tab-ta.has-hover
-                                    || rename-ta.has-hover || move-ta.has-hover
-                                    || close-ta.has-hover;
+                                // Close sits on top of `tab-ta`, so hovering it takes
+                                // the hover away from the tab; count either as
+                                // hovering the tab or the button flickers.
+                                property <bool> hovered: tab-ta.has-hover || close-ta.has-hover;
                                 // Floor as well as cap: a short title still gives a
                                 // comfortable click target.
                                 width: clamp(tab-content.preferred-width, 110px, 240px);
@@ -1462,7 +1455,15 @@ callback create-table-commit();
                                         }
                                     }
                                     pointer-event(e) => {
-                                        if (e.kind == PointerEventKind.down) {
+                                        if (e.kind == PointerEventKind.down
+                                            && e.button == PointerEventButton.right) {
+                                            root.tab-menu-index = i;
+                                            root.tab-menu-group = 0;
+                                            root.tab-menu-title = tab.title;
+                                            root.tab-menu-x = tab-root.absolute-position.x - root.absolute-position.x;
+                                            root.tab-menu-y = tab-root.absolute-position.y - root.absolute-position.y + tab-root.height;
+                                            tab-menu.show();
+                                        } else if (e.kind == PointerEventKind.down) {
                                             self.dragging = false;
                                             root.active-tab = i;
                                             root.active-pane = 0;
@@ -1504,7 +1505,7 @@ callback create-table-commit();
                                     padding-left: Tokens.sp3;
                                     // Only the active tab reserves room for the
                                     // action overlay; the rest give it to the title.
-                                    padding-right: i == root.active-tab ? 58px + Tokens.sp2 : Tokens.sp3;
+                                    padding-right: i == root.active-tab ? 26px + Tokens.sp2 : Tokens.sp3;
                                     spacing: Tokens.sp2;
                                     // connection color dot
                                     if tab.engine != "": VerticalLayout {
@@ -1556,7 +1557,7 @@ callback create-table-commit();
                                 // characters).
                                 Rectangle {
                                     x: parent.width - self.width - Tokens.sp1;
-                                    width: 58px;
+                                    width: 26px;
                                     // Stops above the active tab's indicator (pinned to
                                     // the top: centred, it covered the indicator's top).
                                     y: 0;
@@ -1567,65 +1568,7 @@ callback create-table-commit();
                                     // rename or split instead of selecting the tab.
                                     visible: i == root.active-tab;
                                     Rectangle {
-                                        x: 0;
-                                        width: 18px;
-                                        height: 18px;
-                                        y: (parent.height - self.height) / 2;
-                                        border-radius: self.width / 2;
-                                        background: rename-ta.has-hover ? Tokens.border : transparent;
-                                        rename-ta := TouchArea {
-                                            clicked => {
-                                                root.rename-target = i;
-                                                root.rename-group = 0;
-                                                root.rename-text = tab.title;
-                                                root.rename-modal-open = true;
-                                            }
-                                            changed has-hover => {
-                                                if (self.has-hover) {
-                                                    Tooltip.text = "Rename";
-                                                    Tooltip.x = self.absolute-position.x + self.width / 2;
-                                                    Tooltip.y = self.absolute-position.y + self.height + 4px;
-                                                    Tooltip.shown = true;
-                                                } else if Tooltip.text == "Rename" {
-                                                    Tooltip.shown = false;
-                                                }
-                                            }
-                                        }
-                                        AppIcon {
-                                            name: "pencil";
-                                            size: 11px;
-                                            color: rename-ta.has-hover ? Tokens.text : Tokens.text-dim;
-                                        }
-                                    }
-                                    Rectangle {
-                                        x: 20px;
-                                        width: 18px;
-                                        height: 18px;
-                                        y: (parent.height - self.height) / 2;
-                                        border-radius: self.width / 2;
-                                        background: move-ta.has-hover ? Tokens.accent-tint : transparent;
-                                        move-ta := TouchArea {
-                                            clicked => { root.move-tab-group(i, 1); }
-                                            changed has-hover => {
-                                                if (self.has-hover) {
-                                                    Tooltip.text = "Split to other pane";
-                                                    Tooltip.x = self.absolute-position.x + self.width / 2;
-                                                    Tooltip.y = self.absolute-position.y + self.height + 4px;
-                                                    Tooltip.shown = true;
-                                                } else if Tooltip.text == "Split to other pane" {
-                                                    Tooltip.shown = false;
-                                                }
-                                            }
-                                        }
-                                        AppIcon {
-                                            name: "columns";
-                                            size: 11px;
-                                            color: move-ta.has-hover ? Tokens.accent : Tokens.text-dim;
-                                        }
-                                    }
-                                    // close affordance (active or hovered tab)
-                                    Rectangle {
-                                        x: 40px;
+                                        x: 4px;
                                         width: 18px;
                                         height: 18px;
                                         y: (parent.height - self.height) / 2;
@@ -1688,9 +1631,7 @@ callback create-table-commit();
                                 spacing: Tokens.sp2;
                             for tab[i] in root.p1-tabs: p1-tab-root := Rectangle {
                                 // Same hover-flicker fix as the left strip above.
-                                property <bool> hovered: p1-tab-ta.has-hover
-                                    || p1-rename-ta.has-hover || p1-move-ta.has-hover
-                                    || p1-close-ta.has-hover;
+                                property <bool> hovered: p1-tab-ta.has-hover || p1-close-ta.has-hover;
                                 width: clamp(p1-tab-content.preferred-width, 110px, 240px);
                                 height: Tokens.doc-tab-h;
                                 // Same reasoning as the left group above.
@@ -1712,7 +1653,15 @@ callback create-table-commit();
                                         }
                                     }
                                     pointer-event(e) => {
-                                        if (e.kind == PointerEventKind.down) {
+                                        if (e.kind == PointerEventKind.down
+                                            && e.button == PointerEventButton.right) {
+                                            root.tab-menu-index = i;
+                                            root.tab-menu-group = 1;
+                                            root.tab-menu-title = tab.title;
+                                            root.tab-menu-x = p1-tab-root.absolute-position.x - root.absolute-position.x;
+                                            root.tab-menu-y = p1-tab-root.absolute-position.y - root.absolute-position.y + p1-tab-root.height;
+                                            tab-menu.show();
+                                        } else if (e.kind == PointerEventKind.down) {
                                             self.dragging = false;
                                             root.p1-active-tab = i;
                                             root.active-pane = 1;
@@ -1749,7 +1698,7 @@ callback create-table-commit();
                                 p1-tab-content := HorizontalLayout {
                                     padding-left: Tokens.sp3;
                                     // Same overlay reserve rule as the left strip.
-                                    padding-right: i == root.p1-active-tab ? 58px + Tokens.sp2 : Tokens.sp3;
+                                    padding-right: i == root.p1-active-tab ? 26px + Tokens.sp2 : Tokens.sp3;
                                     spacing: Tokens.sp2;
                                     if tab.engine != "": VerticalLayout {
                                         alignment: center;
@@ -1778,7 +1727,7 @@ callback create-table-commit();
                                 // Action overlay — same as the left strip.
                                 Rectangle {
                                     x: parent.width - self.width - Tokens.sp1;
-                                    width: 58px;
+                                    width: 26px;
                                     // Stops above the active tab's indicator (pinned to
                                     // the top: centred, it covered the indicator's top).
                                     y: 0;
@@ -1787,64 +1736,7 @@ callback create-table-commit();
                                     // Active tab only — same as the left strip.
                                     visible: i == root.p1-active-tab;
                                     Rectangle {
-                                        x: 0;
-                                        width: 18px;
-                                        height: 18px;
-                                        y: (parent.height - self.height) / 2;
-                                        border-radius: self.width / 2;
-                                        background: p1-rename-ta.has-hover ? Tokens.border : transparent;
-                                        p1-rename-ta := TouchArea {
-                                            clicked => {
-                                                root.rename-target = i;
-                                                root.rename-group = 1;
-                                                root.rename-text = tab.title;
-                                                root.rename-modal-open = true;
-                                            }
-                                            changed has-hover => {
-                                                if (self.has-hover) {
-                                                    Tooltip.text = "Rename";
-                                                    Tooltip.x = self.absolute-position.x + self.width / 2;
-                                                    Tooltip.y = self.absolute-position.y + self.height + 4px;
-                                                    Tooltip.shown = true;
-                                                } else if Tooltip.text == "Rename" {
-                                                    Tooltip.shown = false;
-                                                }
-                                            }
-                                        }
-                                        AppIcon {
-                                            name: "pencil";
-                                            size: 11px;
-                                            color: p1-rename-ta.has-hover ? Tokens.text : Tokens.text-dim;
-                                        }
-                                    }
-                                    Rectangle {
-                                        x: 20px;
-                                        width: 18px;
-                                        height: 18px;
-                                        y: (parent.height - self.height) / 2;
-                                        border-radius: self.width / 2;
-                                        background: p1-move-ta.has-hover ? Tokens.accent-tint : transparent;
-                                        p1-move-ta := TouchArea {
-                                            clicked => { root.move-tab-group(i, 0); }
-                                            changed has-hover => {
-                                                if (self.has-hover) {
-                                                    Tooltip.text = "Split to other pane";
-                                                    Tooltip.x = self.absolute-position.x + self.width / 2;
-                                                    Tooltip.y = self.absolute-position.y + self.height + 4px;
-                                                    Tooltip.shown = true;
-                                                } else if Tooltip.text == "Split to other pane" {
-                                                    Tooltip.shown = false;
-                                                }
-                                            }
-                                        }
-                                        AppIcon {
-                                            name: "columns";
-                                            size: 11px;
-                                            color: p1-move-ta.has-hover ? Tokens.accent : Tokens.text-dim;
-                                        }
-                                    }
-                                    Rectangle {
-                                        x: 40px;
+                                        x: 4px;
                                         width: 18px;
                                         height: 18px;
                                         y: (parent.height - self.height) / 2;
@@ -3626,6 +3518,41 @@ callback create-table-commit();
                         clicked => { root.whats-new-open = false; }
                     }
                 }
+            }
+        }
+    }
+
+    // ----- tab context menu (right-click): rename and split live here, so the
+    // click that activates a tab can't land on a button that just appeared
+    // under the pointer. Both strips share it; `tab-menu-group` says which.
+    property <int> tab-menu-index: -1;
+    property <int> tab-menu-group: 0;
+    property <string> tab-menu-title;
+    property <length> tab-menu-x;
+    property <length> tab-menu-y;
+    tab-menu := PopupWindow {
+        // Anchored under the tab, clamped so it stays inside the window.
+        x: min(root.tab-menu-x, root.width - self.width - 8px);
+        y: min(root.tab-menu-y, root.height - self.height - 8px);
+        width: 200px;
+        height: tab-menu-list.preferred-height;
+        tab-menu-list := AppMenu {
+            items: ["Rename", "Split to other pane", "Close"];
+            danger-index: 2;
+            activated(action) => {
+                if (action == 0) {
+                    root.rename-target = root.tab-menu-index;
+                    root.rename-group = root.tab-menu-group;
+                    root.rename-text = root.tab-menu-title;
+                    root.rename-modal-open = true;
+                } else if (action == 1) {
+                    root.move-tab-group(root.tab-menu-index, root.tab-menu-group == 0 ? 1 : 0);
+                } else if (root.tab-menu-group == 0) {
+                    root.close-tab(root.tab-menu-index);
+                } else {
+                    root.close-p1-tab(root.tab-menu-index);
+                }
+                tab-menu.close();
             }
         }
     }
