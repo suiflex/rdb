@@ -1747,6 +1747,8 @@ fn sync_conn_chrome(w: &MainWindow, store: &rdb_connstore::ConnStore, connection
     w.set_selected_conn(idx as i32);
     w.set_status_conn(SharedString::from(sc.name.clone()));
     w.set_bc_conn(SharedString::from(sc.name));
+    // Colours and marks the header's query-language chip.
+    w.set_active_engine(SharedString::from(sc.engine.key()));
     w.global::<Theme>()
         .set_accent(theme::accent_or_default(sc.color.as_deref().unwrap_or("")));
     w.set_active_env_tag_label(theme::env_tag_label(sc.env_tag).into());
