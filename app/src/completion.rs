@@ -51,55 +51,103 @@ fn all_columns(nodes: &[VmTreeNode]) -> Vec<Candidate> {
 }
 
 /// Map a table name or `FROM tbl alias` alias to its underlying table name.
-/// `.` stays inside a token so a schema-qualified `schema.table alias` keeps the
-/// table reference whole and the alias is read as the next token.
 fn resolve_alias(stmt: &str, owner: &str, language: rdb_connstore::QueryLanguage) -> String {
-    let ol = owner.to_lowercase();
-    let words: Vec<&str> = stmt
-        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '.'))
-        .filter(|w| !w.is_empty())
-        .collect();
-    for i in 0..words.len() {
-        let w = words[i].to_uppercase();
-        if (w == "FROM" || w == "JOIN") && i + 1 < words.len() {
-            // A FROM list is comma-separated, and the tokenizer already
-            // dropped the commas — so walk the words after FROM in
-            // `table [AS] [alias]` groups until one stops looking like a
-            // table reference. Only the first entry was examined before, so
-            // `FROM a x, b y` could never resolve `y`.
-            let mut j = i + 1;
-            while j < words.len() {
-                let table = words[j];
-                if is_keyword_for(language, table) {
-                    break;
-                }
-                // `FROM tbl AS alias` — the optional AS sits between the two,
-                // and being a keyword it used to end the scan right here.
-                let mut k = j + 1;
-                if words.get(k).is_some_and(|w| w.eq_ignore_ascii_case("AS")) {
-                    k += 1;
-                }
-                // Compare on the last segment too, so a bare `audit_log.`
-                // still resolves to the `archive.audit_log` that FROM named —
-                // and answers with the qualified name, which is what scopes
-                // the column lookup to the right schema.
-                let table_l = table.to_lowercase();
-                if table_l == ol || table_l.rsplit('.').next() == Some(ol.as_str()) {
-                    return table.to_string();
-                }
-                match words.get(k) {
-                    Some(alias) if !is_keyword_for(language, alias) => {
-                        if alias.to_lowercase() == ol {
-                            return table.to_string();
-                        }
-                        j = k + 1;
-                    }
-                    _ => j = k,
-                }
-            }
+    for (table, alias) in table_refs(stmt, language) {
+        if table.eq_ignore_ascii_case(owner)
+            || table
+                .rsplit('.')
+                .next()
+                .is_some_and(|t| t.eq_ignore_ascii_case(owner))
+        {
+            return table.to_string();
+        }
+        if alias.is_some_and(|alias| alias.eq_ignore_ascii_case(owner)) {
+            return table.to_string();
         }
     }
     owner.to_string()
+}
+
+fn table_tokens(stmt: &str) -> Vec<&str> {
+    let mut tokens = Vec::new();
+    let mut start = None;
+    for (i, ch) in stmt.char_indices() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' {
+            start.get_or_insert(i);
+            continue;
+        }
+        if let Some(s) = start.take() {
+            tokens.push(&stmt[s..i]);
+        }
+        if ch == ',' {
+            tokens.push(",");
+        }
+    }
+    if let Some(s) = start {
+        tokens.push(&stmt[s..]);
+    }
+    tokens
+}
+
+fn table_refs(stmt: &str, language: rdb_connstore::QueryLanguage) -> Vec<(&str, Option<&str>)> {
+    let words = table_tokens(stmt);
+    let mut refs = Vec::new();
+    let mut i = 0;
+    while i < words.len() {
+        if !(words[i].eq_ignore_ascii_case("FROM") || words[i].eq_ignore_ascii_case("JOIN")) {
+            i += 1;
+            continue;
+        }
+        // Resume right after the last token this clause consumed, instead of
+        // rescanning table/alias tokens table_list already read.
+        let (list, next) = table_list(&words, i + 1, language);
+        refs.extend(list);
+        i = next;
+    }
+    refs
+}
+
+/// Every `table [AS] alias` entry starting at `start`, up to the next clause
+/// keyword. Returns the entries plus the index to resume scanning at.
+fn table_list<'a>(
+    words: &[&'a str],
+    start: usize,
+    language: rdb_connstore::QueryLanguage,
+) -> (Vec<(&'a str, Option<&'a str>)>, usize) {
+    let mut refs = Vec::new();
+    let mut j = start;
+    while let Some((table, alias, next)) = next_table_ref(words, j, language) {
+        refs.push((table, alias));
+        j = next;
+    }
+    (refs, j)
+}
+
+/// Read one `table [AS] alias` entry at or after `j`, skipping a leading
+/// comma. Returns the ref plus the index to resume at, or `None` once `j`
+/// hits a keyword (end of the table list) or the end of `words`.
+fn next_table_ref<'a>(
+    words: &[&'a str],
+    mut j: usize,
+    language: rdb_connstore::QueryLanguage,
+) -> Option<(&'a str, Option<&'a str>, usize)> {
+    while words.get(j) == Some(&",") {
+        j += 1;
+    }
+    let table = *words.get(j)?;
+    if is_keyword_for(language, table) {
+        return None;
+    }
+    let mut k = j + 1;
+    if words.get(k).is_some_and(|w| w.eq_ignore_ascii_case("AS")) {
+        k += 1;
+    }
+    let alias = words
+        .get(k)
+        .copied()
+        .filter(|w| *w != "," && !is_keyword_for(language, w));
+    let next = if alias.is_some() { k + 1 } else { k };
+    Some((table, alias, next))
 }
 
 fn is_keyword_for(language: rdb_connstore::QueryLanguage, w: &str) -> bool {
@@ -291,24 +339,19 @@ fn columns_of(nodes: &[VmTreeNode], owner: &str) -> Vec<Candidate> {
 /// cross-schema tables the active-schema `all_columns` would miss. `stmt` is the
 /// whole statement under the cursor, not just the text before it: the `FROM` is
 /// usually already written when the user goes back to replace the `SELECT *`.
-fn from_table_columns(stmt: &str, nodes: &[VmTreeNode]) -> Vec<Candidate> {
-    let words: Vec<&str> = stmt
-        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '.'))
-        .filter(|w| !w.is_empty())
-        .collect();
-    let mut cols = Vec::new();
+fn from_table_columns(
+    stmt: &str,
+    nodes: &[VmTreeNode],
+    language: rdb_connstore::QueryLanguage,
+) -> (bool, Vec<Candidate>) {
+    let refs = table_refs(stmt, language);
     let mut seen = std::collections::HashSet::new();
-    for i in 0..words.len() {
-        let w = words[i].to_uppercase();
-        if (w == "FROM" || w == "JOIN") && i + 1 < words.len() {
-            for c in columns_of(nodes, words[i + 1]) {
-                if seen.insert(c.label.to_lowercase()) {
-                    cols.push(c);
-                }
-            }
-        }
-    }
-    cols
+    let cols = refs
+        .iter()
+        .flat_map(|(table, _)| columns_of(nodes, table))
+        .filter(|c| seen.insert(c.label.to_lowercase()))
+        .collect();
+    (!refs.is_empty(), cols)
 }
 
 /// The last keyword token in `text` for `language`, uppercased (via the editor
@@ -507,11 +550,17 @@ pub fn suggest(
 fn rank_and_cap(mut cands: Vec<Candidate>, word: &str) -> (usize, Vec<Candidate>) {
     let wl = word.to_lowercase();
     if !wl.is_empty() {
-        cands.retain(|c| match_rank(&c.label, &wl).is_some());
-        // Literal prefixes rank above `_`-segment matches, which rank above
-        // underscore-squashed ones, so the most literal completion stays on
-        // top; the sort is stable, so order within a tier is unchanged.
-        cands.sort_by_key(|c| match_rank(&c.label, &wl).unwrap_or(u8::MAX));
+        let ranked: Vec<_> = cands
+            .into_iter()
+            .filter_map(|c| match_rank(&c.label, &wl).map(|r| (r, c)))
+            .collect();
+        let Some(best_rank) = ranked.iter().map(|(r, _)| *r).min() else {
+            return (word.chars().count(), Vec::new());
+        };
+        cands = ranked
+            .into_iter()
+            .filter_map(|(r, c)| (r == best_rank).then_some(c))
+            .collect();
     }
     // dedup by label (a column name may appear across tables), keep first.
     let mut seen = std::collections::HashSet::new();
@@ -858,6 +907,52 @@ mod tests {
     }
 
     #[test]
+    fn scoped_column_completion_does_not_leak_other_tables() {
+        let (_, c) = sug(
+            "select * from users where config",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
+        assert!(!c.iter().any(|x| x.label == "config_id"), "got {c:?}");
+    }
+
+    #[test]
+    fn from_scope_reads_unaliased_comma_tables() {
+        let mut n = nodes();
+        n.push(VmTreeNode {
+            label: "orders".into(),
+            kind: "table".into(),
+        });
+        n.push(VmTreeNode {
+            label: "order_id".into(),
+            kind: "field".into(),
+        });
+        let (_, c) = sug(
+            "select * from users, orders where ord",
+            &n,
+            "public",
+            rdb_connstore::QueryLanguage::Sql,
+        );
+        assert!(c.iter().any(|x| x.label == "order_id"), "got {c:?}");
+    }
+
+    #[test]
+    fn prefix_match_drops_weaker_match_tiers() {
+        let cand = |label: &str| Candidate {
+            label: label.into(),
+            kind: "field".into(),
+            sub: String::new(),
+        };
+        let cands = vec![cand("name"), cand("business_name")];
+        let (_, c) = rank_and_cap(cands, "n");
+        assert_eq!(
+            c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
+            ["name"]
+        );
+    }
+
+    #[test]
     fn mongo_db_dot_suggests_collections() {
         // MongoDB: `db.` is the current database, so it must surface the active
         // schema's collections even though `db` is not a schema node.
@@ -1042,8 +1137,8 @@ mod tests {
         assert!(c.iter().any(|x| x.label == "job_config"));
     }
 
-    /// Typing a mid-word `_` segment finds the identifier, and a true prefix
-    /// still ranks above the subword hit.
+    /// Typing a mid-word `_` segment finds the identifier unless a true prefix
+    /// already answers the word.
     #[test]
     fn subword_matches_underscore_segment() {
         let n = vec![
@@ -1071,9 +1166,8 @@ mod tests {
             rdb_connstore::QueryLanguage::Sql,
         );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
-        assert!(labels.contains(&"flag_teknis"));
         // `teknis_id` is a real prefix → ranks ahead of the mid-word match.
-        assert_eq!(labels.first(), Some(&"teknis_id"));
+        assert_eq!(labels, ["teknis_id"]);
     }
 
     /// WHERE on a cross-schema table (not the active schema) still offers that
@@ -1215,7 +1309,7 @@ mod tests {
         );
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
-            ["jobconfig", "job_config"]
+            ["jobconfig"]
         );
     }
 

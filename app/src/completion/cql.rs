@@ -38,8 +38,11 @@ pub fn bare_word(
         // column/predicate position.
         Some("SELECT") | Some("WHERE") | Some("AND") | Some("OR") | Some("SET") | Some("BY")
         | Some("VALUES") | Some("USING") | Some("ALLOW") => {
-            let mut c = from_table_columns(stmt, nodes);
-            c.extend(all_columns(scope));
+            let (has_scope, mut c) =
+                from_table_columns(stmt, nodes, rdb_connstore::QueryLanguage::Cql);
+            if !has_scope {
+                c.extend(all_columns(scope));
+            }
             c.extend(tables(scope));
             c.extend(keywords());
             c
