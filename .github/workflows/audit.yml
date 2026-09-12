@@ -25,43 +25,59 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          # All ignored advisories are transitive with no upgrade path from
-          # this workspace. Revisit when the pulling dependency bumps.
-          #   0194/0195 quick-xml   — wayland-scanner (winit), pinned 0.39
-          #   2024-0436 paste       — rav1e -> image (unmaintained proc-macro)
-          #   2026-0206 rustybuzz   — usvg -> resvg (unmaintained)
-          #   2026-0192 ttf-parser  — fontdb -> usvg (unmaintained)
-          #   2025-0141 bincode     — typed-index-collections (unmaintained)
-          #   2026-0235 rkyv        — rust_decimal optional dep, feature not
-          #                           enabled by driver-postgres, latest
-          #                           rust_decimal (1.42.1) still pulls it
-          #   2026-0098/0099/0104 rustls-webpki — tiberius (driver-mssql) ->
-          #                           tokio-rustls 0.24 -> rustls 0.21, whose
-          #                           own Cargo.toml pins webpki ^0.101; the
-          #                           patched 0.103.12+/0.104 releases are
-          #                           for the rustls 0.23 line only, so this
-          #                           can't be bumped without tiberius itself
-          #                           moving off tokio-rustls 0.24. Neither
-          #                           issue applies to how we use it: the
-          #                           name-constraint bugs need a misissued
-          #                           cert to already pass signature
-          #                           verification, and the CRL panic only
-          #                           affects code that parses CRLs, which
-          #                           this workspace never does. Revisit when
-          #                           tiberius bumps its rustls pin.
-          #   2025-0134 rustls-pemfile — tiberius (driver-mssql) -> pinned
-          #                           1.0.4; crate is unmaintained (archived
-          #                           upstream, no CVE), and tiberius 0.12.3
-          #                           (latest on crates.io) still depends on
-          #                           it directly. Revisit when tiberius
-          #                           bumps off it (upstream suggests
-          #                           rustls-pki-types' PemObject trait).
-          #   2023-0071 rsa          — russh-keys -> rsa 0.9 (Marvin attack
-          #                           timing sidechannel in RSA decryption)
-          #   2026-0154 russh        — russh 0.45 (unbounded 32-bit allocation
-          #                           in legacy stream parsing)
-          #   2026-0153 russh-cryptovec — russh-cryptovec 0.7.3
-          ignore: RUSTSEC-2026-0194,RUSTSEC-2026-0195,RUSTSEC-2024-0436,RUSTSEC-2026-0206,RUSTSEC-2026-0192,RUSTSEC-2025-0141,RUSTSEC-2026-0235,RUSTSEC-2026-0098,RUSTSEC-2026-0099,RUSTSEC-2026-0104,RUSTSEC-2025-0134,RUSTSEC-2023-0071,RUSTSEC-2026-0154,RUSTSEC-2026-0153
+      # cargo-audit as a prebuilt binary: installing it from source pulls the
+      # whole cargo-audit dependency tree into every run, so one broken
+      # upstream publish takes the workflow down with it.
+      - uses: taiki-e/install-action@cargo-audit
+      # All ignored advisories are transitive with no upgrade path from
+      # this workspace. Revisit when the pulling dependency bumps.
+      #   0194/0195 quick-xml   — wayland-scanner (winit), pinned 0.39
+      #   2024-0436 paste       — rav1e -> image (unmaintained proc-macro)
+      #   2026-0206 rustybuzz   — usvg -> resvg (unmaintained)
+      #   2026-0192 ttf-parser  — fontdb -> usvg (unmaintained)
+      #   2025-0141 bincode     — typed-index-collections (unmaintained)
+      #   2026-0235 rkyv        — rust_decimal optional dep, feature not
+      #                           enabled by driver-postgres, latest
+      #                           rust_decimal (1.42.1) still pulls it
+      #   2026-0098/0099/0104 rustls-webpki — tiberius (driver-mssql) ->
+      #                           tokio-rustls 0.24 -> rustls 0.21, whose
+      #                           own Cargo.toml pins webpki ^0.101; the
+      #                           patched 0.103.12+/0.104 releases are
+      #                           for the rustls 0.23 line only, so this
+      #                           can't be bumped without tiberius itself
+      #                           moving off tokio-rustls 0.24. Neither
+      #                           issue applies to how we use it: the
+      #                           name-constraint bugs need a misissued
+      #                           cert to already pass signature
+      #                           verification, and the CRL panic only
+      #                           affects code that parses CRLs, which
+      #                           this workspace never does. Revisit when
+      #                           tiberius bumps its rustls pin.
+      #   2025-0134 rustls-pemfile — tiberius (driver-mssql) -> pinned
+      #                           1.0.4; crate is unmaintained (archived
+      #                           upstream, no CVE), and tiberius 0.12.3
+      #                           (latest on crates.io) still depends on
+      #                           it directly. Revisit when tiberius
+      #                           bumps off it (upstream suggests
+      #                           rustls-pki-types' PemObject trait).
+      #   2023-0071 rsa          — russh-keys -> rsa 0.9 (Marvin attack
+      #                           timing sidechannel in RSA decryption)
+      #   2026-0154 russh        — russh 0.45 (unbounded 32-bit allocation
+      #                           in legacy stream parsing)
+      #   2026-0153 russh-cryptovec — russh-cryptovec 0.7.3
+      - run: |
+          cargo audit \
+            --ignore RUSTSEC-2026-0194 \
+            --ignore RUSTSEC-2026-0195 \
+            --ignore RUSTSEC-2024-0436 \
+            --ignore RUSTSEC-2026-0206 \
+            --ignore RUSTSEC-2026-0192 \
+            --ignore RUSTSEC-2025-0141 \
+            --ignore RUSTSEC-2026-0235 \
+            --ignore RUSTSEC-2026-0098 \
+            --ignore RUSTSEC-2026-0099 \
+            --ignore RUSTSEC-2026-0104 \
+            --ignore RUSTSEC-2025-0134 \
+            --ignore RUSTSEC-2023-0071 \
+            --ignore RUSTSEC-2026-0154 \
+            --ignore RUSTSEC-2026-0153
