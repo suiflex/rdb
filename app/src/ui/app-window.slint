@@ -19,7 +19,7 @@ import { CommandPalette, ListModal, PaletteGroup } from "palette.slint";
 import { NoteLine, PaletteItem } from "structs.slint";
 import { ConnForm } from "conn-form.slint";
 import { AppIcon } from "icons.slint";
-import { ScrollView } from "std-widgets.slint";
+import { AboutSlint, ScrollView } from "std-widgets.slint";
 import {
     GridColumn,
     GridCell,
@@ -3249,12 +3249,43 @@ callback create-table-commit();
                         horizontal-alignment: center;
                         wrap: word-wrap;
                     }
-                    Text {
-                        text: "PostgreSQL · MySQL · MariaDB · Redis · Valkey · MongoDB · SQLite · Cassandra · SQL Server · Oracle · ClickHouse";
-                        color: Tokens.text-faint;
-                        font-size: Tokens.font-xs;
-                        horizontal-alignment: center;
-                        wrap: word-wrap;
+                    // Engines as their marks, like the picker's "Works with" row.
+                    // SQL Server ships no official logo, so it stays text (same
+                    // choice as the picker and the website).
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: Tokens.sp3;
+                        Image { source: @image-url("icons/brand/postgres.svg"); width: 18px; height: 18px; image-fit: contain; }
+                        Image { source: @image-url("icons/brand/mysql.svg"); width: 18px; height: 18px; image-fit: contain; }
+                        Image { source: @image-url("icons/brand/mariadb.svg"); width: 18px; height: 18px; image-fit: contain; }
+                        Image { source: @image-url("icons/brand/redis.svg"); width: 18px; height: 18px; image-fit: contain; }
+                        Image { source: @image-url("icons/brand/valkey.svg"); width: 18px; height: 18px; image-fit: contain; }
+                        Image { source: @image-url("icons/brand/mongo.svg"); width: 18px; height: 18px; image-fit: contain; }
+                        Image { source: @image-url("icons/brand/sqlite.svg"); width: 18px; height: 18px; image-fit: contain; }
+                        Image { source: @image-url("icons/brand/cassandra.svg"); width: 18px; height: 18px; image-fit: contain; }
+                        Image { source: @image-url("icons/brand/clickhouse.svg"); width: 18px; height: 18px; image-fit: contain; }
+                        Image { source: @image-url("icons/brand/oracle.svg"); width: 18px; height: 18px; image-fit: contain; }
+                        Text {
+                            text: "SQL Server";
+                            color: Tokens.text-faint;
+                            font-size: Tokens.font-xs;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    // Slint's attribution, as its royalty-free licence asks for
+                    // (app/vendor/i-slint-renderer-femtovg/PATCHES.md).
+                    HorizontalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 180px;
+                            height: 56px;
+                            horizontal-stretch: 0;
+                            AboutSlint {
+                                width: 180px;
+                                height: 56px;
+                            }
+                        }
                     }
                 }
 
