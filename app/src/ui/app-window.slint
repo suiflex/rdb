@@ -4,7 +4,7 @@ import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
     CheckBox, CheckState, CircularProgressIndicator, DropDownMenu, LinearProgressIndicator, MaterialPalette, MaterialScheme,
-    MaterialTypography, ToolTipState,
+    MaterialTypography, StateLayer, ToolTipState,
     // Aliased: the native MenuBar below uses the built-in `MenuItem` element.
     MenuItem as MaterialMenuItem
 } from "@material";
@@ -282,6 +282,9 @@ callback create-table-commit();
     // ----- connections screen detail panel -----
     in property <string> sel-name;
     in property <string> sel-engine;
+    // Engine badge key of the connection the workspace is on ("postgres",
+    // "mongo", …): colours and marks the header's query-language chip.
+    in property <string> active-engine;
     in property <color> sel-color;
     in property <bool> sel-has-custom-color;
     in property <string> sel-sub;
@@ -1109,10 +1112,49 @@ callback create-table-commit();
                     }
                     VerticalLayout {
                         alignment: center;
-                        SecondaryButton {
-                            text: root.new-tab-label;
-                            tooltip: "New query tab  " + Shortcut.primary + Shortcut.separator + "T";
-                            clicked => { root.new-tab(); }
+                        // Query-language chip, tinted with the engine's colour and
+                        // carrying its mark: "SQL" in the same grey read the same
+                        // for every engine, so nothing said which one was live.
+                        Rectangle {
+                            height: 40px;
+                            horizontal-stretch: 0;
+                            border-radius: self.height / 2;
+                            border-width: 1px;
+                            border-color: Tokens.db-color(root.active-engine);
+                            background: Tokens.db-color(root.active-engine).with-alpha(0.12);
+                            StateLayer {
+                                width: 100%;
+                                height: 100%;
+                                border-radius: parent.border-radius;
+                                background: MaterialPalette.on_surface;
+                                has-hover: lang-ta.has-hover;
+                                enabled: true;
+                            }
+                            HorizontalLayout {
+                                padding-left: Tokens.sp3;
+                                padding-right: Tokens.sp3;
+                                spacing: Tokens.sp2;
+                                alignment: center;
+                                VerticalLayout {
+                                    alignment: center;
+                                    AppIcon {
+                                        name: "db-" + root.active-engine;
+                                        size: 14px;
+                                        color: Tokens.db-color(root.active-engine);
+                                    }
+                                }
+                                Text {
+                                    text: root.new-tab-label;
+                                    color: Tokens.db-color(root.active-engine);
+                                    font-size: Tokens.font-sm;
+                                    font-weight: Tokens.weight-emphasis;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            lang-ta := TooltipArea {
+                                tip: "New query tab  " + Shortcut.primary + Shortcut.separator + "T";
+                                clicked => { root.new-tab(); }
+                            }
                         }
                     }
                 }
