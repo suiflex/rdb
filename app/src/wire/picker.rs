@@ -803,6 +803,7 @@ fn wire_screen_harness(
     let Ok(screen) = std::env::var("RDB_SCREEN") else {
         return;
     };
+    pin_theme(window);
     schedule_connect_timer(window, store, &screen);
     schedule_sql_open_timer(window, &screen);
     schedule_modal_timer(window, &screen);
@@ -880,6 +881,27 @@ fn schedule_sql_open_timer(window: &MainWindow, screen: &str) {
         move || {
             if let Some(w) = weak.upgrade() {
                 w.invoke_run_query();
+            }
+        },
+    );
+}
+
+/// `RDB_THEME`: pin the theme for a reference shot, whatever the OS is set to.
+/// Deferred past startup, which applies the persisted mode and would otherwise
+/// overwrite this (the settings callback is also installed after this module).
+fn pin_theme(window: &MainWindow) {
+    let Ok(theme) = std::env::var("RDB_THEME") else {
+        return;
+    };
+    let light = theme == "light";
+    let weak = window.as_weak();
+    let t = Box::leak(Box::new(slint::Timer::default()));
+    t.start(
+        slint::TimerMode::SingleShot,
+        std::time::Duration::from_millis(1500),
+        move || {
+            if let Some(w) = weak.upgrade() {
+                w.invoke_set_theme_mode(if light { 1 } else { 2 });
             }
         },
     );
