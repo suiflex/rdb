@@ -21,6 +21,7 @@ PR, you reply once, and your signature is on file.
 
 <!-- Add yourself here, alphabetically by handle, in your own PR. -->
 
+- [@arianao19](https://github.com/arianao19)
 - [@ekacahya21](https://github.com/ekacahya21)
 - [@EnrikoAviyantoPutra](https://github.com/EnrikoAviyantoPutra)
 - [@wahyuakbarwibowo](https://github.com/wahyuakbarwibowo)
