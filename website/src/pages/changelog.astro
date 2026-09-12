@@ -7,7 +7,7 @@ import { REPO_LINKS } from "../config";
 /**
  * The website lives inside the rdb monorepo, so the root changelog is
  * read directly at build time. Resolved from process.cwd() (astro build
- * always runs from website/), not import.meta.url — the latter is
+ * always runs from website/), not import.meta.url. The latter is
  * relative to wherever the bundler happens to emit this chunk, which
  * changed depth across an astro major version and silently broke a
  * fixed "../../../" walk.
@@ -46,31 +46,36 @@ for (const block of blocks.slice(0, 5)) {
   description="What changed in recent RDB releases: new features, fixes, and improvements, generated from the project's conventional-commit history."
   path="/changelog"
 >
-  <section class="mx-auto max-w-3xl px-4 pt-16 pb-10 sm:px-6">
-    <h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">Changelog</h1>
-    <p class="mt-4 text-lg leading-relaxed text-fg-2">
+  <section class="page-hero">
+    <div class="page-hero-inner">
+      <p class="page-kicker">Release flow</p>
+      <h1 class="page-title">Changelog</h1>
+      <p class="page-lede">
       The most recent releases, straight from the project changelog. Binaries
       for every version are on
-      <a href={REPO_LINKS.releases} rel="noopener" class="underline decoration-line underline-offset-4 hover:text-fg">GitHub Releases</a>.
-    </p>
+        <a href={REPO_LINKS.releases} rel="noopener">GitHub Releases</a>.
+      </p>
+    </div>
   </section>
 
-  <section class="mx-auto max-w-3xl space-y-10 px-4 pb-20 sm:px-6">
+  <section class="page-section">
+    <div class="section-inner">
     {
       releases.map((release) => (
-        <article class="rounded-xl border border-line bg-panel p-6 sm:p-8">
-          <header class="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 class="font-display text-2xl font-semibold tracking-tight">v{release.version}</h2>
-            {release.date && <time datetime={release.date} class="font-mono text-xs text-fg-3">{release.date}</time>}
+        <article class="release-card">
+          <header>
+            <span class="latest">RELEASE</span>
+            <h2>v{release.version}</h2>
+            {release.date && <time datetime={release.date}>{release.date}</time>}
           </header>
           {release.sections.map((section) => (
-            <section class="mt-5">
-              <h3 class="text-sm font-semibold text-fg-2">{section.heading}</h3>
-              <ul class="mt-2 space-y-1.5">
+            <section class="release-section">
+              <h3>{section.heading}</h3>
+              <ul>
                 {section.items.map((item) => (
-                  <li class="flex items-baseline gap-2 text-sm leading-relaxed text-fg-2">
+                  <li>
                     {item.scope && (
-                      <code class="shrink-0 rounded border border-line px-1 py-px font-mono text-[11px] text-fg-3">
+                      <code>
                         {item.scope}
                       </code>
                     )}
@@ -83,13 +88,14 @@ for (const block of blocks.slice(0, 5)) {
         </article>
       ))
     }
-    <p class="text-sm text-fg-3">
+    <p class="page-note">
       Older releases are listed in the
       <a
         href="https://github.com/suiflex/rdb/blob/develop/CHANGELOG.md"
         rel="noopener"
-        class="underline decoration-line underline-offset-4 hover:text-fg">full changelog</a
+        >full changelog</a
       >.
     </p>
+    </div>
   </section>
 </Base>

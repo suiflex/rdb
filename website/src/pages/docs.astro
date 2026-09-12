@@ -1,7 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import CodeBlock from "../components/CodeBlock.astro";
-import { GITHUB, REPO_LINKS, url } from "../config";
+import { GITHUB, REPO_LINKS } from "../config";
 
 const guides = [
   {
@@ -10,7 +10,7 @@ const guides = [
   },
   {
     title: "Connect and query",
-    body: "Click a saved connection and the schema loads in the sidebar. Type a query for the connected engine (see Query syntax below), then press Cmd+Enter (Ctrl+Enter on Windows and Linux) to run.",
+    body: "Click a saved connection and the schema loads in the sidebar. Type a query for the connected engine, then press Cmd+Enter or Ctrl+Enter to run.",
   },
   {
     title: "Browse a table",
@@ -50,33 +50,10 @@ const querySyntax = [
   },
 ];
 
-// What the Mongo query tab actually accepts. Kept next to the syntax table
-// because the README points here for it.
 const mongoSupport = [
-  {
-    title: "Methods",
-    items: [
-      "find({ ... })",
-      "aggregate([ ... ])",
-      "insertOne({ ... })",
-    ],
-  },
-  {
-    title: "Chain modifiers",
-    items: [
-      ".limit(n)",
-      ".skip(n)",
-      ".sort({ field: 1 | -1 })",
-    ],
-  },
-  {
-    title: "Addressing",
-    items: [
-      "use('database')",
-      "db.collection",
-      "db.getCollection('fs.files')",
-    ],
-  },
+  ["Methods", ["find({ ... })", "aggregate([ ... ])", "insertOne({ ... })"]],
+  ["Chain modifiers", [".limit(n)", ".skip(n)", ".sort({ field: 1 | -1 })"]],
+  ["Addressing", ["use('database')", "db.collection", "db.getCollection('fs.files')"]],
 ];
 ---
 
@@ -85,55 +62,63 @@ const mongoSupport = [
   description="Get started with RDB: install it, add your first connection, run queries, and build from source. Full documentation lives in the GitHub repository."
   path="/docs"
 >
-  <section class="mx-auto max-w-4xl px-4 pt-16 pb-12 sm:px-6">
-    <h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">Documentation</h1>
-    <p class="mt-4 max-w-xl text-lg leading-relaxed text-fg-2">
-      Enough to get productive in five minutes. The full reference lives in
-      the repository and grows with every release.
-    </p>
-  </section>
-
-  <section class="mx-auto max-w-4xl px-4 pb-14 sm:px-6" aria-label="Quick start">
-    <h2 class="font-display text-2xl font-semibold tracking-tight">Quick start</h2>
-    <ol class="mt-6 space-y-6">
-      {
-        guides.map((guide, i) => (
-          <li class="flex gap-5">
-            <span
-              class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-panel font-mono text-sm text-accent"
-              aria-hidden="true"
-            >
-              {i + 1}
-            </span>
-            <div>
-              <h3 class="font-semibold">{guide.title}</h3>
-              <p class="mt-1 max-w-xl text-sm leading-relaxed text-fg-2">{guide.body}</p>
-            </div>
-          </li>
-        ))
-      }
-    </ol>
-  </section>
-
-  <section class="border-t border-line" aria-label="Query syntax">
-    <div class="mx-auto max-w-4xl px-4 py-14 sm:px-6">
-      <h2 class="font-display text-2xl font-semibold tracking-tight">Query syntax per engine</h2>
-      <p class="mt-3 max-w-xl text-sm leading-relaxed text-fg-2">
-        Each engine's query editor tab speaks that engine's native language;
-        there's no single unified query syntax across all of them.
+  <section class="page-hero">
+    <div class="page-hero-inner">
+      <p class="page-kicker">Documentation</p>
+      <h1 class="page-title">Start from a query.</h1>
+      <p class="page-lede">
+        Enough to get productive in five minutes. The full reference lives in
+        the repository and grows with every release.
       </p>
-      <div class="mt-6 grid gap-4 sm:grid-cols-2">
+    </div>
+  </section>
+
+  <section class="page-section">
+    <div class="section-inner section-grid">
+      <div>
+        <p class="page-kicker">Quick start</p>
+        <h2 class="section-title">Four steps to a result grid.</h2>
+      </div>
+      <ol class="timeline-list">
+        {
+          guides.map((guide, i) => (
+            <li>
+              <span aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
+              <div>
+                <h3>{guide.title}</h3>
+                <p>{guide.body}</p>
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </section>
+
+  <section class="page-section light" aria-label="Query syntax">
+    <div class="section-inner wide">
+      <div class="stream-head">
+        <div>
+          <p class="page-kicker">Query syntax</p>
+          <h2 class="section-title">Each engine keeps its language.</h2>
+        </div>
+        <p>
+          RDB does not pretend every database has one query shape. The editor
+          follows the connected engine.
+        </p>
+      </div>
+      <div class="card-grid two mt-10">
         {
           querySyntax.map((row) => (
-            <div class="rounded-xl border border-line bg-panel px-4 py-4">
-              <span class="block text-sm font-medium">{row.engines}</span>
-              <span class="block text-xs text-fg-3">{row.language}</span>
-              <div class="mt-3 space-y-2">
+            <div class="card">
+              <h3>{row.engines}</h3>
+              <p class="mono">{row.language}</p>
+              <div class="mt-4 grid gap-2">
                 {row.examples.map((ex) => (
-                  <pre class="overflow-x-auto rounded-lg border border-line bg-code px-3 py-2 font-mono text-[13px] text-fg-2"><code>{ex}</code></pre>
+                  <pre class="mini-code"><code>{ex}</code></pre>
                 ))}
               </div>
-              {row.note && <p class="mt-2 text-xs text-fg-3">{row.note}</p>}
+              {row.note && <p>{row.note}</p>}
             </div>
           ))
         }
@@ -141,86 +126,63 @@ const mongoSupport = [
     </div>
   </section>
 
-  <section class="border-t border-line bg-panel" aria-label="MongoDB support">
-    <div class="mx-auto max-w-4xl px-4 py-14 sm:px-6">
-      <h2 class="font-display text-2xl font-semibold tracking-tight">What the MongoDB tab accepts</h2>
-      <p class="mt-3 max-w-xl text-sm leading-relaxed text-fg-2">
+  <section class="page-section panel" aria-label="MongoDB support">
+    <div class="section-inner">
+      <p class="page-kicker">MongoDB tab</p>
+      <h2 class="section-title">Mongosh-shaped, parser-backed.</h2>
+      <p class="page-lede">
         Query bodies are read as JSON5, so unquoted keys and single-quoted
         strings work exactly as they do in mongosh. Modifiers may appear in any
-        order and apply to <code class="font-mono text-[13px]">find</code>;
-        an aggregation carries its own paging as pipeline stages.
+        order and apply to <code class="mono">find</code>.
       </p>
-      <div class="mt-6 grid gap-4 sm:grid-cols-3">
+      <div class="card-grid three mt-10">
         {
-          mongoSupport.map((group) => (
-            <div class="rounded-xl border border-line bg-bg px-4 py-4">
-              <span class="block text-sm font-medium">{group.title}</span>
-              <ul class="mt-3 space-y-2">
-                {group.items.map((item) => (
-                  <li class="rounded-lg border border-line bg-code px-3 py-2 font-mono text-[13px] text-fg-2">
-                    {item}
-                  </li>
-                ))}
+          mongoSupport.map(([title, items]) => (
+            <div class="card">
+              <h3>{title}</h3>
+              <ul class="token-list">
+                {items.map((item) => <li>{item}</li>)}
               </ul>
             </div>
           ))
         }
       </div>
-      <p class="mt-5 max-w-xl text-xs leading-relaxed text-fg-3">
-        Not yet parsed: <code class="font-mono">ObjectId(...)</code> and the
-        write and read helpers beyond the three above
-        (<code class="font-mono">findOne</code>,
-        <code class="font-mono">updateMany</code>,
-        <code class="font-mono">deleteOne</code> and friends). Autocomplete
-        offers some of these ahead of the parser, so they will complete and then
-        fail to run.
+      <p class="page-note">
+        Not yet parsed: <code class="mono">ObjectId(...)</code> and helpers
+        beyond <code class="mono">find</code>, <code class="mono">aggregate</code>,
+        and <code class="mono">insertOne</code>. Autocomplete can offer some of
+        them before the parser supports them.
       </p>
     </div>
   </section>
 
-  <section class="border-t border-line">
-    <div class="mx-auto max-w-4xl px-4 py-14 sm:px-6">
-      <h2 class="font-display text-2xl font-semibold tracking-tight">Build from source</h2>
-      <p class="mt-3 max-w-xl text-sm leading-relaxed text-fg-2">
-        You need stable Rust with rustfmt and clippy. Linux additionally needs
-        the Slint system packages listed in the README.
-      </p>
-      <div class="mt-5 space-y-3">
+  <section class="page-section">
+    <div class="section-inner section-grid">
+      <div>
+        <p class="page-kicker">Source build</p>
+        <h2 class="section-title">Build the native app yourself.</h2>
+      </div>
+      <div class="card-grid">
         <CodeBlock code="git clone https://github.com/suiflex/rdb && cd rdb" label="clone" />
         <CodeBlock code="cargo build --release -p rdb" label="release build" />
       </div>
     </div>
   </section>
 
-  <section class="border-t border-line bg-panel">
-    <div class="mx-auto max-w-4xl px-4 py-14 sm:px-6">
-      <h2 class="font-display text-2xl font-semibold tracking-tight">Go deeper</h2>
-      <ul class="mt-6 grid gap-3 sm:grid-cols-2">
-        {
-          [
-            { label: "README", note: "install options, usage, crate layout", href: REPO_LINKS.readme },
-            { label: "Vision and roadmap", note: "principles and what comes next", href: REPO_LINKS.vision },
-            { label: "Contributing guide", note: "dev setup and PR workflow", href: REPO_LINKS.contributing },
-            { label: "Release notes", note: "what changed in each version", href: REPO_LINKS.releases },
-          ].map((item) => (
-            <li>
-              <a
-                href={item.href}
-                rel="noopener"
-                class="block rounded-xl border border-line bg-ink px-4 py-3.5 transition-colors hover:border-line-2"
-              >
-                <span class="block text-sm font-medium">{item.label}</span>
-                <span class="block text-xs text-fg-3">{item.note}</span>
-              </a>
-            </li>
-          ))
-        }
-      </ul>
-      <p class="mt-6 text-sm text-fg-3">
-        Something missing or unclear?
-        <a href={REPO_LINKS.newIssue} rel="noopener" class="underline decoration-line underline-offset-4 hover:text-fg">Open an issue</a>
-        on <a href={GITHUB} rel="noopener" class="underline decoration-line underline-offset-4 hover:text-fg">GitHub</a>.
-      </p>
+  <section class="page-section light">
+    <div class="section-inner section-grid">
+      <div>
+        <p class="page-kicker">References</p>
+        <h2 class="section-title">Go deeper in the repository.</h2>
+      </div>
+      <nav class="link-list" aria-label="Documentation links">
+        <a class="link-row" href={REPO_LINKS.readme} rel="noopener"><strong>README</strong><span>USAGE ↗</span></a>
+        <a class="link-row" href={REPO_LINKS.vision} rel="noopener"><strong>Vision and roadmap</strong><span>VISION ↗</span></a>
+        <a class="link-row" href={REPO_LINKS.contributing} rel="noopener"><strong>Contributing guide</strong><span>SETUP ↗</span></a>
+        <a class="link-row" href={REPO_LINKS.releases} rel="noopener"><strong>Release notes</strong><span>RELEASES ↗</span></a>
+        <a class="link-row" href={REPO_LINKS.newIssue} rel="noopener"><strong>Open an issue</strong><span>SUPPORT ↗</span></a>
+        <a class="link-row" href={GITHUB} rel="noopener"><strong>Source code</strong><span>GITHUB ↗</span></a>
+      </nav>
     </div>
   </section>
 </Base>
