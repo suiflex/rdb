@@ -907,6 +907,18 @@ fn show_chrome_screen(w: &MainWindow, which: &str) {
             w.set_conn_modal_adding(true);
             w.invoke_open_conn_modal();
         }
+        // Right-click a document tab: its rename/split/close menu.
+        "tab-menu" => {
+            let position = slint::LogicalPosition::new(590.0, 75.0);
+            w.window().dispatch_event(WindowEvent::PointerPressed {
+                position,
+                button: PointerEventButton::Right,
+            });
+            w.window().dispatch_event(WindowEvent::PointerReleased {
+                position,
+                button: PointerEventButton::Right,
+            });
+        }
         _ => {
             // The picker footer's "Export ▾".
             let position = slint::LogicalPosition::new(466.0, 722.0);
@@ -978,6 +990,7 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
             | "notch-light"
             | "sidebar-collapsed"
             | "conn-add"
+            | "tab-menu"
     ) {
         return;
     }
@@ -1019,7 +1032,7 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
                     // Click the picker footer's "Export ▾" so the popup menu
                     // (not reachable any other way) shows in the screenshot.
                     "export-menu" | "menu-hover" | "notch-light" | "sidebar-collapsed"
-                    | "conn-add" => {
+                    | "conn-add" | "tab-menu" => {
                         show_chrome_screen(&w, &which)
                     }
                     "settings" | "settings-updates" | "settings-about" => {
