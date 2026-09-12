@@ -895,3 +895,27 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         });
     }
 }
+
+#[cfg(test)]
+mod panic_to_connection_error_tests {
+    use super::panic_to_connection_error;
+
+    // The panic case has no test: this binary cannot unwind, so provoking a
+    // real panic aborts the whole test process ("failed to initiate panic")
+    // rather than handing back a `JoinError` — the same reason CLAUDE.md warns
+    // that a failing test here aborts instead of reporting. What that case
+    // does is one `is_panic()` call; the case worth pinning is the other one,
+    // where reporting anything at all would be wrong.
+
+    /// Cancel and a superseding connect both abort the task; neither is a
+    /// failure worth putting in front of the user.
+    #[tokio::test]
+    async fn an_aborted_task_reports_nothing() {
+        let handle = tokio::spawn(async {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        });
+        handle.abort();
+        let join = handle.await.expect_err("the task was aborted");
+        assert!(panic_to_connection_error(join).is_none());
+    }
+}
