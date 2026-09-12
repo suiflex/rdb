@@ -4867,16 +4867,36 @@ struct AppFns {
     sync_editor: PaneFn,
 }
 
-fn main() -> Result<(), slint::PlatformError> {
-    // Pick the rustls crypto provider for the whole process, before any driver
-    // can reach TLS. Both backends are linked in — aws-lc-rs through rustls'
-    // own default feature and through russh, ring through ureq — and rustls
-    // refuses to guess between them: the first TLS handshake panics on a tokio
-    // worker instead of returning an error (issue #291). The default SslMode is
-    // `Prefer`, so a connection nobody configured takes that path.
-    // `Err` here only means a provider is already installed, which is the state
-    // this line wants anyway, so it is not worth failing startup over.
+/// Pick the rustls crypto provider for the whole process, before any driver
+/// can reach TLS. Both backends are linked in — aws-lc-rs through rustls' own
+/// default feature and through russh, ring through ureq — and rustls refuses
+/// to guess between them: the first TLS handshake panics on a tokio worker
+/// instead of returning an error (issue #291). The default `SslMode` is
+/// `Prefer`, so a connection nobody configured takes that path.
+///
+/// `Err` only means a provider is already installed, which is the state this
+/// wants anyway, so it is not worth failing startup over.
+fn install_crypto_provider() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
+#[cfg(test)]
+mod crypto_provider_tests {
+    use super::install_crypto_provider;
+
+    /// The panic this guards against is rustls finding no process-wide
+    /// provider. A second call happens whenever another test in this binary
+    /// got here first, so it has to stay silent rather than panic.
+    #[test]
+    fn installs_a_provider_and_tolerates_a_second_call() {
+        install_crypto_provider();
+        install_crypto_provider();
+        assert!(rustls::crypto::CryptoProvider::get_default().is_some());
+    }
+}
+
+fn main() -> Result<(), slint::PlatformError> {
+    install_crypto_provider();
 
     // Name this build to every server it connects to, so RDB is attributable in
     // pg_stat_activity / SHOW PROCESSLIST / currentOp rather than showing up as
