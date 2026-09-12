@@ -235,6 +235,13 @@ Keep the scope specific (`app`, `driver-postgres`, `driver-mysql`, `core`,
   means adding the crate's TLS feature in the same commit, and new connection
   forms default to `Disable` so an unconfigured server can't take the app
   down.
+- **rustls needs a crypto provider picked for the process.** `aws-lc-rs` and
+  `ring` are both linked in (rustls' own default feature and russh bring the
+  first, ureq the second), and rustls 0.23 refuses to choose between them: the
+  first handshake panics on a tokio worker instead of returning an error.
+  `main` calls `install_crypto_provider()` before anything else for that
+  reason — it is not a line to tidy away. A driver added on rustls needs
+  nothing extra; one that installs its own provider would fight this one.
 - **Saving a connection goes through `ConnStore::save_connection`**, not
   `add`/`update` + `set_password`. The split version is non-atomic: metadata
   flushed, secret write failed, and the connection came back later with
