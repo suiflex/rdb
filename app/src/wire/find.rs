@@ -244,7 +244,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     // Function bodies are always SQL (Postgres introspection),
                     // regardless of the tab's connected engine.
                     let spans = super::editor::ui_spans(
-                        editor::lex_line(rdb_connstore::QueryLanguage::Sql, l),
+                        editor::lex_line(
+                            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
+                            l,
+                        ),
                         false,
                     );
                     ModelRc::from(Rc::new(VecModel::from(spans)))

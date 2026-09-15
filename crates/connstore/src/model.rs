@@ -41,6 +41,43 @@ pub enum QueryLanguage {
     Mongo,
 }
 
+/// A SQL vendor. Only meaningful inside `QueryDialect::Sql` — every other
+/// query paradigm has no vendor variation to track.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SqlDialect {
+    Postgres,
+    MySql,
+    Sqlite,
+    Mssql,
+    Clickhouse,
+    Oracle,
+}
+
+/// The query profile an engine's editor tab speaks: one atomic value, not a
+/// `QueryLanguage` plus a separately-tracked `Option<SqlDialect>` that can
+/// drift out of sync with it. SQL carries its vendor inline; every other
+/// paradigm (Cql/Mongo/Command) has none to carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueryDialect {
+    Sql(SqlDialect),
+    Cql,
+    Mongo,
+    Command,
+}
+
+impl QueryDialect {
+    /// The broader query paradigm, for dispatch that doesn't care about SQL
+    /// vendor (statement splitting, `Query` construction, format dispatch).
+    pub fn language(self) -> QueryLanguage {
+        match self {
+            QueryDialect::Sql(_) => QueryLanguage::Sql,
+            QueryDialect::Cql => QueryLanguage::Cql,
+            QueryDialect::Mongo => QueryLanguage::Mongo,
+            QueryDialect::Command => QueryLanguage::Command,
+        }
+    }
+}
+
 impl QueryLanguage {
     /// True when a query buffer is text made of `;`-separated statements that
     /// run in order: `Sql` and `Cql`. A `Command` or `Mongo` buffer is a single
@@ -70,7 +107,7 @@ pub struct EngineMeta {
     pub scheme: &'static str,
     /// Port prefilled by the connection form. `"0"` for file-based engines.
     pub default_port: &'static str,
-    pub language: QueryLanguage,
+    pub dialect: QueryDialect,
 }
 
 /// Every supported engine. Adding a driver means adding a row here — see
@@ -82,7 +119,7 @@ pub const ENGINES: &[EngineMeta] = &[
         key: "postgres",
         scheme: "postgresql",
         default_port: "5432",
-        language: QueryLanguage::Sql,
+        dialect: QueryDialect::Sql(SqlDialect::Postgres),
     },
     EngineMeta {
         engine: Engine::MySql,
@@ -90,7 +127,7 @@ pub const ENGINES: &[EngineMeta] = &[
         key: "mysql",
         scheme: "mysql",
         default_port: "3306",
-        language: QueryLanguage::Sql,
+        dialect: QueryDialect::Sql(SqlDialect::MySql),
     },
     EngineMeta {
         engine: Engine::Redis,
@@ -98,7 +135,7 @@ pub const ENGINES: &[EngineMeta] = &[
         key: "redis",
         scheme: "redis",
         default_port: "6379",
-        language: QueryLanguage::Command,
+        dialect: QueryDialect::Command,
     },
     EngineMeta {
         engine: Engine::Mongo,
@@ -106,7 +143,7 @@ pub const ENGINES: &[EngineMeta] = &[
         key: "mongo",
         scheme: "mongodb",
         default_port: "27017",
-        language: QueryLanguage::Mongo,
+        dialect: QueryDialect::Mongo,
     },
     EngineMeta {
         engine: Engine::Sqlite,
@@ -115,7 +152,7 @@ pub const ENGINES: &[EngineMeta] = &[
         scheme: "sqlite",
         // file-based: port unused
         default_port: "0",
-        language: QueryLanguage::Sql,
+        dialect: QueryDialect::Sql(SqlDialect::Sqlite),
     },
     EngineMeta {
         engine: Engine::Cassandra,
@@ -123,7 +160,7 @@ pub const ENGINES: &[EngineMeta] = &[
         key: "cassandra",
         scheme: "cassandra",
         default_port: "9042",
-        language: QueryLanguage::Cql,
+        dialect: QueryDialect::Cql,
     },
     EngineMeta {
         engine: Engine::Mssql,
@@ -131,7 +168,7 @@ pub const ENGINES: &[EngineMeta] = &[
         key: "mssql",
         scheme: "sqlserver",
         default_port: "1433",
-        language: QueryLanguage::Sql,
+        dialect: QueryDialect::Sql(SqlDialect::Mssql),
     },
     EngineMeta {
         engine: Engine::Oracle,
@@ -139,7 +176,7 @@ pub const ENGINES: &[EngineMeta] = &[
         key: "oracle",
         scheme: "oracle",
         default_port: "1521",
-        language: QueryLanguage::Sql,
+        dialect: QueryDialect::Sql(SqlDialect::Oracle),
     },
     EngineMeta {
         engine: Engine::Clickhouse,
@@ -147,7 +184,7 @@ pub const ENGINES: &[EngineMeta] = &[
         key: "clickhouse",
         scheme: "clickhouse",
         default_port: "8123",
-        language: QueryLanguage::Sql,
+        dialect: QueryDialect::Sql(SqlDialect::Clickhouse),
     },
     EngineMeta {
         engine: Engine::MariaDb,
@@ -155,7 +192,7 @@ pub const ENGINES: &[EngineMeta] = &[
         key: "mariadb",
         scheme: "mariadb",
         default_port: "3306",
-        language: QueryLanguage::Sql,
+        dialect: QueryDialect::Sql(SqlDialect::MySql),
     },
     EngineMeta {
         engine: Engine::Valkey,
@@ -163,7 +200,7 @@ pub const ENGINES: &[EngineMeta] = &[
         key: "valkey",
         scheme: "valkey",
         default_port: "6379",
-        language: QueryLanguage::Command,
+        dialect: QueryDialect::Command,
     },
 ];
 
@@ -177,10 +214,17 @@ impl Engine {
             .expect("every Engine variant needs a row in ENGINES")
     }
 
-    /// The query dialect this engine's editor tab speaks. Single source of
-    /// truth for completion/lexer/format dispatch — see `QueryLanguage`.
+    /// The query profile this engine's editor tab speaks. Single source of
+    /// truth for completion/lexer/formatter dispatch.
+    pub fn dialect(self) -> QueryDialect {
+        self.meta().dialect
+    }
+
+    /// The broader query paradigm, derived from `dialect`. For dispatch that
+    /// doesn't care about SQL vendor (statement splitting, `Query`
+    /// construction, format dispatch).
     pub fn language(self) -> QueryLanguage {
-        self.meta().language
+        self.meta().dialect.language()
     }
 
     /// Human label shown in the UI.
@@ -521,6 +565,17 @@ mod tests {
         assert_eq!(Engine::Mssql.language(), QueryLanguage::Sql);
         assert_eq!(Engine::Clickhouse.language(), QueryLanguage::Sql);
         assert_eq!(Engine::Oracle.language(), QueryLanguage::Sql);
+    }
+
+    /// Aliased engines share their base engine's driver but must still
+    /// resolve to the same query dialect, not a bare SQL/Command fallback.
+    #[test]
+    fn aliased_engines_resolve_to_correct_dialect() {
+        assert_eq!(
+            Engine::MariaDb.dialect(),
+            QueryDialect::Sql(SqlDialect::MySql)
+        );
+        assert_eq!(Engine::Valkey.dialect(), QueryDialect::Command);
     }
 
     /// The lookup panics if a variant has no row, so this is the guard that

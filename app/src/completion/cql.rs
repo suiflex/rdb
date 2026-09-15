@@ -8,8 +8,6 @@ use crate::model::VmTreeNode;
 
 use super::{all_columns, from_table_columns, tables, Candidate};
 
-pub use crate::editor::cql::is_keyword;
-
 pub fn keywords() -> Vec<Candidate> {
     crate::editor::cql::KEYWORDS
         .iter()
@@ -28,7 +26,7 @@ pub fn bare_word(
     nodes: &[VmTreeNode],
     scope: &[VmTreeNode],
 ) -> Vec<Candidate> {
-    match super::last_keyword(head, rdb_connstore::QueryLanguage::Cql).as_deref() {
+    match super::last_keyword(head, rdb_connstore::QueryDialect::Cql).as_deref() {
         // table/keyspace position.
         Some("FROM") | Some("INTO") | Some("UPDATE") | Some("TABLE") => {
             let mut c = tables(scope);
@@ -39,7 +37,7 @@ pub fn bare_word(
         Some("SELECT") | Some("WHERE") | Some("AND") | Some("OR") | Some("SET") | Some("BY")
         | Some("VALUES") | Some("USING") | Some("ALLOW") => {
             let (has_scope, mut c) =
-                from_table_columns(stmt, nodes, rdb_connstore::QueryLanguage::Cql);
+                from_table_columns(stmt, nodes, rdb_connstore::QueryDialect::Cql);
             if !has_scope {
                 c.extend(all_columns(scope));
             }

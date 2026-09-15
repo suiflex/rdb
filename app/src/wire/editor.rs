@@ -17,19 +17,22 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use crate::*;
 
 /// The dialect the editor lexes and completes in: the active tab's own engine
-/// first, the live connection only as a fallback. Highlighting and completion
-/// both go through here so a tab can never be coloured in one dialect and
+/// first, the live connection next, Postgres last — a default vendor is
+/// needed even with nothing connected yet. Highlighting and completion both
+/// go through here so a tab can never be coloured in one dialect and
 /// completed in another.
-fn editor_language(
+fn editor_dialect(
     w: &MainWindow,
     pane: usize,
     cur_engine: &RefCell<Option<rdb_connstore::Engine>>,
-) -> rdb_connstore::QueryLanguage {
-    crate::active_tab_language(w, pane).unwrap_or_else(|| {
+) -> rdb_connstore::QueryDialect {
+    crate::active_tab_dialect(w, pane).unwrap_or_else(|| {
         cur_engine
             .borrow()
-            .map(rdb_connstore::Engine::language)
-            .unwrap_or(rdb_connstore::QueryLanguage::Sql)
+            .map(rdb_connstore::Engine::dialect)
+            .unwrap_or(rdb_connstore::QueryDialect::Sql(
+                rdb_connstore::SqlDialect::Postgres,
+            ))
     })
 }
 
@@ -173,13 +176,13 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
             let sel = ed.selection();
             let error_mark = *panes[pane].error_mark.lock().unwrap();
             let error_line = error_mark.map(|m| m.line as usize);
-            let language = editor_language(&w, pane, &cur_engine);
+            let dialect = editor_dialect(&w, pane, &cur_engine);
             let lines: Vec<ModelRc<Span>> = ed
                 .lines
                 .iter()
                 .enumerate()
                 .map(|(li, l)| {
-                    let mut spans = editor::lex_line(language, l);
+                    let mut spans = editor::lex_line(dialect, l);
                     // selection highlight: char-col range covered on this line
                     if let Some(((sl, sc), (el, ec))) = sel {
                         if li >= sl && li <= el {
@@ -317,13 +320,13 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                 (ed.before_cursor_doc(), ed.current_statement())
             };
             let schema = w.get_schema_name().to_string();
-            let language = editor_language(&w, pane, &cur_engine);
+            let dialect = editor_dialect(&w, pane, &cur_engine);
             let (word_len, cands) = completion::suggest(
                 &before,
                 &stmt,
                 &completion_nodes.lock().unwrap(),
                 &schema,
-                language,
+                dialect,
             );
             if cands.is_empty() {
                 set_p_completion_visible(&w, pane, false);
@@ -381,10 +384,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                 ed.insert(&label);
                 // Auto-append alias when accepting a table name in FROM/JOIN position.
                 if kind == "table" && settings.borrow().get().editor.auto_table_alias {
-                    let language = editor_language(&w, pane, &cur_engine);
+                    let dialect = editor_dialect(&w, pane, &cur_engine);
                     let before = ed.before_cursor_doc();
                     let cur_line = before.rsplit('\n').next().unwrap_or(&before);
-                    if completion::is_table_position(cur_line, language) {
+                    if completion::is_table_position(cur_line, dialect) {
                         let alias = completion::generate_alias(&label);
                         if !alias.is_empty() {
                             ed.insert(&format!(" {alias}"));
@@ -897,7 +900,10 @@ mod tests {
 
     #[test]
     fn tabs_are_painted_as_spaces_without_moving_columns() {
-        let spans = editor::lex_line(rdb_connstore::QueryLanguage::Sql, "select\ta");
+        let spans = editor::lex_line(
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
+            "select\ta",
+        );
         let ui = ui_spans(spans, false);
         let joined: String = ui.iter().map(|s| s.text.as_str()).collect();
         assert_eq!(joined, "select a");

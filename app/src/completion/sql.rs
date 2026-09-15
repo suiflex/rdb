@@ -1,76 +1,11 @@
 //! SQL clause-position completion — Postgres/MySQL/SQLite.
 
-use crate::model::VmTreeNode;
-
 use super::{all_columns, from_table_columns, tables, Candidate};
+use crate::model::VmTreeNode;
+use rdb_connstore::{QueryDialect, SqlDialect};
 
-/// SQL keywords offered when the cursor is at a statement/clause boundary.
-const KEYWORDS: &[&str] = &[
-    "SELECT",
-    "FROM",
-    "WHERE",
-    "INSERT",
-    "INTO",
-    "VALUES",
-    "UPDATE",
-    "SET",
-    "DELETE",
-    "JOIN",
-    "INNER",
-    "LEFT",
-    "RIGHT",
-    "OUTER",
-    "FULL",
-    "ON",
-    "AS",
-    "GROUP",
-    "ORDER",
-    "BY",
-    "HAVING",
-    "LIMIT",
-    "OFFSET",
-    "DISTINCT",
-    "AND",
-    "OR",
-    "NOT",
-    "NULL",
-    "IS",
-    "IN",
-    "LIKE",
-    "BETWEEN",
-    "ASC",
-    "DESC",
-    "COUNT",
-    "CREATE",
-    "TABLE",
-    "ALTER",
-    "DROP",
-    "INDEX",
-    // Date/aggregate functions — widely-portable names only (e.g. not
-    // MySQL's DATE_FORMAT or Postgres' TO_CHAR specifically).
-    "EXTRACT",
-    "DATE_TRUNC",
-    "NOW",
-    "CURRENT_DATE",
-    "CURRENT_TIMESTAMP",
-    "INTERVAL",
-    "AGE",
-    "COALESCE",
-    "CAST",
-    "SUM",
-    "AVG",
-    "MIN",
-    "MAX",
-];
-
-pub fn is_keyword(w: &str) -> bool {
-    let u = w.to_uppercase();
-    KEYWORDS.contains(&u.as_str())
-}
-
-pub fn keywords() -> Vec<Candidate> {
-    KEYWORDS
-        .iter()
+pub fn keywords(dialect: SqlDialect) -> Vec<Candidate> {
+    crate::editor::sql::keywords(dialect)
         .map(|k| Candidate {
             label: (*k).to_string(),
             kind: "keyword".into(),
@@ -88,8 +23,9 @@ pub fn bare_word(
     nodes: &[VmTreeNode],
     scope: &[VmTreeNode],
     active_schema: &str,
+    dialect: SqlDialect,
 ) -> Vec<Candidate> {
-    match super::last_keyword(head, rdb_connstore::QueryLanguage::Sql).as_deref() {
+    match super::last_keyword(head, QueryDialect::Sql(dialect)).as_deref() {
         // table position: active-schema tables, every schema name, and every
         // other schema's tables pre-qualified, so a cross-schema table can be
         // completed from its own name without typing the schema first.
@@ -106,18 +42,17 @@ pub fn bare_word(
             // Columns of the statement's own FROM/JOIN tables come first (they
             // are what's actually in scope, cross-schema included), then the
             // active-schema columns/tables and keywords as a fallback.
-            let (has_scope, mut c) =
-                from_table_columns(stmt, nodes, rdb_connstore::QueryLanguage::Sql);
+            let (has_scope, mut c) = from_table_columns(stmt, nodes, QueryDialect::Sql(dialect));
             if !has_scope {
                 c.extend(all_columns(scope));
             }
             c.extend(tables(scope));
-            c.extend(keywords());
+            c.extend(keywords(dialect));
             c
         }
         // statement start / no useful context: keywords + tables
         _ => {
-            let mut c = keywords();
+            let mut c = keywords(dialect);
             c.extend(tables(scope));
             c
         }

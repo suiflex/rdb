@@ -2100,10 +2100,10 @@ fn active_tab_kind(w: &MainWindow) -> String {
 /// user connects to Mongo, and lexing it as Mongo renders it entirely
 /// uncoloured. `None` when the pane has no active tab, or the tab predates any
 /// connection — the caller falls back to `cur_engine` there.
-pub(crate) fn active_tab_language(
+pub(crate) fn active_tab_dialect(
     w: &MainWindow,
     pane: usize,
-) -> Option<rdb_connstore::QueryLanguage> {
+) -> Option<rdb_connstore::QueryDialect> {
     use slint::Model;
     let (tabs, idx) = if pane == 0 {
         (w.get_tabs(), w.get_active_tab())
@@ -2114,7 +2114,7 @@ pub(crate) fn active_tab_language(
         return None;
     }
     let tab = tabs.row_data(idx as usize)?;
-    rdb_connstore::Engine::from_key(&tab.engine).map(rdb_connstore::Engine::language)
+    rdb_connstore::Engine::from_key(&tab.engine).map(rdb_connstore::Engine::dialect)
 }
 
 /// Clipboard write; returns false when no clipboard is available.

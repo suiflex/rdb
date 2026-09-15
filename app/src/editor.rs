@@ -14,7 +14,7 @@ pub mod sql;
 
 pub mod command;
 
-use rdb_connstore::QueryLanguage;
+use rdb_connstore::QueryDialect;
 
 /// Span kinds, mirrored in code-editor.slint: 0 plain · 1 keyword ·
 /// 2 string · 3 function · 4 comment · 5 number. `sel` marks the span as
@@ -26,12 +26,15 @@ pub struct Span {
     pub sel: bool,
 }
 
-fn is_keyword_for(language: QueryLanguage, word: &str) -> bool {
-    match language {
-        QueryLanguage::Sql => sql::is_keyword(word),
-        QueryLanguage::Cql => cql::is_keyword(word),
-        QueryLanguage::Command => command::is_keyword(word),
-        QueryLanguage::Mongo => mongo::is_keyword(word),
+/// Single dispatch point for "is `word` a keyword in this dialect" — the
+/// lexer and completion both go through this instead of each carrying their
+/// own `QueryLanguage`/`SqlDialect` matching.
+pub(crate) fn is_keyword_for(dialect: QueryDialect, word: &str) -> bool {
+    match dialect {
+        QueryDialect::Sql(d) => sql::is_keyword(d, word),
+        QueryDialect::Cql => cql::is_keyword(word),
+        QueryDialect::Command => command::is_keyword(word),
+        QueryDialect::Mongo => mongo::is_keyword(word),
     }
 }
 
@@ -42,7 +45,7 @@ fn is_ident(c: char) -> bool {
 /// Lex one line into colored spans for the given dialect. Whitespace stays
 /// attached to plain spans so concatenating span texts reproduces the line
 /// exactly.
-pub fn lex_line(language: QueryLanguage, line: &str) -> Vec<Span> {
+pub fn lex_line(dialect: QueryDialect, line: &str) -> Vec<Span> {
     let mut spans: Vec<Span> = Vec::new();
     let push = |spans: &mut Vec<Span>, text: &str, kind: i32| {
         if text.is_empty() {
@@ -103,9 +106,9 @@ pub fn lex_line(language: QueryLanguage, line: &str) -> Vec<Span> {
             }
             let word: String = chars[i..j].iter().collect();
             let upper = word.to_uppercase();
-            let kind = if chars.get(j) == Some(&'(') && !is_keyword_for(language, &upper) {
+            let kind = if chars.get(j) == Some(&'(') && !is_keyword_for(dialect, &upper) {
                 3
-            } else if is_keyword_for(language, &upper) {
+            } else if is_keyword_for(dialect, &upper) {
                 1
             } else {
                 0
@@ -1225,9 +1228,10 @@ fn trim_leading_comments(stmt: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rdb_connstore::SqlDialect;
 
     fn kinds(line: &str) -> Vec<(String, i32)> {
-        lex_line(QueryLanguage::Sql, line)
+        lex_line(QueryDialect::Sql(SqlDialect::Postgres), line)
             .into_iter()
             .map(|s| (s.text, s.kind))
             .collect()
@@ -1311,7 +1315,7 @@ mod tests {
     fn redis_lexer_does_not_highlight_sql_keywords() {
         // Regression: Redis previously reused the SQL keyword set, so `WHERE`
         // typed as a Redis argument was wrongly painted as a keyword.
-        let ks: Vec<(String, i32)> = lex_line(QueryLanguage::Command, "GET WHERE")
+        let ks: Vec<(String, i32)> = lex_line(QueryDialect::Command, "GET WHERE")
             .into_iter()
             .map(|s| (s.text, s.kind))
             .collect();
@@ -1321,7 +1325,7 @@ mod tests {
 
     #[test]
     fn cql_lexer_does_not_highlight_join() {
-        let ks: Vec<(String, i32)> = lex_line(QueryLanguage::Cql, "SELECT * FROM t JOIN")
+        let ks: Vec<(String, i32)> = lex_line(QueryDialect::Cql, "SELECT * FROM t JOIN")
             .into_iter()
             .map(|s| (s.text, s.kind))
             .collect();
@@ -1332,7 +1336,7 @@ mod tests {
     #[test]
     fn spans_roundtrip_line_text() {
         let line = "JOIN sectors s ON s.id = e.id_sector";
-        let joined: String = lex_line(QueryLanguage::Sql, line)
+        let joined: String = lex_line(QueryDialect::Sql(SqlDialect::Postgres), line)
             .into_iter()
             .map(|s| s.text)
             .collect();
@@ -1625,7 +1629,7 @@ mod tests {
 
     #[test]
     fn overlay_selection_splits_spans() {
-        let spans = lex_line(QueryLanguage::Sql, "SELECT 1");
+        let spans = lex_line(QueryDialect::Sql(SqlDialect::Postgres), "SELECT 1");
         let out = overlay_selection(spans, 3, 8);
         let joined: String = out.iter().map(|s| s.text.clone()).collect();
         assert_eq!(joined, "SELECT 1");
@@ -1639,7 +1643,7 @@ mod tests {
 
     #[test]
     fn overlay_selection_empty_range_noop() {
-        let spans = lex_line(QueryLanguage::Sql, "SELECT 1");
+        let spans = lex_line(QueryDialect::Sql(SqlDialect::Postgres), "SELECT 1");
         let out = overlay_selection(spans.clone(), 4, 4);
         assert_eq!(out, spans);
     }

@@ -51,8 +51,8 @@ fn all_columns(nodes: &[VmTreeNode]) -> Vec<Candidate> {
 }
 
 /// Map a table name or `FROM tbl alias` alias to its underlying table name.
-fn resolve_alias(stmt: &str, owner: &str, language: rdb_connstore::QueryLanguage) -> String {
-    for (table, alias) in table_refs(stmt, language) {
+fn resolve_alias(stmt: &str, owner: &str, dialect: rdb_connstore::QueryDialect) -> String {
+    for (table, alias) in table_refs(stmt, dialect) {
         if table.eq_ignore_ascii_case(owner)
             || table
                 .rsplit('.')
@@ -89,7 +89,7 @@ fn table_tokens(stmt: &str) -> Vec<&str> {
     tokens
 }
 
-fn table_refs(stmt: &str, language: rdb_connstore::QueryLanguage) -> Vec<(&str, Option<&str>)> {
+fn table_refs(stmt: &str, dialect: rdb_connstore::QueryDialect) -> Vec<(&str, Option<&str>)> {
     let words = table_tokens(stmt);
     let mut refs = Vec::new();
     let mut i = 0;
@@ -100,7 +100,7 @@ fn table_refs(stmt: &str, language: rdb_connstore::QueryLanguage) -> Vec<(&str, 
         }
         // Resume right after the last token this clause consumed, instead of
         // rescanning table/alias tokens table_list already read.
-        let (list, next) = table_list(&words, i + 1, language);
+        let (list, next) = table_list(&words, i + 1, dialect);
         refs.extend(list);
         i = next;
     }
@@ -112,11 +112,11 @@ fn table_refs(stmt: &str, language: rdb_connstore::QueryLanguage) -> Vec<(&str, 
 fn table_list<'a>(
     words: &[&'a str],
     start: usize,
-    language: rdb_connstore::QueryLanguage,
+    dialect: rdb_connstore::QueryDialect,
 ) -> (Vec<(&'a str, Option<&'a str>)>, usize) {
     let mut refs = Vec::new();
     let mut j = start;
-    while let Some((table, alias, next)) = next_table_ref(words, j, language) {
+    while let Some((table, alias, next)) = next_table_ref(words, j, dialect) {
         refs.push((table, alias));
         j = next;
     }
@@ -129,13 +129,13 @@ fn table_list<'a>(
 fn next_table_ref<'a>(
     words: &[&'a str],
     mut j: usize,
-    language: rdb_connstore::QueryLanguage,
+    dialect: rdb_connstore::QueryDialect,
 ) -> Option<(&'a str, Option<&'a str>, usize)> {
     while words.get(j) == Some(&",") {
         j += 1;
     }
     let table = *words.get(j)?;
-    if is_keyword_for(language, table) {
+    if crate::editor::is_keyword_for(dialect, &table.to_uppercase()) {
         return None;
     }
     let mut k = j + 1;
@@ -145,16 +145,9 @@ fn next_table_ref<'a>(
     let alias = words
         .get(k)
         .copied()
-        .filter(|w| *w != "," && !is_keyword_for(language, w));
+        .filter(|w| *w != "," && !crate::editor::is_keyword_for(dialect, &w.to_uppercase()));
     let next = if alias.is_some() { k + 1 } else { k };
     Some((table, alias, next))
-}
-
-fn is_keyword_for(language: rdb_connstore::QueryLanguage, w: &str) -> bool {
-    match language {
-        rdb_connstore::QueryLanguage::Cql => cql::is_keyword(&w.to_uppercase()),
-        _ => sql::is_keyword(w),
-    }
 }
 
 /// How well `word` (already lowercased) matches `label`, lowest is best:
@@ -342,9 +335,9 @@ fn columns_of(nodes: &[VmTreeNode], owner: &str) -> Vec<Candidate> {
 fn from_table_columns(
     stmt: &str,
     nodes: &[VmTreeNode],
-    language: rdb_connstore::QueryLanguage,
+    dialect: rdb_connstore::QueryDialect,
 ) -> (bool, Vec<Candidate>) {
-    let refs = table_refs(stmt, language);
+    let refs = table_refs(stmt, dialect);
     let mut seen = std::collections::HashSet::new();
     let cols: Vec<Candidate> = refs
         .iter()
@@ -359,11 +352,11 @@ fn from_table_columns(
 /// statement so far, not one line: a formatted query puts the clause keyword on
 /// a line of its own, and reading only the cursor's line reported no clause at
 /// all — the same query typed on one line completed differently.
-fn last_keyword(text: &str, language: rdb_connstore::QueryLanguage) -> Option<String> {
+fn last_keyword(text: &str, dialect: rdb_connstore::QueryDialect) -> Option<String> {
     text.lines()
         .rev()
         .find_map(|line| {
-            crate::editor::lex_line(language, line)
+            crate::editor::lex_line(dialect, line)
                 .into_iter()
                 .rev()
                 .find(|s| s.kind == 1)
@@ -408,22 +401,27 @@ fn in_literal_or_comment(line: &str) -> bool {
 }
 
 /// LIMIT/OFFSET arguments are values, not identifiers. Suppress completion
-/// while typing their numeric or quoted argument.
+/// while typing their numeric or quoted argument. `LIMIT`/`OFFSET` are common
+/// keywords, so which SQL vendor lexes the line doesn't matter here.
 fn sql_clause_argument(line: &str) -> bool {
     // `LIMIT`/`OFFSET` need not be the first token (`SELECT … LIMIT 10`).
     // The lexer gives us the actual last keyword, so quoted words and comments
     // cannot accidentally trigger this guard.
     matches!(
-        last_keyword(line, rdb_connstore::QueryLanguage::Sql).as_deref(),
+        last_keyword(
+            line,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres)
+        )
+        .as_deref(),
         Some("LIMIT") | Some("OFFSET")
     ) && line
         .rsplit_once(char::is_whitespace)
         .is_some_and(|(_, value)| !value.trim().is_empty())
 }
 
-pub fn is_table_position(line: &str, language: rdb_connstore::QueryLanguage) -> bool {
+pub fn is_table_position(line: &str, dialect: rdb_connstore::QueryDialect) -> bool {
     matches!(
-        last_keyword(line, language).as_deref(),
+        last_keyword(line, dialect).as_deref(),
         Some("FROM") | Some("JOIN") | Some("INTO") | Some("UPDATE") | Some("TABLE")
     )
 }
@@ -455,17 +453,17 @@ pub fn suggest(
     stmt: &str,
     nodes: &[VmTreeNode],
     active_schema: &str,
-    language: rdb_connstore::QueryLanguage,
+    dialect: rdb_connstore::QueryDialect,
 ) -> (usize, Vec<Candidate>) {
     // Redis has no table/column tree or dot-completion — dispatch entirely to
     // its own line-based command completion.
-    if language == rdb_connstore::QueryLanguage::Command {
+    if dialect == rdb_connstore::QueryDialect::Command {
         return command::suggest(before_cursor);
     }
     // Default table/column suggestions come from the active schema only, so the
     // popup follows the connected schema without the user picking it first.
     let scope = schema_scope(nodes, active_schema);
-    let is_mongo = language == rdb_connstore::QueryLanguage::Mongo;
+    let is_mongo = dialect == rdb_connstore::QueryDialect::Mongo;
     let mut word = trailing_word(before_cursor);
     let mut head = before_cursor.strip_suffix(word).unwrap_or(before_cursor);
     // Mongo operator/stage names are `$`-prefixed, but `$` isn't an identifier
@@ -496,7 +494,7 @@ pub fn suggest(
         let owner_word = trailing_word(before_dot);
         // The qualified path, so `schema.table.` keeps its schema; identical to
         // `owner_word` for a bare table or alias.
-        let owner = resolve_alias(stmt, trailing_path(before_dot), language);
+        let owner = resolve_alias(stmt, trailing_path(before_dot), dialect);
         // MongoDB's `db.` / `db.<collection>.` shapes are unambiguous and must
         // win over column completion: a collection's sampled fields (from
         // Driver::sample_fields) would otherwise satisfy the `!cols.is_empty()`
@@ -536,12 +534,28 @@ pub fn suggest(
         // on an earlier line still counts; `stmt` stays the whole statement
         // (alias resolution needs the text after the cursor too).
         let head = stmt_before_cursor(before_cursor);
-        match language {
-            rdb_connstore::QueryLanguage::Cql => cql::bare_word(head, stmt, nodes, scope),
-            _ => sql::bare_word(head, stmt, nodes, scope, active_schema),
-        }
+        bare_word_for_dialect(dialect, head, stmt, nodes, scope, active_schema)
     };
     rank_and_cap(cands, word)
+}
+
+/// Dispatch bare-word completion to the dialect's own module. `Command` and
+/// `Mongo` are handled earlier in `suggest` and never reach here.
+fn bare_word_for_dialect(
+    dialect: rdb_connstore::QueryDialect,
+    head: &str,
+    stmt: &str,
+    nodes: &[VmTreeNode],
+    scope: &[VmTreeNode],
+    active_schema: &str,
+) -> Vec<Candidate> {
+    match dialect {
+        rdb_connstore::QueryDialect::Cql => cql::bare_word(head, stmt, nodes, scope),
+        rdb_connstore::QueryDialect::Sql(d) => {
+            sql::bare_word(head, stmt, nodes, scope, active_schema, d)
+        }
+        rdb_connstore::QueryDialect::Mongo | rdb_connstore::QueryDialect::Command => Vec::new(),
+    }
 }
 
 /// Prefix-filter, rank, dedup and cap a candidate list, and report how much of
@@ -644,9 +658,9 @@ mod tests {
         before: &str,
         nodes: &[VmTreeNode],
         active_schema: &str,
-        language: rdb_connstore::QueryLanguage,
+        dialect: rdb_connstore::QueryDialect,
     ) -> (usize, Vec<Candidate>) {
-        suggest(before, before, nodes, active_schema, language)
+        suggest(before, before, nodes, active_schema, dialect)
     }
 
     fn nodes() -> Vec<VmTreeNode> {
@@ -760,7 +774,7 @@ mod tests {
             "select * from archive.audit_log where archive.audit_log.",
             &dupes,
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -774,7 +788,7 @@ mod tests {
             "select * from t_invoi",
             &cross_schema_nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert!(
             c.iter().any(|c| c.label == "billing.t_invoice_line"),
@@ -791,7 +805,7 @@ mod tests {
             "select * from t_invl",
             &cross_schema_nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert!(
             c.iter().any(|c| c.label == "billing.t_invoice_line"),
@@ -806,7 +820,7 @@ mod tests {
             "select * from u",
             &cross_schema_nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert_eq!(c.first().map(|c| c.label.as_str()), Some("users"));
     }
@@ -817,29 +831,35 @@ mod tests {
             "select * from user",
             &cross_schema_nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert!(!c.iter().any(|c| c.label == "public.users"), "got {c:?}");
     }
 
     #[test]
     fn empty_and_whitespace_context_suppress_popup() {
-        assert!(
-            sug("", &nodes(), "public", rdb_connstore::QueryLanguage::Sql)
-                .1
-                .is_empty()
-        );
-        assert!(
-            sug("   ", &nodes(), "public", rdb_connstore::QueryLanguage::Sql)
-                .1
-                .is_empty()
-        );
+        assert!(sug(
+            "",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres)
+        )
+        .1
+        .is_empty());
+        assert!(sug(
+            "   ",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres)
+        )
+        .1
+        .is_empty());
         // trailing space after a keyword: wait for the user to start typing
         assert!(sug(
             "select ",
             &nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres)
         )
         .1
         .is_empty());
@@ -852,14 +872,14 @@ mod tests {
             "SELECT * FROM users WHERE name = 'us",
             &nodes,
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert!(literal.is_empty());
         let (_, limit) = sug(
             "SELECT * FROM users LIMIT 10",
             &nodes,
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert!(limit.is_empty());
     }
@@ -871,7 +891,7 @@ mod tests {
             "SELECT us",
             &nodes,
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert!(candidates.iter().any(|c| c.label == "users"));
     }
@@ -882,7 +902,7 @@ mod tests {
             "select * from job",
             &nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert_eq!(n, 3);
         assert_eq!(
@@ -897,7 +917,7 @@ mod tests {
             "select * from job_config where job_config.",
             &nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert_eq!(n, 0);
         assert_eq!(
@@ -912,7 +932,7 @@ mod tests {
             "select * from users where config",
             &nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert!(!c.iter().any(|x| x.label == "config_id"), "got {c:?}");
     }
@@ -932,7 +952,7 @@ mod tests {
             "select * from users, orders where ord",
             &n,
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert!(c.iter().any(|x| x.label == "order_id"), "got {c:?}");
     }
@@ -961,7 +981,7 @@ mod tests {
             label: "log_inbound".into(),
             kind: "collection".into(),
         });
-        let (n, c) = sug("db.log", &ns, "public", rdb_connstore::QueryLanguage::Mongo);
+        let (n, c) = sug("db.log", &ns, "public", rdb_connstore::QueryDialect::Mongo);
         assert_eq!(n, 3);
         assert!(c.iter().any(|x| x.label == "log_inbound"));
     }
@@ -978,7 +998,7 @@ mod tests {
             "db.log_inbound.fi",
             &ns,
             "public",
-            rdb_connstore::QueryLanguage::Mongo,
+            rdb_connstore::QueryDialect::Mongo,
         );
         assert!(c.iter().any(|x| x.label == "find"));
         assert!(c.iter().any(|x| x.label == "findOne"));
@@ -1002,7 +1022,7 @@ mod tests {
             "db.log_inbound.fi",
             &ns,
             "public",
-            rdb_connstore::QueryLanguage::Mongo,
+            rdb_connstore::QueryDialect::Mongo,
         );
         assert!(c.iter().any(|x| x.label == "find"));
         assert!(!c.iter().any(|x| x.label == "source"));
@@ -1021,7 +1041,7 @@ mod tests {
             "db.log_inbound.find().s",
             &ns,
             "public",
-            rdb_connstore::QueryLanguage::Mongo,
+            rdb_connstore::QueryDialect::Mongo,
         );
         assert_eq!(n, 1);
         assert!(c.iter().any(|x| x.label == "sort"));
@@ -1043,7 +1063,7 @@ mod tests {
             "db.log_inbound.find({ sou",
             &ns,
             "public",
-            rdb_connstore::QueryLanguage::Mongo,
+            rdb_connstore::QueryDialect::Mongo,
         );
         assert!(c.iter().any(|x| x.label == "source"));
     }
@@ -1059,7 +1079,7 @@ mod tests {
             "db.log_inbound.find({ age: { $g",
             &ns,
             "public",
-            rdb_connstore::QueryLanguage::Mongo,
+            rdb_connstore::QueryDialect::Mongo,
         );
         // Replace length covers the `$` too, so accepting "$gt" doesn't
         // duplicate the `$` the user already typed.
@@ -1076,7 +1096,7 @@ mod tests {
             label: "log_inbound".into(),
             kind: "collection".into(),
         });
-        let (_, c) = sug("d", &ns, "public", rdb_connstore::QueryLanguage::Mongo);
+        let (_, c) = sug("d", &ns, "public", rdb_connstore::QueryDialect::Mongo);
         assert!(c.iter().any(|x| x.label == "db"));
         assert!(!c.iter().any(|x| x.label == "DELETE"));
     }
@@ -1085,7 +1105,7 @@ mod tests {
     fn redis_bare_word_suggests_commands_not_sql_keywords() {
         // Regression: Redis previously fell into the SQL keyword branch and
         // got offered SELECT/DELETE/etc, which don't exist in Redis.
-        let (_, c) = sug("GE", &[], "public", rdb_connstore::QueryLanguage::Command);
+        let (_, c) = sug("GE", &[], "public", rdb_connstore::QueryDialect::Command);
         assert!(c.iter().any(|x| x.label == "GET"));
         assert!(!c.iter().any(|x| x.label == "SELECT"));
         assert!(!c.iter().any(|x| x.label == "DELETE"));
@@ -1095,12 +1115,7 @@ mod tests {
     fn redis_completion_only_at_line_start() {
         // A command's arguments (the key name) aren't completed against the
         // command list.
-        let (_, c) = sug(
-            "GET k",
-            &[],
-            "public",
-            rdb_connstore::QueryLanguage::Command,
-        );
+        let (_, c) = sug("GET k", &[], "public", rdb_connstore::QueryDialect::Command);
         assert!(c.is_empty());
     }
 
@@ -1113,14 +1128,14 @@ mod tests {
             "select j",
             &nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Cql,
+            rdb_connstore::QueryDialect::Cql,
         );
         assert!(!c.iter().any(|x| x.label == "JOIN"));
         let (_, c) = sug(
             "select h",
             &nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Cql,
+            rdb_connstore::QueryDialect::Cql,
         );
         assert!(!c.iter().any(|x| x.label == "HAVING"));
     }
@@ -1131,7 +1146,7 @@ mod tests {
             "select * from job",
             &nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Cql,
+            rdb_connstore::QueryDialect::Cql,
         );
         assert_eq!(n, 3);
         assert!(c.iter().any(|x| x.label == "job_config"));
@@ -1163,7 +1178,7 @@ mod tests {
             "select teknis",
             &n,
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         // `teknis_id` is a real prefix → ranks ahead of the mid-word match.
@@ -1192,7 +1207,7 @@ mod tests {
             "select * from analytics_core.event_journal where step",
             &two,
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"step_id"));
@@ -1203,7 +1218,7 @@ mod tests {
             "select * from analytics_core.event_journal where step",
             &two,
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert!(c2.iter().any(|x| x.label == "step_id"));
         assert!(!c2.iter().any(|x| x.label == "id"));
@@ -1226,7 +1241,7 @@ mod tests {
             "select * from not_loaded_yet where i",
             &n,
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert!(c.iter().any(|x| x.label == "id"));
     }
@@ -1254,7 +1269,7 @@ mod tests {
             "select con from analytics_core.job_config",
             &two,
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert_eq!(n, 3);
         assert_eq!(c.first().map(|x| x.label.as_str()), Some("config_id"));
@@ -1268,7 +1283,7 @@ mod tests {
             "select a. from job_config a",
             &nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -1292,7 +1307,7 @@ mod tests {
             "select * from analyticscore",
             &n,
             "analytics_core",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert!(c.iter().any(|x| x.label == "analytics_core"));
         // Not schemas only — tables and columns too.
@@ -1300,14 +1315,14 @@ mod tests {
             "select * from jobconfig",
             &n,
             "analytics_core",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert!(c.iter().any(|x| x.label == "job_config"));
         let (_, c) = sug(
             "select * from job_config where configid",
             &n,
             "analytics_core",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert!(c.iter().any(|x| x.label == "config_id"));
     }
@@ -1327,7 +1342,7 @@ mod tests {
             "select * from jobc",
             &n,
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -1341,7 +1356,7 @@ mod tests {
             "sele",
             &nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert_eq!(n, 4);
         assert_eq!(
@@ -1357,7 +1372,7 @@ mod tests {
             "select n",
             &nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"name"));
@@ -1369,7 +1384,7 @@ mod tests {
             "select * from job_config sc where sc.",
             &nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -1387,7 +1402,7 @@ mod tests {
             "select\n    na",
             &nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"name"), "got {labels:?}");
@@ -1400,7 +1415,7 @@ mod tests {
             "select *\nfrom job_config\nwhere\n    conf",
             &nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"config_id"), "got {labels:?}");
@@ -1414,7 +1429,7 @@ mod tests {
             "select name from job_config;\nsel",
             &nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"SELECT"), "got {labels:?}");
@@ -1428,7 +1443,7 @@ mod tests {
             "select * from job_config as jc where jc.",
             &nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -1444,7 +1459,7 @@ mod tests {
             "select * from job_config a, users b where b.",
             &nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
@@ -1457,13 +1472,23 @@ mod tests {
     #[test]
     fn schema_qualified_alias_join_resolves_columns() {
         let a = "select * from public.job_config a left join public.users b on a.";
-        let (_, c) = sug(a, &nodes(), "public", rdb_connstore::QueryLanguage::Sql);
+        let (_, c) = sug(
+            a,
+            &nodes(),
+            "public",
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
+        );
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["config_id", "name"]
         );
         let b = "select * from public.job_config a left join public.users b on b.";
-        let (_, c) = sug(b, &nodes(), "public", rdb_connstore::QueryLanguage::Sql);
+        let (_, c) = sug(
+            b,
+            &nodes(),
+            "public",
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
+        );
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["id"]
@@ -1475,7 +1500,12 @@ mod tests {
     #[test]
     fn multiline_join_alias_resolves_columns() {
         let sql = "select * from public.job_config a\nleft join public.users b on a.";
-        let (_, c) = sug(sql, &nodes(), "public", rdb_connstore::QueryLanguage::Sql);
+        let (_, c) = sug(
+            sql,
+            &nodes(),
+            "public",
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
+        );
         assert_eq!(
             c.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(),
             ["config_id", "name"]
@@ -1488,7 +1518,7 @@ mod tests {
             "select * f",
             &nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"FROM"));
@@ -1500,7 +1530,7 @@ mod tests {
             "select * from public.",
             &nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert_eq!(n, 0);
         assert_eq!(
@@ -1525,7 +1555,7 @@ mod tests {
             "select * from users where users.",
             &typed,
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert_eq!(c[0].label, "id");
     }
@@ -1550,7 +1580,7 @@ mod tests {
             "select * from t",
             &two,
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"t_users"));
@@ -1560,7 +1590,7 @@ mod tests {
             "select * from t",
             &two,
             "other",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"t_orders"));
@@ -1591,7 +1621,7 @@ mod tests {
             "select * from a",
             &two_schema_nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
         assert!(labels.contains(&"analytics"));
@@ -1605,7 +1635,7 @@ mod tests {
             "select * from analytics.",
             &two_schema_nodes(),
             "public",
-            rdb_connstore::QueryLanguage::Sql,
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres),
         );
         assert_eq!(n, 0);
         assert_eq!(
@@ -1643,28 +1673,49 @@ mod tests {
     fn is_table_position_detects_from_and_join() {
         assert!(is_table_position(
             "select * from ",
-            rdb_connstore::QueryLanguage::Sql
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres)
         ));
         assert!(is_table_position(
             "select * from t left join ",
-            rdb_connstore::QueryLanguage::Sql
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres)
         ));
         assert!(is_table_position(
             "insert into ",
-            rdb_connstore::QueryLanguage::Sql
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres)
         ));
         assert!(is_table_position(
             "update ",
-            rdb_connstore::QueryLanguage::Sql
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres)
         ));
         // Not table position:
         assert!(!is_table_position(
             "select ",
-            rdb_connstore::QueryLanguage::Sql
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres)
         ));
         assert!(!is_table_position(
             "select * from users where ",
-            rdb_connstore::QueryLanguage::Sql
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres)
         ));
+    }
+
+    /// Lexer and completion read vendor keywords from the same
+    /// `QueryDialect`, so a vendor-only word (Postgres' `ILIKE`) must
+    /// highlight and suggest together, and stay absent from both on a
+    /// dialect that doesn't have it (MySQL).
+    #[test]
+    fn lexer_and_completion_agree_on_vendor_keywords() {
+        let pg = rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Postgres);
+        let mysql = rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::MySql);
+
+        assert!(crate::editor::is_keyword_for(pg, "ILIKE"));
+        assert!(!crate::editor::is_keyword_for(mysql, "ILIKE"));
+
+        let (_, pg_cands) = sug("name IL", &nodes(), "public", pg);
+        let (_, mysql_cands) = sug("name IL", &nodes(), "public", mysql);
+        assert!(pg_cands.iter().any(|c| c.label == "ILIKE"), "{pg_cands:?}");
+        assert!(
+            !mysql_cands.iter().any(|c| c.label == "ILIKE"),
+            "{mysql_cands:?}"
+        );
     }
 }
