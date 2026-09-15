@@ -9,7 +9,7 @@
 pub mod cql;
 pub mod sql;
 
-use rdb_connstore::QueryLanguage;
+use rdb_connstore::QueryDialect;
 
 /// Per-dialect knobs for the shared formatting loop.
 pub struct Spec {
@@ -21,14 +21,14 @@ pub struct Spec {
     pub join_qualifiers: &'static [&'static str],
 }
 
-/// Format `text` for `language`. `None` for Redis/Mongo — the Format button
+/// Format `text` for `dialect`. `None` for Redis/Mongo — the Format button
 /// stays hidden for those (see `sql_capable` in main.rs), this is
 /// defense-in-depth against a stray call.
-pub fn dispatch(language: QueryLanguage, text: &str) -> Option<String> {
-    match language {
-        QueryLanguage::Sql => Some(run(&sql::SPEC, text)),
-        QueryLanguage::Cql => Some(run(&cql::SPEC, text)),
-        QueryLanguage::Command | QueryLanguage::Mongo => None,
+pub fn dispatch(dialect: QueryDialect, text: &str) -> Option<String> {
+    match dialect {
+        QueryDialect::Sql(d) => Some(run(&sql::spec(d), text)),
+        QueryDialect::Cql => Some(run(&cql::SPEC, text)),
+        QueryDialect::Command | QueryDialect::Mongo => None,
     }
 }
 
@@ -123,9 +123,10 @@ fn run(spec: &Spec, text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rdb_connstore::SqlDialect;
 
     fn format(sql: &str) -> String {
-        dispatch(QueryLanguage::Sql, sql).unwrap()
+        dispatch(QueryDialect::Sql(SqlDialect::Postgres), sql).unwrap()
     }
 
     #[test]
@@ -162,14 +163,14 @@ mod tests {
 
     #[test]
     fn command_and_mongo_are_not_formatted() {
-        assert!(dispatch(QueryLanguage::Command, "GET k").is_none());
-        assert!(dispatch(QueryLanguage::Mongo, "db.t.find()").is_none());
+        assert!(dispatch(QueryDialect::Command, "GET k").is_none());
+        assert!(dispatch(QueryDialect::Mongo, "db.t.find()").is_none());
     }
 
     #[test]
     fn cql_splits_where_and_allow_filtering() {
         let got = dispatch(
-            QueryLanguage::Cql,
+            QueryDialect::Cql,
             "select * from ks.t where k=1 allow filtering",
         )
         .unwrap();
@@ -179,10 +180,35 @@ mod tests {
     #[test]
     fn cql_does_not_break_on_create_table_primary_key() {
         let got = dispatch(
-            QueryLanguage::Cql,
+            QueryDialect::Cql,
             "create table t (id int, primary key (id))",
         )
         .unwrap();
         assert_eq!(got, "CREATE TABLE t (id int, PRIMARY KEY (id))");
+    }
+
+    #[test]
+    fn full_join_stays_on_one_line_and_uppercase() {
+        assert_eq!(
+            format("select * from a full join b on a.id = b.id"),
+            "SELECT *\nFROM a\nFULL JOIN b ON a.id = b.id"
+        );
+    }
+
+    #[test]
+    fn vendor_keyword_uppercased_only_for_its_dialect() {
+        let mssql = dispatch(
+            QueryDialect::Sql(SqlDialect::Mssql),
+            "select top 10 * from t",
+        )
+        .unwrap();
+        assert_eq!(mssql, "SELECT TOP 10 *\nFROM t");
+
+        let postgres = dispatch(
+            QueryDialect::Sql(SqlDialect::Postgres),
+            "select top 10 * from t",
+        )
+        .unwrap();
+        assert_eq!(postgres, "SELECT top 10 *\nFROM t");
     }
 }

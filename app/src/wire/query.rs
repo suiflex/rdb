@@ -10,6 +10,21 @@ use slint::{ComponentHandle, SharedString};
 
 use crate::*;
 
+/// The Format button's dialect, or Postgres if no connection is current.
+/// `sql_capable` isn't reset on disconnect (`wire/picker.rs`), so the button
+/// can still be visible with `cur_engine` at `None` — Postgres keeps the
+/// button a no-op-ish tidy-up instead of a panic on that stale state.
+fn format_dialect(
+    cur_engine: &RefCell<Option<rdb_connstore::Engine>>,
+) -> rdb_connstore::QueryDialect {
+    cur_engine
+        .borrow()
+        .map(rdb_connstore::Engine::dialect)
+        .unwrap_or(rdb_connstore::QueryDialect::Sql(
+            rdb_connstore::SqlDialect::Postgres,
+        ))
+}
+
 pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
     let AppState {
         store,
@@ -457,14 +472,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let sync_editor = sync_editor.clone();
         let cur_engine = cur_engine.clone();
         window.on_format_sql(move || {
-            let language = cur_engine
-                .borrow()
-                .map(rdb_connstore::Engine::language)
-                .unwrap_or(rdb_connstore::QueryLanguage::Sql);
+            let dialect = format_dialect(&cur_engine);
             let changed = {
                 let mut ed = panes[0].ed_state.borrow_mut();
                 let stmt = ed.current_statement();
-                match format::dispatch(language, &stmt) {
+                match format::dispatch(dialect, &stmt) {
                     Some(formatted) if !stmt.trim().is_empty() => {
                         ed.replace_current_statement(&formatted);
                         true
@@ -482,14 +494,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let sync_editor = sync_editor.clone();
         let cur_engine = cur_engine.clone();
         window.on_p1_format_sql(move || {
-            let language = cur_engine
-                .borrow()
-                .map(rdb_connstore::Engine::language)
-                .unwrap_or(rdb_connstore::QueryLanguage::Sql);
+            let dialect = format_dialect(&cur_engine);
             let changed = {
                 let mut ed = panes[1].ed_state.borrow_mut();
                 let stmt = ed.current_statement();
-                match format::dispatch(language, &stmt) {
+                match format::dispatch(dialect, &stmt) {
                     Some(formatted) if !stmt.trim().is_empty() => {
                         ed.replace_current_statement(&formatted);
                         true

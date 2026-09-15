@@ -1379,6 +1379,30 @@ mod tests {
     }
 
     #[test]
+    fn mssql_top_offers_columns() {
+        let (_, c) = sug(
+            "select top 10 n",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Mssql),
+        );
+        let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+        assert!(labels.contains(&"name"), "got {labels:?}");
+    }
+
+    #[test]
+    fn clickhouse_prewhere_offers_columns() {
+        let (_, c) = sug(
+            "select * from job_config prewhere n",
+            &nodes(),
+            "public",
+            rdb_connstore::QueryDialect::Sql(rdb_connstore::SqlDialect::Clickhouse),
+        );
+        let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+        assert!(labels.contains(&"name"), "got {labels:?}");
+    }
+
+    #[test]
     fn alias_dot_resolves_to_table_columns() {
         let (_, c) = sug(
             "select * from job_config sc where sc.",

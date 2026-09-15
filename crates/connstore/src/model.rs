@@ -67,7 +67,9 @@ pub enum QueryDialect {
 
 impl QueryDialect {
     /// The broader query paradigm, for dispatch that doesn't care about SQL
-    /// vendor (statement splitting, `Query` construction, format dispatch).
+    /// vendor (statement splitting, `Query` construction). Formatting and
+    /// completion keep the full `QueryDialect` instead — they uppercase and
+    /// suggest vendor keywords, so they do care.
     pub fn language(self) -> QueryLanguage {
         match self {
             QueryDialect::Sql(_) => QueryLanguage::Sql,
@@ -222,7 +224,7 @@ impl Engine {
 
     /// The broader query paradigm, derived from `dialect`. For dispatch that
     /// doesn't care about SQL vendor (statement splitting, `Query`
-    /// construction, format dispatch).
+    /// construction). Formatting and completion use `dialect` instead.
     pub fn language(self) -> QueryLanguage {
         self.meta().dialect.language()
     }

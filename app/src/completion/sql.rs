@@ -37,8 +37,10 @@ pub fn bare_word(
         }
         // column position: offer columns and tables, plus keywords so the
         // next clause (FROM/WHERE/…) is always reachable, e.g. after `*`.
+        // TOP (Mssql) and PREWHERE (Clickhouse) are vendor clause keywords
+        // that put the cursor in the same column position as SELECT/WHERE.
         Some("SELECT") | Some("WHERE") | Some("AND") | Some("OR") | Some("ON") | Some("HAVING")
-        | Some("SET") | Some("BY") | Some("VALUES") => {
+        | Some("SET") | Some("BY") | Some("VALUES") | Some("TOP") | Some("PREWHERE") => {
             // Columns of the statement's own FROM/JOIN tables come first (they
             // are what's actually in scope, cross-schema included), then the
             // active-schema columns/tables and keywords as a fallback.

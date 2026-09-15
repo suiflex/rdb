@@ -16,6 +16,7 @@ pub const COMMON_KEYWORDS: &[&str] = &[
     "RIGHT",
     "INNER",
     "OUTER",
+    "FULL",
     "ON",
     "AS",
     "AND",
@@ -31,7 +32,10 @@ pub const COMMON_KEYWORDS: &[&str] = &[
     "SET",
     "DELETE",
     "CREATE",
+    "ALTER",
+    "DROP",
     "TABLE",
+    "INDEX",
     "FUNCTION",
     "REPLACE",
     "RETURNS",
@@ -99,6 +103,8 @@ fn dialect_keywords(dialect: SqlDialect) -> &'static [&'static str] {
     }
 }
 
+/// `word` must already be uppercased by the caller — this check is
+/// case-sensitive on purpose, so callers own the `to_uppercase()`.
 pub fn is_keyword(dialect: SqlDialect, word: &str) -> bool {
     COMMON_KEYWORDS.contains(&word) || dialect_keywords(dialect).contains(&word)
 }
@@ -134,6 +140,27 @@ mod tests {
         ] {
             assert!(is_keyword(d, "SELECT"), "{d:?} should know SELECT");
         }
+    }
+
+    #[test]
+    fn common_ddl_and_clause_keywords_are_present() {
+        for w in ["FULL", "ALTER", "DROP", "INDEX"] {
+            assert!(
+                is_keyword(SqlDialect::Postgres, w),
+                "{w} should be a common keyword"
+            );
+        }
+    }
+
+    /// COUNT stays out of the keyword table on purpose — it is a function
+    /// call, not a clause keyword. See `keywords_strings_functions_comments`
+    /// in `editor.rs`: `COUNT(*)` must get the function-call color
+    /// (`kind == 3`), which only happens when the word before `(` is not a
+    /// keyword. SUM/AVG/MIN/MAX are misclassified the same way already —
+    /// pre-existing, tracked separately, not fixed here.
+    #[test]
+    fn count_is_a_function_not_a_keyword() {
+        assert!(!is_keyword(SqlDialect::Postgres, "COUNT"));
     }
 
     #[test]
