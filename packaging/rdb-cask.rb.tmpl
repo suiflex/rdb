@@ -27,9 +27,7 @@ cask "rdb" do
   # quarantine flag Homebrew leaves on the download (e.g. opening via
   # Spotlight). Stripping it here is the standard cask workaround short
   # of paid notarization. See suiflex/rdb#184.
-  postflight do
-    system_command "/usr/bin/xattr",
-                    args: ["-cr", "#{appdir}/RDB.app"],
-                    sudo: false
+  postflight_steps do
+    run "/usr/bin/xattr", args: ["-cr", "{{appdir}}/RDB.app"]
   end
 end
