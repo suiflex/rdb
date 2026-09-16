@@ -545,6 +545,18 @@ mod tests {
     }
 
     #[test]
+    fn mongo_line_find_with_bare_operator_keys() {
+        let text = "db.users.find({ age: { $gt: 20 } })";
+        match parse_query(Engine::Mongo, text).unwrap() {
+            Query::Mongo(op) => match op.kind {
+                MongoKind::Find(f) => assert_eq!(f, serde_json::json!({ "age": { "$gt": 20 } })),
+                _ => panic!("expected Find"),
+            },
+            _ => panic!("expected Mongo"),
+        }
+    }
+
+    #[test]
     fn mongo_line_empty_find_is_browse_all() {
         match parse_query(Engine::Mongo, "db.c.find()").unwrap() {
             Query::Mongo(op) => match op.kind {
