@@ -2827,6 +2827,55 @@ fn mongo_filter_body(filter: &str) -> String {
     }
 }
 
+/// `browse_text`'s Mongo arm.
+fn mongo_browse_text(
+    table: &rdb_core::write::TableRef,
+    filter: &str,
+    offset: u64,
+    limit: u64,
+) -> String {
+    // mongosh shape, not the JSON envelope: it is what a Mongo user
+    // already knows how to edit, and it can carry a `.sort(...)` the
+    // envelope has no field for. `parse_mongo_line` reads it back.
+    let db = table
+        .database
+        .as_deref()
+        .filter(|d| !d.is_empty())
+        .map(|d| format!("use('{d}')\n"))
+        .unwrap_or_default();
+    let body = mongo_filter_body(filter);
+    // A plain identifier reads best as `db.orders`; anything else (a
+    // dot, a dash, a space — GridFS's `fs.files`, the `system.*`
+    // collections) has to go through getCollection or the parser would
+    // split the name at its first dot.
+    let ident = !table.name.is_empty()
+        && !table.name.starts_with(|c: char| c.is_ascii_digit())
+        && table
+            .name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_');
+    let coll = if ident {
+        format!("db.{}", table.name)
+    } else if table.name.contains('\'') {
+        // ponytail: the parser unquotes by trimming, not unescaping, so
+        // pick the quote the name does not use rather than escaping it.
+        format!("db.getCollection(\"{}\")", table.name)
+    } else {
+        format!("db.getCollection('{}')", table.name)
+    };
+    format!("{db}{coll}.find({body}).skip({offset}).limit({limit})")
+}
+
+/// `"ns"."name"`, or just `"name"` when there is no namespace, double-quoted
+/// with embedded quotes doubled.
+fn qualified_name(ns: Option<&str>, name: &str) -> String {
+    let q = |s: &str| s.replace('"', "\"\"");
+    match ns {
+        Some(ns) if !ns.is_empty() => format!("\"{}\".\"{}\"", q(ns), q(name)),
+        _ => format!("\"{}\"", q(name)),
+    }
+}
+
 fn browse_text(
     engine: rdb_connstore::Engine,
     table: &rdb_core::write::TableRef,
@@ -2874,48 +2923,10 @@ fn browse_text(
         rdb_connstore::Engine::Cassandra => {
             // ponytail: CQL is LIMIT-only (no OFFSET); real paging state is a
             // follow-up. Keyspace travels in `database`.
-            let q = |s: &str| s.replace('"', "\"\"");
-            match table.database.as_deref() {
-                Some(ks) if !ks.is_empty() => format!(
-                    "SELECT * FROM \"{}\".\"{}\" LIMIT {limit}",
-                    q(ks),
-                    q(&table.name)
-                ),
-                _ => format!("SELECT * FROM \"{}\" LIMIT {limit}", q(&table.name)),
-            }
+            let target = qualified_name(table.database.as_deref(), &table.name);
+            format!("SELECT * FROM {target} LIMIT {limit}")
         }
-        rdb_connstore::Engine::Mongo => {
-            // mongosh shape, not the JSON envelope: it is what a Mongo user
-            // already knows how to edit, and it can carry a `.sort(...)` the
-            // envelope has no field for. `parse_mongo_line` reads it back.
-            let db = table
-                .database
-                .as_deref()
-                .filter(|d| !d.is_empty())
-                .map(|d| format!("use('{d}')\n"))
-                .unwrap_or_default();
-            let body = mongo_filter_body(filter);
-            // A plain identifier reads best as `db.orders`; anything else (a
-            // dot, a dash, a space — GridFS's `fs.files`, the `system.*`
-            // collections) has to go through getCollection or the parser would
-            // split the name at its first dot.
-            let ident = !table.name.is_empty()
-                && !table.name.starts_with(|c: char| c.is_ascii_digit())
-                && table
-                    .name
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_');
-            let coll = if ident {
-                format!("db.{}", table.name)
-            } else if table.name.contains('\'') {
-                // ponytail: the parser unquotes by trimming, not unescaping, so
-                // pick the quote the name does not use rather than escaping it.
-                format!("db.getCollection(\"{}\")", table.name)
-            } else {
-                format!("db.getCollection('{}')", table.name)
-            };
-            format!("{db}{coll}.find({body}).skip({offset}).limit({limit})")
-        }
+        rdb_connstore::Engine::Mongo => mongo_browse_text(table, filter, offset, limit),
         rdb_connstore::Engine::Redis | rdb_connstore::Engine::Valkey => {
             format!("BROWSE {} {offset} {limit}", table.name)
         }
@@ -2940,12 +2951,7 @@ fn browse_text(
             // Requires Oracle 12c or later.
             let q = |s: &str| s.replace('"', "\"\"");
             let where_sql = sql_where(col_filters, |c| format!("\"{}\"", q(c)), "LIKE");
-            let target = match table.schema.as_deref() {
-                Some(sc) if !sc.is_empty() => {
-                    format!("\"{}\".\"{}\"", q(sc), q(&table.name))
-                }
-                _ => format!("\"{}\"", q(&table.name)),
-            };
+            let target = qualified_name(table.schema.as_deref(), &table.name);
             format!(
                 "SELECT * FROM {target}{where_sql} \
                  OFFSET {offset} ROWS FETCH NEXT {limit} ROWS ONLY"
@@ -2954,10 +2960,7 @@ fn browse_text(
         rdb_connstore::Engine::Clickhouse => {
             let q = |s: &str| s.replace('"', "\"\"");
             let where_sql = sql_where(col_filters, |c| format!("\"{}\"", q(c)), "LIKE");
-            let target = match table.database.as_deref() {
-                Some(db) if !db.is_empty() => format!("\"{}\".\"{}\"", q(db), q(&table.name)),
-                _ => format!("\"{}\"", q(&table.name)),
-            };
+            let target = qualified_name(table.database.as_deref(), &table.name);
             format!("SELECT * FROM {target}{where_sql} LIMIT {limit} OFFSET {offset}")
         }
     }
