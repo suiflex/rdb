@@ -6257,6 +6257,55 @@ mod tests {
         }
     }
 
+    #[test]
+    fn namespaced_browse_text_quotes_namespace_and_name() {
+        let t =
+            |database: Option<&str>, schema: Option<&str>, name: &str| rdb_core::write::TableRef {
+                database: database.map(Into::into),
+                schema: schema.map(Into::into),
+                name: name.into(),
+            };
+        use rdb_connstore::Engine;
+        assert_eq!(
+            browse_text(
+                Engine::Cassandra,
+                &t(Some("ks"), None, "a\"b"),
+                1,
+                50,
+                "",
+                &[]
+            ),
+            "SELECT * FROM \"ks\".\"a\"\"b\" LIMIT 50"
+        );
+        assert_eq!(
+            browse_text(Engine::Cassandra, &t(Some(""), None, "t"), 0, 50, "", &[]),
+            "SELECT * FROM \"t\" LIMIT 50"
+        );
+        assert_eq!(
+            browse_text(Engine::Oracle, &t(None, Some("HR"), "t"), 1, 50, "", &[]),
+            "SELECT * FROM \"HR\".\"t\" OFFSET 50 ROWS FETCH NEXT 50 ROWS ONLY"
+        );
+        assert_eq!(
+            browse_text(Engine::Oracle, &t(None, None, "t"), 0, 50, "", &[]),
+            "SELECT * FROM \"t\" OFFSET 0 ROWS FETCH NEXT 50 ROWS ONLY"
+        );
+        assert_eq!(
+            browse_text(
+                Engine::Clickhouse,
+                &t(Some("d\"b"), None, "t"),
+                2,
+                10,
+                "",
+                &[]
+            ),
+            "SELECT * FROM \"d\"\"b\".\"t\" LIMIT 10 OFFSET 20"
+        );
+        assert_eq!(
+            browse_text(Engine::Clickhouse, &t(None, None, "t"), 0, 10, "", &[]),
+            "SELECT * FROM \"t\" LIMIT 10 OFFSET 0"
+        );
+    }
+
     // GridFS and the system collections carry a dot, which the short
     // `db.<name>.` form cannot express: the parser would split the name there.
     #[test]
