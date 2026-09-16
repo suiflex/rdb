@@ -334,7 +334,14 @@ fn parse_json_arg(arg: &str, ctx: &str) -> Result<serde_json::Value, String> {
     if a.is_empty() {
         return Ok(serde_json::Value::Object(Default::default()));
     }
-    json5::from_str(a).map_err(|e| format!("invalid JSON in {ctx}(...): {e}"))
+    json5::from_str(a).map_err(|e| {
+        let hint = if ctx == "find" {
+            " (expected a filter document like { field: value })"
+        } else {
+            ""
+        };
+        format!("invalid JSON in {ctx}(...): {e}{hint}")
+    })
 }
 
 fn parse_int_arg(arg: &str, ctx: &str) -> Result<i64, String> {
@@ -639,7 +646,8 @@ mod tests {
 
     #[test]
     fn mongo_line_errors_are_readable() {
-        assert!(parse_query(Engine::Mongo, "db.c.find({ bad json })").is_err());
+        let err = parse_query(Engine::Mongo, "db.c.find({ bad json })").unwrap_err();
+        assert!(err.contains("{ field: value }"), "{err}");
         assert!(parse_query(Engine::Mongo, "db.c.drop()").is_err());
         assert!(parse_query(Engine::Mongo, "db..find({})").is_err());
     }
