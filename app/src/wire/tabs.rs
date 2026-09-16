@@ -431,20 +431,21 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 return;
             }
             let remove_at = if requested >= 0 {
-                tabs.iter()
-                    .enumerate()
-                    .filter(|(_, tab)| tab.group == 0)
-                    .nth(requested as usize)
-                    .map(|(index, _)| index)
-                    .unwrap_or(tabs.len())
+                visible_abs_index_for_group(&w, &tabs, 0, requested as usize).unwrap_or(tabs.len())
             } else {
                 workspace_tab_index(&tabs, active_tab_id.lock().unwrap().as_deref()).unwrap_or(0)
             };
             if remove_at >= tabs.len() {
                 return;
             }
-            if tabs.iter().filter(|tab| tab.group == 0).count() == 1
-                && tabs.iter().any(|tab| tab.group == 1)
+            if tabs
+                .iter()
+                .filter(|tab| tab.group == 0 && workspace_tab_visible(&w, tab))
+                .count()
+                == 1
+                && tabs
+                    .iter()
+                    .any(|tab| tab.group == 1 && workspace_tab_visible(&w, tab))
             {
                 return;
             }
@@ -473,18 +474,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 return;
             }
             if removed_active {
-                let next = tabs
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, tab)| tab.group == 0)
-                    .nth(requested.max(0) as usize)
-                    .map(|(index, _)| index)
-                    .or_else(|| {
-                        tabs.iter()
-                            .enumerate()
-                            .find(|(_, tab)| tab.group == 0)
-                            .map(|(index, _)| index)
-                    });
+                let next = visible_abs_index_for_group(&w, &tabs, 0, requested.max(0) as usize)
+                    .or_else(|| visible_abs_index_for_group(&w, &tabs, 0, 0));
                 drop(tabs);
                 if let Some(next) = next {
                     restore_tab(&w, next);
@@ -519,29 +510,27 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 return;
             }
             save_p1_tab(&w);
-            let remove_at = {
+            let Some(remove_at) = ({
                 let tabs = workspace_tabs.lock().unwrap();
-                tabs.iter()
-                    .enumerate()
-                    .filter(|(_, tab)| tab.group == 1)
-                    .nth(requested as usize)
-                    .map(|(index, _)| index)
-            };
-            let Some(remove_at) = remove_at else {
+                visible_abs_index_for_group(&w, &tabs, 1, requested as usize)
+            }) else {
                 return;
             };
             let mut tabs = workspace_tabs.lock().unwrap();
             let removed_active =
                 active_group1_tab_id.lock().unwrap().as_deref() == Some(&tabs[remove_at].id);
             tabs.remove(remove_at);
-            let remaining = tabs.iter().filter(|tab| tab.group == 1).count();
+            let remaining = tabs
+                .iter()
+                .filter(|tab| tab.group == 1 && workspace_tab_visible(&w, tab))
+                .count();
             let active = active_tab_id.lock().unwrap().clone();
             set_workspace_tabs(&w, &tabs, active.as_deref());
             save_query_tabs(&w, &tabs, active.as_deref());
             let still_active = active_group1_tab_id.lock().unwrap().clone();
             let active_index = still_active.and_then(|id| {
                 tabs.iter()
-                    .filter(|tab| tab.group == 1)
+                    .filter(|tab| tab.group == 1 && workspace_tab_visible(&w, tab))
                     .position(|tab| tab.id == id)
             });
             drop(tabs);
@@ -586,7 +575,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             let index = tabs
                 .iter()
                 .enumerate()
-                .filter(|(_, tab)| tab.group == group)
+                .filter(|(_, tab)| tab.group == group && workspace_tab_visible(&w, tab))
                 .nth(i)
                 .map(|(index, _)| index);
             if let Some(tab) = index.and_then(|index| tabs.get_mut(index)) {
@@ -618,14 +607,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 return;
             }
             save_active_tab(&w);
-            let index = workspace_tabs
-                .lock()
-                .unwrap()
-                .iter()
-                .enumerate()
-                .filter(|(_, tab)| tab.group == 0)
-                .nth(idx as usize)
-                .map(|(index, _)| index);
+            let index =
+                visible_abs_index_for_group(&w, &workspace_tabs.lock().unwrap(), 0, idx as usize);
             if let Some(index) = index {
                 restore_tab(&w, index);
             }

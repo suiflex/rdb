@@ -411,6 +411,7 @@ callback create-table-commit();
     callback completion-choose(int);
     in property <string> query-label;
     in property <string> results-meta;
+    in property <bool> export-running: false;
     in property <[string]> query-console;
     in-out property <bool> console-open: false;
     callback clear-console();
@@ -553,6 +554,7 @@ callback create-table-commit();
     in-out property <bool> p1-show-structure: false;
     in property <string> p1-query-label;
     in property <string> p1-results-meta;
+    in property <bool> p1-export-running: false;
     in property <[ResultTabItem]> p1-result-tabs;
     in property <int> p1-active-result;
     in-out property <int> p1-sql-view-mode;
@@ -698,6 +700,11 @@ callback create-table-commit();
     // Max collections listed per database for NoSQL (MongoDB); RDBMS unaffected.
     in property <int> nosql-collection-limit: 200;
     callback set-nosql-collection-limit(int);
+    // Keep all query tabs visible (off), or scope the strip to the active
+    // connection while retaining shared scratch tabs (on).
+    in-out property <bool> query-tabs-by-connection: false;
+    in property <string> query-scope-connection;
+    callback set-query-tabs-by-connection(bool);
     // Auto-append alias when accepting a table name from completion in FROM/JOIN position.
     in-out property <bool> auto-table-alias: true;
     callback set-auto-table-alias(bool);
@@ -1819,6 +1826,7 @@ callback create-table-commit();
                         p1-show-structure <=> root.p1-show-structure;
                         p1-query-label: root.p1-query-label;
                         p1-results-meta: root.p1-results-meta;
+                        p1-export-running: root.p1-export-running;
                         p1-result-tabs: root.p1-result-tabs;
                         p1-active-result: root.p1-active-result;
                         p1-sql-view-mode <=> root.p1-sql-view-mode;
@@ -1957,6 +1965,7 @@ callback create-table-commit();
                         close-result-tab(i) => { root.close-result-tab(i); }
                         query-label: root.query-label;
                         results-meta: root.results-meta;
+                        export-running: root.export-running;
                         fn-mode: root.fn-mode;
                         fn-name: root.fn-name;
                         fn-lines: root.fn-lines;
@@ -2927,6 +2936,14 @@ callback create-table-commit();
                             toggled => {
                                 root.sidebar-right = !root.sidebar-right;
                                 root.set-sidebar-side(root.sidebar-right);
+                            }
+                        }
+                        ToggleRow {
+                            label: "Query tabs follow connection";
+                            description: "Show only tabs for the active connection.";
+                            checked: root.query-tabs-by-connection;
+                            toggled => {
+                                root.set-query-tabs-by-connection(!root.query-tabs-by-connection);
                             }
                         }
                     }

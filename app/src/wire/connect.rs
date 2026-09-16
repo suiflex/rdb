@@ -31,46 +31,48 @@ fn plan_tab_restore(
     active_tab_id: &Arc<Mutex<Option<String>>>,
     active_group1_tab_id: &Arc<Mutex<Option<String>>>,
     query_number: &Arc<std::sync::atomic::AtomicUsize>,
+    connection_id: &str,
+    scoped: bool,
 ) -> TabRestorePlan {
+    let visible = |tab: &WorkspaceTab| tab_visible_for_connection(tab, connection_id, scoped);
     let restore = should_restore_query_tabs(tabs_restored.get());
     tabs_restored.set(true);
     let (tabs, active, active_p1, active_group) = if restore {
-        let (tabs, active, active_p1, active_group, max_number) = load_query_tabs();
-        // Never let a freshly-minted tab reuse a number a restored tab
-        // already holds — `fetch_max` only ever raises the counter.
+        let (tabs, disk_active, disk_active_p1, active_group, max_number) = load_query_tabs();
         query_number.fetch_max(max_number, std::sync::atomic::Ordering::Relaxed);
+        let active = disk_active
+            .filter(|id| tabs.iter().any(|tab| tab.id == *id && visible(tab)))
+            .or_else(|| {
+                tabs.iter()
+                    .find(|tab| visible(tab))
+                    .map(|tab| tab.id.clone())
+            });
+        let active_p1 =
+            disk_active_p1.filter(|id| tabs.iter().any(|tab| tab.id == *id && visible(tab)));
         (tabs, active, active_p1, active_group)
     } else {
-        // Retain every open tab across the switch so the workspace behaves
-        // like a set of persistent documents — the SQL scratch tabs keep
-        // their results ("standby") and the connection-scoped table/
-        // collection tabs stay open too, their last data now a snapshot
-        // until the user hits Refresh against the new connection. Only the
-        // in-flight loading flag is cleared so no tab is left showing a
-        // stuck spinner.
+        // Retain every open tab across the switch. In scoped mode the renderer
+        // hides tabs for other connections, but their state remains available
+        // when the user switches back.
         let mut kept: Vec<WorkspaceTab> = std::mem::take(&mut *workspace_tabs.lock().unwrap());
         for t in &mut kept {
             t.loading = false;
         }
-        // Picking a connection changes what NEW actions target (new tab,
-        // browse-from-sidebar) — it must never rewrite a tab that's already
-        // open. Each tab is permanently locked to the connection it was
-        // created against (routed by its own `connection_id` through
-        // `driver_pool`); reassigning the focused one here is what made
-        // switching connections look like it dragged the open query tab
-        // along with it.
         let active = active_tab_id
             .lock()
             .unwrap()
             .clone()
-            .filter(|id| kept.iter().any(|t| t.id == *id))
-            .or_else(|| kept.first().map(|t| t.id.clone()));
-        // Connection switch keeps the in-memory focus + right-group tab.
+            .filter(|id| kept.iter().any(|tab| tab.id == *id && visible(tab)))
+            .or_else(|| {
+                kept.iter()
+                    .find(|tab| visible(tab))
+                    .map(|tab| tab.id.clone())
+            });
         let active_p1 = active_group1_tab_id
             .lock()
             .unwrap()
             .clone()
-            .filter(|id| kept.iter().any(|t| t.id == *id));
+            .filter(|id| kept.iter().any(|tab| tab.id == *id && visible(tab)));
         (kept, active, active_p1, 0usize)
     };
     let standby = !restore && active.is_some();
@@ -403,6 +405,7 @@ fn handle_connect_clicked(state: &AppState, fns: &AppFns, weak: slint::Weak<Main
         rt,
         store,
         panes,
+        settings,
         current,
         driver_pool,
         cur_engine,
@@ -476,6 +479,8 @@ fn handle_connect_clicked(state: &AppState, fns: &AppFns, weak: slint::Weak<Main
         &active_tab_id,
         &active_group1_tab_id,
         &query_number,
+        &sc.id,
+        settings.borrow().get().ui_state.query_tabs_by_connection,
     );
     *workspace_tabs.lock().unwrap() = init_tabs;
     *active_tab_id.lock().unwrap() = init_active.clone();
@@ -575,6 +580,7 @@ fn paint_connect_ui(
     w.set_tree_loading(true);
     w.set_conn_status(SharedString::from("connecting"));
     w.set_picker_error(SharedString::default());
+    w.set_query_scope_connection(SharedString::from(sc.id.clone()));
     w.global::<Theme>()
         .set_accent(theme::accent_or_default(sc.color.as_deref().unwrap_or("")));
     w.set_status_conn(SharedString::from(sc.name.clone()));

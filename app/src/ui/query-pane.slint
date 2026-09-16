@@ -36,6 +36,7 @@ export component QueryPane inherits Rectangle {
     // ----- editor toolbar -----
     in-out property <length> editor-h: 340px;
     in property <bool> query-running;
+    in property <bool> export-running: false;
     in property <bool> streaming;
     in-out property <string> limit-text;
     in property <string> query-label;
@@ -280,6 +281,7 @@ export component QueryPane inherits Rectangle {
                 VerticalLayout {
                     alignment: center;
                     ExportButton {
+                        enabled: !root.export-running;
                         tooltip: "Export the rows to a file — CSV, JSON, TSV, SQL or Markdown";
                         export(i) => { root.export-results(i); }
                     }
@@ -635,6 +637,7 @@ export component QueryPane inherits Rectangle {
                         clicked => { root.copy-results(true); }
                     }
                     ExportButton {
+                        enabled: !root.export-running;
                         tooltip: "Export the rows to a file — CSV, JSON, TSV, SQL or Markdown";
                         export(i) => { root.export-results(i); }
                     }

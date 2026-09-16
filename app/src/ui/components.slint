@@ -428,8 +428,10 @@ export component TextButton inherits MaterialTextButton {}
 // `export(i)` reports the chosen row index into the option list below.
 export component ExportButton {
     in property <string> tooltip;            // optional hover label
+    in property <bool> enabled: true;
     callback export(int);
     MaterialTextButton {
+        enabled: root.enabled;
         text: "Export ▾";
         tooltip: root.tooltip;
         clicked => { menu.show(); }

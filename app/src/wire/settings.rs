@@ -1,6 +1,6 @@
 //! Command palette and the settings-modal toggles (theme, update check,
-//! sidebar side, font size, history retention, NoSQL collection cap, auto table
-//! alias, query-error highlight).
+//! sidebar side, font size, history retention, NoSQL collection cap, query tab
+//! scope, auto table alias, query-error highlight).
 //!
 //! Split out of `main`; the handler bodies are unchanged.
 
@@ -24,8 +24,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         raw_nodes,
         expanded_tables,
         loaded_dbs,
+        workspace_tabs,
+        active_tab_id,
+        active_group1_tab_id,
         ..
     } = state.clone();
+    let restore_tab = fns.restore_tab.clone();
     let rebuild_query_tree = fns.rebuild_query_tree.clone();
 
     // ----- palette toggle -----
@@ -163,6 +167,79 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             let _ = settings
                 .borrow_mut()
                 .update(|s| s.ui_state.sidebar_right = v);
+        });
+    }
+    // ----- settings: connection-scoped query tabs toggle -----
+    {
+        let weak = window.as_weak();
+        let settings = settings.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
+        let restore_tab = restore_tab.clone();
+        let restore_p1_tab = fns.restore_p1_tab.clone();
+        window.on_set_query_tabs_by_connection(move |enabled| {
+            let _ = settings
+                .borrow_mut()
+                .update(|s| s.ui_state.query_tabs_by_connection = enabled);
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            w.set_query_tabs_by_connection(enabled);
+            let (next, right_next) = {
+                let tabs = workspace_tabs.lock().unwrap();
+                let active = active_tab_id.lock().unwrap().clone();
+                let next = active
+                    .filter(|id| {
+                        tabs.iter()
+                            .find(|tab| tab.id == *id)
+                            .is_some_and(|tab| workspace_tab_visible(&w, tab))
+                    })
+                    .or_else(|| {
+                        tabs.iter()
+                            .find(|tab| workspace_tab_visible(&w, tab))
+                            .map(|tab| tab.id.clone())
+                    });
+                let right_active = active_group1_tab_id.lock().unwrap().clone();
+                let right_next = right_active
+                    .filter(|id| {
+                        tabs.iter()
+                            .find(|tab| tab.id == *id)
+                            .is_some_and(|tab| tab.group == 1 && workspace_tab_visible(&w, tab))
+                    })
+                    .or_else(|| {
+                        tabs.iter()
+                            .find(|tab| tab.group == 1 && workspace_tab_visible(&w, tab))
+                            .map(|tab| tab.id.clone())
+                    });
+                (next, right_next)
+            };
+            *active_tab_id.lock().unwrap() = next.clone();
+            *active_group1_tab_id.lock().unwrap() = right_next.clone();
+            let (index, right_index) = {
+                let tabs = workspace_tabs.lock().unwrap();
+                let index = next
+                    .as_deref()
+                    .and_then(|id| tabs.iter().position(|tab| tab.id == id));
+                let right_index = right_next.as_deref().and_then(|id| {
+                    tabs.iter()
+                        .filter(|tab| tab.group == 1 && workspace_tab_visible(&w, tab))
+                        .position(|tab| tab.id == id)
+                });
+                set_workspace_tabs(&w, &tabs, next.as_deref());
+                (index, right_index)
+            };
+            if let Some(index) = index {
+                restore_tab(&w, index);
+            } else {
+                clear_grid(&w, 0);
+                w.set_results_meta(SharedString::default());
+            }
+            if let Some(index) = right_index {
+                restore_p1_tab(&w, index);
+            } else {
+                w.set_p1_active_tab(-1);
+            }
         });
     }
 

@@ -104,6 +104,7 @@ export component WorkArea inherits Rectangle {
     callback completion-choose(int);
     in property <string> query-label;    // "emiten-per-sektor.sql · saved"
     in property <string> results-meta;   // "10 rows · 38 ms"
+    in property <bool> export-running: false;
     // result tabs (SQL): ⌘⏎ replaces the active one, ⌘\ appends
     in property <[ResultTabItem]> result-tabs;
     in property <int> active-result;
@@ -184,6 +185,7 @@ export component WorkArea inherits Rectangle {
     in-out property <bool> p1-show-structure: false;
     in property <string> p1-query-label;
     in property <string> p1-results-meta;
+    in property <bool> p1-export-running: false;
     in property <[ResultTabItem]> p1-result-tabs;
     in property <int> p1-active-result;
     in-out property <int> p1-sql-view-mode;
@@ -478,6 +480,7 @@ export component WorkArea inherits Rectangle {
             completion-selected: root.completion-selected;
             completion-choose(i) => { root.completion-choose(i); }
             results-meta: root.results-meta;
+            export-running: root.export-running;
             filter-open <=> root.filter-open;
             sql-view-mode <=> root.sql-view-mode;
             result-tabs: root.result-tabs;
@@ -632,6 +635,7 @@ export component WorkArea inherits Rectangle {
                 completion-selected: root.p1-completion-selected;
                 completion-choose(i) => { root.p1-completion-choose(i); }
                 results-meta: root.p1-results-meta;
+                export-running: root.p1-export-running;
                 filter-open <=> root.p1-filter-open;
                 sql-view-mode <=> root.p1-sql-view-mode;
                 result-tabs: root.p1-result-tabs;

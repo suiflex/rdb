@@ -98,39 +98,70 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
     {
         let weak = window.as_weak();
         let displayed_grid = displayed_grid.clone();
+        let export_busy = panes[0].export_busy.clone();
         window.on_export_results(move |fmt| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let Some(grid) = displayed_grid.lock().unwrap().clone() else {
-                eprintln!("[export] nothing to export: no result grid loaded");
-                w.set_results_meta(SharedString::from("nothing to export"));
+            if export_busy.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 return;
-            };
-            // format: 0 CSV, 1 JSON, 2 TSV, 3 SQL INSERT, 4 Markdown
-            let (ext, filter, contents) = match fmt {
-                1 => ("json", "JSON", export::to_json(&grid)),
-                2 => ("tsv", "TSV", export::to_tsv(&grid)),
-                3 => {
-                    let table = w.get_active_table();
-                    let table = if table.is_empty() {
-                        "results"
-                    } else {
-                        table.as_str()
-                    };
-                    ("sql", "SQL", export::to_sql_insert(&grid, table))
+            }
+            let table = {
+                let table = w.get_active_table();
+                if table.is_empty() {
+                    "results".to_string()
+                } else {
+                    table.to_string()
                 }
-                4 => ("md", "Markdown", export::to_markdown(&grid)),
-                _ => ("csv", "CSV", export::to_csv(&grid)),
             };
-            save_via_dialog(
-                &w,
-                format!("rdb-export.{ext}"),
-                filter.to_string(),
-                ext.to_string(),
-                contents,
-                |w, msg| w.set_results_meta(SharedString::from(msg)),
-            );
+            w.set_export_running(true);
+            w.set_results_meta(SharedString::from("preparing export…"));
+            let weak2 = weak.clone();
+            let export_busy2 = export_busy.clone();
+            let displayed_grid = displayed_grid.clone();
+            std::thread::spawn(move || {
+                let grid = match displayed_grid.lock() {
+                    Ok(grid) => grid.clone(),
+                    Err(_) => None,
+                };
+                let Some(grid) = grid else {
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = weak2.upgrade() {
+                            export_busy2.store(false, std::sync::atomic::Ordering::SeqCst);
+                            w.set_export_running(false);
+                            w.set_results_meta(SharedString::from("nothing to export"));
+                        }
+                    });
+                    return;
+                };
+                // format: 0 CSV, 1 JSON, 2 TSV, 3 SQL INSERT, 4 Markdown
+                let (ext, filter, contents) = match fmt {
+                    1 => ("json", "JSON", export::to_json(&grid)),
+                    2 => ("tsv", "TSV", export::to_tsv(&grid)),
+                    3 => ("sql", "SQL", export::to_sql_insert(&grid, &table)),
+                    4 => ("md", "Markdown", export::to_markdown(&grid)),
+                    _ => ("csv", "CSV", export::to_csv(&grid)),
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak2.upgrade() {
+                        w.set_results_meta(SharedString::from("exporting…"));
+                        save_via_dialog(
+                            &w,
+                            format!("rdb-export.{ext}"),
+                            filter.to_string(),
+                            ext.to_string(),
+                            contents,
+                            move |w, msg| {
+                                export_busy2.store(false, std::sync::atomic::Ordering::SeqCst);
+                                w.set_export_running(false);
+                                w.set_results_meta(SharedString::from(msg));
+                            },
+                        );
+                    } else {
+                        export_busy2.store(false, std::sync::atomic::Ordering::SeqCst);
+                    }
+                });
+            });
         });
     }
 
@@ -606,41 +637,72 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             set_p_results_meta(&w, 1, SharedString::from(msg));
         });
     }
-    // ----- right pane: Export result grid -----
     {
         let weak = window.as_weak();
         let panes = panes.clone();
+        let export_busy = panes[1].export_busy.clone();
         window.on_p1_export_results(move |fmt| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let Some(grid) = panes[1].displayed_grid.lock().unwrap().clone() else {
-                set_p_results_meta(&w, 1, SharedString::from("nothing to export"));
+            if export_busy.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 return;
-            };
-            let (ext, filter, contents) = match fmt {
-                1 => ("json", "JSON", export::to_json(&grid)),
-                2 => ("tsv", "TSV", export::to_tsv(&grid)),
-                3 => {
-                    let table = w.get_p1_active_table();
-                    let table = if table.is_empty() {
-                        "results"
-                    } else {
-                        table.as_str()
-                    };
-                    ("sql", "SQL", export::to_sql_insert(&grid, table))
+            }
+            let table = {
+                let table = w.get_p1_active_table();
+                if table.is_empty() {
+                    "results".to_string()
+                } else {
+                    table.to_string()
                 }
-                4 => ("md", "Markdown", export::to_markdown(&grid)),
-                _ => ("csv", "CSV", export::to_csv(&grid)),
             };
-            save_via_dialog(
-                &w,
-                format!("rdb-export.{ext}"),
-                filter.to_string(),
-                ext.to_string(),
-                contents,
-                |w, msg| set_p_results_meta(w, 1, SharedString::from(msg)),
-            );
+            set_p_export_running(&w, 1, true);
+            set_p_results_meta(&w, 1, SharedString::from("preparing export…"));
+            let weak2 = weak.clone();
+            let export_busy2 = export_busy.clone();
+            let displayed_grid = panes[1].displayed_grid.clone();
+            std::thread::spawn(move || {
+                let grid = match displayed_grid.lock() {
+                    Ok(grid) => grid.clone(),
+                    Err(_) => None,
+                };
+                let Some(grid) = grid else {
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = weak2.upgrade() {
+                            export_busy2.store(false, std::sync::atomic::Ordering::SeqCst);
+                            set_p_export_running(&w, 1, false);
+                            set_p_results_meta(&w, 1, SharedString::from("nothing to export"));
+                        }
+                    });
+                    return;
+                };
+                let (ext, filter, contents) = match fmt {
+                    1 => ("json", "JSON", export::to_json(&grid)),
+                    2 => ("tsv", "TSV", export::to_tsv(&grid)),
+                    3 => ("sql", "SQL", export::to_sql_insert(&grid, &table)),
+                    4 => ("md", "Markdown", export::to_markdown(&grid)),
+                    _ => ("csv", "CSV", export::to_csv(&grid)),
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak2.upgrade() {
+                        set_p_results_meta(&w, 1, SharedString::from("exporting…"));
+                        save_via_dialog(
+                            &w,
+                            format!("rdb-export.{ext}"),
+                            filter.to_string(),
+                            ext.to_string(),
+                            contents,
+                            move |w, msg| {
+                                export_busy2.store(false, std::sync::atomic::Ordering::SeqCst);
+                                set_p_export_running(w, 1, false);
+                                set_p_results_meta(w, 1, SharedString::from(msg));
+                            },
+                        );
+                    } else {
+                        export_busy2.store(false, std::sync::atomic::Ordering::SeqCst);
+                    }
+                });
+            });
         });
     }
     {

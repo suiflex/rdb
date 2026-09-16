@@ -237,14 +237,21 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             let prev_right = active_group1_tab_id.lock().unwrap().clone();
             let moved_id = {
                 let mut tabs = tabs.lock().unwrap();
-                if source == 0 && tabs.iter().filter(|tab| tab.group == 0).count() == 1 {
+                if source == 0
+                    && tabs
+                        .iter()
+                        .filter(|tab| tab.group == 0 && workspace_tab_visible(&w, tab))
+                        .count()
+                        == 1
+                {
                     return;
                 }
-                let Some(tab) = tabs
-                    .iter_mut()
-                    .filter(|tab| tab.group == source)
-                    .nth(index.max(0) as usize)
+                let Some(index) =
+                    visible_abs_index_for_group(&w, &tabs, source, index.max(0) as usize)
                 else {
+                    return;
+                };
+                let Some(tab) = tabs.get_mut(index) else {
                     return;
                 };
                 tab.group = target;
@@ -257,21 +264,35 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 let left_id = if target == 0 {
                     Some(moved_id.clone())
                 } else {
-                    prev_left.filter(|id| tabs.iter().any(|t| t.group == 0 && &t.id == id))
+                    prev_left.filter(|id| {
+                        tabs.iter()
+                            .any(|t| t.group == 0 && workspace_tab_visible(&w, t) && &t.id == id)
+                    })
                 }
-                .or_else(|| tabs.iter().find(|t| t.group == 0).map(|t| t.id.clone()));
+                .or_else(|| {
+                    tabs.iter()
+                        .find(|t| t.group == 0 && workspace_tab_visible(&w, t))
+                        .map(|t| t.id.clone())
+                });
                 let right_id = if target == 1 {
                     Some(moved_id.clone())
                 } else {
-                    prev_right.filter(|id| tabs.iter().any(|t| t.group == 1 && &t.id == id))
+                    prev_right.filter(|id| {
+                        tabs.iter()
+                            .any(|t| t.group == 1 && workspace_tab_visible(&w, t) && &t.id == id)
+                    })
                 }
-                .or_else(|| tabs.iter().find(|t| t.group == 1).map(|t| t.id.clone()));
+                .or_else(|| {
+                    tabs.iter()
+                        .find(|t| t.group == 1 && workspace_tab_visible(&w, t))
+                        .map(|t| t.id.clone())
+                });
                 let left_index = left_id
                     .as_ref()
                     .and_then(|id| tabs.iter().position(|t| &t.id == id));
                 let right_index = right_id.as_ref().and_then(|id| {
                     tabs.iter()
-                        .filter(|t| t.group == 1)
+                        .filter(|t| t.group == 1 && workspace_tab_visible(&w, t))
                         .position(|t| &t.id == id)
                 });
                 set_workspace_tabs(&w, &tabs, left_id.as_deref());
