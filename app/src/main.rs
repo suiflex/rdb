@@ -172,10 +172,20 @@ fn save_via_dialog(
                 }
                 _ => {
                     eprintln!("[export] dialog cancelled or failed");
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = weak.upgrade() {
+                            report(&w, "export cancelled".into());
+                        }
+                    });
                     return;
                 }
             };
             if path.is_empty() {
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak.upgrade() {
+                        report(&w, "export cancelled".into());
+                    }
+                });
                 return;
             }
             let msg = match std::fs::write(&path, contents) {
@@ -203,6 +213,9 @@ fn save_via_dialog(
                 .await;
             let Some(file) = picked else {
                 eprintln!("[export] dialog closed with no file (cancelled or failed to open)");
+                if let Some(w) = weak.upgrade() {
+                    report(&w, "export cancelled".into());
+                }
                 return;
             };
             let msg = match std::fs::write(file.path(), contents) {
@@ -1557,6 +1570,9 @@ struct GroupRuntime {
     col_filters: Arc<std::sync::Mutex<Vec<String>>>,
     stream_cancel: Rc<RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>>,
     stream_timer: Rc<RefCell<Option<slint::Timer>>>,
+    // Prevent duplicate exports while serialization, dialog selection, or file
+    // writing is still in progress.
+    export_busy: Arc<std::sync::atomic::AtomicBool>,
     // Abort handle for the in-flight buffered query task, so a slow query can be
     // hard-cancelled. Overwritten on each run; aborting a finished task is a
     // no-op, so no clearing on completion is needed.
@@ -1596,6 +1612,7 @@ impl GroupRuntime {
             col_filters: Arc::new(std::sync::Mutex::new(Vec::new())),
             stream_cancel: Rc::new(RefCell::new(None)),
             stream_timer: Rc::new(RefCell::new(None)),
+            export_busy: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             query_abort: Rc::new(RefCell::new(None)),
             error_mark: Arc::new(Mutex::new(None)),
             pending_run_origin: Rc::new(Cell::new((0, 0))),
@@ -1780,6 +1797,7 @@ fn abs_index_for_group(tabs: &[WorkspaceTab], group: usize, group_index: usize) 
 }
 
 /// Position of the tab at absolute index `abs` within its own group's tab strip.
+#[cfg(test)]
 fn group_relative_index(tabs: &[WorkspaceTab], abs: usize) -> usize {
     let group = tabs[abs].group;
     tabs[..abs].iter().filter(|t| t.group == group).count()
@@ -1789,7 +1807,7 @@ fn group_relative_index(tabs: &[WorkspaceTab], abs: usize) -> usize {
 mod group_tests {
     use super::{
         abs_index_for_group, group_relative_index, replaceable_table_tab_index,
-        workspace_tab_index, WorkspaceTab,
+        tab_visible_for_connection, workspace_tab_index, WorkspaceTab,
     };
 
     fn tab(id: &str, group: usize) -> WorkspaceTab {
@@ -1842,10 +1860,57 @@ mod group_tests {
         // A SQL tab is never replaceable.
         assert_eq!(replaceable_table_tab_index(&[tab("s", 0)], Some("s")), None);
     }
+
+    #[test]
+    fn connection_scope_keeps_shared_tabs_and_filters_bound_tabs() {
+        let shared = WorkspaceTab::sql("shared".into(), 0);
+        let mut bound = WorkspaceTab::sql("bound".into(), 0);
+        bound.connection_id = Some("conn-a".into());
+        assert!(tab_visible_for_connection(&shared, "conn-a", true));
+        assert!(tab_visible_for_connection(&shared, "conn-b", true));
+        assert!(tab_visible_for_connection(&bound, "conn-a", true));
+        assert!(!tab_visible_for_connection(&bound, "conn-b", true));
+        assert!(tab_visible_for_connection(&bound, "conn-b", false));
+    }
+}
+
+fn tab_visible_for_connection(tab: &WorkspaceTab, scope_connection: &str, scoped: bool) -> bool {
+    !scoped || tab.connection_id.is_none() || tab.connection_id.as_deref() == Some(scope_connection)
+}
+
+fn workspace_tab_visible(w: &MainWindow, tab: &WorkspaceTab) -> bool {
+    tab_visible_for_connection(
+        tab,
+        w.get_query_scope_connection().as_str(),
+        w.get_query_tabs_by_connection(),
+    )
+}
+fn visible_abs_index_for_group(
+    w: &MainWindow,
+    tabs: &[WorkspaceTab],
+    group: usize,
+    group_index: usize,
+) -> Option<usize> {
+    tabs.iter()
+        .enumerate()
+        .filter(|(_, tab)| tab.group == group && workspace_tab_visible(w, tab))
+        .nth(group_index)
+        .map(|(index, _)| index)
+}
+
+fn visible_group_relative_index(w: &MainWindow, tabs: &[WorkspaceTab], abs: usize) -> usize {
+    let group = tabs.get(abs).map(|tab| tab.group).unwrap_or(0);
+    tabs.iter()
+        .take(abs)
+        .filter(|tab| tab.group == group && workspace_tab_visible(w, tab))
+        .count()
 }
 
 fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&str>) {
-    let left: Vec<&WorkspaceTab> = tabs.iter().filter(|tab| tab.group == 0).collect();
+    let left: Vec<&WorkspaceTab> = tabs
+        .iter()
+        .filter(|tab| tab.group == 0 && workspace_tab_visible(w, tab))
+        .collect();
     let items: Vec<TabItem> = left
         .iter()
         .map(|tab| TabItem {
@@ -1865,7 +1930,10 @@ fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&
             .map(|i| i as i32)
             .unwrap_or(-1),
     );
-    let right: Vec<&WorkspaceTab> = tabs.iter().filter(|tab| tab.group == 1).collect();
+    let right: Vec<&WorkspaceTab> = tabs
+        .iter()
+        .filter(|tab| tab.group == 1 && workspace_tab_visible(w, tab))
+        .collect();
     let p1_items: Vec<TabItem> = right
         .iter()
         .map(|tab| TabItem {
@@ -2638,7 +2706,7 @@ fn save_query_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active: Option<&str>) 
     // Right-group active tab: map the p1 strip index back to a tab id.
     let active_p1 = tabs
         .iter()
-        .filter(|t| t.group == 1)
+        .filter(|t| t.group == 1 && workspace_tab_visible(w, t))
         .nth(w.get_p1_active_tab().max(0) as usize)
         .filter(|t| t.kind == "sql")
         .map(|t| t.id.clone());
@@ -5008,6 +5076,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let zoom_level = clamp_font_size(settings.borrow().get().editor.font_size as i32);
     window.set_update_check_enabled(settings.borrow().get().update_check);
     window.set_sidebar_right(settings.borrow().get().ui_state.sidebar_right);
+    window.set_query_tabs_by_connection(settings.borrow().get().ui_state.query_tabs_by_connection);
     let history_cap = Rc::new(Cell::new(
         settings.borrow().get().editor.history_max_entries.max(1) as usize,
     ));
@@ -5428,7 +5497,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     return;
                 };
                 let pane = tab.group.min(1);
-                let group_index = group_relative_index(&tabs, abs_index);
+                let group_index = visible_group_relative_index(w, &tabs, abs_index);
                 (tab, pane, group_index)
             };
             if pane == 0 {
@@ -5442,7 +5511,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 // whatever connection was last explicitly clicked, and a New
                 // Query fired right after silently lands on the wrong one.
                 if let Some(cid) = tab.connection_id.clone() {
-                    *current_connection_id.lock().unwrap() = Some(cid);
+                    *current_connection_id.lock().unwrap() = Some(cid.clone());
+                    w.set_query_scope_connection(SharedString::from(cid));
                 }
             } else {
                 *active_group1_tab_id.lock().unwrap() = Some(tab.id.clone());

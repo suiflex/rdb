@@ -110,6 +110,9 @@ export component CodeEditor inherits Rectangle {
         }
 
         edit-scroll := ScrollView {
+            // Keep the horizontal thumb visible so a long single-line query
+            // always exposes its current position and remains discoverable.
+            horizontal-scrollbar-policy: ScrollBarPolicy.always-on;
             // Let the per-line TouchArea own mouse drags for text selection;
             // otherwise the Flickable hijacks a >8px drag as a pan and cancels
             // the selection. Wheel/trackpad scrolling is unaffected.

@@ -332,6 +332,13 @@ pub(crate) fn set_p_query_running(w: &MainWindow, pane: usize, b: bool) {
         w.set_p1_query_running(b);
     }
 }
+pub(crate) fn set_p_export_running(w: &MainWindow, pane: usize, b: bool) {
+    if pane == 0 {
+        w.set_export_running(b);
+    } else {
+        w.set_p1_export_running(b);
+    }
+}
 
 pub(crate) fn set_p_streaming(w: &MainWindow, pane: usize, b: bool) {
     if pane == 0 {

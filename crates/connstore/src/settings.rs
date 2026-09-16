@@ -60,6 +60,8 @@ pub struct UiState {
     pub last_filter: String,
     /// Place the workspace sidebar on the right instead of the left.
     pub sidebar_right: bool,
+    /// Show query tabs belonging to the active connection only.
+    pub query_tabs_by_connection: bool,
 }
 
 /// Query-editor / results preferences.
@@ -203,6 +205,7 @@ mod tests {
         assert!(s.get().update_check);
         assert_eq!(s.get().last_update_check, None);
         assert_eq!(s.get().editor.default_page_size, 100);
+        assert!(!s.get().ui_state.query_tabs_by_connection);
         assert_eq!(s.get().editor.history_max_entries, 50);
         assert!(s.get().editor.auto_table_alias);
         assert!(s.get().editor.error_highlight);
@@ -221,6 +224,7 @@ mod tests {
             s.last_update_check = Some(1_700_000_000);
             s.ui_state.collapsed_groups = vec!["Prod".into()];
             s.ui_state.last_filter = "pg".into();
+            s.ui_state.query_tabs_by_connection = true;
             s.editor.font_size = 16;
             s.editor.history_max_entries = 100;
         })
@@ -232,6 +236,7 @@ mod tests {
         assert_eq!(reloaded.get().last_update_check, Some(1_700_000_000));
         assert_eq!(reloaded.get().ui_state.collapsed_groups, vec!["Prod"]);
         assert_eq!(reloaded.get().ui_state.last_filter, "pg");
+        assert!(reloaded.get().ui_state.query_tabs_by_connection);
         assert_eq!(reloaded.get().editor.font_size, 16);
         assert_eq!(reloaded.get().editor.history_max_entries, 100);
     }
