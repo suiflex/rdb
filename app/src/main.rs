@@ -2801,6 +2801,32 @@ fn sql_where(
     }
 }
 
+/// The Mongo filter box is meant for a bare document, but people paste what
+/// they would type in mongosh: a whole `db.coll.find({...})`, or the inside of
+/// the braces. Both are unwrapped to the document here; anything else is left
+/// for `query_parse` to reject with its own message.
+fn mongo_filter_body(filter: &str) -> String {
+    let f = filter.trim();
+    if f.is_empty() {
+        return "{}".into();
+    }
+    if f.starts_with("db.") || f.starts_with("use") {
+        if let Ok(rdb_core::query::Query::Mongo(op)) =
+            crate::query_parse::parse_query(rdb_connstore::Engine::Mongo, f)
+        {
+            if let rdb_core::query::MongoKind::Find(doc) = op.kind {
+                return doc.to_string();
+            }
+        }
+        return f.into();
+    }
+    if f.starts_with('{') {
+        f.into()
+    } else {
+        format!("{{{f}}}")
+    }
+}
+
 fn browse_text(
     engine: rdb_connstore::Engine,
     table: &rdb_core::write::TableRef,
@@ -2868,10 +2894,7 @@ fn browse_text(
                 .filter(|d| !d.is_empty())
                 .map(|d| format!("use('{d}')\n"))
                 .unwrap_or_default();
-            let body = match filter.trim() {
-                "" => "{}",
-                f => f,
-            };
+            let body = mongo_filter_body(filter);
             // A plain identifier reads best as `db.orders`; anything else (a
             // dot, a dash, a space — GridFS's `fs.files`, the `system.*`
             // collections) has to go through getCollection or the parser would
@@ -6205,6 +6228,33 @@ mod tests {
             panic!("expected a find");
         };
         assert_eq!(f, serde_json::json!({"status": "A"}));
+    }
+
+    #[test]
+    fn mongo_filter_box_accepts_find_call_and_bare_keys() {
+        let m = rdb_core::write::TableRef {
+            database: Some("shop".into()),
+            schema: None,
+            name: "orders".into(),
+        };
+        for f in [
+            "{ age: { $gt: 20 } }",
+            "age: { $gt: 20 }",
+            "db.orders.find({ age: { $gt: 20 } })",
+            "db.orders.find({ age: { $gt: 20 } }).limit(5);",
+        ] {
+            let text = browse_text(rdb_connstore::Engine::Mongo, &m, 0, 20, f, &[]);
+            let q = crate::query_parse::parse_query(rdb_connstore::Engine::Mongo, &text)
+                .unwrap_or_else(|e| panic!("{f:?}: {e}"));
+            let rdb_core::query::Query::Mongo(op) = q else {
+                panic!("expected a Mongo op");
+            };
+            assert_eq!(op.limit, Some(20), "{f:?}");
+            let rdb_core::query::MongoKind::Find(doc) = op.kind else {
+                panic!("expected a find");
+            };
+            assert_eq!(doc, serde_json::json!({"age": {"$gt": 20}}), "{f:?}");
+        }
     }
 
     // GridFS and the system collections carry a dot, which the short
