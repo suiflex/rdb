@@ -51,6 +51,16 @@ component's CI (lean).
   tests only; the `tests/integration.rs` targets need Docker, so they stay out
   of CI and run locally via `make test-it`.
 - The app job installs Slint system libs and runs `cargo build -p rdb`.
+- `danger.yml` is the only job that **runs** the app. It drives every
+  `RDB_SCREEN` scenario (`scripts/danger_screens.sh`, ubuntu under Xvfb with
+  `SLINT_BACKEND=winit-software`, plus macOS on the default backend) and fails
+  on any screen that aborts, panics, or exits without painting a frame. It
+  exists because a Slint layout re-entrancy panic aborted the app on a single
+  click in v0.46.1/0.47.0 while `fmt`, `clippy`, `build` and `cargo test` all
+  stayed green — none of them start the event loop. **Adding an arm to
+  `wire_screen_harness` means adding the screen to `scripts/danger_screens.sh`**;
+  nothing enforces that, and a screen missing from the list is a scenario
+  nobody runs.
 - `audit.yml` runs `cargo audit` on every `Cargo.toml`/`Cargo.lock` change plus
   a weekly sweep (new advisories land with no code change).
 - `website.yml` is a CI check only for `website/**` — actual deploy is
