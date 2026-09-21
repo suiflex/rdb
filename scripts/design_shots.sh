@@ -34,6 +34,7 @@ shot palette command-palette
 shot function function-view
 shot settings-about settings-about
 shot update-ready update-ready
+shot update-install update-install 3000
 shot whats-new whats-new
 
 # A few in the light theme, since most of the palette work shows there.
