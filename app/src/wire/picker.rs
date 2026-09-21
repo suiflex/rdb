@@ -985,6 +985,23 @@ fn show_chrome_screen(w: &MainWindow, which: &str) {
 
 /// Update screens: neither the download, the swap nor the version check runs
 /// in mock mode, so fake the state each one reports.
+/// Synthetic left click at a logical window position, for the screens that
+/// have to go through real event delivery rather than setting properties.
+fn click_at(w: &MainWindow, x: f32, y: f32) {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let position = slint::LogicalPosition::new(x, y);
+    w.window()
+        .dispatch_event(WindowEvent::PointerMoved { position });
+    w.window().dispatch_event(WindowEvent::PointerPressed {
+        position,
+        button: PointerEventButton::Left,
+    });
+    w.window().dispatch_event(WindowEvent::PointerReleased {
+        position,
+        button: PointerEventButton::Left,
+    });
+}
+
 fn show_update_screen(w: &MainWindow, which: &str) {
     if which == "whats-new" {
         // A release-please shaped sample body.
@@ -1000,10 +1017,34 @@ fn show_update_screen(w: &MainWindow, which: &str) {
     w.set_update_version("9.9.9".into());
     w.set_update_self_update_supported(true);
     w.set_update_available(true);
-    if which == "update-ready" {
+    if which == "update-ready" || which == "update-install" {
         // Download finished: the install-now dialog.
         w.set_update_stage("ready".into());
-        w.set_update_ready_open(true);
+        w.set_update_ready_open(which != "update-install");
+        if which == "update-install" {
+            w.set_settings_tab(1);
+            w.set_settings_open(true);
+        }
+        // "update-install" carries on and clicks "Install and Relaunch" for
+        // real. Setting the properties by hand is not the same test: the
+        // click closes the dialog from inside the button's own TouchArea,
+        // which is what used to abort the app, so the event has to come
+        // through the window. Tuned for the harness default RDB_WIN=1280x800;
+        // at another size the click lands on the veil and the shot still
+        // shows the dialog, which is the failure showing itself.
+        if which == "update-install" {
+            let weak = w.as_weak();
+            let t = Box::leak(Box::new(slint::Timer::default()));
+            t.start(
+                slint::TimerMode::SingleShot,
+                std::time::Duration::from_millis(500),
+                move || {
+                    if let Some(w) = weak.upgrade() {
+                        click_at(&w, 520.0, 355.0);
+                    }
+                },
+            );
+        }
     } else {
         // Banner mid-install.
         w.set_update_stage("restarting".into());
@@ -1021,6 +1062,7 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
             | "palette"
             | "update-installing"
             | "update-ready"
+            | "update-install"
             | "whats-new"
             | "settings"
             | "settings-updates"
@@ -1055,7 +1097,7 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
                         w.set_f_import_url("mongodb://root:secret@203.0.113.31:32343/admin?authMechanism=DEFAULT&replicaSet=rs0".into());
                     }
                     "palette" => w.invoke_toggle_palette(),
-                    "update-installing" | "update-ready" | "whats-new" => {
+                    "update-installing" | "update-ready" | "update-install" | "whats-new" => {
                         show_update_screen(&w, &which)
                     }
                     // Settings modal: Appearance (0) or Updates (1) tab.
