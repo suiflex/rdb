@@ -40,8 +40,14 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
     // ----- restart to update: idle/error -> download, ready -> swap + relaunch -----
     {
         let weak = window.as_weak();
+        // Mock runs have nothing downloaded, so the "ready" branch would bounce
+        // back to "idle" and the RDB_SCREEN=update-install regression screen
+        // would never reach the install step it exists to cover. Point it at a
+        // path that cannot exist; the swap then fails the way it should.
         let staged_path: Arc<std::sync::Mutex<Option<std::path::PathBuf>>> =
-            Arc::new(std::sync::Mutex::new(None));
+            Arc::new(std::sync::Mutex::new(
+                mock::mock_mode().then(|| std::path::PathBuf::from("/nonexistent/rdb-mock.dmg")),
+            ));
         window.on_restart_to_update(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -109,8 +115,20 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                         w.set_update_stage(SharedString::from("idle"));
                         return;
                     };
-                    w.set_update_step(SharedString::default());
-                    w.set_update_stage(SharedString::from("restarting"));
+                    // Posted rather than set inline: this runs inside the
+                    // button's click, which Slint dispatches from within a
+                    // layout pass. Showing the "Installing…" spinner there
+                    // instantiates an item tree while the banner's layout-info
+                    // is still being evaluated, and Slint aborts the process
+                    // with "Recursion detected". One turn of the event loop
+                    // later there is no evaluation in flight.
+                    let weak_stage = weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = weak_stage.upgrade() {
+                            w.set_update_step(SharedString::default());
+                            w.set_update_stage(SharedString::from("restarting"));
+                        }
+                    });
                     let weak2 = weak.clone();
                     let weak_step = weak.clone();
                     let on_step = move |step: &'static str| {
