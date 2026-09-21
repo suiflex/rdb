@@ -1,0 +1,105 @@
+name: danger
+
+# Runs the app. Nothing else in CI does.
+#
+# `fmt`, `clippy`, `cargo build` and `cargo test` were all green through a crash
+# that aborted the app on a single click in Settings -> Updates: a Slint layout
+# re-entrancy panic, which under `panic = "abort"` is a crash report with no
+# message. None of those checks ever start the event loop, so none of them could
+# have seen it.
+#
+# This job drives every `RDB_SCREEN` scenario in `wire_screen_harness` to its
+# state, renders a frame and quits, and fails on any screen that aborts, panics
+# or never paints. Adding a screen to the harness means adding it to
+# `scripts/danger_screens.sh`.
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - app/**
+      - crates/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - scripts/danger_screens.sh
+      - .github/workflows/danger.yml
+  pull_request:
+    paths:
+      - app/**
+      - crates/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - scripts/danger_screens.sh
+      - .github/workflows/danger.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  screens:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Its own key: this build carries `--features mock`, so sharing
+          # rdb-app's cache would have the two evict each other.
+          shared-key: rdb-danger
+      # Same Slint libs as rdb-app, plus a display to open the window in.
+      - name: Install Slint system deps and Xvfb (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libfontconfig1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxkbcommon-dev \
+            libgtk-3-dev \
+            xvfb
+      # The RDB_SCREEN harness and RDB_SHOT capture are both behind `mock`.
+      - run: cargo build -p rdb --features mock
+
+      # Software renderer inside Xvfb: `renderer-software` is already compiled
+      # in (app/Cargo.toml), so the run needs no GL driver on the runner.
+      - name: Run every screen (Linux)
+        if: runner.os == 'Linux'
+        env:
+          SLINT_BACKEND: winit-software
+          DANGER_OUT: ${{ github.workspace }}/danger-out
+          RDB_SHOT_DELAY_MS: 6000
+        run: xvfb-run -a scripts/danger_screens.sh
+
+      # Default backend here, which is what ships to users on macOS and where
+      # the crash this job exists for actually happened.
+      - name: Run every screen (macOS)
+        if: runner.os == 'macOS'
+        env:
+          DANGER_OUT: ${{ github.workspace }}/danger-out
+          RDB_SHOT_DELAY_MS: 6000
+        run: scripts/danger_screens.sh
+
+      # The frame each screen rendered, so a failure can be looked at instead of
+      # reproduced. Logs and frames only — the per-screen store directories stay
+      # out of the artifact.
+      - name: Upload screens
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: danger-${{ matrix.os }}
+          path: |
+            danger-out/*.log
+            danger-out/*.bmp
+          retention-days: 7
