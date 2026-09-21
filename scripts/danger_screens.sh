@@ -14,6 +14,10 @@
 #
 # On Linux run it under a display: SLINT_BACKEND=winit-software xvfb-run -a ...
 
+# Same as design_shots.sh: the default BIN path is relative, so run from the
+# repo root whatever directory the caller was in.
+cd "$(dirname "$0")/.."
+
 BIN=${BIN:-target/debug/rdb}
 DELAY=${RDB_SHOT_DELAY_MS:-4000}
 REQUIRE_FRAME=${DANGER_REQUIRE_FRAME:-1}
