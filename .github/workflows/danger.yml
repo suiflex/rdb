@@ -56,7 +56,10 @@ jobs:
           # Its own key: this build carries `--features mock`, so sharing
           # rdb-app's cache would have the two evict each other.
           shared-key: rdb-danger
-      # Same Slint libs as rdb-app, plus a display to open the window in.
+      # Same Slint libs as rdb-app, plus a display to open the window in and
+      # the X11 libraries winit dlopens at runtime. rdb-app only ever builds,
+      # so it never needed those and they are easy to miss: without
+      # libxkbcommon-x11 the app panics before it draws anything.
       - name: Install Slint system deps and Xvfb (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -68,6 +71,8 @@ jobs:
             libxcb-xfixes0-dev \
             libxkbcommon-dev \
             libgtk-3-dev \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
             xvfb
       # The RDB_SCREEN harness and RDB_SHOT capture are both behind `mock`.
       - run: cargo build -p rdb --features mock
