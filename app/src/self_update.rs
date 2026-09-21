@@ -211,6 +211,28 @@ mod macos {
             .find(|p| p.extension().is_some_and(|e| e == "app"))
     }
 
+    /// Swaps two paths in one filesystem operation. The rename pair it
+    /// replaces leaves a window where `/Applications/RDB.app` does not exist
+    /// at all, and the app has aborted mid-install before (a Slint panic
+    /// during the click that starts this), which would have taken the whole
+    /// bundle with it. `renamex_np` is APFS/HFS+ only, so the caller keeps
+    /// the rename pair as a fallback.
+    pub(super) fn swap_paths(a: &Path, b: &Path) -> std::io::Result<()> {
+        use std::os::unix::ffi::OsStrExt;
+        let to_c = |p: &Path| {
+            std::ffi::CString::new(p.as_os_str().as_bytes())
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+        };
+        let (a, b) = (to_c(a)?, to_c(b)?);
+        // SAFETY: both pointers are valid NUL-terminated paths, live for the call.
+        let rc = unsafe { libc::renamex_np(a.as_ptr(), b.as_ptr(), libc::RENAME_SWAP) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+
     fn run_checked(cmd: &str, args: &[&str]) -> Result<(), SelfUpdateError> {
         let output = std::process::Command::new(cmd)
             .args(args)
@@ -280,18 +302,23 @@ mod macos {
         );
 
         on_step("Replacing");
-        let backup = bundle_root.with_file_name(format!("{bundle_name}.old"));
-        let _ = std::fs::remove_dir_all(&backup);
-        std::fs::rename(&bundle_root, &backup)?;
-        match std::fs::rename(&staged, &bundle_root) {
-            Ok(()) => {
-                let _ = std::fs::remove_dir_all(&backup);
-            }
-            Err(e) => {
-                // Old bundle wasn't touched beyond the rename-out above — put
-                // it back so the app is never left in a broken state.
-                let _ = std::fs::rename(&backup, &bundle_root);
-                return Err(SelfUpdateError::Io(e));
+        if swap_paths(&bundle_root, &staged).is_ok() {
+            // `staged` holds the old bundle now.
+            let _ = std::fs::remove_dir_all(&staged);
+        } else {
+            let backup = bundle_root.with_file_name(format!("{bundle_name}.old"));
+            let _ = std::fs::remove_dir_all(&backup);
+            std::fs::rename(&bundle_root, &backup)?;
+            match std::fs::rename(&staged, &bundle_root) {
+                Ok(()) => {
+                    let _ = std::fs::remove_dir_all(&backup);
+                }
+                Err(e) => {
+                    // Old bundle wasn't touched beyond the rename-out above —
+                    // put it back so the app is never left in a broken state.
+                    let _ = std::fs::rename(&backup, &bundle_root);
+                    return Err(SelfUpdateError::Io(e));
+                }
             }
         }
 
@@ -424,6 +451,24 @@ pub fn perform_swap(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn swap_paths_exchanges_both_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (dir.path().join("a.app"), dir.path().join("b.app"));
+        std::fs::create_dir(&a).unwrap();
+        std::fs::create_dir(&b).unwrap();
+        std::fs::write(a.join("who"), "old").unwrap();
+        std::fs::write(b.join("who"), "new").unwrap();
+
+        macos::swap_paths(&a, &b).unwrap();
+
+        // Both still exist — the point of the swap is that there is never a
+        // moment where the installed bundle is missing.
+        assert_eq!(std::fs::read_to_string(a.join("who")).unwrap(), "new");
+        assert_eq!(std::fs::read_to_string(b.join("who")).unwrap(), "old");
+    }
 
     #[test]
     fn pick_asset_never_partial_matches() {
