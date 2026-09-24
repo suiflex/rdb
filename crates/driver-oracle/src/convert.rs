@@ -55,7 +55,7 @@ pub fn cell_at(row: &Row, idx: usize, md: &Metadata) -> Cell {
         // Whether a zone is part of the value is a property of the column,
         // not of the timestamp struct — `OracleTimestamp` carries an offset
         // either way, and a plain TIMESTAMP's is a meaningless zero.
-        let zoned = ty == &DB_TYPE_TIMESTAMP_TZ || ty == &DB_TYPE_TIMESTAMP_LTZ;
+        let zoned = ty == DB_TYPE_TIMESTAMP_TZ || ty == DB_TYPE_TIMESTAMP_LTZ;
         return cell(
             row,
             idx,
@@ -64,19 +64,19 @@ pub fn cell_at(row: &Row, idx: usize, md: &Metadata) -> Cell {
         );
     }
 
-    if ty == &DB_TYPE_NUMBER || ty == &DB_TYPE_BINARY_INTEGER {
+    if ty == DB_TYPE_NUMBER || ty == DB_TYPE_BINARY_INTEGER {
         return cell(row, idx, number_cell, "[number]");
     }
-    if ty == &DB_TYPE_BINARY_FLOAT {
+    if ty == DB_TYPE_BINARY_FLOAT {
         return cell(row, idx, |f: f32| Cell::Float(f as f64), "[binary float]");
     }
-    if ty == &DB_TYPE_BINARY_DOUBLE {
+    if ty == DB_TYPE_BINARY_DOUBLE {
         return cell(row, idx, Cell::Float, "[binary double]");
     }
-    if ty == &DB_TYPE_BOOLEAN {
+    if ty == DB_TYPE_BOOLEAN {
         return cell(row, idx, Cell::Bool, "[boolean]");
     }
-    if ty == &DB_TYPE_INTERVAL_DS {
+    if ty == DB_TYPE_INTERVAL_DS {
         return cell(
             row,
             idx,
@@ -84,7 +84,7 @@ pub fn cell_at(row: &Row, idx: usize, md: &Metadata) -> Cell {
             "[interval]",
         );
     }
-    if ty == &DB_TYPE_INTERVAL_YM {
+    if ty == DB_TYPE_INTERVAL_YM {
         return cell(
             row,
             idx,
@@ -95,7 +95,7 @@ pub fn cell_at(row: &Row, idx: usize, md: &Metadata) -> Cell {
     // Oracle 21c's native JSON type. The previous ODPI-C driver could not read
     // this at all and had to tell users to wrap the column in
     // `JSON_SERIALIZE`; here it decodes to a value.
-    if ty == &DB_TYPE_JSON {
+    if ty == DB_TYPE_JSON {
         return cell(
             row,
             idx,
@@ -103,7 +103,7 @@ pub fn cell_at(row: &Row, idx: usize, md: &Metadata) -> Cell {
             "[json]",
         );
     }
-    if ty == &DB_TYPE_VECTOR {
+    if ty == DB_TYPE_VECTOR {
         return cell(
             row,
             idx,
@@ -122,13 +122,13 @@ pub fn cell_at(row: &Row, idx: usize, md: &Metadata) -> Cell {
     // the whole statement — `driver::unsupported_type_hint` is what the user
     // actually sees today. These arms are kept for the day it decodes them,
     // and because a REF CURSOR can still arrive from PL/SQL.
-    if ty == &DB_TYPE_BFILE {
+    if ty == DB_TYPE_BFILE {
         return marker_or_null(row, idx, "[BFILE]");
     }
-    if ty == &DB_TYPE_CURSOR {
+    if ty == DB_TYPE_CURSOR {
         return marker_or_null(row, idx, "[REF CURSOR]");
     }
-    if ty == &DB_TYPE_OBJECT {
+    if ty == DB_TYPE_OBJECT {
         return marker_or_null(row, idx, "[OBJECT]");
     }
 
@@ -379,22 +379,22 @@ pub fn column_type_name(md: &Metadata) -> String {
     let ty = md.db_type();
     let (size, precision, scale) = (md.max_size(), md.precision(), md.scale());
 
-    if ty == &DB_TYPE_VARCHAR {
+    if ty == DB_TYPE_VARCHAR {
         return format!("VARCHAR2({size})");
     }
-    if ty == &DB_TYPE_NVARCHAR {
+    if ty == DB_TYPE_NVARCHAR {
         return format!("NVARCHAR2({size})");
     }
-    if ty == &DB_TYPE_CHAR {
+    if ty == DB_TYPE_CHAR {
         return format!("CHAR({size})");
     }
-    if ty == &DB_TYPE_NCHAR {
+    if ty == DB_TYPE_NCHAR {
         return format!("NCHAR({size})");
     }
-    if ty == &DB_TYPE_RAW {
+    if ty == DB_TYPE_RAW {
         return format!("RAW({size})");
     }
-    if ty == &DB_TYPE_NUMBER {
+    if ty == DB_TYPE_NUMBER {
         // Oracle reports an unconstrained NUMBER as precision 0 with scale
         // -127 ("no scale specified"), which would render as the nonsense
         // `NUMBER(0,-127)` in a column header.
@@ -404,13 +404,13 @@ pub fn column_type_name(md: &Metadata) -> String {
             (p, s) => format!("NUMBER({p},{s})"),
         };
     }
-    if ty == &DB_TYPE_TIMESTAMP {
+    if ty == DB_TYPE_TIMESTAMP {
         return format!("TIMESTAMP({})", timestamp_precision(scale));
     }
-    if ty == &DB_TYPE_TIMESTAMP_TZ {
+    if ty == DB_TYPE_TIMESTAMP_TZ {
         return format!("TIMESTAMP({}) WITH TIME ZONE", timestamp_precision(scale));
     }
-    if ty == &DB_TYPE_TIMESTAMP_LTZ {
+    if ty == DB_TYPE_TIMESTAMP_LTZ {
         return format!(
             "TIMESTAMP({}) WITH LOCAL TIME ZONE",
             timestamp_precision(scale)
@@ -436,26 +436,26 @@ fn timestamp_precision(scale: i8) -> u8 {
 /// Types whose name carries no size or precision.
 fn simple_type_name(ty: &'static DbType) -> &'static str {
     for (t, name) in [
-        (&DB_TYPE_DATE, "DATE"),
-        (&DB_TYPE_BINARY_FLOAT, "BINARY_FLOAT"),
-        (&DB_TYPE_BINARY_DOUBLE, "BINARY_DOUBLE"),
-        (&DB_TYPE_BINARY_INTEGER, "BINARY_INTEGER"),
-        (&DB_TYPE_BOOLEAN, "BOOLEAN"),
-        (&DB_TYPE_CLOB, "CLOB"),
-        (&DB_TYPE_NCLOB, "NCLOB"),
-        (&DB_TYPE_BFILE, "BFILE"),
-        (&DB_TYPE_LONG, "LONG"),
-        (&DB_TYPE_LONG_RAW, "LONG RAW"),
-        (&DB_TYPE_LONG_NVARCHAR, "LONG NVARCHAR"),
-        (&DB_TYPE_ROWID, "ROWID"),
-        (&DB_TYPE_UROWID, "UROWID"),
-        (&DB_TYPE_INTERVAL_DS, "INTERVAL DAY TO SECOND"),
-        (&DB_TYPE_INTERVAL_YM, "INTERVAL YEAR TO MONTH"),
-        (&DB_TYPE_JSON, "JSON"),
-        (&DB_TYPE_XMLTYPE, "XMLTYPE"),
-        (&DB_TYPE_VECTOR, "VECTOR"),
-        (&DB_TYPE_CURSOR, "REF CURSOR"),
-        (&DB_TYPE_OBJECT, "OBJECT"),
+        (DB_TYPE_DATE, "DATE"),
+        (DB_TYPE_BINARY_FLOAT, "BINARY_FLOAT"),
+        (DB_TYPE_BINARY_DOUBLE, "BINARY_DOUBLE"),
+        (DB_TYPE_BINARY_INTEGER, "BINARY_INTEGER"),
+        (DB_TYPE_BOOLEAN, "BOOLEAN"),
+        (DB_TYPE_CLOB, "CLOB"),
+        (DB_TYPE_NCLOB, "NCLOB"),
+        (DB_TYPE_BFILE, "BFILE"),
+        (DB_TYPE_LONG, "LONG"),
+        (DB_TYPE_LONG_RAW, "LONG RAW"),
+        (DB_TYPE_LONG_NVARCHAR, "LONG NVARCHAR"),
+        (DB_TYPE_ROWID, "ROWID"),
+        (DB_TYPE_UROWID, "UROWID"),
+        (DB_TYPE_INTERVAL_DS, "INTERVAL DAY TO SECOND"),
+        (DB_TYPE_INTERVAL_YM, "INTERVAL YEAR TO MONTH"),
+        (DB_TYPE_JSON, "JSON"),
+        (DB_TYPE_XMLTYPE, "XMLTYPE"),
+        (DB_TYPE_VECTOR, "VECTOR"),
+        (DB_TYPE_CURSOR, "REF CURSOR"),
+        (DB_TYPE_OBJECT, "OBJECT"),
     ] {
         if ty == t {
             return name;
@@ -627,9 +627,9 @@ mod tests {
     #[test]
     fn type_names_use_oracle_spelling_not_the_rust_constant() {
         // `DbType::name()` would say "DB_TYPE_VARCHAR" here.
-        assert_eq!(simple_type_name(&DB_TYPE_DATE), "DATE");
-        assert_eq!(simple_type_name(&DB_TYPE_BINARY_DOUBLE), "BINARY_DOUBLE");
-        assert_eq!(simple_type_name(&DB_TYPE_JSON), "JSON");
-        assert_eq!(simple_type_name(&DB_TYPE_XMLTYPE), "XMLTYPE");
+        assert_eq!(simple_type_name(DB_TYPE_DATE), "DATE");
+        assert_eq!(simple_type_name(DB_TYPE_BINARY_DOUBLE), "BINARY_DOUBLE");
+        assert_eq!(simple_type_name(DB_TYPE_JSON), "JSON");
+        assert_eq!(simple_type_name(DB_TYPE_XMLTYPE), "XMLTYPE");
     }
 }

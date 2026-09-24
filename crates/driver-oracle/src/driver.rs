@@ -214,7 +214,7 @@ impl Driver for OracleDriver {
                 return Ok(ResultSet::Affected(c.execute(&sql, &[])?.rows_affected()));
             }
             let cursor = c.query(&sql, &[])?;
-            let meta = cursor.columns().clone();
+            let meta = cursor.columns().to_vec();
             let cols: Vec<Column> = meta
                 .iter()
                 .map(|m| Column {
@@ -389,7 +389,7 @@ fn unsupported_type_hint(msg: &str) -> String {
 /// available.
 fn ora_err(e: &oracledb::Error) -> String {
     match e.kind() {
-        ErrorKind::DbError(msg) => msg.trim().to_string(),
+        ErrorKind::DbError(db) => db.message().trim().to_string(),
         _ => e.to_string(),
     }
 }
