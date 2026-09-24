@@ -735,6 +735,7 @@ fn handle_connect_clicked(state: &AppState, fns: &AppFns, weak: slint::Weak<Main
         fn_defs,
         tabs_restored,
         painted_connection,
+        conn_contexts,
         ..
     } = state.clone();
     let AppFns {
@@ -754,6 +755,23 @@ fn handle_connect_clicked(state: &AppState, fns: &AppFns, weak: slint::Weak<Main
     if let Some(w) = weak.upgrade() {
         save_active_tab(&w);
         save_p1_tab(&w);
+        // File the connection being left behind, the same way switching by
+        // tab does. Without it, switching from the rail still threw its tree
+        // and expand state away and paid a full schema read to come back.
+        let outgoing = painted_connection.lock().unwrap().clone();
+        if let Some(prev) = outgoing {
+            snapshot_conn_context(
+                &w,
+                &conn_contexts,
+                &prev,
+                &raw_nodes,
+                &completion_nodes,
+                &fn_defs,
+                &expanded_tables,
+                &loaded_dbs,
+                &collapsed_categories,
+            );
+        }
     }
     let i = idx as usize;
     // One-shot: set by the database switcher, empty for a fresh picker
