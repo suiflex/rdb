@@ -5470,6 +5470,11 @@ fn main() -> Result<(), slint::PlatformError> {
         })
     };
 
+    // Switching the whole app context to a connection the pool already holds.
+    // Built before `restore_tab_for_pane` because that is its only caller: a
+    // tab switch is a connection switch.
+    let activate_connection = wire::connect::build_activate_connection(&state);
+
     #[allow(clippy::type_complexity)]
     // Restore a tab into a group's runtime (`pane` 0 left / 1 right). `group_index`
     // is the position within that group's tab strip. Both groups share this path;
@@ -5490,6 +5495,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let last_view = last_view.clone();
         let store = store.clone();
         let current_connection_id = current_connection_id.clone();
+        let activate_connection = activate_connection.clone();
         Rc::new(move |w, abs_index| {
             let (tab, pane, group_index) = {
                 let tabs = tabs.lock().unwrap();
@@ -5502,20 +5508,40 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             if pane == 0 {
                 *active_tab_id.lock().unwrap() = Some(tab.id.clone());
-                // Topbar identity follows whichever tab is now on screen, not
-                // the last connection explicitly picked from the connect flow.
-                sync_conn_chrome(w, &store.borrow(), tab.connection_id.as_deref());
-                // `current_connection_id` is the single "what does a NEW action
-                // target" pointer (new tab, browse-from-sidebar) — it must track
-                // the focused tab too, or a plain tab switch leaves it aimed at
-                // whatever connection was last explicitly clicked, and a New
-                // Query fired right after silently lands on the wrong one.
-                if let Some(cid) = tab.connection_id.clone() {
-                    *current_connection_id.lock().unwrap() = Some(cid.clone());
-                    w.set_query_scope_connection(SharedString::from(cid));
-                }
             } else {
                 *active_group1_tab_id.lock().unwrap() = Some(tab.id.clone());
+            }
+            // Topbar identity follows whichever tab is now on screen, not
+            // the last connection explicitly picked from the connect flow.
+            sync_conn_chrome(w, &store.borrow(), tab.connection_id.as_deref());
+            // `current_connection_id` is the single "what does a NEW action
+            // target" pointer (new tab, browse-from-sidebar) — it must track
+            // the focused tab too, or a plain tab switch leaves it aimed at
+            // whatever connection was last explicitly clicked, and a New
+            // Query fired right after silently lands on the wrong one.
+            //
+            // Set before activating, so the connect result that lands back
+            // recognises itself as the current context (and so the nested
+            // `restore_tab` a later connect fires sees no further change to
+            // make).
+            let switched_to = {
+                let mut current = current_connection_id.lock().unwrap();
+                match tab.connection_id.clone() {
+                    Some(cid) => {
+                        let changed = current.as_deref() != Some(cid.as_str());
+                        *current = Some(cid.clone());
+                        w.set_query_scope_connection(SharedString::from(cid.clone()));
+                        changed.then_some(cid)
+                    }
+                    None => None,
+                }
+            };
+            // Everything outside the tab — engine, driver slot, sidebar tree,
+            // autocomplete — follows it too. Without this the sidebar keeps
+            // listing the other connection's tables and clicking one opens a
+            // tab bound to the wrong database.
+            if let Some(cid) = switched_to {
+                activate_connection(w, &cid);
             }
             {
                 // Keep the group-0 selection stable when restoring the right group.
