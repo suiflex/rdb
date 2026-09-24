@@ -237,6 +237,7 @@ async fn finish_connect_success(
     raw_nodes: Arc<Mutex<Vec<model::VmTreeNode>>>,
     completion_nodes: Arc<Mutex<Vec<model::VmTreeNode>>>,
     fn_defs: Arc<Mutex<HashMap<String, String>>>,
+    current_connection_id: Arc<Mutex<Option<String>>>,
 ) {
     // Postgres: list real namespaces so the sidebar schema switcher offers
     // more than "public". Engine-specific SQL lives in the driver, not here.
@@ -269,7 +270,25 @@ async fn finish_connect_success(
     // Now genuinely connected — the sidebar dot and "another connection is
     // still around" checks read this, not tab scoping (see `connected_ids`
     // on `AppState`).
-    connected_ids.lock().unwrap().insert(connection_id);
+    connected_ids.lock().unwrap().insert(connection_id.clone());
+    // The pool and the live-ids set above are facts about the connection and
+    // are recorded either way. Everything below repaints the workspace *as*
+    // this connection, and a tab switch is a context switch now, so the user
+    // may have moved to another one while this schema was in flight. Painting
+    // anyway drops the other connection's tree, autocomplete and schema list
+    // on top of the workspace they are actually looking at.
+    if current_connection_id.lock().unwrap().as_deref() != Some(connection_id.as_str()) {
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(w) = weak.upgrade() {
+                // It did connect, so nothing should be left spinning; the
+                // sidebar dot for it goes live off `connected_ids` above.
+                w.set_connecting(false);
+                w.set_tree_loading(false);
+                w.invoke_refresh_connections();
+            }
+        });
+        return;
+    }
     let nodes = model::to_tree_model(&schema);
     let fields = model::to_structure_model(&schema);
     // Scoped Mongo tree holds only the selected database: open it and mark
@@ -438,6 +457,7 @@ pub(crate) fn build_activate_connection(state: &AppState) -> Rc<dyn Fn(&MainWind
         collapsed_categories,
         connect_handle,
         cur_engine,
+        current_connection_id,
         ..
     } = state.clone();
     Rc::new(move |w: &MainWindow, connection_id: &str| {
@@ -481,6 +501,7 @@ pub(crate) fn build_activate_connection(state: &AppState) -> Rc<dyn Fn(&MainWind
             expanded_tables.clone(),
             loaded_dbs.clone(),
             connect_handle.clone(),
+            current_connection_id.clone(),
             true,
         );
     })
@@ -650,6 +671,7 @@ fn handle_connect_clicked(state: &AppState, fns: &AppFns, weak: slint::Weak<Main
         expanded_tables,
         loaded_dbs,
         connect_handle,
+        current_connection_id,
         // A database switch needs a driver on the new database, never the
         // pooled one.
         db_ovr.is_none(),
@@ -795,6 +817,7 @@ fn spawn_connect_task(
     expanded_tables: Arc<Mutex<HashSet<String>>>,
     loaded_dbs: Arc<Mutex<HashSet<String>>>,
     connect_handle: Rc<RefCell<Option<tokio::task::JoinHandle<()>>>>,
+    current_connection_id: Arc<Mutex<Option<String>>>,
     reuse_pooled: bool,
 ) {
     let weak2 = weak.clone();
@@ -844,6 +867,7 @@ fn spawn_connect_task(
                     raw_nodes,
                     completion_nodes,
                     fn_defs,
+                    current_connection_id,
                 )
                 .await;
             }
