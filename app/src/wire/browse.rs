@@ -845,17 +845,25 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 };
                 if need_fetch {
                     let driver = current.clone();
+                    let driver_pool = driver_pool.clone();
                     let raw_nodes = raw_nodes.clone();
                     let expanded_tables = expanded_tables.clone();
                     let loaded_dbs = loaded_dbs.clone();
                     let sidebar_filter = sidebar_filter.clone();
                     let weak2 = weak.clone();
                     let db = label.clone();
+                    // The tree belongs to a connection, so resolve its driver
+                    // through the pool like every other action does. Taking
+                    // the single `current` slot instead meant this queued
+                    // behind whatever held it — a connect holds it across its
+                    // whole schema read — and an expanding database just span
+                    // until that finished, or until it timed out.
+                    let tree_connection_id = current_connection_id.lock().unwrap().clone();
                     rt.spawn(async move {
-                        let drv = {
-                            let guard = driver.lock().await;
-                            guard.as_ref().map(|(_, d)| d.clone())
-                        };
+                        let drv =
+                            resolve_driver(&driver_pool, &driver, tree_connection_id.as_deref())
+                                .await
+                                .map(|(_, d)| d);
                         let containers = match drv {
                             Some(drv) => drv.containers(&db).await.unwrap_or_default(),
                             None => return,
