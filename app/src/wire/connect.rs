@@ -409,6 +409,83 @@ fn finish_connect_failure(weak: slint::Weak<MainWindow>, e: rdb_core::error::Rdb
     });
 }
 
+/// Point the app's whole connection context at `connection_id`: the engine,
+/// the `current` driver slot, the sidebar tree, the completion data and the
+/// schema picker.
+///
+/// Built once and handed to `restore_tab_for_pane`, which is what makes "the
+/// focused tab's connection *is* the active connection" true rather than
+/// aspirational. Before this, a tab switch moved `current_connection_id` and
+/// the topbar while everything else stayed pinned to whichever connection was
+/// last picked from the rail — so the sidebar listed one database's tables
+/// while opening one of them bound the new tab to another database, which
+/// across two different engines produces a tab that simply cannot run.
+///
+/// No handshake: `spawn_connect_task` with `reuse_pooled` takes the driver the
+/// pool already holds and only re-reads the schema.
+pub(crate) fn build_activate_connection(state: &AppState) -> Rc<dyn Fn(&MainWindow, &str)> {
+    let AppState {
+        rt,
+        store,
+        current,
+        driver_pool,
+        connected_ids,
+        raw_nodes,
+        completion_nodes,
+        fn_defs,
+        expanded_tables,
+        loaded_dbs,
+        collapsed_categories,
+        connect_handle,
+        cur_engine,
+        ..
+    } = state.clone();
+    Rc::new(move |w: &MainWindow, connection_id: &str| {
+        let Some(sc) = store
+            .borrow()
+            .list()
+            .iter()
+            .find(|c| c.id == connection_id)
+            .cloned()
+        else {
+            return;
+        };
+        // Synchronous, and the part that matters most: every
+        // `let Some(engine) = *cur_engine.borrow()` guard (open table, browse
+        // SQL, add column) and the format/comment/stream forks read this on
+        // the very next click, long before any schema comes back.
+        *cur_engine.borrow_mut() = Some(sc.engine);
+        // A tab whose connection was disconnected keeps its text and its
+        // badge; there is no pooled driver to switch to, and forcing a
+        // reconnect from a plain tab click would be a surprise.
+        if !connected_ids.lock().unwrap().contains(connection_id) {
+            return;
+        }
+        let cfg = store.borrow().conn_config_for(&sc.id);
+        // The tree about to be replaced describes the previous connection.
+        expanded_tables.lock().unwrap().clear();
+        loaded_dbs.lock().unwrap().clear();
+        *collapsed_categories.borrow_mut() = default_collapsed_cats();
+        w.set_tree_loading(true);
+        spawn_connect_task(
+            rt.clone(),
+            w.as_weak(),
+            &sc,
+            cfg,
+            current.clone(),
+            driver_pool.clone(),
+            connected_ids.clone(),
+            raw_nodes.clone(),
+            completion_nodes.clone(),
+            fn_defs.clone(),
+            expanded_tables.clone(),
+            loaded_dbs.clone(),
+            connect_handle.clone(),
+            true,
+        );
+    })
+}
+
 /// A connect task that panicked still has to clear the picker's
 /// "Connecting…" state; nothing else will, and the task it was waiting on is
 /// gone. An abort is not a failure — Cancel and a superseding connect both
