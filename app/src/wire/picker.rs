@@ -737,7 +737,16 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             // `disconnecting_id` removed above, so any entry left here is a
             // genuinely different, still-live connection.
             let other_live = !connected_ids.lock().unwrap().is_empty();
-            if !other_live {
+            // The connection the workspace carries on with: whatever the
+            // focused tab belongs to, as long as that one is itself still
+            // live. A tab of a connection disconnected earlier leaves
+            // nothing to carry on with, live sibling or not.
+            let surviving = focused_tab_connection_id(&active_tab_id, &workspace_tabs)
+                .filter(|cid| connected_ids.lock().unwrap().contains(cid));
+            // Reactivating below refills the slot from the pool. With
+            // nothing to reactivate it has to be emptied here instead, or it
+            // keeps handing out the driver that was just dropped.
+            if surviving.is_none() {
                 let current = current.clone();
                 rt.spawn(async move {
                     *current.lock().await = None;
@@ -753,16 +762,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 // Resync chrome to whatever tab stayed focused, so the
                 // topbar reflects a connection that's actually still there
                 // instead of the one just dropped.
-                let cid = active_tab_id.lock().unwrap().clone().and_then(|id| {
-                    workspace_tabs
-                        .lock()
-                        .unwrap()
-                        .iter()
-                        .find(|t| t.id == id)
-                        .and_then(|t| t.connection_id.clone())
-                });
-                sync_conn_chrome(&w, &store.borrow(), cid.as_deref());
-                if let Some(cid) = cid {
+                sync_conn_chrome(&w, &store.borrow(), surviving.as_deref());
+                if let Some(cid) = surviving {
                     *current_connection_id.lock().unwrap() = Some(cid.clone());
                     // The teardown above cleared state the survivor still
                     // needs: its engine (every `cur_engine` guard — open

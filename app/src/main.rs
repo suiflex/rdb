@@ -5546,17 +5546,27 @@ fn main() -> Result<(), slint::PlatformError> {
             // `restore_tab` a later connect fires sees no further change to
             // make).
             let switched_to = {
+                // Scoped tight, and no UI touched while it is held: a Slint
+                // setter runs bindings synchronously, and this lock is taken
+                // all over the wiring.
                 let mut current = current_connection_id.lock().unwrap();
                 match tab.connection_id.clone() {
                     Some(cid) => {
                         let changed = current.as_deref() != Some(cid.as_str());
                         *current = Some(cid.clone());
-                        w.set_query_scope_connection(SharedString::from(cid.clone()));
                         changed.then_some(cid)
                     }
                     None => None,
                 }
             };
+            // Tab *visibility* in scoped mode stays keyed to the left group.
+            // Rescoping from the right group would hide the left group's own
+            // tabs out from under it when the two hold different connections.
+            if pane == 0 {
+                if let Some(cid) = tab.connection_id.clone() {
+                    w.set_query_scope_connection(SharedString::from(cid));
+                }
+            }
             // Everything outside the tab — engine, driver slot, sidebar tree,
             // autocomplete — follows it too. Without this the sidebar keeps
             // listing the other connection's tables and clicking one opens a
