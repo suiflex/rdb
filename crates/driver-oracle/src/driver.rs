@@ -209,11 +209,13 @@ impl Driver for OracleDriver {
         };
         on_conn(&self.conn, move |c| {
             // DDL, DML and PL/SQL have no result set to iterate; they report a
-            // row count instead.
-            if !is_query(&sql) {
-                return Ok(ResultSet::Affected(c.execute(&sql, &[])?.rows_affected()));
+            // row count instead. `oracledb` classifies the statement while
+            // building it, client-side, so asking costs no round trip.
+            let mut stmt = c.statement(&sql)?.build()?;
+            if !stmt.is_query() {
+                return Ok(ResultSet::Affected(stmt.execute(&[])?.rows_affected()));
             }
-            let cursor = c.query(&sql, &[])?;
+            let cursor = stmt.query(&[])?;
             let meta = cursor.columns().to_vec();
             let cols: Vec<Column> = meta
                 .iter()
@@ -313,54 +315,6 @@ impl Driver for OracleDriver {
     }
 }
 
-/// Whether a statement produces a result set to iterate rather than a row
-/// count, decided from its leading keyword.
-///
-/// `oracledb` classifies statements this same way internally
-/// (`Statement::determine_statement_type`, which routes on `SELECT`/`WITH`
-/// versus DML/DDL/PL/SQL keywords) but keeps the answer crate-private, so
-/// this mirrors that table rather than inventing a different one. `Cursor`
-/// does report an empty column list for a non-query, but it carries no
-/// affected-row count, and "3 rows updated" is the whole result of a DML
-/// statement — so routing has to happen before execution, not after.
-///
-/// ponytail: leading keyword only. `TABLE(...)`, `(SELECT ...)` and other
-/// rarities route to `execute`, which still runs them correctly but reports a
-/// row count instead of the rows. Replace this with upstream's own answer if
-/// it is ever exposed.
-fn is_query(sql: &str) -> bool {
-    matches!(
-        leading_keyword(sql).to_uppercase().as_str(),
-        "SELECT" | "WITH"
-    )
-}
-
-/// The first bare word of a statement, skipping whitespace and both comment
-/// forms. A query editor's buffer routinely opens with a `--` note above the
-/// statement, so a naive `trim_start` would classify most saved queries wrong.
-fn leading_keyword(sql: &str) -> &str {
-    let mut rest = sql.trim_start();
-    loop {
-        if let Some(after) = rest.strip_prefix("--") {
-            rest = after
-                .split_once('\n')
-                .map_or("", |(_, tail)| tail)
-                .trim_start();
-        } else if let Some(after) = rest.strip_prefix("/*") {
-            rest = after
-                .split_once("*/")
-                .map_or("", |(_, tail)| tail)
-                .trim_start();
-        } else {
-            break;
-        }
-    }
-    let end = rest
-        .find(|c: char| !c.is_alphanumeric() && c != '_')
-        .unwrap_or(rest.len());
-    &rest[..end]
-}
-
 /// `oracledb` cannot decode a `BFILE` or an object type (`XMLTYPE` describes
 /// as one), and it refuses the whole statement rather than the one column —
 /// so a `SELECT *` over a table containing either fails with nothing shown.
@@ -453,36 +407,6 @@ mod tests {
     }
 
     #[test]
-    fn selects_and_ctes_are_queries() {
-        assert!(is_query("SELECT * FROM dual"));
-        assert!(is_query("  select 1 from dual"));
-        assert!(is_query("WITH t AS (SELECT 1 FROM dual) SELECT * FROM t"));
-    }
-
-    #[test]
-    fn dml_ddl_and_plsql_are_not_queries() {
-        assert!(!is_query("UPDATE users SET name = 'x'"));
-        assert!(!is_query("INSERT INTO users VALUES (1)"));
-        assert!(!is_query("DELETE FROM users"));
-        assert!(!is_query("MERGE INTO users USING dual ON (1=1)"));
-        assert!(!is_query("CREATE TABLE t (id NUMBER)"));
-        assert!(!is_query("TRUNCATE TABLE t"));
-        assert!(!is_query("BEGIN NULL; END;"));
-        assert!(!is_query(""));
-    }
-
-    #[test]
-    fn a_leading_comment_does_not_hide_the_keyword() {
-        // A saved query routinely opens with a note above the statement.
-        assert!(is_query("-- daily totals\nSELECT * FROM dual"));
-        assert!(is_query("/* daily totals */ SELECT * FROM dual"));
-        assert!(is_query(
-            "-- one\n-- two\n\n  /* three */\nSELECT 1 FROM dual"
-        ));
-        assert!(!is_query("-- careful\nDROP TABLE t"));
-    }
-
-    #[test]
     fn an_undecodable_column_type_names_the_way_out() {
         let bfile = unsupported_type_hint("unsupported database type DB_TYPE_BFILE");
         assert!(bfile.contains("BFILE") && bfile.contains("DBMS_LOB"));
@@ -490,12 +414,6 @@ mod tests {
         assert!(obj.contains("XMLTYPE") && obj.contains("getClobVal"));
         // Unrelated errors pass through untouched.
         assert_eq!(unsupported_type_hint("ORA-00942: nope"), "ORA-00942: nope");
-    }
-
-    #[test]
-    fn an_unterminated_comment_is_not_mistaken_for_a_query() {
-        assert!(!is_query("/* never closed SELECT"));
-        assert!(!is_query("-- only a comment"));
     }
 
     #[test]
