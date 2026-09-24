@@ -1062,3 +1062,82 @@ mod panic_to_connection_error_tests {
         assert!(panic_to_connection_error(join).is_none());
     }
 }
+
+#[cfg(test)]
+mod plan_tab_restore_tests {
+    use super::*;
+
+    /// `tabs_restored` pre-set, so the plan takes the in-memory path and no
+    /// test touches the on-disk tab file.
+    fn plan(
+        tabs: Vec<WorkspaceTab>,
+        active: Option<&str>,
+        connection_id: &str,
+        scoped: bool,
+    ) -> TabRestorePlan {
+        plan_tab_restore(
+            &Rc::new(Cell::new(true)),
+            &Arc::new(Mutex::new(tabs)),
+            &Arc::new(Mutex::new(active.map(str::to_string))),
+            &Arc::new(Mutex::new(None)),
+            &Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            connection_id,
+            scoped,
+            &ConnBadgeInfo::default(),
+        )
+    }
+
+    fn tab(id: &str, connection_id: Option<&str>) -> WorkspaceTab {
+        let mut t = WorkspaceTab::sql(id.to_string(), 1);
+        t.connection_id = connection_id.map(str::to_string);
+        t
+    }
+
+    /// The focused tab is the active connection, so landing on another
+    /// connection's tab would pull the context straight back off the
+    /// connection the user just picked.
+    #[test]
+    fn connecting_mints_a_tab_when_every_open_one_belongs_elsewhere() {
+        for scoped in [false, true] {
+            let plan = plan(
+                vec![tab("a1", Some("conn-a"))],
+                Some("a1"),
+                "conn-b",
+                scoped,
+            );
+            let active = plan.active.expect("a connection always lands somewhere");
+            let landed = plan
+                .tabs
+                .iter()
+                .find(|t| t.id == active)
+                .expect("the active id names a tab in the plan");
+            assert_eq!(landed.connection_id.as_deref(), Some("conn-b"));
+            // The other connection's tab survives the switch.
+            assert!(plan.tabs.iter().any(|t| t.id == "a1"));
+            // A tab minted empty has no result to keep on screen.
+            assert!(!plan.standby);
+        }
+    }
+
+    #[test]
+    fn connecting_lands_on_a_tab_it_already_owns() {
+        let plan = plan(
+            vec![tab("a1", Some("conn-a")), tab("b1", Some("conn-b"))],
+            Some("a1"),
+            "conn-b",
+            false,
+        );
+        assert_eq!(plan.active.as_deref(), Some("b1"));
+        assert_eq!(plan.tabs.len(), 2);
+        assert!(plan.standby);
+    }
+
+    /// A tab that has never run is bound to nothing and latches onto the
+    /// first connection it runs against, so it is a fine place to land.
+    #[test]
+    fn an_unbound_tab_is_reused_rather_than_replaced() {
+        let plan = plan(vec![tab("q1", None)], Some("q1"), "conn-b", false);
+        assert_eq!(plan.active.as_deref(), Some("q1"));
+        assert_eq!(plan.tabs.len(), 1);
+    }
+}
