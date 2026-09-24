@@ -33,22 +33,36 @@ fn plan_tab_restore(
     query_number: &Arc<std::sync::atomic::AtomicUsize>,
     connection_id: &str,
     scoped: bool,
+    badge: &ConnBadgeInfo,
 ) -> TabRestorePlan {
     let visible = |tab: &WorkspaceTab| tab_visible_for_connection(tab, connection_id, scoped);
+    // Only a tab this connection owns may take the focus. The focused tab *is*
+    // the active connection (`restore_tab_for_pane`), so landing on another
+    // connection's tab would drag the whole context — sidebar tree, engine,
+    // driver — straight back to it, and the connect the user just asked for
+    // would appear to do nothing. A tab bound to nothing yet is fair game: it
+    // latches onto whatever it first runs against.
+    let ownable = |tab: &WorkspaceTab| {
+        visible(tab)
+            && tab
+                .connection_id
+                .as_deref()
+                .is_none_or(|id| id == connection_id)
+    };
     let restore = should_restore_query_tabs(tabs_restored.get());
     tabs_restored.set(true);
-    let (tabs, active, active_p1, active_group) = if restore {
+    let (mut tabs, active, active_p1, mut active_group) = if restore {
         let (tabs, disk_active, disk_active_p1, active_group, max_number) = load_query_tabs();
         query_number.fetch_max(max_number, std::sync::atomic::Ordering::Relaxed);
         let active = disk_active
-            .filter(|id| tabs.iter().any(|tab| tab.id == *id && visible(tab)))
+            .filter(|id| tabs.iter().any(|tab| tab.id == *id && ownable(tab)))
             .or_else(|| {
                 tabs.iter()
-                    .find(|tab| visible(tab))
+                    .find(|tab| ownable(tab))
                     .map(|tab| tab.id.clone())
             });
         let active_p1 =
-            disk_active_p1.filter(|id| tabs.iter().any(|tab| tab.id == *id && visible(tab)));
+            disk_active_p1.filter(|id| tabs.iter().any(|tab| tab.id == *id && ownable(tab)));
         (tabs, active, active_p1, active_group)
     } else {
         // Retain every open tab across the switch. In scoped mode the renderer
@@ -62,20 +76,40 @@ fn plan_tab_restore(
             .lock()
             .unwrap()
             .clone()
-            .filter(|id| kept.iter().any(|tab| tab.id == *id && visible(tab)))
+            .filter(|id| kept.iter().any(|tab| tab.id == *id && ownable(tab)))
             .or_else(|| {
                 kept.iter()
-                    .find(|tab| visible(tab))
+                    .find(|tab| ownable(tab))
                     .map(|tab| tab.id.clone())
             });
         let active_p1 = active_group1_tab_id
             .lock()
             .unwrap()
             .clone()
-            .filter(|id| kept.iter().any(|tab| tab.id == *id && visible(tab)));
+            .filter(|id| kept.iter().any(|tab| tab.id == *id && ownable(tab)));
         (kept, active, active_p1, 0usize)
     };
-    let standby = !restore && active.is_some();
+    // Nothing this connection can land on: give it an empty tab of its own
+    // rather than leaving the focus on a foreign one.
+    let created = active.is_none();
+    let active = active.or_else(|| {
+        let number = query_number.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        let id = format!("query:{connection_id}:{number}");
+        let mut tab = WorkspaceTab::sql(id.clone(), number);
+        tab.connection_id = Some(connection_id.to_string());
+        tab.engine = badge.engine.clone();
+        tab.connection_name = badge.name.clone();
+        tab.color = badge.color;
+        tab.has_custom_color = badge.has_custom_color;
+        tabs.push(tab);
+        // The fresh tab is in the left group; landing on the right one would
+        // focus a group that has nothing to show for this connection.
+        active_group = 0;
+        Some(id)
+    });
+    // A brand-new empty tab has no result worth preserving, so it clears like
+    // a fresh restore does.
+    let standby = !restore && active.is_some() && !created;
     TabRestorePlan {
         tabs,
         active,
@@ -481,6 +515,7 @@ fn handle_connect_clicked(state: &AppState, fns: &AppFns, weak: slint::Weak<Main
         &query_number,
         &sc.id,
         settings.borrow().get().ui_state.query_tabs_by_connection,
+        &connection_badge_info(&store.borrow(), &sc.id),
     );
     *workspace_tabs.lock().unwrap() = init_tabs;
     *active_tab_id.lock().unwrap() = init_active.clone();
