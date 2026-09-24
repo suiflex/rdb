@@ -125,6 +125,13 @@ async fn connect_query_schema_commit_against_real_oracle() {
     };
     assert_eq!(cols.len(), 11);
     assert_eq!(rows.len(), 2);
+    // Grid headers use Oracle's own spelling, with size and precision.
+    let types: Vec<&str> = cols.iter().map(|c| c.type_name.as_str()).collect();
+    assert_eq!(types[0], "NUMBER");
+    assert_eq!(types[1], "VARCHAR2(50)");
+    assert_eq!(types[3], "NUMBER(38)");
+    assert_eq!(types[6], "TIMESTAMP(6)");
+    assert_eq!(types[8], "TIMESTAMP(6) WITH TIME ZONE");
     assert!(matches!(rows[0][0], Cell::Int(1)));
     assert!(matches!(&rows[0][1], Cell::Text(s) if s == "alice"));
     assert!(matches!(rows[0][2], Cell::Float(f) if (f - 9.5).abs() < f64::EPSILON));
@@ -242,6 +249,24 @@ async fn connect_query_schema_commit_against_real_oracle() {
     assert!(
         err.to_string().contains("ORA-00942"),
         "server error not surfaced: {err}"
+    );
+    // ...and it points at the missing table, so the editor can underline it.
+    assert!(
+        err.to_string().contains("[[rdb-position:15]] ORA-00942"),
+        "server error offset not surfaced: {err}"
+    );
+
+    // A saved query routinely opens with a note above the statement; the
+    // comment must not make it look like DML with no rows to show. (A leading
+    // `--` line comment is left out: oracledb itself fails that statement
+    // with ORA-00900 on beta.3 and beta.4 alike, whichever way it is routed.)
+    let rs = driver
+        .query(&sql("/* daily check */\nSELECT 1 FROM dual"))
+        .await
+        .expect("commented select");
+    assert!(
+        matches!(&rs, ResultSet::Tabular { rows, .. } if rows.len() == 1),
+        "a leading comment hid the query: {rs:?}"
     );
 
     // Oracle 21c+ native JSON and 23c BOOLEAN. The ODPI-C driver this one
