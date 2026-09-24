@@ -5515,9 +5515,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "oracledb"
-version = "26.0.0-beta.3"
+version = "26.0.0-beta.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f9af8674256d8417b17b2e9e86a304cb637b881ffa9bc817d58b98c7b49457d"
+checksum = "d729181747bd69ba53cde2956ea9ddc06cf09d0badaf4a9e89944b7c0b7b4397"
 dependencies = [
  "aes 0.9.1",
  "base16ct",
