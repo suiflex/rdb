@@ -4890,6 +4890,60 @@ fn right_pane_connection_id(
         .or_else(|| focused_tab_connection_id(active_tab_id, workspace_tabs))
 }
 
+/// Point the app at the tab that just came on screen: topbar identity, the
+/// pointer every new action reads, scoped tab visibility, and — when the tab
+/// belongs to a different connection than the one showing — the whole
+/// connection context.
+///
+/// Lives outside `restore_tab_for_pane` because it is the one part of a tab
+/// restore that is about the *connection* rather than the tab's own runtime.
+fn point_context_at_tab(
+    w: &MainWindow,
+    tab: &WorkspaceTab,
+    pane: usize,
+    store: &Rc<RefCell<rdb_connstore::ConnStore>>,
+    current_connection_id: &std::sync::Mutex<Option<String>>,
+    activate_connection: &WindowConnFn,
+) {
+    // Topbar identity follows whichever tab is now on screen, not the last
+    // connection explicitly picked from the connect flow.
+    sync_conn_chrome(w, &store.borrow(), tab.connection_id.as_deref());
+    // `current_connection_id` is the single "what does a NEW action target"
+    // pointer (new tab, browse-from-sidebar) — it must track the focused tab
+    // too, or a plain tab switch leaves it aimed at whatever connection was
+    // last explicitly clicked, and a New Query fired right after silently
+    // lands on the wrong one.
+    //
+    // Set before activating, so the connect result that lands back recognises
+    // itself as the current context (and so the nested `restore_tab` a later
+    // connect fires sees no further change to make).
+    let Some(cid) = tab.connection_id.clone() else {
+        return;
+    };
+    let changed = {
+        // Scoped tight, and no UI touched while it is held: a Slint setter
+        // runs bindings synchronously, and this lock is taken all over the
+        // wiring.
+        let mut current = current_connection_id.lock().unwrap();
+        let changed = current.as_deref() != Some(cid.as_str());
+        *current = Some(cid.clone());
+        changed
+    };
+    // Tab *visibility* in scoped mode stays keyed to the left group.
+    // Rescoping from the right group would hide the left group's own tabs out
+    // from under it when the two hold different connections.
+    if pane == 0 {
+        w.set_query_scope_connection(SharedString::from(cid.clone()));
+    }
+    // Everything outside the tab — engine, driver slot, sidebar tree,
+    // autocomplete — follows it too. Without this the sidebar keeps listing
+    // the other connection's tables and clicking one opens a tab bound to the
+    // wrong database.
+    if changed {
+        activate_connection(w, &cid);
+    }
+}
+
 /// Slot holding the "re-run the current browse query" closure. Set once the
 /// browse view knows what it is browsing; `None` before that.
 type BrowseTrigger = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
@@ -5574,48 +5628,14 @@ fn main() -> Result<(), slint::PlatformError> {
             } else {
                 *active_group1_tab_id.lock().unwrap() = Some(tab.id.clone());
             }
-            // Topbar identity follows whichever tab is now on screen, not
-            // the last connection explicitly picked from the connect flow.
-            sync_conn_chrome(w, &store.borrow(), tab.connection_id.as_deref());
-            // `current_connection_id` is the single "what does a NEW action
-            // target" pointer (new tab, browse-from-sidebar) — it must track
-            // the focused tab too, or a plain tab switch leaves it aimed at
-            // whatever connection was last explicitly clicked, and a New
-            // Query fired right after silently lands on the wrong one.
-            //
-            // Set before activating, so the connect result that lands back
-            // recognises itself as the current context (and so the nested
-            // `restore_tab` a later connect fires sees no further change to
-            // make).
-            let switched_to = {
-                // Scoped tight, and no UI touched while it is held: a Slint
-                // setter runs bindings synchronously, and this lock is taken
-                // all over the wiring.
-                let mut current = current_connection_id.lock().unwrap();
-                match tab.connection_id.clone() {
-                    Some(cid) => {
-                        let changed = current.as_deref() != Some(cid.as_str());
-                        *current = Some(cid.clone());
-                        changed.then_some(cid)
-                    }
-                    None => None,
-                }
-            };
-            // Tab *visibility* in scoped mode stays keyed to the left group.
-            // Rescoping from the right group would hide the left group's own
-            // tabs out from under it when the two hold different connections.
-            if pane == 0 {
-                if let Some(cid) = tab.connection_id.clone() {
-                    w.set_query_scope_connection(SharedString::from(cid));
-                }
-            }
-            // Everything outside the tab — engine, driver slot, sidebar tree,
-            // autocomplete — follows it too. Without this the sidebar keeps
-            // listing the other connection's tables and clicking one opens a
-            // tab bound to the wrong database.
-            if let Some(cid) = switched_to {
-                activate_connection(w, &cid);
-            }
+            point_context_at_tab(
+                w,
+                &tab,
+                pane,
+                &store,
+                &current_connection_id,
+                &activate_connection,
+            );
             {
                 // Keep the group-0 selection stable when restoring the right group.
                 let tabs_guard = tabs.lock().unwrap();
