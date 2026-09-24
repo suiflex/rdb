@@ -4944,12 +4944,47 @@ struct AppState {
     tabs_restored: Rc<Cell<bool>>,
     panes: Rc<[GroupRuntime; 2]>,
     cur_engine: Rc<RefCell<Option<rdb_connstore::Engine>>>,
+    // Workspace state per connection, and which connection the workspace is
+    // currently painted as. Together they turn a switch back to an open
+    // connection into a swap instead of a reconnect; see `ConnContext`.
+    conn_contexts: ConnContexts,
+    painted_connection: Arc<Mutex<Option<String>>>,
     saved_queries: Rc<RefCell<Vec<(String, String)>>>,
     recent_queries: Rc<RefCell<Vec<HistoryEntry>>>,
     collapsed: Rc<RefCell<HashSet<String>>>,
     conn_filter: Rc<RefCell<String>>,
     editing_id: Rc<RefCell<String>>,
 }
+
+/// Everything the workspace displays *about* one connection, kept per
+/// connection so switching to one that is already open is a swap of state
+/// already in memory.
+///
+/// Re-reading the schema instead was what made a second connection unusable:
+/// `spawn_connect_task` holds the `current` driver slot for the whole of its
+/// connect-and-read, and the sidebar's lazy expand
+/// (`on_toggle_schema_node`) awaits that same slot — so expanding a Mongo
+/// database sat behind it, for the full connect timeout when the connection
+/// had gone away. Switching also threw the expand state away, so every tree
+/// reopened from scratch.
+#[derive(Clone, Default)]
+pub(crate) struct ConnContext {
+    nodes: Vec<model::VmTreeNode>,
+    completion: Vec<model::VmTreeNode>,
+    fn_defs: HashMap<String, String>,
+    expanded: HashSet<String>,
+    loaded: HashSet<String>,
+    collapsed_cats: HashSet<String>,
+    schema_names: Vec<SharedString>,
+    schema_current: SharedString,
+    db_names: Vec<SharedString>,
+    fields: Vec<StructField>,
+    sql_capable: bool,
+    new_tab_label: SharedString,
+}
+
+/// Per-connection [`ConnContext`], keyed by connection id. UI-thread only.
+pub(crate) type ConnContexts = Rc<RefCell<HashMap<String, ConnContext>>>;
 
 /// Callback shapes used by [`AppFns`]. Named so the struct reads as a list of
 /// jobs rather than a wall of `Rc<dyn Fn(...)>`.
@@ -5199,6 +5234,11 @@ fn main() -> Result<(), slint::PlatformError> {
         Arc::new(std::sync::Mutex::new(None));
     let current_connection_id: Arc<std::sync::Mutex<Option<String>>> =
         Arc::new(std::sync::Mutex::new(None));
+    // See `ConnContext`: the workspace state of every connection opened this
+    // session, plus which one the workspace is showing right now.
+    let conn_contexts: ConnContexts = Rc::new(RefCell::new(HashMap::new()));
+    let painted_connection: Arc<std::sync::Mutex<Option<String>>> =
+        Arc::new(std::sync::Mutex::new(None));
     let connected_ids: Arc<std::sync::Mutex<HashSet<String>>> =
         Arc::new(std::sync::Mutex::new(HashSet::new()));
     // One-shot database override for the next connect: the database switcher sets
@@ -5323,6 +5363,8 @@ fn main() -> Result<(), slint::PlatformError> {
         tabs_restored: tabs_restored.clone(),
         panes: panes.clone(),
         cur_engine: cur_engine.clone(),
+        conn_contexts: conn_contexts.clone(),
+        painted_connection: painted_connection.clone(),
         saved_queries: saved_queries.clone(),
         recent_queries: recent_queries.clone(),
         collapsed: collapsed.clone(),
