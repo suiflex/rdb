@@ -4859,17 +4859,35 @@ mod driver_pool_tests {
 /// started from that tab must run against, per `driver_for`. Duplicated by
 /// hand across every wiring module before this, which is how the tab-vs-
 /// `current` mismatch bugs (see `driver_for`) kept reappearing.
+///
+/// `active_id` picks which focus: the left group's (`active_tab_id`) or the
+/// right group's (`active_group1_tab_id`). An action in the right pane that
+/// reads the left one runs against another connection entirely once two are
+/// open — see `right_pane_connection_id`.
 fn focused_tab_connection_id(
-    active_tab_id: &std::sync::Mutex<Option<String>>,
+    active_id: &std::sync::Mutex<Option<String>>,
     workspace_tabs: &std::sync::Mutex<Vec<WorkspaceTab>>,
 ) -> Option<String> {
-    let id = active_tab_id.lock().unwrap().clone()?;
+    let id = active_id.lock().unwrap().clone()?;
     workspace_tabs
         .lock()
         .unwrap()
         .iter()
         .find(|t| t.id == id)
         .and_then(|t| t.connection_id.clone())
+}
+
+/// The connection an action in the right pane belongs to. That pane is the
+/// right *group*'s active tab when the workspace is split into two groups,
+/// and the left tab's own second pane when a single tab is split — so try the
+/// group's tab first and fall back rather than assuming either shape.
+fn right_pane_connection_id(
+    active_tab_id: &std::sync::Mutex<Option<String>>,
+    active_group1_tab_id: &std::sync::Mutex<Option<String>>,
+    workspace_tabs: &std::sync::Mutex<Vec<WorkspaceTab>>,
+) -> Option<String> {
+    focused_tab_connection_id(active_group1_tab_id, workspace_tabs)
+        .or_else(|| focused_tab_connection_id(active_tab_id, workspace_tabs))
 }
 
 /// Slot holding the "re-run the current browse query" closure. Set once the

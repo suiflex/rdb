@@ -39,6 +39,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         current,
         driver_pool,
         active_tab_id,
+        active_group1_tab_id,
         workspace_tabs,
         ..
     } = state.clone();
@@ -200,12 +201,19 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let current = current.clone();
         let driver_pool = driver_pool.clone();
         let active_tab_id = active_tab_id.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
         let workspace_tabs = workspace_tabs.clone();
         let cancel = move || {
             let current = current.clone();
             let driver_pool = driver_pool.clone();
-            // The active tab's own connection, not whatever `current` is.
-            let tab_connection_id = focused_tab_connection_id(&active_tab_id, &workspace_tabs);
+            // The active tab's own connection, not whatever `current` is —
+            // and each pane's own tab, or cancelling on the right kills a
+            // query on the left group's connection instead.
+            let tab_connection_id = if pane == 1 {
+                right_pane_connection_id(&active_tab_id, &active_group1_tab_id, &workspace_tabs)
+            } else {
+                focused_tab_connection_id(&active_tab_id, &workspace_tabs)
+            };
             rt.spawn(async move {
                 let driver = resolve_driver(&driver_pool, &current, tab_connection_id.as_deref())
                     .await
