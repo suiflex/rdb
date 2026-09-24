@@ -25,6 +25,7 @@ struct TabRestorePlan {
     standby: bool,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn plan_tab_restore(
     tabs_restored: &Rc<Cell<bool>>,
     workspace_tabs: &Arc<Mutex<Vec<WorkspaceTab>>>,
@@ -442,7 +443,7 @@ fn finish_connect_failure(weak: slint::Weak<MainWindow>, e: rdb_core::error::Rdb
 ///
 /// No handshake: `spawn_connect_task` with `reuse_pooled` takes the driver the
 /// pool already holds and only re-reads the schema.
-pub(crate) fn build_activate_connection(state: &AppState) -> Rc<dyn Fn(&MainWindow, &str)> {
+pub(crate) fn build_activate_connection(state: &AppState) -> WindowConnFn {
     let AppState {
         rt,
         store,

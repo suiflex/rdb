@@ -4939,6 +4939,9 @@ type PaneTextFn = Rc<dyn Fn(usize, &str)>;
 type PaneFn = Rc<dyn Fn(usize)>;
 type WindowFn = Rc<dyn Fn(&MainWindow)>;
 type WindowPaneFn = Rc<dyn Fn(&MainWindow, usize)>;
+/// Act on the window for a named connection — switching the app's context to
+/// it, for instance.
+type WindowConnFn = Rc<dyn Fn(&MainWindow, &str)>;
 type WindowGuardFn = Rc<dyn Fn(&MainWindow) -> bool>;
 type PaneSqlFn = Rc<dyn Fn(usize, String)>;
 
