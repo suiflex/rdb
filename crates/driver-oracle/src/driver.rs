@@ -389,9 +389,21 @@ fn unsupported_type_hint(msg: &str) -> String {
 /// available.
 fn ora_err(e: &oracledb::Error) -> String {
     match e.kind() {
-        ErrorKind::DbError(db) => db.message().trim().to_string(),
+        ErrorKind::DbError(db) => with_position(db.message().trim(), db.offset()),
         _ => e.to_string(),
     }
+}
+
+/// Oracle reports where a statement broke as a 0-based offset into it. Move
+/// that into the `[[rdb-position:N]]` marker the UI reads to highlight the
+/// failing token (the marker is 1-based). An offset of 0 is also what errors
+/// with no position report, so it is left unmarked rather than pinned to the
+/// statement's first character.
+fn with_position(msg: &str, offset: usize) -> String {
+    if offset == 0 {
+        return msg.to_string();
+    }
+    format!("[[rdb-position:{}]] {msg}", offset + 1)
 }
 
 #[cfg(test)]
@@ -484,5 +496,15 @@ mod tests {
     fn an_unterminated_comment_is_not_mistaken_for_a_query() {
         assert!(!is_query("/* never closed SELECT"));
         assert!(!is_query("-- only a comment"));
+    }
+
+    #[test]
+    fn a_server_offset_becomes_a_one_based_position_marker() {
+        assert_eq!(
+            with_position("ORA-00942: nope", 14),
+            "[[rdb-position:15]] ORA-00942: nope"
+        );
+        // No position to point at: the message goes through untouched.
+        assert_eq!(with_position("ORA-01017: nope", 0), "ORA-01017: nope");
     }
 }
