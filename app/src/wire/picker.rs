@@ -911,6 +911,18 @@ fn sequence(window: &MainWindow, steps: Vec<(&'static str, ScreenCond, ScreenAct
     );
 }
 
+/// Whether the connection at store index `idx` has an open driver right now,
+/// read off the sidebar model's own `live` flag.
+fn connection_is_live(w: &MainWindow, idx: i32) -> bool {
+    use slint::Model as _;
+    w.get_connections().iter().any(|group| {
+        group
+            .rows
+            .iter()
+            .any(|row| row.index == idx && !row.is_header && row.live)
+    })
+}
+
 /// The left group's tab strip as `engine:title` pairs, for failure messages.
 fn tab_strip(w: &MainWindow) -> String {
     use slint::Model as _;
@@ -1042,7 +1054,42 @@ fn schedule_multi_connection_scenario(
                             "New Query off a postgres tab opened a '{engine}' tab"
                         ));
                     }
+                    // Drop the connection those postgres tabs belong to,
+                    // leaving mongo as the only live one.
+                    w.invoke_disconnect();
                 }),
+            ),
+            (
+                "the disconnect empties the tree it belonged to",
+                Rc::new(|w: &MainWindow| {
+                    use slint::Model as _;
+                    w.get_schema_tree().row_count() == 0
+                }),
+                // Over to the mongo tab, which is still live.
+                Rc::new(|w: &MainWindow| w.invoke_select_tab(2)),
+            ),
+            (
+                "the live connection is still there to switch to",
+                Rc::new(|w: &MainWindow| {
+                    use slint::Model as _;
+                    active_tab_engine(w) == "mongo"
+                        && !w.get_tree_loading()
+                        && w.get_schema_tree().row_count() > 0
+                }),
+                // Back to a tab whose connection is now gone. Half-switching
+                // to it is what left the workspace contradicting itself, so
+                // it has to come back live instead.
+                Rc::new(|w: &MainWindow| w.invoke_select_tab(0)),
+            ),
+            (
+                "focusing a disconnected tab brings its connection back",
+                // Its `live` flag, not the tree on screen: the tree left
+                // behind by the other connection is not empty, so anything
+                // that only counts rows passes on the broken state too.
+                Rc::new(move |w: &MainWindow| {
+                    connection_is_live(w, pg) && active_tab_engine(w) == "postgres"
+                }),
+                Rc::new(|_w: &MainWindow| {}),
             ),
         ],
     );
