@@ -21,6 +21,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         query_console,
         workspace_tabs,
         active_tab_id,
+        active_group1_tab_id,
         ..
     } = state.clone();
     let edit_buf = panes[0].edit_buf.clone();
@@ -663,8 +664,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             let query_console = query_console.clone();
             set_p_status_error(&w, 1, false);
             set_p_result_status(&w, 1, SharedString::from("saving…"));
-            // Split panes share their tab's single connection_id.
-            let tab_connection_id = focused_tab_connection_id(&active_tab_id, &workspace_tabs);
+            let tab_connection_id =
+                right_pane_connection_id(&active_tab_id, &active_group1_tab_id, &workspace_tabs);
             rt.spawn(async move {
                 let driver = resolve_driver(&driver_pool, &current, tab_connection_id.as_deref())
                     .await
