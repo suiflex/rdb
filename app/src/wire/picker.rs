@@ -824,6 +824,7 @@ fn wire_screen_harness(
     };
     pin_theme(window);
     schedule_connect_timer(window, store, &screen);
+    schedule_multi_connection_scenario(window, store, &screen);
     schedule_sql_open_timer(window, &screen);
     schedule_modal_timer(window, &screen);
     schedule_workspace_open_timer(window, &screen);
@@ -842,7 +843,7 @@ fn schedule_connect_timer(
     // "tooltip" hovers a control on this same pre-connect screen.
     if matches!(
         screen,
-        "connections" | "tooltip" | "export-menu" | "menu-hover"
+        "connections" | "tooltip" | "export-menu" | "menu-hover" | "multi-connection"
     ) {
         return;
     }
@@ -860,6 +861,191 @@ fn schedule_connect_timer(
         connect_after(window, if idx == 0 { 1 } else { 0 }, 1500);
         connect_after(window, idx, 2800);
     }
+}
+
+/// Aborts the run with a readable reason. A screen that quietly fails to
+/// reach its end state still paints a frame and still exits 0, so anything
+/// this harness actually *checks* has to end the process itself.
+fn screen_fail(msg: &str) -> ! {
+    eprintln!("SCREEN ASSERT FAILED: {msg}");
+    std::process::exit(2);
+}
+
+/// Runs `steps` in order: each waits for its condition, then fires its action
+/// once. A step whose condition never holds inside `TICK_LIMIT` fails the run
+/// rather than letting the screenshot land on a half-driven UI, which would
+/// read as a pass.
+fn sequence(window: &MainWindow, steps: Vec<(&'static str, ScreenCond, ScreenAct)>) {
+    const TICK_LIMIT: u32 = 30; // 3s per step
+    let weak = window.as_weak();
+    let t: &'static slint::Timer = Box::leak(Box::new(slint::Timer::default()));
+    let state = Rc::new(RefCell::new((0usize, 0u32)));
+    t.start(
+        slint::TimerMode::Repeated,
+        std::time::Duration::from_millis(100),
+        move || {
+            let Some(w) = weak.upgrade() else {
+                t.stop();
+                return;
+            };
+            let (step, ticks) = *state.borrow();
+            let Some((name, cond, act)) = steps.get(step) else {
+                t.stop();
+                return;
+            };
+            if cond(&w) {
+                act(&w);
+                *state.borrow_mut() = (step + 1, 0);
+            } else if ticks + 1 > TICK_LIMIT {
+                screen_fail(&format!(
+                    "step '{name}' never became ready; tabs={} active={} engine={:?} tree_loading={}",
+                    tab_strip(&w),
+                    w.get_active_tab(),
+                    active_tab_engine(&w),
+                    w.get_tree_loading(),
+                ));
+            } else {
+                *state.borrow_mut() = (step, ticks + 1);
+            }
+        },
+    );
+}
+
+/// The left group's tab strip as `engine:title` pairs, for failure messages.
+fn tab_strip(w: &MainWindow) -> String {
+    use slint::Model as _;
+    w.get_tabs()
+        .iter()
+        .map(|t| format!("{}:{}", t.engine, t.title))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Badge key of the tab the left group is showing, empty when there is none.
+fn active_tab_engine(w: &MainWindow) -> String {
+    use slint::Model as _;
+    let idx = w.get_active_tab();
+    if idx < 0 {
+        return String::new();
+    }
+    w.get_tabs()
+        .row_data(idx as usize)
+        .map(|t| t.engine.to_string())
+        .unwrap_or_default()
+}
+
+/// The multi-connection regression, driven end to end: two live connections
+/// on different engines, and every "new action" — New Query, opening a table
+/// from the sidebar — has to target the connection whose tab is focused.
+///
+/// It asserts rather than posing for a screenshot: binding a tab to the wrong
+/// database looks completely normal in a frame, which is exactly how this
+/// shipped. Mock mode gives two real pooled drivers (`AnyDriver::connect`
+/// builds one per connect) carrying their own engines, so the switch under
+/// test is the real one and no server is needed.
+fn schedule_multi_connection_scenario(
+    window: &MainWindow,
+    store: &Rc<RefCell<rdb_connstore::ConnStore>>,
+    screen: &str,
+) {
+    if screen != "multi-connection" {
+        return;
+    }
+    // The screen seeds its own pair rather than leaning on the mock list:
+    // RDB_STORE_DIR (which every screen needs, or the run reads the
+    // developer's real connections and query tabs) replaces the seeded mock
+    // store with an empty file-backed one. Two rows in the isolated store
+    // cost nothing and make the scenario independent of either seed.
+    for (name, engine, port) in [
+        ("screen postgres", rdb_connstore::Engine::Postgres, 5432u16),
+        ("screen mongo", rdb_connstore::Engine::Mongo, 27017u16),
+    ] {
+        if store.borrow().list().iter().any(|c| c.name == name) {
+            continue;
+        }
+        let conn =
+            rdb_connstore::SavedConnection::new(name, engine, "203.0.113.10", port, "screen_user");
+        if store.borrow_mut().add(conn).is_err() {
+            screen_fail(&format!("could not seed the '{name}' connection"));
+        }
+    }
+    let idx_of = |name: &str| {
+        store
+            .borrow()
+            .list()
+            .iter()
+            .position(|s| s.name == name)
+            .map(|i| i as i32)
+    };
+    let (Some(pg), Some(mongo)) = (idx_of("screen postgres"), idx_of("screen mongo")) else {
+        let names: Vec<String> = store
+            .borrow()
+            .list()
+            .iter()
+            .map(|s| s.name.clone())
+            .collect();
+        screen_fail(&format!(
+            "the seeded connection pair is missing; saw {names:?}"
+        ));
+    };
+    sequence(
+        window,
+        vec![
+            (
+                "connect to postgres",
+                Rc::new(|w: &MainWindow| !w.get_connecting()),
+                Rc::new(move |w: &MainWindow| w.invoke_connect_clicked(pg)),
+            ),
+            (
+                "open a table on postgres",
+                Rc::new(|w: &MainWindow| w.get_connected() && !w.get_tree_loading()),
+                Rc::new(|w: &MainWindow| w.invoke_open_table("".into(), "emiten".into())),
+            ),
+            (
+                "connect to mongo with the postgres tab open",
+                Rc::new(|w: &MainWindow| w.get_active_table() == "emiten"),
+                Rc::new(move |w: &MainWindow| w.invoke_connect_clicked(mongo)),
+            ),
+            (
+                "the connect lands on a tab of its own connection",
+                Rc::new(|w: &MainWindow| w.get_connected() && !w.get_tree_loading()),
+                Rc::new(|w: &MainWindow| {
+                    let engine = active_tab_engine(w);
+                    if engine != "mongo" {
+                        screen_fail(&format!(
+                            "connecting to mongo left the focus on a '{engine}' tab"
+                        ));
+                    }
+                    // Back to the postgres tab: it is first in the strip, and
+                    // scoped tab visibility is off by default, so nothing is
+                    // hidden.
+                    w.invoke_select_tab(0);
+                }),
+            ),
+            (
+                "the focused tab pulls the context back to postgres",
+                Rc::new(|w: &MainWindow| {
+                    active_tab_engine(w) == "postgres" && !w.get_tree_loading()
+                }),
+                Rc::new(|w: &MainWindow| w.invoke_new_tab()),
+            ),
+            (
+                "a new tab targets the focused tab's connection",
+                Rc::new(|w: &MainWindow| {
+                    use slint::Model as _;
+                    w.get_tabs().row_count() >= 3
+                }),
+                Rc::new(|w: &MainWindow| {
+                    let engine = active_tab_engine(w);
+                    if engine != "postgres" {
+                        screen_fail(&format!(
+                            "New Query off a postgres tab opened a '{engine}' tab"
+                        ));
+                    }
+                }),
+            ),
+        ],
+    );
 }
 
 fn connect_after(window: &MainWindow, idx: i32, ms: u64) {
