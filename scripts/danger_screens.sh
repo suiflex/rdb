@@ -72,6 +72,7 @@ workspace-limit
 workspace-insert
 workspace-sql
 workspace-tabflow
+multi-connection
 "
 
 # Named screens override the list, for debugging one scenario:
@@ -92,16 +93,21 @@ failed=""
 for screen in $SCREENS; do
   log="$OUT/$screen.log"
   rc=0
-  # RDB_STORE_DIR is not optional: without it the run reads and overwrites the
-  # developer's real connection store.
-  env \
-    RDB_MOCK=1 \
-    RDB_SCREEN="$screen" \
-    RDB_WIN=1280x800 \
-    RDB_STORE_DIR="$OUT/store-$screen" \
-    RDB_SHOT="$OUT/$screen.bmp" \
-    RDB_SHOT_DELAY_MS="$DELAY" \
-    "$BIN" >"$log" 2>&1 &
+  # multi-connection drives two connects, a table open, a tab switch and a new
+  # tab before it asserts; the default delay shoots the frame mid-scenario.
+  delay=$DELAY
+  case "$screen" in multi-connection) [ "$DELAY" -lt 12000 ] && delay=12000;; esac
+  (
+    export RDB_MOCK=1
+    export RDB_SCREEN="$screen"
+    export RDB_WIN=1280x800
+    export RDB_SHOT="$OUT/$screen.bmp"
+    export RDB_SHOT_DELAY_MS="$delay"
+    # RDB_STORE_DIR is not optional: without it the run reads and overwrites
+    # the developer's real connection store *and* their open query tabs.
+    export RDB_STORE_DIR="$OUT/store-$screen"
+    exec "$BIN"
+  ) >"$log" 2>&1 &
   app=$!
   # Hand-rolled watchdog rather than `timeout`, which macOS does not ship. The
   # app quits itself once it has its frame; this only catches a hang.
