@@ -34,7 +34,7 @@ use rdb_core::result::{Cell, Column, ResultSet};
 use rdb_core::schema::Schema;
 use rdb_core::write::{TableRef, WriteOp};
 
-use crate::convert::{cell_at, column_type_name};
+use crate::convert::cell_at;
 use crate::schema::{fold_rows, SchemaRow, COLUMNS_QUERY};
 use crate::write_sql;
 
@@ -219,7 +219,7 @@ impl Driver for OracleDriver {
                 .iter()
                 .map(|m| Column {
                     name: m.name().to_string(),
-                    type_name: column_type_name(m),
+                    type_name: m.data_type(),
                 })
                 .collect();
             let mut out: Vec<Vec<Cell>> = Vec::new();
