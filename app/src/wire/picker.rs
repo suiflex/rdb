@@ -647,6 +647,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let collapsed = collapsed.clone();
         let conn_filter = conn_filter.clone();
         let connected_ids = connected_ids.clone();
+        let activate_connection = crate::wire::connect::build_activate_connection(state);
         window.on_disconnect(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -728,12 +729,6 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             loaded_dbs.lock().unwrap().clear();
             *collapsed_categories.borrow_mut() = default_collapsed_cats();
             raw_nodes.lock().unwrap().clear();
-            {
-                let current = current.clone();
-                rt.spawn(async move {
-                    *current.lock().await = None;
-                });
-            }
             // Only fall back to the landing picker when no other connection
             // is actually still connected — with two connections open,
             // disconnecting one must not blow away the other's workspace.
@@ -742,6 +737,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             // `disconnecting_id` removed above, so any entry left here is a
             // genuinely different, still-live connection.
             let other_live = !connected_ids.lock().unwrap().is_empty();
+            if !other_live {
+                let current = current.clone();
+                rt.spawn(async move {
+                    *current.lock().await = None;
+                });
+            }
             w.set_connections(build_sidebar_model(
                 &store.borrow(),
                 &collapsed.borrow(),
@@ -763,17 +764,13 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 sync_conn_chrome(&w, &store.borrow(), cid.as_deref());
                 if let Some(cid) = cid {
                     *current_connection_id.lock().unwrap() = Some(cid.clone());
-                    // `current` was cleared above along with the dropped
-                    // connection; repopulate it from the pool entry the
-                    // surviving connection still owns, or the health poll
-                    // (which only ever pings `current`) is stuck reading
-                    // None forever and the breadcrumb dot freezes.
-                    let current = current.clone();
-                    let driver_pool = driver_pool.clone();
-                    rt.spawn(async move {
-                        let entry = driver_pool.read().await.get(&cid).cloned();
-                        *current.lock().await = entry;
-                    });
+                    // The teardown above cleared state the survivor still
+                    // needs: its engine (every `cur_engine` guard — open
+                    // table, browse, add column — silently no-ops without
+                    // it), its sidebar tree, and the `current` slot the
+                    // health poll pings. Reactivating it from the pool puts
+                    // all three back without a handshake.
+                    activate_connection(&w, &cid);
                 }
             } else {
                 w.set_connected(false);
