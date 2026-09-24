@@ -1295,25 +1295,30 @@ mod plan_tab_restore_tests {
     /// connection the user just picked.
     #[test]
     fn connecting_mints_a_tab_when_every_open_one_belongs_elsewhere() {
-        for scoped in [false, true] {
-            let plan = plan(
-                vec![tab("a1", Some("conn-a"))],
-                Some("a1"),
-                "conn-b",
-                scoped,
-            );
-            let active = plan.active.expect("a connection always lands somewhere");
-            let landed = plan
-                .tabs
-                .iter()
-                .find(|t| t.id == active)
-                .expect("the active id names a tab in the plan");
-            assert_eq!(landed.connection_id.as_deref(), Some("conn-b"));
-            // The other connection's tab survives the switch.
-            assert!(plan.tabs.iter().any(|t| t.id == "a1"));
-            // A tab minted empty has no result to keep on screen.
-            assert!(!plan.standby);
-        }
+        // Both tab-scoping modes, spelled out rather than looped: the two
+        // cases are independent, and a failure names which one.
+        check_minted_tab(false);
+        check_minted_tab(true);
+    }
+
+    fn check_minted_tab(scoped: bool) {
+        let plan = plan(
+            vec![tab("a1", Some("conn-a"))],
+            Some("a1"),
+            "conn-b",
+            scoped,
+        );
+        let active = plan.active.expect("a connection always lands somewhere");
+        let landed = plan
+            .tabs
+            .iter()
+            .find(|t| t.id == active)
+            .expect("the active id names a tab in the plan");
+        assert_eq!(landed.connection_id.as_deref(), Some("conn-b"));
+        // The other connection's tab survives the switch.
+        assert!(plan.tabs.iter().any(|t| t.id == "a1"));
+        // A tab minted empty has no result to keep on screen.
+        assert!(!plan.standby);
     }
 
     #[test]
