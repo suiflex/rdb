@@ -239,6 +239,7 @@ async fn finish_connect_success(
     completion_nodes: Arc<Mutex<Vec<model::VmTreeNode>>>,
     fn_defs: Arc<Mutex<HashMap<String, String>>>,
     current_connection_id: Arc<Mutex<Option<String>>>,
+    painted_connection: Arc<Mutex<Option<String>>>,
 ) {
     // Postgres: list real namespaces so the sidebar schema switcher offers
     // more than "public". Engine-specific SQL lives in the driver, not here.
@@ -349,6 +350,9 @@ async fn finish_connect_success(
         }));
     }
     let _ = slint::invoke_from_event_loop(move || {
+        // What the workspace now shows, for `ConnContext`'s snapshot on the
+        // way out.
+        *painted_connection.lock().unwrap() = Some(connection_id);
         if let Some(w) = weak.upgrade() {
             w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
             w.set_sql_capable(sql_capable);
@@ -429,6 +433,86 @@ fn finish_connect_failure(weak: slint::Weak<MainWindow>, e: rdb_core::error::Rdb
     });
 }
 
+/// Files the workspace's current state under `connection_id`, so coming back
+/// to it later is a restore rather than a reconnect.
+///
+/// A connection still loading has nothing worth filing: the entry is dropped
+/// instead, and the next switch to it fetches for real.
+#[allow(clippy::too_many_arguments)]
+fn snapshot_conn_context(
+    w: &MainWindow,
+    contexts: &ConnContexts,
+    connection_id: &str,
+    raw_nodes: &Arc<Mutex<Vec<model::VmTreeNode>>>,
+    completion_nodes: &Arc<Mutex<Vec<model::VmTreeNode>>>,
+    fn_defs: &Arc<Mutex<HashMap<String, String>>>,
+    expanded_tables: &Arc<Mutex<HashSet<String>>>,
+    loaded_dbs: &Arc<Mutex<HashSet<String>>>,
+    collapsed_categories: &Rc<RefCell<HashSet<String>>>,
+) {
+    let nodes = raw_nodes.lock().unwrap().clone();
+    if w.get_tree_loading() || nodes.is_empty() {
+        contexts.borrow_mut().remove(connection_id);
+        return;
+    }
+    let ctx = ConnContext {
+        nodes,
+        completion: completion_nodes.lock().unwrap().clone(),
+        fn_defs: fn_defs.lock().unwrap().clone(),
+        expanded: expanded_tables.lock().unwrap().clone(),
+        loaded: loaded_dbs.lock().unwrap().clone(),
+        collapsed_cats: collapsed_categories.borrow().clone(),
+        schema_names: w.get_schema_list().iter().collect(),
+        schema_current: w.get_schema_name(),
+        db_names: w.get_db_list().iter().collect(),
+        fields: w.get_structure_columns().iter().collect(),
+        sql_capable: w.get_sql_capable(),
+        new_tab_label: w.get_new_tab_label(),
+    };
+    contexts.borrow_mut().insert(connection_id.to_string(), ctx);
+}
+
+/// Paints the workspace as `ctx`'s connection: sidebar tree, autocomplete
+/// data, schema and database pickers, structure columns. Entirely local.
+#[allow(clippy::too_many_arguments)]
+fn restore_conn_context(
+    w: &MainWindow,
+    ctx: &ConnContext,
+    engine: rdb_connstore::Engine,
+    raw_nodes: &Arc<Mutex<Vec<model::VmTreeNode>>>,
+    completion_nodes: &Arc<Mutex<Vec<model::VmTreeNode>>>,
+    fn_defs: &Arc<Mutex<HashMap<String, String>>>,
+    expanded_tables: &Arc<Mutex<HashSet<String>>>,
+    loaded_dbs: &Arc<Mutex<HashSet<String>>>,
+    collapsed_categories: &Rc<RefCell<HashSet<String>>>,
+    sidebar_filter: &Arc<Mutex<String>>,
+) {
+    *raw_nodes.lock().unwrap() = ctx.nodes.clone();
+    *completion_nodes.lock().unwrap() = ctx.completion.clone();
+    *fn_defs.lock().unwrap() = ctx.fn_defs.clone();
+    *expanded_tables.lock().unwrap() = ctx.expanded.clone();
+    *loaded_dbs.lock().unwrap() = ctx.loaded.clone();
+    *collapsed_categories.borrow_mut() = ctx.collapsed_cats.clone();
+    let rows = schema_display_rows(
+        &ctx.nodes,
+        &ctx.expanded,
+        &ctx.collapsed_cats,
+        &ctx.loaded,
+        Some(engine),
+        &sidebar_filter.lock().unwrap().clone(),
+    );
+    w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
+    w.set_schema_list(ModelRc::from(Rc::new(VecModel::from(
+        ctx.schema_names.clone(),
+    ))));
+    w.set_schema_name(ctx.schema_current.clone());
+    w.set_db_list(ModelRc::from(Rc::new(VecModel::from(ctx.db_names.clone()))));
+    w.set_structure_columns(ModelRc::from(Rc::new(VecModel::from(ctx.fields.clone()))));
+    w.set_sql_capable(ctx.sql_capable);
+    w.set_new_tab_label(ctx.new_tab_label.clone());
+    w.set_tree_loading(false);
+}
+
 /// Point the app's whole connection context at `connection_id`: the engine,
 /// the `current` driver slot, the sidebar tree, the completion data and the
 /// schema picker.
@@ -459,6 +543,9 @@ pub(crate) fn build_activate_connection(state: &AppState) -> WindowConnFn {
         connect_handle,
         cur_engine,
         current_connection_id,
+        conn_contexts,
+        painted_connection,
+        sidebar_filter,
         ..
     } = state.clone();
     Rc::new(move |w: &MainWindow, connection_id: &str| {
@@ -482,8 +569,57 @@ pub(crate) fn build_activate_connection(state: &AppState) -> WindowConnFn {
         if !connected_ids.lock().unwrap().contains(connection_id) {
             return;
         }
+        // Put the connection being left behind in the drawer before opening
+        // another one over the top of it.
+        let outgoing = painted_connection.lock().unwrap().clone();
+        if let Some(prev) = outgoing.filter(|prev| prev != connection_id) {
+            snapshot_conn_context(
+                w,
+                &conn_contexts,
+                &prev,
+                &raw_nodes,
+                &completion_nodes,
+                &fn_defs,
+                &expanded_tables,
+                &loaded_dbs,
+                &collapsed_categories,
+            );
+        }
+        // Already open: everything the workspace shows about it is in memory,
+        // so this is a swap. No connect, no schema read, and above all no
+        // claim on the `current` driver slot that the sidebar's lazy expand
+        // would then have to queue behind.
+        let cached = conn_contexts.borrow().get(connection_id).cloned();
+        if let Some(ctx) = cached {
+            restore_conn_context(
+                w,
+                &ctx,
+                sc.engine,
+                &raw_nodes,
+                &completion_nodes,
+                &fn_defs,
+                &expanded_tables,
+                &loaded_dbs,
+                &collapsed_categories,
+                &sidebar_filter,
+            );
+            *painted_connection.lock().unwrap() = Some(connection_id.to_string());
+            // The legacy single-driver slot still backs anything that has no
+            // tab to resolve against; point it at this connection's pooled
+            // driver without blocking the UI on the lock.
+            let cid = connection_id.to_string();
+            let current = current.clone();
+            let driver_pool = driver_pool.clone();
+            rt.spawn(async move {
+                let entry = driver_pool.read().await.get(&cid).cloned();
+                *current.lock().await = entry;
+            });
+            return;
+        }
         let cfg = store.borrow().conn_config_for(&sc.id);
-        // The tree about to be replaced describes the previous connection.
+        // Nothing cached for it (first activation of a connection this
+        // session): fall through to the real fetch. The tree about to be
+        // replaced describes the previous connection.
         expanded_tables.lock().unwrap().clear();
         loaded_dbs.lock().unwrap().clear();
         *collapsed_categories.borrow_mut() = default_collapsed_cats();
@@ -503,6 +639,7 @@ pub(crate) fn build_activate_connection(state: &AppState) -> WindowConnFn {
             loaded_dbs.clone(),
             connect_handle.clone(),
             current_connection_id.clone(),
+            painted_connection.clone(),
             true,
         );
     })
@@ -559,6 +696,7 @@ fn handle_connect_clicked(state: &AppState, fns: &AppFns, weak: slint::Weak<Main
         connect_handle,
         fn_defs,
         tabs_restored,
+        painted_connection,
         ..
     } = state.clone();
     let AppFns {
@@ -673,6 +811,7 @@ fn handle_connect_clicked(state: &AppState, fns: &AppFns, weak: slint::Weak<Main
         loaded_dbs,
         connect_handle,
         current_connection_id,
+        painted_connection,
         // A database switch needs a driver on the new database, never the
         // pooled one.
         db_ovr.is_none(),
@@ -819,6 +958,7 @@ fn spawn_connect_task(
     loaded_dbs: Arc<Mutex<HashSet<String>>>,
     connect_handle: Rc<RefCell<Option<tokio::task::JoinHandle<()>>>>,
     current_connection_id: Arc<Mutex<Option<String>>>,
+    painted_connection: Arc<Mutex<Option<String>>>,
     reuse_pooled: bool,
 ) {
     let weak2 = weak.clone();
@@ -869,6 +1009,7 @@ fn spawn_connect_task(
                     completion_nodes,
                     fn_defs,
                     current_connection_id,
+                    painted_connection,
                 )
                 .await;
             }
