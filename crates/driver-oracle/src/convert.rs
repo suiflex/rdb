@@ -25,14 +25,11 @@ use std::collections::HashMap;
 use chrono::{Datelike, NaiveDate, TimeDelta, Timelike};
 
 use oracledb::{
-    DbType, FromDbValue, JsonValue, Metadata, OracleIntervalDS, OracleIntervalYM, OracleNumber,
+    FromDbValue, JsonValue, Metadata, OracleIntervalDS, OracleIntervalYM, OracleNumber,
     OracleTimestamp, Row, Vector, VectorData, DB_TYPE_BFILE, DB_TYPE_BINARY_DOUBLE,
-    DB_TYPE_BINARY_FLOAT, DB_TYPE_BINARY_INTEGER, DB_TYPE_BOOLEAN, DB_TYPE_CHAR, DB_TYPE_CLOB,
-    DB_TYPE_CURSOR, DB_TYPE_DATE, DB_TYPE_INTERVAL_DS, DB_TYPE_INTERVAL_YM, DB_TYPE_JSON,
-    DB_TYPE_LONG, DB_TYPE_LONG_NVARCHAR, DB_TYPE_LONG_RAW, DB_TYPE_NCHAR, DB_TYPE_NCLOB,
-    DB_TYPE_NUMBER, DB_TYPE_NVARCHAR, DB_TYPE_OBJECT, DB_TYPE_RAW, DB_TYPE_ROWID,
-    DB_TYPE_TIMESTAMP, DB_TYPE_TIMESTAMP_LTZ, DB_TYPE_TIMESTAMP_TZ, DB_TYPE_UROWID,
-    DB_TYPE_VARCHAR, DB_TYPE_VECTOR, DB_TYPE_XMLTYPE,
+    DB_TYPE_BINARY_FLOAT, DB_TYPE_BINARY_INTEGER, DB_TYPE_BOOLEAN, DB_TYPE_CURSOR,
+    DB_TYPE_INTERVAL_DS, DB_TYPE_INTERVAL_YM, DB_TYPE_JSON, DB_TYPE_NUMBER, DB_TYPE_OBJECT,
+    DB_TYPE_TIMESTAMP_LTZ, DB_TYPE_TIMESTAMP_TZ, DB_TYPE_VECTOR,
 };
 use rdb_core::result::Cell;
 
@@ -369,101 +366,6 @@ fn write_json_string(s: &str, out: &mut String) {
     out.push('"');
 }
 
-/// Human-readable type name for a result column header.
-///
-/// `DbType::name()` cannot be used here: it returns the Rust constant's name
-/// (`"DB_TYPE_VARCHAR"`), and the Oracle spelling it also holds (`ora_name`,
-/// `"VARCHAR2"`) is crate-private. So the mapping is kept here, and the size
-/// and precision come off `Metadata`.
-pub fn column_type_name(md: &Metadata) -> String {
-    let ty = md.db_type();
-    let (size, precision, scale) = (md.max_size(), md.precision(), md.scale());
-
-    if ty == DB_TYPE_VARCHAR {
-        return format!("VARCHAR2({size})");
-    }
-    if ty == DB_TYPE_NVARCHAR {
-        return format!("NVARCHAR2({size})");
-    }
-    if ty == DB_TYPE_CHAR {
-        return format!("CHAR({size})");
-    }
-    if ty == DB_TYPE_NCHAR {
-        return format!("NCHAR({size})");
-    }
-    if ty == DB_TYPE_RAW {
-        return format!("RAW({size})");
-    }
-    if ty == DB_TYPE_NUMBER {
-        // Oracle reports an unconstrained NUMBER as precision 0 with scale
-        // -127 ("no scale specified"), which would render as the nonsense
-        // `NUMBER(0,-127)` in a column header.
-        return match (precision, scale) {
-            (0, _) => "NUMBER".to_string(),
-            (p, 0) => format!("NUMBER({p})"),
-            (p, s) => format!("NUMBER({p},{s})"),
-        };
-    }
-    if ty == DB_TYPE_TIMESTAMP {
-        return format!("TIMESTAMP({})", timestamp_precision(scale));
-    }
-    if ty == DB_TYPE_TIMESTAMP_TZ {
-        return format!("TIMESTAMP({}) WITH TIME ZONE", timestamp_precision(scale));
-    }
-    if ty == DB_TYPE_TIMESTAMP_LTZ {
-        return format!(
-            "TIMESTAMP({}) WITH LOCAL TIME ZONE",
-            timestamp_precision(scale)
-        );
-    }
-
-    simple_type_name(ty).to_string()
-}
-
-/// Oracle reports a timestamp's fractional-second digits in the scale field,
-/// with the default already applied: a bare `TIMESTAMP` describes as scale 6,
-/// not as 0. So scale is used as given — `TIMESTAMP(0)` is a real declaration
-/// meaning no fractional seconds, and treating 0 as "unset" would rewrite it
-/// to `TIMESTAMP(6)` in the header.
-fn timestamp_precision(scale: i8) -> u8 {
-    if (0..=9).contains(&scale) {
-        scale as u8
-    } else {
-        6
-    }
-}
-
-/// Types whose name carries no size or precision.
-fn simple_type_name(ty: &'static DbType) -> &'static str {
-    for (t, name) in [
-        (DB_TYPE_DATE, "DATE"),
-        (DB_TYPE_BINARY_FLOAT, "BINARY_FLOAT"),
-        (DB_TYPE_BINARY_DOUBLE, "BINARY_DOUBLE"),
-        (DB_TYPE_BINARY_INTEGER, "BINARY_INTEGER"),
-        (DB_TYPE_BOOLEAN, "BOOLEAN"),
-        (DB_TYPE_CLOB, "CLOB"),
-        (DB_TYPE_NCLOB, "NCLOB"),
-        (DB_TYPE_BFILE, "BFILE"),
-        (DB_TYPE_LONG, "LONG"),
-        (DB_TYPE_LONG_RAW, "LONG RAW"),
-        (DB_TYPE_LONG_NVARCHAR, "LONG NVARCHAR"),
-        (DB_TYPE_ROWID, "ROWID"),
-        (DB_TYPE_UROWID, "UROWID"),
-        (DB_TYPE_INTERVAL_DS, "INTERVAL DAY TO SECOND"),
-        (DB_TYPE_INTERVAL_YM, "INTERVAL YEAR TO MONTH"),
-        (DB_TYPE_JSON, "JSON"),
-        (DB_TYPE_XMLTYPE, "XMLTYPE"),
-        (DB_TYPE_VECTOR, "VECTOR"),
-        (DB_TYPE_CURSOR, "REF CURSOR"),
-        (DB_TYPE_OBJECT, "OBJECT"),
-    ] {
-        if ty == t {
-            return name;
-        }
-    }
-    "UNKNOWN"
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -589,20 +491,6 @@ mod tests {
         let v = Vector::Dense(VectorData::Float32(vec![0.0; 1536]));
         assert_eq!(describe_vector(&v), "[VECTOR FLOAT32 · 1536 dims]");
     }
-
-    #[test]
-    fn a_declared_timestamp_precision_is_used_as_reported() {
-        // Measured against a live server: a bare TIMESTAMP describes as
-        // scale 6 and TIMESTAMP(0) as scale 0, so 0 is a declaration, not a
-        // gap. Reading it as "unset" turned every TIMESTAMP(0) into (6).
-        assert_eq!(timestamp_precision(0), 0);
-        assert_eq!(timestamp_precision(3), 3);
-        assert_eq!(timestamp_precision(6), 6);
-        assert_eq!(timestamp_precision(9), 9);
-        // Only a value outside the legal range falls back.
-        assert_eq!(timestamp_precision(-127), 6);
-    }
-
     #[test]
     fn a_binary_vector_counts_dimensions_not_bytes() {
         // Binary vectors are packed eight dimensions to the byte, so a
@@ -622,14 +510,5 @@ mod tests {
             2024, 3, 7, 2, 5, 1, 0, 7, 0,
         ));
         assert_eq!(render_json(&zoned), r#""2024-03-07 09:05:01 +07:00""#);
-    }
-
-    #[test]
-    fn type_names_use_oracle_spelling_not_the_rust_constant() {
-        // `DbType::name()` would say "DB_TYPE_VARCHAR" here.
-        assert_eq!(simple_type_name(DB_TYPE_DATE), "DATE");
-        assert_eq!(simple_type_name(DB_TYPE_BINARY_DOUBLE), "BINARY_DOUBLE");
-        assert_eq!(simple_type_name(DB_TYPE_JSON), "JSON");
-        assert_eq!(simple_type_name(DB_TYPE_XMLTYPE), "XMLTYPE");
     }
 }
