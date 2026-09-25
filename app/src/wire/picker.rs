@@ -1276,6 +1276,53 @@ fn show_update_screen(w: &MainWindow, which: &str) {
                 },
             );
         }
+    } else if which == "update-restarting" {
+        // The install as it really unfolds, with Settings → Updates open
+        // behind the dialog the whole time (where 0.47.1 aborted in the
+        // field): the download lands and opens the dialog, "Install and
+        // Relaunch" is clicked through the window, then each macOS install
+        // step arrives frames apart, the way `perform_swap`'s `on_step` posts
+        // them. The other update screens set their state before the first
+        // frame, so none of them re-lays-out the Updates tab mid-install.
+        w.set_settings_tab(1);
+        w.set_settings_open(true);
+        w.set_update_stage("downloading".into());
+        w.set_update_progress(0.4);
+        let at = |ms: u64, f: Box<dyn Fn(&MainWindow)>| {
+            let weak = w.as_weak();
+            let t = Box::leak(Box::new(slint::Timer::default()));
+            t.start(
+                slint::TimerMode::SingleShot,
+                std::time::Duration::from_millis(ms),
+                move || {
+                    if let Some(w) = weak.upgrade() {
+                        f(&w);
+                    }
+                },
+            );
+        };
+        at(
+            500,
+            Box::new(|w| {
+                w.set_update_progress(1.0);
+                w.set_update_stage("ready".into());
+                w.set_update_ready_open(true);
+            }),
+        );
+        // "Install and Relaunch" at the harness default 1280x800.
+        at(1000, Box::new(|w| click_at(w, 802.0, 377.0)));
+        for (i, step) in ["Mounting", "Copying", "Replacing", "Relaunching"]
+            .into_iter()
+            .enumerate()
+        {
+            at(
+                1200 + 200 * i as u64,
+                Box::new(move |w| {
+                    w.set_update_step(step.into());
+                    w.set_update_stage("restarting".into());
+                }),
+            );
+        }
     } else {
         // Banner mid-install.
         w.set_update_stage("restarting".into());
@@ -1292,6 +1339,7 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
             | "function"
             | "palette"
             | "update-installing"
+            | "update-restarting"
             | "update-ready"
             | "update-install"
             | "whats-new"
@@ -1328,7 +1376,8 @@ fn schedule_modal_timer(window: &MainWindow, screen: &str) {
                         w.set_f_import_url("mongodb://root:secret@203.0.113.31:32343/admin?authMechanism=DEFAULT&replicaSet=rs0".into());
                     }
                     "palette" => w.invoke_toggle_palette(),
-                    "update-installing" | "update-ready" | "update-install" | "whats-new" => {
+                    "update-installing" | "update-restarting" | "update-ready" | "update-install"
+                    | "whats-new" => {
                         show_update_screen(&w, &which)
                     }
                     // Settings modal: Appearance (0) or Updates (1) tab.

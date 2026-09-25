@@ -58,6 +58,7 @@ settings-about
 update-ready
 update-install
 update-installing
+update-restarting
 whats-new
 workspace-active-commit
 workspace-detail-commit
