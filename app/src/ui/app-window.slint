@@ -3092,10 +3092,17 @@ callback create-table-commit();
                             if root.update-self-update-supported && root.update-stage == "restarting": HorizontalLayout {
                                 spacing: Tokens.sp2;
                                 alignment: start;
+                                // Fixed size, not min/max-height: the Material
+                                // indicator keeps itself square by taking its
+                                // width from its height. Left to the layout, that
+                                // height comes from this card's layout, which the
+                                // tab is still measuring — a binding loop that
+                                // aborted the app ("Recursion detected") the moment
+                                // an install started with Settings open.
                                 CircularProgressIndicator {
                                     indeterminate: true;
-                                    min-height: 16px;
-                                    max-height: 16px;
+                                    width: 16px;
+                                    height: 16px;
                                 }
                                 Text {
                                     vertical-alignment: center;
