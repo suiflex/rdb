@@ -569,15 +569,6 @@ pub(crate) fn build_activate_connection(state: &AppState) -> WindowConnFn {
         sidebar_filter,
         ..
     } = state.clone();
-    // `connect_clicked` paints, which restores a tab, which lands back here.
-    // While this is set, activation does the synchronous part and gets out of
-    // its own way.
-    let reconnecting = Rc::new(Cell::new(false));
-    // Connections already auto-connected once for a tab. An unreachable host
-    // costs a 15s timeout (25s over SSH) per attempt, and without this every
-    // click on its tab would pay that again. Cleared by an explicit connect or
-    // disconnect, so retrying by hand always works.
-    let auto_attempted: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
     Rc::new(move |w: &MainWindow, connection_id: &str| {
         let Some(sc) = store
             .borrow()
@@ -588,46 +579,19 @@ pub(crate) fn build_activate_connection(state: &AppState) -> WindowConnFn {
         else {
             return;
         };
+        // Not open: nothing to activate. `point_context_at_tab` shows such a
+        // tab as offline with a Connect button instead; connecting from here
+        // repainted the whole workspace and raced whatever else was
+        // connecting. Checked before `cur_engine`, which belongs to the
+        // connection the sidebar still shows.
+        if !connected_ids.lock().unwrap().contains(connection_id) {
+            return;
+        }
         // Synchronous, and the part that matters most: every
         // `let Some(engine) = *cur_engine.borrow()` guard (open table, browse
         // SQL, add column) and the format/comment/stream forks read this on
         // the very next click, long before any schema comes back.
         *cur_engine.borrow_mut() = Some(sc.engine);
-        // The tab's connection is not open. Half-switching to it is what left
-        // the workspace contradicting itself: the topbar, the rail selection
-        // and every "what does a new action target" pointer moved to a
-        // connection with no driver, while the sidebar tree and the driver
-        // slot stayed on the live one — so New Query and opening a table
-        // aimed somewhere that could not answer. Open it instead, which is
-        // also what makes the rail honest: a tile is shown for the selected
-        // connection whether or not it is live, so a selection that never
-        // becomes live is a tile that appears and vanishes with tab focus.
-        if !connected_ids.lock().unwrap().contains(connection_id) {
-            if reconnecting.get()
-                || !auto_attempted
-                    .borrow_mut()
-                    .insert(connection_id.to_string())
-            {
-                return;
-            }
-            let Some(idx) = store
-                .borrow()
-                .list()
-                .iter()
-                .position(|c| c.id == connection_id)
-            else {
-                return;
-            };
-            reconnecting.set(true);
-            // The whole real connect path: tab restore, spinner, pooled
-            // driver reuse. It repaints, which restores a tab, which reaches
-            // this closure again — hence the guard.
-            w.invoke_connect_clicked(idx as i32);
-            reconnecting.set(false);
-            return;
-        }
-        // It answered, so a later drop is worth auto-connecting through again.
-        auto_attempted.borrow_mut().remove(connection_id);
         // Put the connection being left behind in the drawer before opening
         // another one over the top of it.
         let outgoing = painted_connection.lock().unwrap().clone();
@@ -1181,8 +1145,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 let weak = weak.clone();
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak.upgrade() {
-                        // Only touch a live workspace; never override "connecting".
-                        if w.get_connected() {
+                        // Only touch a live workspace; never override "connecting",
+                        // nor "offline" (the focused tab's own connection is not
+                        // the one this pinged).
+                        if w.get_connected() && w.get_conn_status() != "offline" {
                             w.set_conn_status(SharedString::from(if ok {
                                 "connected"
                             } else {

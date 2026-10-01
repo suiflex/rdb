@@ -1009,6 +1009,7 @@ callback create-table-commit();
                             show-dot: true;
                             dot-color: root.conn-status == "error" ? Tokens.error
                                 : root.conn-status == "connecting" ? Tokens.warn
+                                : root.conn-status == "offline" ? Tokens.text-faint
                                 : Tokens.ok;
                             mono: true;
                             tooltip: "Switch connection  " + Shortcut.primary
@@ -1027,8 +1028,12 @@ callback create-table-commit();
                     if root.conn-status != "connected": VerticalLayout {
                         alignment: center;
                         Text {
-                            text: root.conn-status == "error" ? "disconnected" : "connecting…";
-                            color: root.conn-status == "error" ? Tokens.error : Tokens.warn;
+                            text: root.conn-status == "error" ? "disconnected"
+                                : root.conn-status == "offline" ? "not connected"
+                                : "connecting…";
+                            color: root.conn-status == "error" ? Tokens.error
+                                : root.conn-status == "offline" ? Tokens.text-dim
+                                : Tokens.warn;
                             font-size: Tokens.font-sm;
                             vertical-alignment: center;
                         }
@@ -1045,11 +1050,12 @@ callback create-table-commit();
                             clicked => { root.cancel-connect(); }
                         }
                     }
-                    // one-click reconnect when the live connection dropped
-                    if root.conn-status == "error": VerticalLayout {
+                    // one-click reconnect when the live connection dropped, or
+                    // connect when the focused tab's connection isn't open
+                    if root.conn-status == "error" || root.conn-status == "offline": VerticalLayout {
                         alignment: center;
                         SecondaryButton {
-                            text: "↻ Reconnect";
+                            text: root.conn-status == "offline" ? "Connect" : "↻ Reconnect";
                             tooltip: "Reconnect to this database  " + Shortcut.primary
                                 + Shortcut.separator + Shortcut.shift + Shortcut.separator + "R";
                             clicked => { root.reconnect(); }

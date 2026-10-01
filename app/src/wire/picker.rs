@@ -1076,13 +1076,24 @@ fn schedule_multi_connection_scenario(
                         && !w.get_tree_loading()
                         && w.get_schema_tree().row_count() > 0
                 }),
-                // Back to a tab whose connection is now gone. Half-switching
-                // to it is what left the workspace contradicting itself, so
-                // it has to come back live instead.
+                // Back to a tab whose connection is now gone.
                 Rc::new(|w: &MainWindow| w.invoke_select_tab(0)),
             ),
             (
-                "focusing a disconnected tab brings its connection back",
+                "focusing a disconnected tab shows it offline",
+                // No auto-connect: the topbar says so, and the sidebar stays
+                // on the connection that is still live.
+                Rc::new(|w: &MainWindow| {
+                    use slint::Model as _;
+                    active_tab_engine(w) == "postgres"
+                        && w.get_conn_status() == "offline"
+                        && w.get_schema_tree().row_count() > 0
+                }),
+                // The topbar's Connect button.
+                Rc::new(|w: &MainWindow| w.invoke_reconnect()),
+            ),
+            (
+                "connect brings the tab's connection back",
                 // Its `live` flag, not the tree on screen: the tree left
                 // behind by the other connection is not empty, so anything
                 // that only counts rows passes on the broken state too.

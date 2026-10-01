@@ -884,11 +884,12 @@ export component WorkArea inherits Rectangle {
                 HorizontalLayout {
                     spacing: Tokens.sp2;
                     alignment: end;
-                    // Offer a one-click retry when the live connection dropped.
-                    if root.conn-status == "error": VerticalLayout {
+                    // Offer a one-click retry when the live connection dropped,
+                    // or a connect when the focused tab's connection isn't open.
+                    if root.conn-status == "error" || root.conn-status == "offline": VerticalLayout {
                         alignment: center;
                         SecondaryButton {
-                            text: "Reconnect";
+                            text: root.conn-status == "offline" ? "Connect" : "Reconnect";
                             clicked => { root.reconnect(); }
                         }
                     }
@@ -899,14 +900,17 @@ export component WorkArea inherits Rectangle {
                         y: (parent.height - self.height) / 2;
                         background: root.conn-status == "error" ? Tokens.error
                             : root.conn-status == "connecting" ? Tokens.warn
+                            : root.conn-status == "offline" ? Tokens.text-faint
                             : root.status-error ? Tokens.error : Tokens.ok;
                     }
                     Text {
                         text: root.conn-status == "error" ? "disconnected"
                             : root.conn-status == "connecting" ? "connecting…"
+                            : root.conn-status == "offline" ? "not connected"
                             : root.status-latency;
                         color: root.conn-status == "error" ? Tokens.error
                             : root.conn-status == "connecting" ? Tokens.warn
+                            : root.conn-status == "offline" ? Tokens.text-dim
                             : root.status-error ? Tokens.error : Tokens.ok;
                         font-size: Tokens.font-sm;
                         font-family: Tokens.mono;

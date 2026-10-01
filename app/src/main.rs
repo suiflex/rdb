@@ -4933,6 +4933,7 @@ fn point_context_at_tab(
     pane: usize,
     store: &Rc<RefCell<rdb_connstore::ConnStore>>,
     current_connection_id: &std::sync::Mutex<Option<String>>,
+    connected_ids: &std::sync::Mutex<HashSet<String>>,
     activate_connection: &WindowConnFn,
 ) {
     // Topbar identity follows whichever tab is now on screen, not the last
@@ -4950,6 +4951,20 @@ fn point_context_at_tab(
     let Some(cid) = tab.connection_id.clone() else {
         return;
     };
+    // The tab's connection isn't open (and isn't the one being connected
+    // right now): say so in the topbar, with Connect pointed at it through
+    // `selected_conn`, and leave the sidebar and every "what does a new
+    // action target" pointer on the connection that is live. Connecting on
+    // focus raced other connects and tore the workspace down mid-switch.
+    let live = connected_ids.lock().unwrap().contains(&cid);
+    let targeted = current_connection_id.lock().unwrap().as_deref() == Some(cid.as_str());
+    if !live && !targeted {
+        w.set_conn_status(SharedString::from("offline"));
+        return;
+    }
+    if live && w.get_conn_status() == "offline" {
+        w.set_conn_status(SharedString::from("connected"));
+    }
     let changed = {
         // Scoped tight, and no UI touched while it is held: a Slint setter
         // runs bindings synchronously, and this lock is taken all over the
@@ -5641,6 +5656,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let last_view = last_view.clone();
         let store = store.clone();
         let current_connection_id = current_connection_id.clone();
+        let connected_ids = connected_ids.clone();
         let activate_connection = activate_connection.clone();
         Rc::new(move |w, abs_index| {
             let (tab, pane, group_index) = {
@@ -5663,6 +5679,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 pane,
                 &store,
                 &current_connection_id,
+                &connected_ids,
                 &activate_connection,
             );
             {
