@@ -5007,14 +5007,21 @@ fn point_context_at_tab(
         return;
     };
     // The tab's connection isn't open (and isn't the one being connected
-    // right now): say so in the topbar, with Connect pointed at it through
-    // `selected_conn`, and leave the sidebar and every "what does a new
-    // action target" pointer on the connection that is live. Connecting on
-    // focus raced other connects and tore the workspace down mid-switch.
+    // right now): say so in the topbar and leave the sidebar and every "what
+    // does a new action target" pointer on the connection that is live.
+    // Connecting on focus raced other connects and tore the workspace down
+    // mid-switch. The topbar's Connect button connects the focused tab's
+    // connection itself (`on_reconnect`).
     let live = connected_ids.lock().unwrap().contains(&cid);
-    let targeted = current_connection_id.lock().unwrap().as_deref() == Some(cid.as_str());
-    if !live && !targeted {
+    let current = current_connection_id.lock().unwrap().clone();
+    if !live && current.as_deref() != Some(cid.as_str()) {
         w.set_conn_status(SharedString::from("offline"));
+        // `sync_conn_chrome` above moved the rail selection onto the offline
+        // connection; the database switcher, create database/table and edit
+        // connection all act on `selected_conn`, against the sidebar's
+        // connection. Keep it there.
+        let live_idx = current.and_then(|id| store.borrow().list().iter().position(|c| c.id == id));
+        w.set_selected_conn(live_idx.map_or(-1, |i| i as i32));
         return;
     }
     if live && w.get_conn_status() == "offline" {

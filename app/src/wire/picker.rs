@@ -763,6 +763,13 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 // topbar reflects a connection that's actually still there
                 // instead of the one just dropped.
                 sync_conn_chrome(&w, &store.borrow(), surviving.as_deref());
+                let focused_bound =
+                    focused_tab_connection_id(&active_tab_id, &workspace_tabs).is_some();
+                if surviving.is_none() && focused_bound {
+                    // The focused tab's own connection is the one just
+                    // dropped: it is an offline tab now, Connect included.
+                    w.set_conn_status(SharedString::from("offline"));
+                }
                 if let Some(cid) = surviving {
                     *current_connection_id.lock().unwrap() = Some(cid.clone());
                     // The teardown above cleared state the survivor still
@@ -782,10 +789,30 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
     // ----- reconnect: retry the current connection after a health drop -----
     {
         let weak = window.as_weak();
+        let store = store.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
         window.on_reconnect(move || {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            // An offline tab's Connect: open the focused tab's own connection.
+            // `selected_conn` stays on the sidebar's live one (see
+            // `point_context_at_tab`).
+            if w.get_conn_status() == "offline" {
+                let active = if w.get_active_pane() == 1 {
+                    &active_group1_tab_id
+                } else {
+                    &active_tab_id
+                };
+                let idx = focused_tab_connection_id(active, &workspace_tabs)
+                    .and_then(|id| store.borrow().list().iter().position(|c| c.id == id));
+                if let Some(idx) = idx {
+                    w.invoke_connect_clicked(idx as i32);
+                }
+                return;
+            }
             // The health poll leaves selected_conn pointing at the live
             // connection, so replay the connect path against it.
             let idx = w.get_selected_conn();
@@ -1081,12 +1108,14 @@ fn schedule_multi_connection_scenario(
             ),
             (
                 "focusing a disconnected tab shows it offline",
-                // No auto-connect: the topbar says so, and the sidebar stays
-                // on the connection that is still live.
-                Rc::new(|w: &MainWindow| {
+                // No auto-connect: the topbar says so, and the sidebar and
+                // the rail selection stay on the connection that is still
+                // live.
+                Rc::new(move |w: &MainWindow| {
                     use slint::Model as _;
                     active_tab_engine(w) == "postgres"
                         && w.get_conn_status() == "offline"
+                        && w.get_selected_conn() == mongo
                         && w.get_schema_tree().row_count() > 0
                 }),
                 // The topbar's Connect button.
