@@ -859,6 +859,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     // whole schema read — and an expanding database just span
                     // until that finished, or until it timed out.
                     let tree_connection_id = current_connection_id.lock().unwrap().clone();
+                    let current_connection_id = current_connection_id.clone();
                     rt.spawn(async move {
                         let drv =
                             resolve_driver(&driver_pool, &driver, tree_connection_id.as_deref())
@@ -868,6 +869,14 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                             Some(drv) => drv.containers(&db).await.unwrap_or_default(),
                             None => return,
                         };
+                        // `raw_nodes` is whichever connection the sidebar shows
+                        // *now*. If that changed while this was in flight, these
+                        // containers belong to a tree that is no longer there.
+                        // ponytail: the db stays marked loaded in the snapshot
+                        // left behind, so it reopens empty until re-expanded.
+                        if *current_connection_id.lock().unwrap() != tree_connection_id {
+                            return;
+                        }
                         let rows = {
                             let mut nodes = raw_nodes.lock().unwrap();
                             if let Some(pos) = nodes
