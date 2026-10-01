@@ -1102,6 +1102,69 @@ fn default_collapsed_cats() -> HashSet<String> {
     HashSet::from(["Functions".to_string()])
 }
 
+/// The "Tables" category's rows: each matching container, then its fields
+/// when it is expanded.
+fn container_rows(
+    nodes: &[model::VmTreeNode],
+    expanded_tables: &HashSet<String>,
+    matches: &dyn Fn(&str) -> bool,
+    rows: &mut Vec<TreeNode>,
+) {
+    // Walk the flat nodes: containers + (when expanded) their fields.
+    let mut show_fields = false;
+    for n in nodes {
+        let is_container = matches!(n.kind.as_str(), "table" | "collection" | "keyspace");
+        if n.kind == "field" {
+            if !show_fields {
+                continue;
+            }
+            rows.push(TreeNode {
+                label: n.label.clone().into(),
+                depth: 2,
+                kind: "field".into(),
+                expanded: false,
+                db: SharedString::default(),
+                count: 0,
+                sub: SharedString::default(),
+                sub_color: Default::default(),
+                sub_has_custom_color: false,
+            });
+        } else if is_container {
+            if !matches(&n.label) {
+                show_fields = false;
+                continue;
+            }
+            show_fields = expanded_tables.contains(&n.label);
+            rows.push(TreeNode {
+                label: n.label.clone().into(),
+                depth: 1,
+                kind: n.kind.clone().into(),
+                expanded: show_fields,
+                db: SharedString::default(),
+                count: 0,
+                sub: SharedString::default(),
+                sub_color: Default::default(),
+                sub_has_custom_color: false,
+            });
+        } else if n.kind != "function" {
+            // database row: categories replace it; reset field visibility
+            show_fields = false;
+        }
+    }
+}
+
+/// The leaf kind of an engine whose sidebar nests leaves under a database
+/// header, loaded lazily per database: Mongo (database→collection), Redis
+/// (database→key), Cassandra (keyspace→table). `None` for the flat SQL tree.
+fn nested_leaf_kind(engine: Option<rdb_connstore::Engine>) -> Option<&'static str> {
+    match engine? {
+        rdb_connstore::Engine::Mongo => Some("collection"),
+        rdb_connstore::Engine::Redis => Some("key"),
+        rdb_connstore::Engine::Cassandra => Some("table"),
+        _ => None,
+    }
+}
+
 fn schema_display_rows(
     nodes: &[model::VmTreeNode],
     expanded_tables: &HashSet<String>,
@@ -1110,21 +1173,9 @@ fn schema_display_rows(
     engine: Option<rdb_connstore::Engine>,
     filter: &str,
 ) -> Vec<TreeNode> {
-    // Mongo (database→collection) and Redis (database→key) both render as a
-    // collapsible database header nesting its own lazily-loaded leaves.
     // `expanded_tables` is the set of OPEN databases (default closed).
-    match engine {
-        Some(rdb_connstore::Engine::Mongo) => {
-            return nested_display_rows(nodes, expanded_tables, loaded_dbs, "collection", filter);
-        }
-        Some(rdb_connstore::Engine::Redis) => {
-            return nested_display_rows(nodes, expanded_tables, loaded_dbs, "key", filter);
-        }
-        // Cassandra nests keyspace→table like Mongo nests database→collection.
-        Some(rdb_connstore::Engine::Cassandra) => {
-            return nested_display_rows(nodes, expanded_tables, loaded_dbs, "table", filter);
-        }
-        _ => {}
+    if let Some(leaf_kind) = nested_leaf_kind(engine) {
+        return nested_display_rows(nodes, expanded_tables, loaded_dbs, leaf_kind, filter);
     }
 
     let needle = filter.to_lowercase();
@@ -1191,58 +1242,11 @@ fn schema_display_rows(
             }
             continue;
         }
-        // Walk the flat nodes: containers + (when expanded) their fields.
-        let mut show_fields = false;
-        for n in nodes {
-            let is_container = matches!(n.kind.as_str(), "table" | "collection" | "keyspace");
-            if n.kind == "field" {
-                if !show_fields {
-                    continue;
-                }
-                rows.push(TreeNode {
-                    label: n.label.clone().into(),
-                    depth: 2,
-                    kind: "field".into(),
-                    expanded: false,
-                    db: SharedString::default(),
-                    count: 0,
-                    sub: SharedString::default(),
-                    sub_color: Default::default(),
-                    sub_has_custom_color: false,
-                });
-            } else if is_container {
-                if !matches(&n.label) {
-                    show_fields = false;
-                    continue;
-                }
-                show_fields = expanded_tables.contains(&n.label);
-                rows.push(TreeNode {
-                    label: n.label.clone().into(),
-                    depth: 1,
-                    kind: n.kind.clone().into(),
-                    expanded: show_fields,
-                    db: SharedString::default(),
-                    count: 0,
-                    sub: SharedString::default(),
-                    sub_color: Default::default(),
-                    sub_has_custom_color: false,
-                });
-            } else if n.kind != "function" {
-                // database row: categories replace it; reset field visibility
-                show_fields = false;
-            }
-        }
+        container_rows(nodes, expanded_tables, &matches, &mut rows);
     }
     rows
 }
 
-/// Build a database→leaf tree for engines that browse per-database (Mongo
-/// collections, Redis keys). Each database is a depth-0 collapsible header (open
-/// when its name is in `expanded_dbs`, default closed); its leaves are depth-1
-/// rows tagged with the owning database and emitted with `leaf_kind`. An open
-/// database with no leaf rows gets a non-clickable hint row so the header never
-/// looks stuck: `(loading…)` until its fetch lands in `loaded_dbs`, then
-/// `(empty)` if it really is empty.
 /// Narrows the Queries / History list to rows whose label contains
 /// `filter` (case-insensitive), keeping a group header only while one of its
 /// rows survives.
@@ -1283,6 +1287,13 @@ fn no_match_row(filter: &str) -> TreeNode {
     }
 }
 
+/// Build a database→leaf tree for engines that browse per-database (Mongo
+/// collections, Redis keys). Each database is a depth-0 collapsible header (open
+/// when its name is in `expanded_dbs`, default closed); its leaves are depth-1
+/// rows tagged with the owning database and emitted with `leaf_kind`. An open
+/// database with no leaf rows gets a non-clickable hint row so the header never
+/// looks stuck: `(loading…)` until its fetch lands in `loaded_dbs`, then
+/// `(empty)` if it really is empty.
 fn nested_display_rows(
     nodes: &[model::VmTreeNode],
     expanded_dbs: &HashSet<String>,
