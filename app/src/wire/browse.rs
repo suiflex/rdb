@@ -813,17 +813,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             // Mongo/Redis/Cassandra: database (or keyspace) headers open an
             // opt-in set (default closed) and load their leaves (collections /
             // keys / tables) lazily on first expand.
-            if matches!(
-                engine,
-                Some(rdb_connstore::Engine::Mongo)
-                    | Some(rdb_connstore::Engine::Redis)
-                    | Some(rdb_connstore::Engine::Cassandra)
-            ) {
-                let leaf_kind = match engine {
-                    Some(rdb_connstore::Engine::Redis) => "key",
-                    Some(rdb_connstore::Engine::Cassandra) => "table",
-                    _ => "collection",
-                };
+            if let Some(leaf_kind) = nested_leaf_kind(engine) {
                 let now_open = {
                     let mut e = expanded_tables.lock().unwrap();
                     if e.remove(&label) {
@@ -834,15 +824,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     }
                 };
                 // Fetch this database's collections once, on first open.
-                let need_fetch = now_open && {
-                    let mut l = loaded_dbs.lock().unwrap();
-                    if l.contains(&label) {
-                        false
-                    } else {
-                        l.insert(label.clone());
-                        true
-                    }
-                };
+                let need_fetch = now_open && loaded_dbs.lock().unwrap().insert(label.clone());
                 if need_fetch {
                     let driver = current.clone();
                     let driver_pool = driver_pool.clone();
