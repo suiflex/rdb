@@ -82,6 +82,15 @@ export component ListModal inherits Rectangle {
                 submitted => { root.choose(root.selected); }
             }
 
+            // A search that matches nothing says so instead of leaving a gap.
+            if root.items.length == 0 && search.text != "": Text {
+                text: "No matches for \"" + search.text + "\"";
+                color: Tokens.text-dim;
+                font-size: Tokens.font-sm;
+                horizontal-alignment: center;
+                overflow: elide;
+            }
+
             Rectangle {
                 // flex: absorb the space left between the search row and footer
                 // (capped) so the footer stays put when the modal is height-limited

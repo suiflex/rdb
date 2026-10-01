@@ -1142,6 +1142,10 @@ fn schema_display_rows(
         .iter()
         .filter(|n| n.kind == "function" && matches(&n.label))
         .count() as i32;
+    // Every category would sit at 0 with nothing under it; say why instead.
+    if filtering && container_count == 0 && function_count == 0 {
+        return vec![no_match_row(filter)];
+    }
     let mut rows: Vec<TreeNode> = Vec::new();
     for &cat in categories {
         let is_fn_cat = cat == "Functions";
@@ -1248,6 +1252,7 @@ fn filter_query_rows(rows: Vec<TreeNode>, filter: &str) -> Vec<TreeNode> {
         return rows;
     }
     let mut out: Vec<TreeNode> = Vec::new();
+    let mut matched = false;
     let mut header: Option<TreeNode> = None;
     for row in rows {
         if row.kind == "qcat" {
@@ -1261,8 +1266,21 @@ fn filter_query_rows(rows: Vec<TreeNode>, filter: &str) -> Vec<TreeNode> {
             out.push(h);
         }
         out.push(row);
+        matched = true;
+    }
+    if !matched {
+        out.push(no_match_row(filter));
     }
     out
+}
+
+/// The sidebar's single row for a filter that matched nothing.
+fn no_match_row(filter: &str) -> TreeNode {
+    TreeNode {
+        label: format!("No matches for \"{}\"", filter.trim()).into(),
+        kind: "hint".into(),
+        ..Default::default()
+    }
 }
 
 fn nested_display_rows(
@@ -6406,6 +6424,23 @@ mod tests {
         assert_eq!(header.count, 3);
     }
 
+    /// Regression: a filter matching nothing left only empty category
+    /// headers, which read as a blank sidebar.
+    #[test]
+    fn sidebar_filter_matching_nothing_says_so() {
+        let rows = schema_display_rows(
+            &nodes(),
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::new(),
+            Some(rdb_connstore::Engine::Postgres),
+            "zzz",
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].kind.as_str(), "hint");
+        assert_eq!(rows[0].label.as_str(), "No matches for \"zzz\"");
+    }
+
     #[test]
     fn page_bounds_first_page_full() {
         // 300 shown of 1000 total: 1–300, no prev, next available
@@ -6681,7 +6716,10 @@ mod filter_query_rows_tests {
     }
 
     #[test]
-    fn nothing_matching_leaves_no_headers_behind() {
-        assert!(filter_query_rows(sample(), "zzz").is_empty());
+    fn nothing_matching_says_so_instead_of_leaving_the_list_blank() {
+        assert_eq!(
+            labels(filter_query_rows(sample(), "zzz")),
+            ["No matches for \"zzz\""]
+        );
     }
 }
