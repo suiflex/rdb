@@ -217,6 +217,9 @@ fn build_schema_picker_names(
     (schema_names, schema_current)
 }
 
+/// A connect's claim on the `current` driver slot.
+type SlotGuard = tokio::sync::OwnedMutexGuard<Option<(rdb_connstore::Engine, Arc<AnyDriver>)>>;
+
 /// Publishes the driver, builds the sidebar tree and autocomplete seed,
 /// pushes it to the UI, then keeps loading every other Postgres schema in
 /// the background so cross-schema completion fills in without blocking the
@@ -229,7 +232,7 @@ async fn finish_connect_success(
     schema: rdb_core::schema::Schema,
     scoped_db: Option<String>,
     connection_id: String,
-    mut slot: tokio::sync::OwnedMutexGuard<Option<(rdb_connstore::Engine, Arc<AnyDriver>)>>,
+    slot: Option<SlotGuard>,
     store_driver: DriverSlot,
     driver_pool: DriverPool,
     connected_ids: Arc<Mutex<HashSet<String>>>,
@@ -263,8 +266,6 @@ async fn finish_connect_success(
         .into_iter()
         .map(SharedString::from)
         .collect();
-    *slot = Some((engine, driver.clone()));
-    drop(slot);
     driver_pool
         .write()
         .await
@@ -273,13 +274,29 @@ async fn finish_connect_success(
     // still around" checks read this, not tab scoping (see `connected_ids`
     // on `AppState`).
     connected_ids.lock().unwrap().insert(connection_id.clone());
+    // The legacy `current` slot is "the focused connection's driver". A
+    // connect that finishes after the user moved on must not claim it, or
+    // the health poll and every tab with no connection of its own end up on
+    // a connection nobody is looking at.
+    let focused = current_connection_id.lock().unwrap().as_deref() == Some(connection_id.as_str());
+    match slot {
+        Some(mut slot) if focused => *slot = Some((engine, driver.clone())),
+        Some(_) => {}
+        // Not claimed up front (a tab switch re-reading an open connection):
+        // publish without holding up the paint behind another connect.
+        None if focused => {
+            let entry = (engine, driver.clone());
+            tokio::spawn(async move { *store_driver.lock().await = Some(entry) });
+        }
+        None => {}
+    }
     // The pool and the live-ids set above are facts about the connection and
     // are recorded either way. Everything below repaints the workspace *as*
     // this connection, and a tab switch is a context switch now, so the user
     // may have moved to another one while this schema was in flight. Painting
     // anyway drops the other connection's tree, autocomplete and schema list
     // on top of the workspace they are actually looking at.
-    if current_connection_id.lock().unwrap().as_deref() != Some(connection_id.as_str()) {
+    if !focused {
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(w) = weak.upgrade() {
                 // It did connect, so nothing should be left spinning; the
@@ -349,6 +366,8 @@ async fn finish_connect_success(
                 .map(|f| (f.name.clone(), f.definition.clone()))
         }));
     }
+    let painted_for_bg = painted_connection.clone();
+    let bg_connection_id = connection_id.clone();
     let _ = slint::invoke_from_event_loop(move || {
         // What the workspace now shows, for `ConnContext`'s snapshot on the
         // way out.
@@ -385,12 +404,12 @@ async fn finish_connect_success(
     // autocompletes. Runs after the sidebar (active schema) already
     // rendered; the popup just gains more names as this fills. Fetched
     // concurrently, one task per schema, instead of sequentially.
+    //
+    // Reads through this connection's own driver — `current` may already
+    // belong to another one — and drops the result if the user moved on
+    // meanwhile, since `completion_nodes` is the focused connection's.
     if matches!(engine, rdb_connstore::Engine::Postgres) && all_schema_names.len() > 1 {
-        let driver = {
-            let guard = store_driver.lock().await;
-            guard.as_ref().map(|(_, d)| d.clone())
-        };
-        if let Some(driver) = driver {
+        {
             let handles: Vec<_> = all_schema_names
                 .iter()
                 .cloned()
@@ -411,7 +430,9 @@ async fn finish_connect_success(
                     all.extend(nodes);
                 }
             }
-            if !all.is_empty() {
+            let still_painted =
+                painted_for_bg.lock().unwrap().as_deref() == Some(bg_connection_id.as_str());
+            if !all.is_empty() && still_painted {
                 *completion_nodes.lock().unwrap() = all;
             }
         }
@@ -679,6 +700,7 @@ pub(crate) fn build_activate_connection(state: &AppState) -> WindowConnFn {
             current_connection_id.clone(),
             painted_connection.clone(),
             true,
+            false,
         );
     })
 }
@@ -871,6 +893,7 @@ fn handle_connect_clicked(state: &AppState, fns: &AppFns, weak: slint::Weak<Main
         // A database switch needs a driver on the new database, never the
         // pooled one.
         db_ovr.is_none(),
+        true,
     );
 }
 
@@ -1016,13 +1039,18 @@ fn spawn_connect_task(
     current_connection_id: Arc<Mutex<Option<String>>>,
     painted_connection: Arc<Mutex<Option<String>>>,
     reuse_pooled: bool,
+    claim_slot: bool,
 ) {
     let weak2 = weak.clone();
     let store_driver = current.clone();
     // Claim the driver slot now, so a query/browse task spawned right
     // after this click can't observe a stale None; it awaits this lock
-    // instead and resolves once connect lands.
-    let claimed = current.clone().try_lock_owned().ok();
+    // instead and resolves once connect lands. A tab switch re-reading an
+    // already-open connection skips this: its driver is already in the pool,
+    // and claiming would queue it behind any other connect holding the slot.
+    let claimed = claim_slot
+        .then(|| current.clone().try_lock_owned().ok())
+        .flatten();
     let engine = sc.engine;
     let connection_id = sc.id.clone();
     // NoSQL collection cap to push onto the fresh connection (Mongo only).
@@ -1032,8 +1060,9 @@ fn spawn_connect_task(
         .unwrap_or(200);
     let inner = rt.spawn(async move {
         let slot = match claimed {
-            Some(g) => g,
-            None => store_driver.clone().lock_owned().await,
+            Some(g) => Some(g),
+            None if claim_slot => Some(store_driver.clone().lock_owned().await),
+            None => None,
         };
         let timeout_secs = if cfg.as_ref().ok().and_then(|c| c.ssh.as_ref()).is_some() {
             25
