@@ -5024,7 +5024,12 @@ fn point_context_at_tab(
         w.set_selected_conn(live_idx.map_or(-1, |i| i as i32));
         return;
     }
-    if live && w.get_conn_status() == "offline" {
+    // The status describes the focused connection. Moving onto a different
+    // live one drops whatever the last one showed — "connecting…" from a
+    // connect still running for it in the background, or "offline" — while a
+    // connect to this very connection keeps its spinner.
+    let switching = current.as_deref() != Some(cid.as_str());
+    if live && (switching || w.get_conn_status() == "offline") {
         w.set_conn_status(SharedString::from("connected"));
     }
     let changed = {
