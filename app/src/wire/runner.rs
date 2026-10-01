@@ -384,6 +384,23 @@ async fn resolve_pk_hint(
     }
 }
 
+/// The sidebar's database/schema selection, but only while the sidebar is
+/// showing the connection the query runs on. A tab on another connection
+/// (the right split, or one whose context hasn't landed yet) gets `""` —
+/// its driver's own default — rather than a name that belongs to a
+/// different server, possibly a different engine.
+fn db_for_query(
+    selected: &str,
+    painted_connection: &Mutex<Option<String>>,
+    query_connection_id: Option<&str>,
+) -> String {
+    let painted = painted_connection.lock().unwrap();
+    match query_connection_id {
+        Some(id) if painted.as_deref() != Some(id) => String::new(),
+        _ => selected.to_string(),
+    }
+}
+
 pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSqlFn) {
     let AppState {
         rt,
@@ -395,6 +412,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
         active_tab_id,
         active_group1_tab_id,
         current_connection_id,
+        painted_connection,
         query_console,
         last_view,
         ..
@@ -410,6 +428,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
         let current = current.clone();
         let driver_pool = driver_pool.clone();
         let current_connection_id = current_connection_id.clone();
+        let painted_connection = painted_connection.clone();
         let store = store.clone();
         let last_view = last_view.clone();
         let panes = panes.clone();
@@ -475,18 +494,26 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             let new_tab = result_new_tab.swap(false, std::sync::atomic::Ordering::SeqCst);
             // A multi-statement run sets this; consume it likewise.
             let split = split_results.swap(false, std::sync::atomic::Ordering::SeqCst);
-            // Currently selected database (top dropdown). Mongo line queries with
-            // no `use(...)` run against it, matching what the user sees browsing.
-            let mut cur_db = String::new();
             if let Some(w) = weak.upgrade() {
                 set_p_query_running(&w, pane, true);
                 // Don't force the SQL console open on every run — the eye toggle
                 // owns its visibility. Re-opening it here ignored a user who just
                 // hid it. The console still updates in place when it is open.
-                cur_db = w.get_schema_name().to_string();
             }
             let query_connection_id =
                 tab_connection_id.or_else(|| current_connection_id.lock().unwrap().clone());
+            // Currently selected database (top dropdown). Mongo line queries with
+            // no `use(...)` run against it, matching what the user sees browsing.
+            let cur_db = weak
+                .upgrade()
+                .map(|w| {
+                    db_for_query(
+                        &w.get_schema_name(),
+                        &painted_connection,
+                        query_connection_id.as_deref(),
+                    )
+                })
+                .unwrap_or_default();
             let query_badge = query_connection_id
                 .as_deref()
                 .map(|cid| connection_badge_info(&store.borrow(), cid))
@@ -657,6 +684,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
         let current = current.clone();
         let driver_pool = driver_pool.clone();
         let current_connection_id = current_connection_id.clone();
+        let painted_connection = painted_connection.clone();
         let store = store.clone();
         let query_console = query_console.clone();
         let workspace_tabs = workspace_tabs.clone();
@@ -675,9 +703,6 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             let run_origin = panes[pane].pending_run_origin.take();
             let sql_for_error = sql.clone();
             set_p_error_mark(&w, pane, None);
-            // Read on the UI thread now — the producer/consumer task below
-            // runs off it and can't touch `w`.
-            let cur_db = w.get_schema_name().to_string();
             let results = panes[pane].results.clone();
             let active_result = panes[pane].active_result.clone();
             let displayed_grid = panes[pane].displayed_grid.clone();
@@ -725,6 +750,13 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             // connection can change before this stream finishes.
             let query_connection_id =
                 tab_connection_id.or_else(|| current_connection_id.lock().unwrap().clone());
+            // Read on the UI thread now — the producer/consumer task below
+            // runs off it and can't touch `w`.
+            let cur_db = db_for_query(
+                &w.get_schema_name(),
+                &painted_connection,
+                query_connection_id.as_deref(),
+            );
             let query_badge = query_connection_id
                 .as_deref()
                 .map(|cid| connection_badge_info(&store.borrow(), cid))
@@ -1079,4 +1111,30 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
     };
 
     (run_sql, run_stream)
+}
+
+#[cfg(test)]
+mod db_for_query_tests {
+    use super::db_for_query;
+    use std::sync::Mutex;
+
+    #[test]
+    fn uses_the_sidebar_selection_for_the_connection_it_shows() {
+        let painted = Mutex::new(Some("conn-a".to_string()));
+        assert_eq!(db_for_query("public", &painted, Some("conn-a")), "public");
+    }
+
+    /// Regression: a Mongo tab run while the sidebar showed a Postgres
+    /// connection queried a database named "public".
+    #[test]
+    fn ignores_the_sidebar_selection_of_another_connection() {
+        let painted = Mutex::new(Some("conn-pg".to_string()));
+        assert_eq!(db_for_query("public", &painted, Some("conn-mongo")), "");
+    }
+
+    #[test]
+    fn an_unbound_tab_follows_the_sidebar() {
+        let painted = Mutex::new(Some("conn-a".to_string()));
+        assert_eq!(db_for_query("public", &painted, None), "public");
+    }
 }
