@@ -1012,7 +1012,7 @@ fn spawn_connect_task(
     fn_defs: Arc<Mutex<HashMap<String, String>>>,
     expanded_tables: Arc<Mutex<HashSet<String>>>,
     loaded_dbs: Arc<Mutex<HashSet<String>>>,
-    connect_handle: Rc<RefCell<Option<tokio::task::JoinHandle<()>>>>,
+    connect_handle: ConnectHandles,
     current_connection_id: Arc<Mutex<Option<String>>>,
     painted_connection: Arc<Mutex<Option<String>>>,
     reuse_pooled: bool,
@@ -1091,12 +1091,22 @@ fn spawn_connect_task(
             }
         }
     });
-    // Abort any still-running connect first, or switching mid-connect
-    // leaks the old task and hangs the UI holding the driver lock.
-    if let Some(old) = connect_handle.borrow_mut().take() {
+    // Abort a still-running connect to this same connection first, or a
+    // reconnect leaks the old task and hangs the UI holding the driver lock.
+    // Other connections' connects keep running.
+    replace_connect_handle(&mut connect_handle.borrow_mut(), sc.id.clone(), handle);
+}
+
+/// Stores `handle` as `id`'s in-flight connect, aborting the one it replaces.
+fn replace_connect_handle(
+    handles: &mut HashMap<String, tokio::task::JoinHandle<()>>,
+    id: String,
+    handle: tokio::task::JoinHandle<()>,
+) {
+    handles.retain(|_, h| !h.is_finished());
+    if let Some(old) = handles.insert(id, handle) {
         old.abort();
     }
-    *connect_handle.borrow_mut() = Some(handle);
 }
 
 pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
@@ -1107,6 +1117,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         collapsed,
         connected_ids,
         connect_handle,
+        current_connection_id,
         conn_modal_map,
         ..
     } = state.clone();
@@ -1207,8 +1218,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
     {
         let weak = window.as_weak();
         let connect_handle = connect_handle.clone();
+        let current_connection_id = current_connection_id.clone();
         window.on_cancel_connect(move || {
-            if let Some(h) = connect_handle.borrow_mut().take() {
+            // The spinner being cancelled is the focused connection's.
+            let focused = current_connection_id.lock().unwrap().clone();
+            if let Some(h) = focused.and_then(|id| connect_handle.borrow_mut().remove(&id)) {
                 h.abort();
             }
             if let Some(w) = weak.upgrade() {
@@ -1233,6 +1247,45 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 w.set_grid_col_widths(ModelRc::from(Rc::new(VecModel::from(v))));
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod replace_connect_handle_tests {
+    use super::replace_connect_handle;
+    use std::collections::HashMap;
+
+    fn pending() -> tokio::task::JoinHandle<()> {
+        tokio::spawn(std::future::pending())
+    }
+
+    async fn settle() {
+        // Let the runtime process the abort before reading `is_finished`.
+        tokio::task::yield_now().await;
+    }
+
+    /// Regression: opening C while A was still connecting aborted A, so A
+    /// never reached the pool and vanished from the rail.
+    #[tokio::test]
+    async fn a_connect_to_another_connection_keeps_running() {
+        let mut handles = HashMap::new();
+        replace_connect_handle(&mut handles, "conn-a".into(), pending());
+        replace_connect_handle(&mut handles, "conn-c".into(), pending());
+        settle().await;
+        assert!(!handles["conn-a"].is_finished());
+        assert!(!handles["conn-c"].is_finished());
+    }
+
+    #[tokio::test]
+    async fn a_second_connect_to_the_same_connection_supersedes_the_first() {
+        let mut handles = HashMap::new();
+        let first = pending();
+        let first_abort = first.abort_handle();
+        replace_connect_handle(&mut handles, "conn-a".into(), first);
+        replace_connect_handle(&mut handles, "conn-a".into(), pending());
+        settle().await;
+        assert!(first_abort.is_finished());
+        assert_eq!(handles.len(), 1);
     }
 }
 
