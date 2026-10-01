@@ -220,6 +220,37 @@ fn build_schema_picker_names(
 /// A connect's claim on the `current` driver slot.
 type SlotGuard = tokio::sync::OwnedMutexGuard<Option<(rdb_connstore::Engine, Arc<AnyDriver>)>>;
 
+/// Writes a finished connect's driver into the `current` slot, but only for
+/// the focused connection. Unclaimed (a tab switch re-reading an open
+/// connection, or another connect held the slot), the write waits for the
+/// slot off the paint path and re-checks focus once it has it.
+fn publish_to_current_slot(
+    slot: Option<SlotGuard>,
+    focused: bool,
+    entry: (rdb_connstore::Engine, Arc<AnyDriver>),
+    store_driver: DriverSlot,
+    current_connection_id: Arc<Mutex<Option<String>>>,
+    connection_id: String,
+) {
+    match slot {
+        Some(mut slot) if focused => *slot = Some(entry),
+        // Released here, not at the end of the connect: the Postgres
+        // completion load after it can run for a while.
+        Some(slot) => drop(slot),
+        None if focused => {
+            tokio::spawn(async move {
+                let mut slot = store_driver.lock().await;
+                // The wait may have outlasted the focus.
+                if current_connection_id.lock().unwrap().as_deref() == Some(connection_id.as_str())
+                {
+                    *slot = Some(entry);
+                }
+            });
+        }
+        None => {}
+    }
+}
+
 /// Publishes the driver, builds the sidebar tree and autocomplete seed,
 /// pushes it to the UI, then keeps loading every other Postgres schema in
 /// the background so cross-schema completion fills in without blocking the
@@ -279,28 +310,14 @@ async fn finish_connect_success(
     // the health poll and every tab with no connection of its own end up on
     // a connection nobody is looking at.
     let focused = current_connection_id.lock().unwrap().as_deref() == Some(connection_id.as_str());
-    match slot {
-        Some(mut slot) if focused => *slot = Some((engine, driver.clone())),
-        // Released here, not at the end of this function: the Postgres
-        // completion load below can run for a while.
-        Some(slot) => drop(slot),
-        // Not claimed up front (a tab switch re-reading an open connection,
-        // or another connect held the slot): publish without holding up the
-        // paint behind it.
-        None if focused => {
-            let entry = (engine, driver.clone());
-            let focus = current_connection_id.clone();
-            let id = connection_id.clone();
-            tokio::spawn(async move {
-                let mut slot = store_driver.lock().await;
-                // The wait may have outlasted the focus.
-                if focus.lock().unwrap().as_deref() == Some(id.as_str()) {
-                    *slot = Some(entry);
-                }
-            });
-        }
-        None => {}
-    }
+    publish_to_current_slot(
+        slot,
+        focused,
+        (engine, driver.clone()),
+        store_driver,
+        current_connection_id.clone(),
+        connection_id.clone(),
+    );
     // The pool and the live-ids set above are facts about the connection and
     // are recorded either way. Everything below repaints the workspace *as*
     // this connection, and a tab switch is a context switch now, so the user
