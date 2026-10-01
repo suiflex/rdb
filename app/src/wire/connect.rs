@@ -281,12 +281,23 @@ async fn finish_connect_success(
     let focused = current_connection_id.lock().unwrap().as_deref() == Some(connection_id.as_str());
     match slot {
         Some(mut slot) if focused => *slot = Some((engine, driver.clone())),
-        Some(_) => {}
-        // Not claimed up front (a tab switch re-reading an open connection):
-        // publish without holding up the paint behind another connect.
+        // Released here, not at the end of this function: the Postgres
+        // completion load below can run for a while.
+        Some(slot) => drop(slot),
+        // Not claimed up front (a tab switch re-reading an open connection,
+        // or another connect held the slot): publish without holding up the
+        // paint behind it.
         None if focused => {
             let entry = (engine, driver.clone());
-            tokio::spawn(async move { *store_driver.lock().await = Some(entry) });
+            let focus = current_connection_id.clone();
+            let id = connection_id.clone();
+            tokio::spawn(async move {
+                let mut slot = store_driver.lock().await;
+                // The wait may have outlasted the focus.
+                if focus.lock().unwrap().as_deref() == Some(id.as_str()) {
+                    *slot = Some(entry);
+                }
+            });
         }
         None => {}
     }
@@ -1010,8 +1021,10 @@ fn spawn_connect_task(
     // Claim the driver slot now, so a query/browse task spawned right
     // after this click can't observe a stale None; it awaits this lock
     // instead and resolves once connect lands. A tab switch re-reading an
-    // already-open connection skips this: its driver is already in the pool,
-    // and claiming would queue it behind any other connect holding the slot.
+    // already-open connection skips this: its driver is already in the pool.
+    // Only ever a `try`: another connection's connect may hold the slot for
+    // its whole handshake, and this one must not queue behind it —
+    // `finish_connect_success` publishes without the claim instead.
     let claimed = claim_slot
         .then(|| current.clone().try_lock_owned().ok())
         .flatten();
@@ -1023,11 +1036,7 @@ fn spawn_connect_task(
         .map(|w| w.get_nosql_collection_limit().max(1) as usize)
         .unwrap_or(200);
     let inner = rt.spawn(async move {
-        let slot = match claimed {
-            Some(g) => Some(g),
-            None if claim_slot => Some(store_driver.clone().lock_owned().await),
-            None => None,
-        };
+        let slot = claimed;
         let timeout_secs = if cfg.as_ref().ok().and_then(|c| c.ssh.as_ref()).is_some() {
             25
         } else {
