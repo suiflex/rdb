@@ -4725,6 +4725,12 @@ fn read_conn_form(w: &MainWindow) -> Result<FormConn, &'static str> {
 /// removes query-vs-ping (and query-vs-query) serialization.
 type DriverSlot = Arc<tokio::sync::Mutex<Option<(rdb_connstore::Engine, Arc<AnyDriver>)>>>;
 
+/// The in-flight connect task per `connection_id`. Keyed rather than a single
+/// slot so opening C while A is still connecting (or while A's schema is
+/// being re-read for a tab switch) no longer aborts the other one; a second
+/// connect to the *same* id still supersedes the first.
+type ConnectHandles = Rc<RefCell<HashMap<String, tokio::task::JoinHandle<()>>>>;
+
 /// Every connection opened this session, keyed by `connection_id`, so a
 /// query started from a tab reaches *that tab's* connection even after
 /// `current` has since moved on to another one (`current` still tracks only
@@ -5018,7 +5024,7 @@ struct AppState {
     table_cols: Rc<VecModel<TableCol>>,
     fn_defs: Arc<Mutex<HashMap<String, String>>>,
     completion_nodes: Arc<Mutex<Vec<model::VmTreeNode>>>,
-    connect_handle: Rc<RefCell<Option<tokio::task::JoinHandle<()>>>>,
+    connect_handle: ConnectHandles,
     tabs_restored: Rc<Cell<bool>>,
     panes: Rc<[GroupRuntime; 2]>,
     cur_engine: Rc<RefCell<Option<rdb_connstore::Engine>>>,
@@ -5355,8 +5361,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let last_view: Arc<std::sync::Mutex<Option<model::ResultView>>> =
         Arc::new(std::sync::Mutex::new(None));
     let browse_trigger: BrowseTrigger = Rc::new(RefCell::new(None));
-    let connect_handle: Rc<RefCell<Option<tokio::task::JoinHandle<()>>>> =
-        Rc::new(RefCell::new(None));
+    let connect_handle: ConnectHandles = Rc::new(RefCell::new(HashMap::new()));
     let editing_id: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
     // ----- saved/recent queries (sidebar Queries tab) -----
     // User-curated saved queries: seeded on first run, then editable (delete)
