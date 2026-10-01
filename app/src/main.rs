@@ -4757,12 +4757,20 @@ fn driver_for<'a, V>(
 /// Locks `driver_pool` and `current` just long enough to clone the `Arc`
 /// `driver_for` picks. Replaces the same lock-then-lookup copied across
 /// every wiring module.
+///
+/// `current` is only locked when there is no `connection_id` to look up: a
+/// connect holds that slot across its whole handshake and schema read, and a
+/// tab bound to an already-open connection has no reason to queue behind
+/// another connection's connect.
 async fn resolve_driver(
     driver_pool: &DriverPool,
     current: &DriverSlot,
     connection_id: Option<&str>,
 ) -> Option<(rdb_connstore::Engine, Arc<AnyDriver>)> {
     let pool = driver_pool.read().await;
+    if connection_id.is_some() {
+        return driver_for(&pool, None, connection_id).map(|(e, d)| (*e, d.clone()));
+    }
     let guard = current.lock().await;
     driver_for(&pool, guard.as_ref(), connection_id).map(|(e, d)| (*e, d.clone()))
 }
@@ -4808,6 +4816,22 @@ mod driver_pool_tests {
         let pool: HashMap<String, &str> = HashMap::new();
         let current = Some(&"driver-b");
         assert_eq!(driver_for(&pool, current, Some("conn-a")), None);
+    }
+
+    /// Regression: a connect holds `current` across its whole handshake, and
+    /// a query from a tab bound to another connection used to queue behind it.
+    #[tokio::test]
+    async fn a_tab_with_a_connection_id_never_waits_on_current() {
+        use std::sync::Arc;
+        let pool: super::DriverPool = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+        let current: super::DriverSlot = Arc::new(tokio::sync::Mutex::new(None));
+        let _held = current.lock().await;
+        let resolved = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            super::resolve_driver(&pool, &current, Some("conn-a")),
+        )
+        .await;
+        assert!(matches!(resolved, Ok(None)));
     }
 
     #[test]
