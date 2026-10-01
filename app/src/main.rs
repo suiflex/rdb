@@ -1239,6 +1239,32 @@ fn schema_display_rows(
 /// database with no leaf rows gets a non-clickable hint row so the header never
 /// looks stuck: `(loading…)` until its fetch lands in `loaded_dbs`, then
 /// `(empty)` if it really is empty.
+/// Narrows the Queries / History list to rows whose label contains
+/// `filter` (case-insensitive), keeping a group header only while one of its
+/// rows survives.
+fn filter_query_rows(rows: Vec<TreeNode>, filter: &str) -> Vec<TreeNode> {
+    let needle = filter.trim().to_lowercase();
+    if needle.is_empty() {
+        return rows;
+    }
+    let mut out: Vec<TreeNode> = Vec::new();
+    let mut header: Option<TreeNode> = None;
+    for row in rows {
+        if row.kind == "qcat" {
+            header = Some(row);
+            continue;
+        }
+        if !row.label.to_lowercase().contains(&needle) {
+            continue;
+        }
+        if let Some(h) = header.take() {
+            out.push(h);
+        }
+        out.push(row);
+    }
+    out
+}
+
 fn nested_display_rows(
     nodes: &[model::VmTreeNode],
     expanded_dbs: &HashSet<String>,
@@ -5841,10 +5867,13 @@ fn main() -> Result<(), slint::PlatformError> {
         let saved = saved_queries.clone();
         let recent = recent_queries.clone();
         let collapsed_history_groups = collapsed_history_groups.clone();
+        let sidebar_filter = sidebar_filter.clone();
         move |active: &str| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            // The sidebar has one filter field for all three tabs.
+            let filter = sidebar_filter.lock().unwrap().clone();
             // Mode 2 (History) shows only the live history; mode 1 (Queries)
             // shows Saved + Recent.
             let history_only = w.get_sidebar_mode() == 2;
@@ -5899,7 +5928,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 for label in &order {
                     let idxs = &buckets[label];
-                    let is_open = !collapsed.contains(label);
+                    // While filtering, groups are forced open so matches show.
+                    let is_open = !filter.is_empty() || !collapsed.contains(label);
                     rows.push(TreeNode {
                         label: label.as_str().into(),
                         depth: 0,
@@ -5936,6 +5966,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 }
             }
+            let rows = filter_query_rows(rows, &filter);
             w.set_query_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
         }
     });
@@ -6608,5 +6639,49 @@ mod tests {
             "USERS",
         );
         assert_eq!(rows.iter().filter(|r| r.kind == "table").count(), 1);
+    }
+}
+
+#[cfg(test)]
+mod filter_query_rows_tests {
+    use super::*;
+
+    fn row(label: &str, kind: &str) -> TreeNode {
+        TreeNode {
+            label: label.into(),
+            kind: kind.into(),
+            ..Default::default()
+        }
+    }
+
+    fn labels(rows: Vec<TreeNode>) -> Vec<String> {
+        rows.into_iter().map(|r| r.label.to_string()).collect()
+    }
+
+    fn sample() -> Vec<TreeNode> {
+        vec![
+            row("Today", "qcat"),
+            row("select * from users", "recent"),
+            row("Yesterday", "qcat"),
+            row("select * from orders", "recent"),
+        ]
+    }
+
+    #[test]
+    fn keeps_matching_rows_under_their_own_header() {
+        assert_eq!(
+            labels(filter_query_rows(sample(), "ORDERS")),
+            ["Yesterday", "select * from orders"]
+        );
+    }
+
+    #[test]
+    fn an_empty_filter_keeps_everything() {
+        assert_eq!(filter_query_rows(sample(), "").len(), 4);
+    }
+
+    #[test]
+    fn nothing_matching_leaves_no_headers_behind() {
+        assert!(filter_query_rows(sample(), "zzz").is_empty());
     }
 }

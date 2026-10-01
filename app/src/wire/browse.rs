@@ -999,11 +999,19 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let collapsed_categories = collapsed_categories.clone();
         let cur_engine = cur_engine.clone();
         let sidebar_filter = sidebar_filter.clone();
+        let rebuild_query_tree = rebuild_query_tree.clone();
         window.on_filter_tree(move |text| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
             *sidebar_filter.lock().unwrap() = text.to_string();
+            // Queries and History share the field; their list reads the
+            // filter back out of `sidebar_filter`. The Items tree below is
+            // rebuilt either way, so switching back to it shows the same
+            // filter the field does.
+            if w.get_sidebar_mode() != 0 {
+                rebuild_query_tree("");
+            }
             let nodes = raw_nodes.lock().unwrap();
             let rows = schema_display_rows(
                 &nodes,
