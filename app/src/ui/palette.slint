@@ -40,6 +40,13 @@ export component ListModal inherits Rectangle {
 
     visible: root.open;
     background: Tokens.veil;
+    // Every caller builds its list unfiltered on open; start the search
+    // field empty to match, not on whatever was typed last time.
+    changed open => {
+        if (self.open) {
+            search.text = "";
+        }
+    }
 
     veil-ta := TouchArea {
         clicked => { root.dismiss(); }
