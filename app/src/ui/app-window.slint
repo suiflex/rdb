@@ -462,6 +462,8 @@ callback create-table-commit();
     in property <[string]> db-list;
     in property <[PaletteGroup]> conn-items;
     callback db-choose(int);
+    // Search text typed into the Open database modal.
+    callback db-filter(string);
     callback conn-choose(int);
     callback open-db-modal();
     callback open-conn-modal();
@@ -470,6 +472,8 @@ callback create-table-commit();
     in-out property <bool> schema-modal-open: false;
     in property <[PaletteGroup]> schema-items;
     callback schema-choose(int);
+    // Search text typed into the Switch schema modal.
+    callback schema-filter(string);
 
     // ----- pagination + edit footer -----
     in property <int> page-start;
@@ -2297,6 +2301,9 @@ callback create-table-commit();
         placeholder: "Search for database...";
         open: root.db-modal-open;
         items: root.db-items;
+        filter(t) => {
+            root.db-filter(t);
+        }
         choose(i) => {
             root.db-choose(i);
         }
@@ -2320,6 +2327,9 @@ callback create-table-commit();
         confirm-label: "Switch";
         open: root.schema-modal-open;
         items: root.schema-items;
+        filter(t) => {
+            root.schema-filter(t);
+        }
         choose(i) => {
             root.schema-choose(i);
         }
