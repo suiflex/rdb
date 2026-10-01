@@ -10,6 +10,29 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use crate::*;
 
+/// One switcher row per name containing `query` (case-insensitive); an empty
+/// query keeps them all.
+fn switcher_items(names: impl Iterator<Item = SharedString>, query: &str) -> Vec<PaletteItem> {
+    let query = query.trim().to_lowercase();
+    names
+        .filter(|n| n.to_lowercase().contains(&query))
+        .map(|label| PaletteItem {
+            label,
+            kind: "database".into(),
+            sub: SharedString::default(),
+            local: false,
+            color: theme::accent_or_default(""),
+            has_custom_color: false,
+            env_tag_label: SharedString::default(),
+            env_tag_color: theme::accent_or_default(""),
+            group: SharedString::default(),
+            expanded: false,
+            is_group_end: false,
+            depth: 0,
+        })
+        .collect()
+}
+
 pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
     let AppState {
         rt,
@@ -45,24 +68,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             };
             // Real databases enumerated on connect and cached in `db-list`. Empty
             // for engines that can't switch (single/implicit database).
-            let items: Vec<PaletteItem> = w
-                .get_db_list()
-                .iter()
-                .map(|d| PaletteItem {
-                    label: d,
-                    kind: "database".into(),
-                    sub: SharedString::default(),
-                    local: false,
-                    color: theme::accent_or_default(""),
-                    has_custom_color: false,
-                    env_tag_label: SharedString::default(),
-                    env_tag_color: theme::accent_or_default(""),
-                    group: SharedString::default(),
-                    expanded: false,
-                    is_group_end: false,
-                    depth: 0,
-                })
-                .collect();
+            let items = switcher_items(w.get_db_list().iter(), "");
             if items.is_empty() {
                 return;
             }
@@ -70,6 +76,33 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 items,
             )))));
             w.set_db_modal_open(true);
+        });
+    }
+    // Typing in either switcher narrows the list it shows. `db_choose` /
+    // `schema_choose` read the label off the shown model, so a filtered index
+    // still picks the right entry.
+    {
+        let weak = window.as_weak();
+        window.on_db_filter(move |q| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let items = switcher_items(w.get_db_list().iter(), &q);
+            w.set_db_items(ModelRc::from(Rc::new(VecModel::from(group_palette_items(
+                items,
+            )))));
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_schema_filter(move |q| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let items = switcher_items(w.get_schema_list().iter(), &q);
+            w.set_schema_items(ModelRc::from(Rc::new(VecModel::from(group_palette_items(
+                items,
+            )))));
         });
     }
     {
@@ -105,24 +138,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             let Some(w) = weak.upgrade() else {
                 return;
             };
-            let items: Vec<PaletteItem> = w
-                .get_schema_list()
-                .iter()
-                .map(|s| PaletteItem {
-                    label: s,
-                    kind: "database".into(),
-                    sub: SharedString::default(),
-                    local: false,
-                    color: theme::accent_or_default(""),
-                    has_custom_color: false,
-                    env_tag_label: SharedString::default(),
-                    env_tag_color: theme::accent_or_default(""),
-                    group: SharedString::default(),
-                    expanded: false,
-                    is_group_end: false,
-                    depth: 0,
-                })
-                .collect();
+            let items = switcher_items(w.get_schema_list().iter(), "");
             if items.is_empty() {
                 return;
             }
@@ -530,5 +546,41 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 });
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod switcher_items_tests {
+    use super::switcher_items;
+    use slint::SharedString;
+
+    fn labels(query: &str) -> Vec<String> {
+        let names = ["_peerdb_internal", "cabut", "cleansing", "Datin"]
+            .into_iter()
+            .map(SharedString::from);
+        switcher_items(names, query)
+            .into_iter()
+            .map(|i| i.label.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn narrows_to_names_containing_the_query() {
+        assert_eq!(labels("cab"), ["cabut"]);
+    }
+
+    #[test]
+    fn ignores_case() {
+        assert_eq!(labels("DAT"), ["Datin"]);
+    }
+
+    #[test]
+    fn an_empty_query_keeps_every_name() {
+        assert_eq!(labels("").len(), 4);
+    }
+
+    #[test]
+    fn nothing_matching_leaves_the_list_empty() {
+        assert!(labels("zzz").is_empty());
     }
 }
