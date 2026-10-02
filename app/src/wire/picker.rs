@@ -1161,6 +1161,27 @@ fn schedule_multi_connection_scenario(
                         && w.get_selected_conn() == mongo
                         && w.get_schema_tree().row_count() > 0
                 }),
+                // Run something in it, the way a user would.
+                Rc::new(|w: &MainWindow| {
+                    w.invoke_editor_key("db.users.find()".into(), false, false, false);
+                    w.invoke_run_query();
+                }),
+            ),
+            (
+                "running a dead connection's tab moves it to the live one",
+                // Name, colour and engine on the strip follow the query to
+                // mongo instead of still claiming postgres.
+                Rc::new(|w: &MainWindow| {
+                    active_tab_engine(w) == "mongo" && w.get_conn_status() == "connected"
+                }),
+                // Another postgres tab (the emiten table), still offline.
+                Rc::new(|w: &MainWindow| w.invoke_select_tab(1)),
+            ),
+            (
+                "another dead tab still shows offline",
+                Rc::new(|w: &MainWindow| {
+                    active_tab_engine(w) == "postgres" && w.get_conn_status() == "offline"
+                }),
                 // The topbar's Connect button.
                 Rc::new(|w: &MainWindow| w.invoke_reconnect()),
             ),
