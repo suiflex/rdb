@@ -809,7 +809,7 @@ fn handle_connect_clicked(state: &AppState, fns: &AppFns, weak: slint::Weak<Main
     // to a disk read only if startup found none. Either way, switching
     // connections doesn't lose open queries.
     let TabRestorePlan {
-        tabs: init_tabs,
+        tabs: mut init_tabs,
         active: init_active,
         active_p1: init_active_p1,
         active_group: init_active_group,
@@ -824,6 +824,8 @@ fn handle_connect_clicked(state: &AppState, fns: &AppFns, weak: slint::Weak<Main
         settings.borrow().get().ui_state.query_tabs_by_connection,
         &connection_badge_info(&store.borrow(), &sc.id),
     );
+    // The plan may have read the tabs back off disk, labels and all.
+    refresh_tab_badges(&mut init_tabs, &store.borrow());
     *workspace_tabs.lock().unwrap() = init_tabs;
     *active_tab_id.lock().unwrap() = init_active.clone();
     *active_group1_tab_id.lock().unwrap() = init_active_p1.clone();
