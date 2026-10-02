@@ -5,6 +5,7 @@
 import { Tokens } from "tokens.slint";
 import { TopLevelGroup } from "structs.slint";
 import { DbBadge, TooltipArea } from "components.slint";
+import { AppIcon } from "icons.slint";
 import { StateLayer, MaterialPalette } from "@material";
 import { ScrollView } from "std-widgets.slint";
 
@@ -20,6 +21,8 @@ export component ConnectionsPanel inherits Rectangle {
     in property <bool> mirror;
     callback connect-clicked(int);
     callback open-picker();
+    // Close every open connection and go back to the picker.
+    callback disconnect-all();
 
     // A strip distinct from the card: Material's `surface` (the card) is the
     // canvas colour in both themes, so a canvas rail hid the notch.
@@ -143,6 +146,32 @@ export component ConnectionsPanel inherits Rectangle {
                             }
                         }
                     }
+                }
+            }
+        }
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 40px;
+                height: 40px;
+                border-radius: self.width / 2;
+                StateLayer {
+                    width: 100%;
+                    height: 100%;
+                    background: MaterialPalette.on_surface;
+                    border-radius: parent.border-radius;
+                    has-hover: home-ta.has-hover;
+                    enabled: true;
+                }
+                AppIcon {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    name: "home";
+                    color: home-ta.has-hover ? Tokens.accent : Tokens.text-dim;
+                }
+                home-ta := TooltipArea {
+                    tip: "Disconnect all";
+                    clicked => { root.disconnect-all(); }
                 }
             }
         }
