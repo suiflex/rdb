@@ -25,26 +25,58 @@ use crate::*;
 fn bind_tab_connection_for_runner(
     workspace_tabs: &std::sync::Mutex<Vec<WorkspaceTab>>,
     current_connection_id: &std::sync::Mutex<Option<String>>,
+    live: &HashSet<String>,
+    badge_for: &dyn Fn(&str) -> ConnBadgeInfo,
     target_id: &str,
     sql: &str,
-) -> Option<String> {
-    let mut tab_connection_id = None;
-    if let Some(tab) = workspace_tabs
-        .lock()
-        .unwrap()
-        .iter_mut()
-        .find(|tab| tab.id == target_id)
-    {
-        tab.loading = true;
-        tab.query_text = sql.to_string();
-        tab_connection_id = tab.connection_id.clone();
-        if tab_connection_id.is_none() {
-            tab_connection_id = current_connection_id.lock().unwrap().clone();
-            tab.connection_id = tab_connection_id.clone();
+) -> (Option<String>, bool) {
+    let mut tabs = workspace_tabs.lock().unwrap();
+    let Some(tab) = tabs.iter_mut().find(|tab| tab.id == target_id) else {
+        return (None, false);
+    };
+    tab.loading = true;
+    tab.query_text = sql.to_string();
+    // A tab bound to nothing yet latches onto the connection the workspace
+    // shows, and so does one whose own connection is gone: running it is
+    // asking for an answer from the connection that is there. Its name and
+    // colour move with it, or the strip keeps naming a connection the query
+    // never touched.
+    let dead = tab
+        .connection_id
+        .as_ref()
+        .is_some_and(|id| !live.contains(id));
+    if tab.connection_id.is_none() || dead {
+        if let Some(cur) = current_connection_id.lock().unwrap().clone() {
+            let badge = badge_for(&cur);
+            tab.connection_id = Some(cur);
+            tab.engine = badge.engine;
+            tab.connection_name = badge.name;
+            tab.color = badge.color;
+            tab.has_custom_color = badge.has_custom_color;
+            return (tab.connection_id.clone(), true);
         }
     }
-    tab_connection_id
+    (tab.connection_id.clone(), false)
 }
+
+/// Repaints the tab strip and topbar after a run moved its tab onto the
+/// workspace's connection.
+fn show_rebound_tab(
+    w: &MainWindow,
+    store: &rdb_connstore::ConnStore,
+    workspace_tabs: &std::sync::Mutex<Vec<WorkspaceTab>>,
+    active_tab_id: &std::sync::Mutex<Option<String>>,
+    connection_id: &str,
+) {
+    {
+        let tabs = workspace_tabs.lock().unwrap();
+        let left_active = active_tab_id.lock().unwrap().clone();
+        set_workspace_tabs(w, &tabs, left_active.as_deref());
+    }
+    sync_conn_chrome(w, store, Some(connection_id));
+    w.set_conn_status(SharedString::from("connected"));
+}
+
 /// One statement's result, kept only when Run Selection asked for a result
 /// tab per statement.
 struct SplitResult {
@@ -412,6 +444,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
         active_tab_id,
         active_group1_tab_id,
         current_connection_id,
+        connected_ids,
         painted_connection,
         query_console,
         last_view,
@@ -429,6 +462,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
         let driver_pool = driver_pool.clone();
         let current_connection_id = current_connection_id.clone();
         let painted_connection = painted_connection.clone();
+        let connected_ids = connected_ids.clone();
         let store = store.clone();
         let last_view = last_view.clone();
         let panes = panes.clone();
@@ -467,12 +501,17 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             let Some(target_id) = active_id.lock().unwrap().clone() else {
                 return;
             };
-            let tab_connection_id = bind_tab_connection_for_runner(
+            let (tab_connection_id, rebound) = bind_tab_connection_for_runner(
                 &workspace_tabs,
                 &current_connection_id,
+                &connected_ids.lock().unwrap(),
+                &|cid| connection_badge_info(&store.borrow(), cid),
                 &target_id,
                 &sql,
             );
+            if let (true, Some(cid), Some(w)) = (rebound, &tab_connection_id, weak.upgrade()) {
+                show_rebound_tab(&w, &store.borrow(), &workspace_tabs, &active_tab_id, cid);
+            }
             let weak2 = weak.clone();
             let current = current.clone();
             let driver_pool = driver_pool.clone();
@@ -685,6 +724,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
         let driver_pool = driver_pool.clone();
         let current_connection_id = current_connection_id.clone();
         let painted_connection = painted_connection.clone();
+        let connected_ids = connected_ids.clone();
         let store = store.clone();
         let query_console = query_console.clone();
         let workspace_tabs = workspace_tabs.clone();
@@ -733,12 +773,17 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             // Log the RAW sql (clean `SELECT * FROM t`, no injected LIMIT).
             append_query_console(&query_console, sql.clone());
             sync_query_console(&w, &query_console);
-            let tab_connection_id = bind_tab_connection_for_runner(
+            let (tab_connection_id, rebound) = bind_tab_connection_for_runner(
                 &workspace_tabs,
                 &current_connection_id,
+                &connected_ids.lock().unwrap(),
+                &|cid| connection_badge_info(&store.borrow(), cid),
                 &target_id,
                 &sql,
             );
+            if let (true, Some(cid)) = (rebound, &tab_connection_id) {
+                show_rebound_tab(&w, &store.borrow(), &workspace_tabs, &active_tab_id, cid);
+            }
             set_p_query_running(&w, pane, true);
             set_p_streaming(&w, pane, true);
             set_p_read_only(&w, pane, true);
@@ -1136,5 +1181,52 @@ mod db_for_query_tests {
     fn an_unbound_tab_follows_the_sidebar() {
         let painted = Mutex::new(Some("conn-a".to_string()));
         assert_eq!(db_for_query("public", &painted, None), "public");
+    }
+}
+
+#[cfg(test)]
+mod bind_tab_connection_tests {
+    use super::*;
+
+    fn bind(tab_conn: Option<&str>, live: &[&str]) -> (Option<String>, bool, WorkspaceTab) {
+        let mut tab = WorkspaceTab::sql("t".into(), 1);
+        tab.connection_id = tab_conn.map(str::to_string);
+        tab.connection_name = "old".into();
+        let tabs = std::sync::Mutex::new(vec![tab]);
+        let current = std::sync::Mutex::new(Some("conn-a".to_string()));
+        let live: HashSet<String> = live.iter().map(|s| s.to_string()).collect();
+        let badge = |cid: &str| ConnBadgeInfo {
+            name: format!("name of {cid}"),
+            ..Default::default()
+        };
+        let (id, rebound) =
+            bind_tab_connection_for_runner(&tabs, &current, &live, &badge, "t", "select 1");
+        let tab = tabs.into_inner().unwrap().remove(0);
+        (id, rebound, tab)
+    }
+
+    #[test]
+    fn a_tab_on_a_live_connection_keeps_it() {
+        let (id, rebound, tab) = bind(Some("conn-b"), &["conn-a", "conn-b"]);
+        assert_eq!(id.as_deref(), Some("conn-b"));
+        assert!(!rebound);
+        assert_eq!(tab.connection_name, "old");
+    }
+
+    /// Regression: the tab kept B's name and colour while its query ran on A.
+    #[test]
+    fn a_tab_whose_connection_is_gone_moves_to_the_workspace_one() {
+        let (id, rebound, tab) = bind(Some("conn-b"), &["conn-a"]);
+        assert_eq!(id.as_deref(), Some("conn-a"));
+        assert!(rebound);
+        assert_eq!(tab.connection_name, "name of conn-a");
+    }
+
+    #[test]
+    fn an_unbound_tab_latches_with_its_badge() {
+        let (id, rebound, tab) = bind(None, &["conn-a"]);
+        assert_eq!(id.as_deref(), Some("conn-a"));
+        assert!(rebound);
+        assert_eq!(tab.connection_name, "name of conn-a");
     }
 }
