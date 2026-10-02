@@ -155,7 +155,7 @@ fn next_table_ref<'a>(
 /// `flag_teknis`), 2 = prefix once the underscores are squashed out of both
 /// (`schemaoi` finds `schema_oi`). `None` when it doesn't match at all.
 /// Doubles as the sort key so a fuzzier tier can't outrank a literal one.
-fn match_rank(label: &str, word: &str) -> Option<u8> {
+pub(crate) fn match_rank(label: &str, word: &str) -> Option<u8> {
     let l = label.to_lowercase();
     if l.starts_with(word) {
         return Some(0);
