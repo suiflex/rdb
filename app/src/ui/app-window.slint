@@ -306,6 +306,8 @@ callback create-table-commit();
     // "connecting" (amber) | "connected" (green) | "error" (red, ping dropped).
     in property <string> conn-status: "connecting";
     callback disconnect();
+    // Close every open connection and return to the picker (the rail's Home).
+    callback disconnect-all();
     callback conn-filter(string);
     // Re-render the connections sidebar (live dots etc.) from Rust state.
     // Needed as a callback, not a plain fn call, because the connect flow's
@@ -1391,6 +1393,7 @@ callback create-table-commit();
                     set-visible(v) => { root.sidebar-visible = v; }
                     set-w(v) => { root.sidebar-w = v; }
                     disconnect() => { root.disconnect(); }
+                    disconnect-all() => { root.disconnect-all(); }
                     open-function(f) => { root.open-function(f); }
                     open-query(q, i) => { root.open-query(q, i); }
                     insert-query(i) => { root.insert-query(i); }
@@ -2257,6 +2260,7 @@ callback create-table-commit();
                     set-visible(v) => { root.sidebar-visible = v; }
                     set-w(v) => { root.sidebar-w = v; }
                     disconnect() => { root.disconnect(); }
+                    disconnect-all() => { root.disconnect-all(); }
                     open-function(f) => { root.open-function(f); }
                     open-query(q, i) => { root.open-query(q, i); }
                     insert-query(i) => { root.insert-query(i); }

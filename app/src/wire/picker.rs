@@ -33,6 +33,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         connected_ids,
         query_number,
         conn_modal_map,
+        connect_handle,
         ..
     } = state.clone();
     let AppFns {
@@ -796,6 +797,44 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         });
     }
 
+    // ----- disconnect all: the rail's Home, back to the picker -----
+    {
+        let weak = window.as_weak();
+        let rt = rt.clone();
+        let current = current.clone();
+        let driver_pool = driver_pool.clone();
+        let connected_ids = connected_ids.clone();
+        let connect_handle = connect_handle.clone();
+        window.on_disconnect_all(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            // Connects still in flight would land afterwards and bring a
+            // connection back behind the picker.
+            for (_, h) in connect_handle.borrow_mut().drain() {
+                h.abort();
+            }
+            let ids: Vec<String> = connected_ids.lock().unwrap().drain().collect();
+            {
+                let current = current.clone();
+                let driver_pool = driver_pool.clone();
+                rt.spawn(async move {
+                    for id in ids {
+                        let entry = driver_pool.write().await.remove(&id);
+                        if let Some((_, driver)) = entry {
+                            let _ = driver.cancel_running().await;
+                        }
+                    }
+                    *current.lock().await = None;
+                });
+            }
+            // With nothing left live, the single disconnect's teardown is the
+            // "last connection closed" path: grid, tree and topbar cleared,
+            // every tab kept, picker shown.
+            w.invoke_disconnect();
+        });
+    }
+
     // ----- reconnect: retry the current connection after a health drop -----
     {
         let weak = window.as_weak();
@@ -1192,6 +1231,16 @@ fn schedule_multi_connection_scenario(
                 // that only counts rows passes on the broken state too.
                 Rc::new(move |w: &MainWindow| {
                     connection_is_live(w, pg) && active_tab_engine(w) == "postgres"
+                }),
+                // The rail's Home.
+                Rc::new(|w: &MainWindow| w.invoke_disconnect_all()),
+            ),
+            (
+                "home closes every connection and shows the picker",
+                Rc::new(move |w: &MainWindow| {
+                    !w.get_connected()
+                        && !connection_is_live(w, pg)
+                        && !connection_is_live(w, mongo)
                 }),
                 Rc::new(|_w: &MainWindow| {}),
             ),

@@ -40,6 +40,7 @@ export component NavCluster inherits HorizontalLayout {
     callback connect-clicked(int);
     callback open-picker();
     callback disconnect();
+    callback disconnect-all();
     callback open-function(string);
     callback open-query(string, int);
     callback insert-query(int);
@@ -69,6 +70,7 @@ export component NavCluster inherits HorizontalLayout {
         mirror: root.mirror;
         connect-clicked(i) => { root.connect-clicked(i); }
         open-picker => { root.open-picker(); }
+        disconnect-all => { root.disconnect-all(); }
     }
 
     // draggable vertical splitter (sidebar width) — leading edge when mirrored
@@ -213,5 +215,6 @@ export component NavCluster inherits HorizontalLayout {
         mirror: root.mirror;
         connect-clicked(i) => { root.connect-clicked(i); }
         open-picker => { root.open-picker(); }
+        disconnect-all => { root.disconnect-all(); }
     }
 }
