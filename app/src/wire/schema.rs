@@ -10,13 +10,16 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use crate::*;
 
-/// One switcher row per name containing `query` (case-insensitive); an empty
-/// query keeps them all.
+/// One switcher row per name matching `query` the way query completion
+/// matches (`search_rank`), best match first; an empty query keeps them all
+/// in their own order.
 fn switcher_items(names: impl Iterator<Item = SharedString>, query: &str) -> Vec<PaletteItem> {
-    let query = query.trim().to_lowercase();
-    names
-        .filter(|n| n.to_lowercase().contains(&query))
-        .map(|label| PaletteItem {
+    let mut hits: Vec<_> = names
+        .filter_map(|n| search_rank(&n, query).map(|rank| (rank, n)))
+        .collect();
+    hits.sort_by_key(|(rank, _)| *rank);
+    hits.into_iter()
+        .map(|(_, label)| PaletteItem {
             label,
             kind: "database".into(),
             sub: SharedString::default(),
@@ -567,6 +570,22 @@ mod switcher_items_tests {
     #[test]
     fn narrows_to_names_containing_the_query() {
         assert_eq!(labels("cab"), ["cabut"]);
+    }
+
+    /// Same tiers as query completion: a `_`-segment prefix and chars in
+    /// order both match, ranked below a literal prefix.
+    #[test]
+    fn matches_like_completion_with_the_best_match_first() {
+        assert_eq!(labels("int"), ["_peerdb_internal"]);
+        assert_eq!(labels("cbt"), ["cabut"]);
+        let names = ["l_integrasi", "integrasi"]
+            .into_iter()
+            .map(SharedString::from);
+        let ranked: Vec<_> = switcher_items(names, "integ")
+            .into_iter()
+            .map(|i| i.label.to_string())
+            .collect();
+        assert_eq!(ranked, ["integrasi", "l_integrasi"]);
     }
 
     #[test]

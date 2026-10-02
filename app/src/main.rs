@@ -655,9 +655,9 @@ fn build_conn_items(
             .and_then(rdb_connstore::normalize_group_path)
             .unwrap_or_else(|| UNGROUPED.to_string());
         if !needle.is_empty()
-            && !sc.name.to_lowercase().contains(&needle)
-            && !g.to_lowercase().contains(&needle)
-            && !sc.env_tag.as_str().to_lowercase().contains(&needle)
+            && search_rank(&sc.name, &needle).is_none()
+            && search_rank(&g, &needle).is_none()
+            && search_rank(sc.env_tag.as_str(), &needle).is_none()
         {
             continue;
         }
@@ -1178,9 +1178,8 @@ fn schema_display_rows(
         return nested_display_rows(nodes, expanded_tables, loaded_dbs, leaf_kind, filter);
     }
 
-    let needle = filter.to_lowercase();
-    let filtering = !needle.is_empty();
-    let matches = |label: &str| !filtering || label.to_lowercase().contains(&needle);
+    let filtering = !filter.trim().is_empty();
+    let matches = |label: &str| search_rank(label, filter).is_some();
     let categories = sidebar_categories(engine);
     // Matching containers live under "Tables"; functions under "Functions".
     let container_count = nodes
@@ -1247,6 +1246,18 @@ fn schema_display_rows(
     rows
 }
 
+/// How well a search `query` matches `label`, ranked the way query
+/// completion ranks a typed word (lowest is best — see
+/// `completion::match_rank`): prefix, then a `_`-segment prefix, then the
+/// chars in order. An empty query matches everything.
+fn search_rank(label: &str, query: &str) -> Option<u8> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return Some(0);
+    }
+    completion::match_rank(label, &query)
+}
+
 /// Narrows the Queries / History list to rows whose label contains
 /// `filter` (case-insensitive), keeping a group header only while one of its
 /// rows survives.
@@ -1263,7 +1274,14 @@ fn filter_query_rows(rows: Vec<TreeNode>, filter: &str) -> Vec<TreeNode> {
             header = Some(row);
             continue;
         }
-        if !row.label.to_lowercase().contains(&needle) {
+        // History rows are SQL text, where an in-order-chars match hits
+        // nearly every entry; they stay a plain substring search.
+        let hit = if row.kind == "recent" {
+            row.label.to_lowercase().contains(&needle)
+        } else {
+            search_rank(&row.label, &needle).is_some()
+        };
+        if !hit {
             continue;
         }
         if let Some(h) = header.take() {
@@ -1301,9 +1319,8 @@ fn nested_display_rows(
     leaf_kind: &str,
     filter: &str,
 ) -> Vec<TreeNode> {
-    let needle = filter.to_lowercase();
-    let filtering = !needle.is_empty();
-    let matches = |label: &str| !filtering || label.to_lowercase().contains(&needle);
+    let filtering = !filter.trim().is_empty();
+    let matches = |label: &str| search_rank(label, filter).is_some();
 
     // Group the flat list into (database, leaves) so headers can carry a
     // matching-leaf count badge before their rows are emitted.
@@ -3744,16 +3761,22 @@ fn build_palette_items(
     };
     let mut items: Vec<PaletteItem> = Vec::new();
     let mut actions: Vec<PaletteAction> = Vec::new();
-    let conns: Vec<_> = names
+    // Best match first within each section, the way completion orders its
+    // popup; a stable sort keeps the original order among equal ranks.
+    let mut conns: Vec<_> = names
         .iter()
         .enumerate()
-        .filter(|(_, (n, _, _, _, env_tag_label, _, group))| {
-            needle.is_empty()
-                || n.to_lowercase().contains(needle)
-                || group.to_lowercase().contains(needle)
-                || env_tag_label.to_lowercase().contains(needle)
+        .filter_map(|(i, c)| {
+            let (n, _, _, _, env_tag_label, _, group) = c;
+            [n.as_str(), group.as_str(), env_tag_label.as_str()]
+                .into_iter()
+                .filter_map(|s| search_rank(s, needle))
+                .min()
+                .map(|rank| (rank, (i, c)))
         })
         .collect();
+    conns.sort_by_key(|(rank, _)| *rank);
+    let conns: Vec<_> = conns.into_iter().map(|(_, c)| c).collect();
     if !conns.is_empty() {
         items.push(section("Connections"));
         actions.push(PaletteAction::None);
@@ -3778,13 +3801,15 @@ fn build_palette_items(
     }
     let schema_tree = w.get_schema_tree();
     let by_kind = |kind: &'static str| -> Vec<(SharedString, SharedString)> {
-        schema_tree
+        let mut hits: Vec<_> = schema_tree
             .iter()
-            .filter(|n| {
-                n.kind == kind && (needle.is_empty() || n.label.to_lowercase().contains(needle))
+            .filter(|n| n.kind == kind)
+            .filter_map(|n| {
+                search_rank(&n.label, needle).map(|r| (r, n.db.clone(), n.label.clone()))
             })
-            .map(|n| (n.db.clone(), n.label.clone()))
-            .collect()
+            .collect();
+        hits.sort_by_key(|(rank, _, _)| *rank);
+        hits.into_iter().map(|(_, db, label)| (db, label)).collect()
     };
     let tables = by_kind("table");
     if !tables.is_empty() {
@@ -3852,11 +3877,13 @@ fn build_palette_items(
             actions.push(PaletteAction::OpenFunction(label));
         }
     }
-    let saved: Vec<_> = saved_queries
+    let mut saved: Vec<_> = saved_queries
         .iter()
         .enumerate()
-        .filter(|(_, (n, _))| needle.is_empty() || n.to_lowercase().contains(needle))
+        .filter_map(|(i, q)| search_rank(&q.0, needle).map(|rank| (rank, (i, q))))
         .collect();
+    saved.sort_by_key(|(rank, _)| *rank);
+    let saved: Vec<_> = saved.into_iter().map(|(_, s)| s).collect();
     if !saved.is_empty() {
         items.push(section("Saved Queries"));
         actions.push(PaletteAction::None);
