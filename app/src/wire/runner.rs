@@ -59,6 +59,33 @@ fn bind_tab_connection_for_runner(
     (tab.connection_id.clone(), false)
 }
 
+/// `bind_tab_connection_for_runner` for a run about to start, repainting the
+/// strip and topbar when it moved the tab onto another connection.
+#[allow(clippy::too_many_arguments)]
+fn bind_tab_for_run(
+    w: &MainWindow,
+    store: &Rc<RefCell<rdb_connstore::ConnStore>>,
+    workspace_tabs: &std::sync::Mutex<Vec<WorkspaceTab>>,
+    active_tab_id: &std::sync::Mutex<Option<String>>,
+    current_connection_id: &std::sync::Mutex<Option<String>>,
+    connected_ids: &std::sync::Mutex<HashSet<String>>,
+    target_id: &str,
+    sql: &str,
+) -> Option<String> {
+    let (id, rebound) = bind_tab_connection_for_runner(
+        workspace_tabs,
+        current_connection_id,
+        &connected_ids.lock().unwrap(),
+        &|cid| connection_badge_info(&store.borrow(), cid),
+        target_id,
+        sql,
+    );
+    if let (true, Some(cid)) = (rebound, &id) {
+        show_rebound_tab(w, &store.borrow(), workspace_tabs, active_tab_id, cid);
+    }
+    id
+}
+
 /// Repaints the tab strip and topbar after a run moved its tab onto the
 /// workspace's connection.
 fn show_rebound_tab(
@@ -501,17 +528,18 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             let Some(target_id) = active_id.lock().unwrap().clone() else {
                 return;
             };
-            let (tab_connection_id, rebound) = bind_tab_connection_for_runner(
-                &workspace_tabs,
-                &current_connection_id,
-                &connected_ids.lock().unwrap(),
-                &|cid| connection_badge_info(&store.borrow(), cid),
-                &target_id,
-                &sql,
-            );
-            if let (true, Some(cid), Some(w)) = (rebound, &tab_connection_id, weak.upgrade()) {
-                show_rebound_tab(&w, &store.borrow(), &workspace_tabs, &active_tab_id, cid);
-            }
+            let tab_connection_id = weak.upgrade().and_then(|w| {
+                bind_tab_for_run(
+                    &w,
+                    &store,
+                    &workspace_tabs,
+                    &active_tab_id,
+                    &current_connection_id,
+                    &connected_ids,
+                    &target_id,
+                    &sql,
+                )
+            });
             let weak2 = weak.clone();
             let current = current.clone();
             let driver_pool = driver_pool.clone();
@@ -773,17 +801,16 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             // Log the RAW sql (clean `SELECT * FROM t`, no injected LIMIT).
             append_query_console(&query_console, sql.clone());
             sync_query_console(&w, &query_console);
-            let (tab_connection_id, rebound) = bind_tab_connection_for_runner(
+            let tab_connection_id = bind_tab_for_run(
+                &w,
+                &store,
                 &workspace_tabs,
+                &active_tab_id,
                 &current_connection_id,
-                &connected_ids.lock().unwrap(),
-                &|cid| connection_badge_info(&store.borrow(), cid),
+                &connected_ids,
                 &target_id,
                 &sql,
             );
-            if let (true, Some(cid)) = (rebound, &tab_connection_id) {
-                show_rebound_tab(&w, &store.borrow(), &workspace_tabs, &active_tab_id, cid);
-            }
             set_p_query_running(&w, pane, true);
             set_p_streaming(&w, pane, true);
             set_p_read_only(&w, pane, true);
