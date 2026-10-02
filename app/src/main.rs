@@ -455,6 +455,27 @@ mod build_conn_items_tests {
         (dir, store)
     }
 
+    /// Regression: a tab saved bound to one connection but labelled with
+    /// another kept the wrong label forever, so its queries ran on A under
+    /// B's name and colour.
+    #[test]
+    fn restored_tabs_take_their_label_from_their_own_connection() {
+        let (_dir, store) = store_with_groups(&[None, None]);
+        let a = store.list()[0].clone();
+        let mut tab = WorkspaceTab::sql("t".into(), 1);
+        tab.connection_id = Some(a.id.clone());
+        tab.connection_name = "conn1".into();
+        tab.engine = "mongo".into();
+        let mut orphan = WorkspaceTab::sql("o".into(), 2);
+        orphan.connection_id = Some("deleted".into());
+        orphan.connection_name = "kept".into();
+        let mut tabs = vec![tab, orphan];
+        refresh_tab_badges(&mut tabs, &store);
+        assert_eq!(tabs[0].connection_name, a.name);
+        assert_eq!(tabs[0].engine, AnyDriver::badge(a.engine));
+        assert_eq!(tabs[1].connection_name, "kept");
+    }
+
     #[test]
     fn implied_ancestor_header_renders_with_zero_direct_members() {
         let (_dir, store) = store_with_groups(&[Some("Work/Production")]);
@@ -1815,6 +1836,28 @@ fn connection_badge_info(store: &rdb_connstore::ConnStore, connection_id: &str) 
             has_custom_color: c.color.is_some(),
         })
         .unwrap_or_default()
+}
+
+/// Re-derives every bound tab's engine, name and colour from the connection
+/// it is bound to. The persisted label is only a cache: tabs latched onto a
+/// connection before the label moved with them were saved naming one
+/// connection while bound to another, and a connection renamed or recoloured
+/// since leaves the same kind of stale label behind. A tab whose connection
+/// no longer exists keeps what it had.
+fn refresh_tab_badges(tabs: &mut [WorkspaceTab], store: &rdb_connstore::ConnStore) {
+    for tab in tabs {
+        let Some(id) = tab.connection_id.as_deref() else {
+            continue;
+        };
+        if !store.list().iter().any(|c| c.id == id) {
+            continue;
+        }
+        let badge = connection_badge_info(store, id);
+        tab.engine = badge.engine;
+        tab.connection_name = badge.name;
+        tab.color = badge.color;
+        tab.has_custom_color = badge.has_custom_color;
+    }
 }
 
 /// Point the topbar identity chrome (name, accent, env pill, sidebar
@@ -5597,7 +5640,8 @@ fn main() -> Result<(), slint::PlatformError> {
     // Skipped in mock mode, where the screenshot harness must not pick up
     // whatever the developer left on disk.
     if !mock::mock_mode() {
-        let (tabs, active, active_p1, active_group, max_number) = load_query_tabs();
+        let (mut tabs, active, active_p1, active_group, max_number) = load_query_tabs();
+        refresh_tab_badges(&mut tabs, &store.borrow());
         if !tabs.is_empty() {
             // Never let a freshly-minted tab reuse a number a restored tab
             // already holds — `fetch_max` only ever raises the counter.
