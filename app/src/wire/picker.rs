@@ -648,6 +648,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let conn_filter = conn_filter.clone();
         let connected_ids = connected_ids.clone();
         let activate_connection = crate::wire::connect::build_activate_connection(state);
+        let restore_tab = restore_tab.clone();
+        let save_active_tab = save_active_tab.clone();
         window.on_disconnect(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -763,12 +765,20 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 // topbar reflects a connection that's actually still there
                 // instead of the one just dropped.
                 sync_conn_chrome(&w, &store.borrow(), surviving.as_deref());
-                let focused_bound =
-                    focused_tab_connection_id(&active_tab_id, &workspace_tabs).is_some();
-                if surviving.is_none() && focused_bound {
+                if surviving.is_none() {
                     // The focused tab's own connection is the one just
-                    // dropped: it is an offline tab now, Connect included.
-                    w.set_conn_status(SharedString::from("offline"));
+                    // dropped: carry on in one that is still live rather
+                    // than leaving an empty sidebar under a dead tab.
+                    save_active_tab(&w);
+                    move_to_live_connection(
+                        &w,
+                        &store,
+                        &workspace_tabs,
+                        &connected_ids,
+                        &current_connection_id,
+                        &restore_tab,
+                        &activate_connection,
+                    );
                 }
                 if let Some(cid) = surviving {
                     *current_connection_id.lock().unwrap() = Some(cid.clone());
@@ -828,6 +838,45 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             let _ = open::that(u.as_str());
         });
     }
+}
+
+/// Focuses the first tab whose connection is still live, which carries the
+/// whole context (sidebar, topbar, engine) over to it. With no such tab,
+/// activates the first live connection in the store's order and opens a
+/// fresh tab on it.
+fn move_to_live_connection(
+    w: &MainWindow,
+    store: &Rc<RefCell<rdb_connstore::ConnStore>>,
+    workspace_tabs: &Arc<Mutex<Vec<WorkspaceTab>>>,
+    connected_ids: &Arc<Mutex<HashSet<String>>>,
+    current_connection_id: &Arc<Mutex<Option<String>>>,
+    restore_tab: &WindowPaneFn,
+    activate_connection: &WindowConnFn,
+) {
+    let live = connected_ids.lock().unwrap().clone();
+    let tab_idx = workspace_tabs
+        .lock()
+        .unwrap()
+        .iter()
+        .position(|t| t.connection_id.as_ref().is_some_and(|c| live.contains(c)));
+    if let Some(idx) = tab_idx {
+        restore_tab(w, idx);
+        return;
+    }
+    let Some(cid) = store
+        .borrow()
+        .list()
+        .iter()
+        .find(|c| live.contains(&c.id))
+        .map(|c| c.id.clone())
+    else {
+        return;
+    };
+    *current_connection_id.lock().unwrap() = Some(cid.clone());
+    sync_conn_chrome(w, &store.borrow(), Some(&cid));
+    w.set_conn_status(SharedString::from("connected"));
+    activate_connection(w, &cid);
+    w.invoke_new_tab();
 }
 
 /// Drives the app to a reference state for screenshots and e2e tests,
@@ -1087,19 +1136,13 @@ fn schedule_multi_connection_scenario(
                 }),
             ),
             (
-                "the disconnect empties the tree it belonged to",
-                Rc::new(|w: &MainWindow| {
-                    use slint::Model as _;
-                    w.get_schema_tree().row_count() == 0
-                }),
-                // Over to the mongo tab, which is still live.
-                Rc::new(|w: &MainWindow| w.invoke_select_tab(2)),
-            ),
-            (
-                "the live connection is still there to switch to",
+                "the disconnect moves to the connection still live",
+                // The focused tab's connection is gone, so focus lands on the
+                // mongo tab and the sidebar follows it.
                 Rc::new(|w: &MainWindow| {
                     use slint::Model as _;
                     active_tab_engine(w) == "mongo"
+                        && w.get_conn_status() == "connected"
                         && !w.get_tree_loading()
                         && w.get_schema_tree().row_count() > 0
                 }),
