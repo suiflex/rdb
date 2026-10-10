@@ -254,7 +254,12 @@ export component ListModal inherits Rectangle {
                                         size: 15px;
                                         color: Tokens.text-faint;
                                     }
-                                    if it.kind == "postgres" || it.kind == "mysql" || it.kind == "redis" || it.kind == "mongo" || it.kind == "sqlite" || it.kind == "cassandra": DbBadge {
+                                    // Every `ENGINES` badge key — a missing one leaves the row
+                                    // without its leading badge and shifts the text right.
+                                    if it.kind == "postgres" || it.kind == "mysql" || it.kind == "mariadb"
+                                        || it.kind == "redis" || it.kind == "valkey" || it.kind == "mongo"
+                                        || it.kind == "sqlite" || it.kind == "cassandra" || it.kind == "mssql"
+                                        || it.kind == "oracle" || it.kind == "clickhouse": DbBadge {
                                         engine: it.kind;
                                         size: 24px;
                                         fill: it.has-custom-color ? it.color : Tokens.db-color(it.kind);
