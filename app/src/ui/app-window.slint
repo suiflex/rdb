@@ -1469,7 +1469,9 @@ callback create-table-commit();
                                     moved => {
                                         // 18px slop: a small jitter during a click
                                         // no longer flips to drag and eats the click.
-                                        if (abs(self.mouse-x - self.pressed-x) > 18px) {
+                                        // `pressed` / `pressed-x` track the left button only; a
+                                        // right-press grabs too and would compare a stale x.
+                                        if (self.pressed && abs(self.mouse-x - self.pressed-x) > 18px) {
                                             self.dragging = true;
                                             root.tab-drag-source = 0;
                                         }
@@ -1477,6 +1479,7 @@ callback create-table-commit();
                                     pointer-event(e) => {
                                         if (e.kind == PointerEventKind.down
                                             && e.button == PointerEventButton.right) {
+                                            self.dragging = false;
                                             root.tab-menu-index = i;
                                             root.tab-menu-group = 0;
                                             root.tab-menu-title = tab.title;
@@ -1488,7 +1491,7 @@ callback create-table-commit();
                                             root.active-tab = i;
                                             root.active-pane = 0;
                                         }
-                                        if (e.kind == PointerEventKind.up && self.dragging
+                                        if (e.kind == PointerEventKind.up && e.button == PointerEventButton.left && self.dragging
                                             && self.mouse-x - self.pressed-x > 48px) {
                                             root.move-tab-group(i, 1);
                                         }
@@ -1667,7 +1670,9 @@ callback create-table-commit();
                                     moved => {
                                         // 18px slop: a small jitter during a click
                                         // no longer flips to drag and eats the click.
-                                        if (abs(self.mouse-x - self.pressed-x) > 18px) {
+                                        // `pressed` / `pressed-x` track the left button only; a
+                                        // right-press grabs too and would compare a stale x.
+                                        if (self.pressed && abs(self.mouse-x - self.pressed-x) > 18px) {
                                             self.dragging = true;
                                             root.tab-drag-source = 1;
                                         }
@@ -1675,6 +1680,7 @@ callback create-table-commit();
                                     pointer-event(e) => {
                                         if (e.kind == PointerEventKind.down
                                             && e.button == PointerEventButton.right) {
+                                            self.dragging = false;
                                             root.tab-menu-index = i;
                                             root.tab-menu-group = 1;
                                             root.tab-menu-title = tab.title;
@@ -1686,7 +1692,7 @@ callback create-table-commit();
                                             root.p1-active-tab = i;
                                             root.active-pane = 1;
                                         }
-                                        if (e.kind == PointerEventKind.up && self.dragging
+                                        if (e.kind == PointerEventKind.up && e.button == PointerEventButton.left && self.dragging
                                             && self.pressed-x - self.mouse-x > 48px) {
                                             root.move-tab-group(i, 0);
                                         }
