@@ -24,6 +24,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         sync_editor,
         load_editor_text,
         rebuild_query_tree,
+        save_active_tab,
         ..
     } = fns.clone();
 
@@ -228,10 +229,18 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let active_tab_id = active_tab_id.clone();
         let current_connection_id = current_connection_id.clone();
         let store = store.clone();
+        let save_active_tab = save_active_tab.clone();
+        let load_editor_text = load_editor_text.clone();
         window.on_open_function(move |name| {
             let Some(w) = weak.upgrade() else {
                 return;
             };
+            // The function view takes over the left pane, so the tab it covers
+            // is saved first and the editor emptied: otherwise the next save
+            // wrote that tab's text into the function tab, and the tab itself
+            // came back without its unsaved edits.
+            save_active_tab(&w);
+            load_editor_text(0, "");
             let def = fn_defs
                 .lock()
                 .unwrap()
@@ -269,10 +278,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 .map(|cid| connection_badge_info(&store.borrow(), cid))
                 .unwrap_or_default();
             let mut tabs = workspace_tabs.lock().unwrap();
-            if let Some(i) = tabs.iter().position(|tab| tab.id == id) {
+            // `set_workspace_tabs` maps the id to its visible strip index.
+            if tabs.iter().any(|tab| tab.id == id) {
                 *active_tab_id.lock().unwrap() = Some(id.clone());
                 set_workspace_tabs(&w, &tabs, Some(&id));
-                w.set_active_tab(i as i32);
             } else {
                 tabs.push(WorkspaceTab {
                     id: id.clone(),
