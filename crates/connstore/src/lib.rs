@@ -18,5 +18,7 @@ pub use model::{
     Engine, EngineMeta, EnvTag, QueryDialect, QueryLanguage, SavedConnection, SqlDialect, ENGINES,
 };
 pub use secret::{EncryptedFileBackend, KeyringBackend, SecretBackend};
-pub use settings::{AppSettings, EditorPrefs, SettingsStore, ThemeMode, UiState};
+pub use settings::{
+    AppSettings, EditorPrefs, SettingsStore, TabFocus, TabRebind, ThemeMode, UiState,
+};
 pub use store::ConnStore;

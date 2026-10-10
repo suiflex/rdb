@@ -50,6 +50,31 @@ impl ThemeMode {
     }
 }
 
+/// With connection-scoped tabs off, what decides the connection a tab runs
+/// on when the sidebar and the tab disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TabFocus {
+    /// The sidebar's connection stays put; a tab of the same driver family
+    /// runs on it.
+    #[default]
+    Sidebar,
+    /// Opening a tab moves the sidebar to the connection the tab came from.
+    Tab,
+}
+
+/// With `TabFocus::Sidebar`, when a tab run on another connection takes that
+/// connection as its own (its colour dot changes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TabRebind {
+    /// Once a query has actually run there.
+    #[default]
+    OnRun,
+    /// As soon as the tab is opened against it.
+    OnOpen,
+}
+
 /// UI state worth restoring across restarts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -62,6 +87,11 @@ pub struct UiState {
     pub sidebar_right: bool,
     /// Show query tabs belonging to the active connection only.
     pub query_tabs_by_connection: bool,
+    /// Only read while `query_tabs_by_connection` is off.
+    pub tab_focus: TabFocus,
+    /// Only read while `query_tabs_by_connection` is off and `tab_focus` is
+    /// `Sidebar`.
+    pub tab_rebind: TabRebind,
 }
 
 /// Query-editor / results preferences.
@@ -206,6 +236,8 @@ mod tests {
         assert_eq!(s.get().last_update_check, None);
         assert_eq!(s.get().editor.default_page_size, 100);
         assert!(!s.get().ui_state.query_tabs_by_connection);
+        assert_eq!(s.get().ui_state.tab_focus, TabFocus::Sidebar);
+        assert_eq!(s.get().ui_state.tab_rebind, TabRebind::OnRun);
         assert_eq!(s.get().editor.history_max_entries, 50);
         assert!(s.get().editor.auto_table_alias);
         assert!(s.get().editor.error_highlight);
@@ -225,6 +257,8 @@ mod tests {
             s.ui_state.collapsed_groups = vec!["Prod".into()];
             s.ui_state.last_filter = "pg".into();
             s.ui_state.query_tabs_by_connection = true;
+            s.ui_state.tab_focus = TabFocus::Tab;
+            s.ui_state.tab_rebind = TabRebind::OnOpen;
             s.editor.font_size = 16;
             s.editor.history_max_entries = 100;
         })
@@ -237,6 +271,8 @@ mod tests {
         assert_eq!(reloaded.get().ui_state.collapsed_groups, vec!["Prod"]);
         assert_eq!(reloaded.get().ui_state.last_filter, "pg");
         assert!(reloaded.get().ui_state.query_tabs_by_connection);
+        assert_eq!(reloaded.get().ui_state.tab_focus, TabFocus::Tab);
+        assert_eq!(reloaded.get().ui_state.tab_rebind, TabRebind::OnOpen);
         assert_eq!(reloaded.get().editor.font_size, 16);
         assert_eq!(reloaded.get().editor.history_max_entries, 100);
     }
