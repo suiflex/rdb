@@ -656,6 +656,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let collapsed = collapsed.clone();
         let conn_filter = conn_filter.clone();
         let connected_ids = connected_ids.clone();
+        let state = state.clone();
         window.on_form_delete_confirmed(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -664,6 +665,47 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             if id.is_empty() {
                 w.set_form_open(false);
                 return;
+            }
+            // Close it first if it is open: the workspace's own teardown when
+            // it is the one on screen, otherwise just drop its driver and
+            // stop whatever its tabs were running.
+            if connected_ids.lock().unwrap().contains(&id) {
+                let focused =
+                    state.current_connection_id.lock().unwrap().as_deref() == Some(id.as_str());
+                if focused {
+                    w.invoke_disconnect();
+                } else {
+                    connected_ids.lock().unwrap().remove(&id);
+                    for run in state.tab_runs.borrow_mut().values_mut() {
+                        if run.connection_id.as_deref() == Some(id.as_str()) {
+                            run.stop();
+                        }
+                    }
+                    let pool = state.driver_pool.clone();
+                    let gone = id.clone();
+                    state.rt.spawn(async move {
+                        pool.write().await.remove(&gone);
+                    });
+                }
+            }
+            state.conn_contexts.borrow_mut().remove(&id);
+            state.last_tab_by_conn.borrow_mut().remove(&id);
+            // Its tabs stay, as tabs bound to nothing: the query and the last
+            // result are still the user's.
+            {
+                let mut tabs = state.workspace_tabs.lock().unwrap();
+                for tab in tabs
+                    .iter_mut()
+                    .filter(|t| t.connection_id.as_deref() == Some(id.as_str()))
+                {
+                    tab.connection_id = None;
+                    tab.engine = String::new();
+                    tab.connection_name = String::new();
+                    tab.has_custom_color = false;
+                }
+                let left = state.active_tab_id.lock().unwrap().clone();
+                set_workspace_tabs(&w, &tabs, left.as_deref());
+                save_query_tabs(&w, &tabs, left.as_deref());
             }
             {
                 let mut st = store.borrow_mut();
@@ -679,6 +721,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 &conn_filter.borrow(),
                 &connected_ids.lock().unwrap(),
             ));
+            paint_run_states(&w, &state);
         });
     }
 }
