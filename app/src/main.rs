@@ -1744,6 +1744,9 @@ struct WorkspaceTab {
     // One set, not one per pane: a tab is edited by whichever group has it
     // active, and both groups write that group's active tab's `query_text`.
     folded_heads: Vec<usize>,
+    // Cursor and selection, so coming back to a tab lands where it was left
+    // instead of on line 1. In memory only.
+    caret: editor::Caret,
     // Connection the tab was created against (snapshot, not live-tracked).
     connection_id: Option<String>,
     // DbBadge key, e.g. "postgres"; empty when no connection was active yet.
@@ -1785,6 +1788,7 @@ impl WorkspaceTab {
             split_ratio: 0.5,
             pane1_query: String::new(),
             folded_heads: Vec::new(),
+            caret: Default::default(),
             connection_id: None,
             engine: String::new(),
             connection_name: String::new(),
@@ -5682,6 +5686,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             tab.query_text = ed_state.borrow().text();
+            tab.caret = ed_state.borrow().caret();
             // Folds index into the text above, so they are snapshotted with it.
             tab.folded_heads = snapshot_folds(&panes[0].folded_heads);
             tab.loading = w.get_query_running();
@@ -5758,6 +5763,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             tab.query_text = panes[1].ed_state.borrow().text();
+            tab.caret = panes[1].ed_state.borrow().caret();
             tab.folded_heads = snapshot_folds(&panes[1].folded_heads);
             tab.loading = w.get_p1_query_running();
             if tab.kind == "sql" {
@@ -5790,6 +5796,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let active_tab_id = active_tab_id.clone();
         let active_group1_tab_id = active_group1_tab_id.clone();
         let load_editor_text = load_editor_text.clone();
+        let sync_editor = sync_editor.clone();
         let panes = panes.clone();
         let last_view = last_view.clone();
         let store = store.clone();
@@ -5847,6 +5854,8 @@ fn main() -> Result<(), slint::PlatformError> {
             }
 
             load_editor_text(pane, &tab.query_text);
+            panes[pane].ed_state.borrow_mut().set_caret(tab.caret);
+            sync_editor(pane);
             // Replace the pane's fold set with this tab's, rather than leaving
             // the previous tab's line numbers to fold whatever now sits at
             // them. The set is only meaningful against the text just loaded.
