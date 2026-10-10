@@ -5431,6 +5431,10 @@ pub(crate) struct ConnContext {
     fields: Vec<StructField>,
     sql_capable: bool,
     new_tab_label: SharedString,
+    // The topbar's database and schema crumbs, so switching back shows this
+    // connection's selection rather than the last connection's.
+    bc_db: SharedString,
+    bc_schema: SharedString,
 }
 
 /// Per-connection [`ConnContext`], keyed by connection id. UI-thread only.

@@ -425,6 +425,11 @@ async fn finish_connect_success(
             w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
             w.set_sql_capable(sql_capable);
             w.set_new_tab_label(crate::query_parse::language_label(engine).into());
+            // The crumb was painted with a guess ("public") at connect time;
+            // name the schema the server actually put us in.
+            if matches!(engine, rdb_connstore::Engine::Postgres) {
+                w.set_bc_schema(schema_current.clone());
+            }
             w.set_schema_name(schema_current);
             w.set_schema_list(ModelRc::from(Rc::new(VecModel::from(schema_names))));
             w.set_db_list(ModelRc::from(Rc::new(VecModel::from(db_names))));
@@ -540,6 +545,8 @@ fn snapshot_conn_context(
         fields: w.get_structure_columns().iter().collect(),
         sql_capable: w.get_sql_capable(),
         new_tab_label: w.get_new_tab_label(),
+        bc_db: w.get_bc_db(),
+        bc_schema: w.get_bc_schema(),
     };
     contexts.borrow_mut().insert(connection_id.to_string(), ctx);
 }
@@ -582,6 +589,8 @@ fn restore_conn_context(
     w.set_structure_columns(ModelRc::from(Rc::new(VecModel::from(ctx.fields.clone()))));
     w.set_sql_capable(ctx.sql_capable);
     w.set_new_tab_label(ctx.new_tab_label.clone());
+    w.set_bc_db(ctx.bc_db.clone());
+    w.set_bc_schema(ctx.bc_schema.clone());
     w.set_tree_loading(false);
 }
 
