@@ -1995,6 +1995,50 @@ fn paint_run_states(w: &MainWindow, state: &AppState) {
     paint_run_state(w, state, 1);
 }
 
+/// Seeds the two tab-focus choices in Settings from the saved state.
+fn show_tab_settings(w: &MainWindow, ui: &rdb_connstore::UiState) {
+    w.set_tab_focus(match ui.tab_focus {
+        rdb_connstore::TabFocus::Sidebar => 0,
+        rdb_connstore::TabFocus::Tab => 1,
+    });
+    w.set_tab_rebind(match ui.tab_rebind {
+        rdb_connstore::TabRebind::OnRun => 0,
+        rdb_connstore::TabRebind::OnOpen => 1,
+    });
+}
+
+/// "On open": a query tab takes the sidebar's connection as soon as it is
+/// opened against it, not on its first run there.
+fn rebind_on_open(state: &AppState, tab: &WorkspaceTab, mode: run_target::TabMode) {
+    if mode
+        != (run_target::TabMode::Sidebar {
+            rebind_on_open: true,
+        })
+        || tab.kind != "sql"
+    {
+        return;
+    }
+    let store = state.store.borrow();
+    let cur = state.current_connection_id.lock().unwrap().clone();
+    let target = tab_run_target(
+        &state.settings.borrow(),
+        &store,
+        cur.as_deref(),
+        &state.connected_ids.lock().unwrap(),
+        tab,
+    );
+    let Some(c) = target
+        .connection()
+        .filter(|c| tab.connection_id.as_deref() != Some(*c))
+    else {
+        return;
+    };
+    let mut tabs = state.workspace_tabs.lock().unwrap();
+    if let Some(t) = tabs.iter_mut().find(|t| t.id == tab.id) {
+        bind_tab_to(t, c, connection_badge_info(&store, c));
+    }
+}
+
 /// What a held-back run is waiting on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum RunWait {
@@ -5587,14 +5631,7 @@ fn main() -> Result<(), slint::PlatformError> {
     window.set_update_check_enabled(settings.borrow().get().update_check);
     window.set_sidebar_right(settings.borrow().get().ui_state.sidebar_right);
     window.set_query_tabs_by_connection(settings.borrow().get().ui_state.query_tabs_by_connection);
-    window.set_tab_focus(match settings.borrow().get().ui_state.tab_focus {
-        rdb_connstore::TabFocus::Sidebar => 0,
-        rdb_connstore::TabFocus::Tab => 1,
-    });
-    window.set_tab_rebind(match settings.borrow().get().ui_state.tab_rebind {
-        rdb_connstore::TabRebind::OnRun => 0,
-        rdb_connstore::TabRebind::OnOpen => 1,
-    });
+    show_tab_settings(&window, &settings.borrow().get().ui_state);
     let history_cap = Rc::new(Cell::new(
         settings.borrow().get().editor.history_max_entries.max(1) as usize,
     ));
@@ -6063,32 +6100,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 &connected_ids,
                 &activate_connection,
             );
-            if mode
-                == (run_target::TabMode::Sidebar {
-                    rebind_on_open: true,
-                })
-                && tab.kind == "sql"
-            {
-                // "On open": the tab takes the sidebar's connection as soon as
-                // it is opened against it, not on its first run there.
-                let store = store.borrow();
-                let cur = current_connection_id.lock().unwrap().clone();
-                let target = tab_run_target(
-                    &state.settings.borrow(),
-                    &store,
-                    cur.as_deref(),
-                    &connected_ids.lock().unwrap(),
-                    &tab,
-                );
-                if let Some(c) = target.connection() {
-                    if tab.connection_id.as_deref() != Some(c) {
-                        let mut tabs = tabs.lock().unwrap();
-                        if let Some(t) = tabs.iter_mut().find(|t| t.id == tab.id) {
-                            bind_tab_to(t, c, connection_badge_info(&store, c));
-                        }
-                    }
-                }
-            }
+            rebind_on_open(&state, &tab, mode);
             {
                 // Keep the group-0 selection stable when restoring the right group.
                 let tabs_guard = tabs.lock().unwrap();
