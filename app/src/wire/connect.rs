@@ -33,9 +33,12 @@ fn plan_tab_restore(
     active_group1_tab_id: &Arc<Mutex<Option<String>>>,
     query_number: &Arc<std::sync::atomic::AtomicUsize>,
     connection_id: &str,
-    scoped: bool,
+    mode: crate::run_target::TabMode,
+    last_tab: Option<&str>,
     badge: &ConnBadgeInfo,
 ) -> TabRestorePlan {
+    use crate::run_target::TabMode;
+    let scoped = mode == TabMode::Follow;
     let visible = |tab: &WorkspaceTab| tab_visible_for_connection(tab, connection_id, scoped);
     // Only a tab this connection owns may take the focus. The focused tab *is*
     // the active connection (`restore_tab_for_pane`), so landing on another
@@ -43,19 +46,30 @@ fn plan_tab_restore(
     // driver — straight back to it, and the connect the user just asked for
     // would appear to do nothing. A tab bound to nothing yet is fair game: it
     // latches onto whatever it first runs against.
+    //
+    // When the sidebar decides, the focused tab doesn't drag the context
+    // anywhere: whatever tab is open stays open and is re-checked against
+    // the new connection.
     let ownable = |tab: &WorkspaceTab| {
         visible(tab)
-            && tab
-                .connection_id
-                .as_deref()
-                .is_none_or(|id| id == connection_id)
+            && (!mode.tab_drives_sidebar()
+                || tab
+                    .connection_id
+                    .as_deref()
+                    .is_none_or(|id| id == connection_id))
     };
+    // Coming back to a connection lands on the tab last open there, where
+    // the tab decides; the sidebar-decides mode keeps the open tab instead.
+    let last = last_tab.filter(|_| mode.tab_drives_sidebar());
     let restore = should_restore_query_tabs(tabs_restored.get());
     tabs_restored.set(true);
     let (mut tabs, active, active_p1, mut active_group) = if restore {
         let (tabs, disk_active, disk_active_p1, active_group, max_number) = load_query_tabs();
         query_number.fetch_max(max_number, std::sync::atomic::Ordering::Relaxed);
-        let active = disk_active
+        let active = last
+            .map(str::to_string)
+            .filter(|id| tabs.iter().any(|tab| tab.id == *id && ownable(tab)))
+            .or(disk_active)
             .filter(|id| tabs.iter().any(|tab| tab.id == *id && ownable(tab)))
             .or_else(|| {
                 tabs.iter()
@@ -73,10 +87,11 @@ fn plan_tab_restore(
         for t in &mut kept {
             t.loading = false;
         }
-        let active = active_tab_id
-            .lock()
-            .unwrap()
-            .clone()
+        let current = active_tab_id.lock().unwrap().clone();
+        let active = last
+            .map(str::to_string)
+            .filter(|id| kept.iter().any(|tab| tab.id == *id && ownable(tab)))
+            .or(current)
             .filter(|id| kept.iter().any(|tab| tab.id == *id && ownable(tab)))
             .or_else(|| {
                 kept.iter()
@@ -91,9 +106,14 @@ fn plan_tab_restore(
         (kept, active, active_p1, 0usize)
     };
     // Nothing this connection can land on: give it an empty tab of its own
-    // rather than leaving the focus on a foreign one.
-    let created = active.is_none();
+    // rather than leaving the focus on a foreign one. With tabs following
+    // the connection, a connection with no tabs shows the empty workspace
+    // and its New Query button instead.
+    let created = active.is_none() && mode != TabMode::Follow;
     let active = active.or_else(|| {
+        if !created {
+            return None;
+        }
         let number = query_number.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let id = format!("query:{connection_id}:{number}");
         let mut tab = WorkspaceTab::sql(id.clone(), number);
@@ -824,7 +844,12 @@ fn handle_connect_clicked(state: &AppState, fns: &AppFns, weak: slint::Weak<Main
         &active_group1_tab_id,
         &query_number,
         &sc.id,
-        settings.borrow().get().ui_state.query_tabs_by_connection,
+        crate::run_target::TabMode::from_ui(&settings.borrow().get().ui_state),
+        state
+            .last_tab_by_conn
+            .borrow()
+            .get(&sc.id)
+            .map(String::as_str),
         &connection_badge_info(&store.borrow(), &sc.id),
     );
     // The plan may have read the tabs back off disk, labels and all.
@@ -1345,6 +1370,11 @@ mod panic_to_connection_error_tests {
 #[cfg(test)]
 mod plan_tab_restore_tests {
     use super::*;
+    use crate::run_target::TabMode;
+
+    const SIDEBAR: TabMode = TabMode::Sidebar {
+        rebind_on_open: false,
+    };
 
     /// `tabs_restored` pre-set, so the plan takes the in-memory path and no
     /// test touches the on-disk tab file.
@@ -1352,7 +1382,8 @@ mod plan_tab_restore_tests {
         tabs: Vec<WorkspaceTab>,
         active: Option<&str>,
         connection_id: &str,
-        scoped: bool,
+        mode: TabMode,
+        last: Option<&str>,
     ) -> TabRestorePlan {
         plan_tab_restore(
             &Rc::new(Cell::new(true)),
@@ -1361,7 +1392,8 @@ mod plan_tab_restore_tests {
             &Arc::new(Mutex::new(None)),
             &Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             connection_id,
-            scoped,
+            mode,
+            last,
             &ConnBadgeInfo::default(),
         )
     }
@@ -1372,23 +1404,16 @@ mod plan_tab_restore_tests {
         t
     }
 
-    /// The focused tab is the active connection, so landing on another
-    /// connection's tab would pull the context straight back off the
-    /// connection the user just picked.
+    /// Where the tab decides, landing on another connection's tab would pull
+    /// the context straight back off the connection the user just picked.
     #[test]
-    fn connecting_mints_a_tab_when_every_open_one_belongs_elsewhere() {
-        // Both tab-scoping modes, spelled out rather than looped: the two
-        // cases are independent, and a failure names which one.
-        check_minted_tab(false);
-        check_minted_tab(true);
-    }
-
-    fn check_minted_tab(scoped: bool) {
+    fn tab_mode_mints_a_tab_when_every_open_one_belongs_elsewhere() {
         let plan = plan(
             vec![tab("a1", Some("conn-a"))],
             Some("a1"),
             "conn-b",
-            scoped,
+            TabMode::Tab,
+            None,
         );
         let active = plan.active.expect("a connection always lands somewhere");
         let landed = plan
@@ -1404,23 +1429,62 @@ mod plan_tab_restore_tests {
     }
 
     #[test]
-    fn connecting_lands_on_a_tab_it_already_owns() {
+    fn tab_mode_lands_on_a_tab_it_already_owns() {
         let plan = plan(
             vec![tab("a1", Some("conn-a")), tab("b1", Some("conn-b"))],
             Some("a1"),
             "conn-b",
-            false,
+            TabMode::Tab,
+            None,
         );
         assert_eq!(plan.active.as_deref(), Some("b1"));
         assert_eq!(plan.tabs.len(), 2);
         assert!(plan.standby);
     }
 
+    #[test]
+    fn coming_back_lands_on_the_tab_last_open_there() {
+        let tabs = vec![tab("b1", Some("conn-b")), tab("b2", Some("conn-b"))];
+        let plan = plan(tabs, Some("a1"), "conn-b", TabMode::Tab, Some("b2"));
+        assert_eq!(plan.active.as_deref(), Some("b2"));
+    }
+
+    /// With tabs following the connection, a connection without tabs shows
+    /// the empty workspace rather than an auto-created tab.
+    #[test]
+    fn follow_mode_leaves_a_connection_without_tabs_empty() {
+        let plan = plan(
+            vec![tab("a1", Some("conn-a"))],
+            Some("a1"),
+            "conn-b",
+            TabMode::Follow,
+            None,
+        );
+        assert_eq!(plan.active, None);
+        assert_eq!(plan.tabs.len(), 1);
+    }
+
+    /// Where the sidebar decides, switching connection keeps the open tab and
+    /// re-checks it, instead of jumping to another one.
+    #[test]
+    fn sidebar_mode_keeps_the_open_tab() {
+        let tabs = vec![tab("a1", Some("conn-a")), tab("b1", Some("conn-b"))];
+        let plan = plan(tabs, Some("a1"), "conn-b", SIDEBAR, Some("b1"));
+        assert_eq!(plan.active.as_deref(), Some("a1"));
+        assert_eq!(plan.tabs.len(), 2);
+    }
+
     /// A tab that has never run is bound to nothing and latches onto the
     /// first connection it runs against, so it is a fine place to land.
     #[test]
     fn an_unbound_tab_is_reused_rather_than_replaced() {
-        let plan = plan(vec![tab("q1", None)], Some("q1"), "conn-b", false);
+        let plan = plan(
+            vec![tab("q1", None)],
+            Some("q1"),
+            "conn-b",
+            TabMode::Tab,
+            None,
+        );
         assert_eq!(plan.active.as_deref(), Some("q1"));
         assert_eq!(plan.tabs.len(), 1);
     }
