@@ -172,6 +172,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
     // ----- settings: which side decides a tab's connection, and when it moves -----
     {
         let settings = settings.clone();
+        let weak = window.as_weak();
+        let state = state.clone();
         window.on_set_tab_focus(move |i| {
             let focus = if i == 1 {
                 rdb_connstore::TabFocus::Tab
@@ -181,10 +183,15 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             let _ = settings
                 .borrow_mut()
                 .update(|s| s.ui_state.tab_focus = focus);
+            if let Some(w) = weak.upgrade() {
+                paint_run_states(&w, &state);
+            }
         });
     }
     {
         let settings = settings.clone();
+        let weak = window.as_weak();
+        let state = state.clone();
         window.on_set_tab_rebind(move |i| {
             let rebind = if i == 1 {
                 rdb_connstore::TabRebind::OnOpen
@@ -194,6 +201,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             let _ = settings
                 .borrow_mut()
                 .update(|s| s.ui_state.tab_rebind = rebind);
+            if let Some(w) = weak.upgrade() {
+                paint_run_states(&w, &state);
+            }
         });
     }
     // ----- settings: connection-scoped query tabs toggle -----
@@ -207,6 +217,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let restore_p1_tab = fns.restore_p1_tab.clone();
         let save_active_tab = fns.save_active_tab.clone();
         let save_p1_tab = fns.save_p1_tab.clone();
+        let state = state.clone();
         window.on_set_query_tabs_by_connection(move |enabled| {
             // The restore below reloads both panes from the tab list; without
             // a save first, whatever was typed since the last switch is lost.
@@ -275,6 +286,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             } else {
                 w.set_p1_active_tab(-1);
             }
+            paint_run_states(&w, &state);
         });
     }
 

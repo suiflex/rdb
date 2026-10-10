@@ -231,6 +231,14 @@ in-out property <bool> rename-modal-open: false;
 // A tab from a non-production connection about to run on a production one
 // for the first time waits on this.
 in-out property <bool> prod-confirm-open: false;
+// Per-pane Run state for the tab on screen; see `QueryPane`.
+in property <bool> run-needs-connect;
+in property <string> run-block-text;
+in property <string> run-block-action;
+in property <bool> p1-run-needs-connect;
+in property <string> p1-run-block-text;
+in property <string> p1-run-block-action;
+callback run-block-act(int);
 in property <string> prod-confirm-name;
 callback prod-confirm-accept();
 callback prod-confirm-cancel();
@@ -1850,6 +1858,13 @@ callback create-table-commit();
                         p1-find-text: root.p1-find-text;
                         p1-find-status: root.p1-find-status;
                         p1-query-running: root.p1-query-running;
+                        p1-run-needs-connect: root.p1-run-needs-connect;
+                        p1-run-block-text: root.p1-run-block-text;
+                        p1-run-block-action: root.p1-run-block-action;
+                        run-needs-connect: root.run-needs-connect;
+                        run-block-text: root.run-block-text;
+                        run-block-action: root.run-block-action;
+                        run-block-act(p) => { root.run-block-act(p); }
                         p1-streaming: root.p1-streaming;
                         p1-limit-text <=> root.p1-limit-text;
                         p1-active-table: root.p1-active-table;

@@ -40,6 +40,12 @@ export component QueryPane inherits Rectangle {
     in property <bool> streaming;
     in-out property <string> limit-text;
     in property <string> query-label;
+    // Where Run stands for this pane's tab (`run_target` on the Rust side):
+    // its connection is closed, or it can't run here and says why.
+    in property <bool> run-needs-connect;
+    in property <string> run-block-text;
+    in property <string> run-block-action;
+    callback run-block-act();
     callback run();
     callback run-new-tab();
     callback format-sql();
@@ -388,6 +394,30 @@ export component QueryPane inherits Rectangle {
                 width: 100%;
                 height: 100%;
                 spacing: 0;
+                if root.run-block-text != "": Rectangle {
+                    height: 44px;
+                    background: Tokens.warn.with-alpha(0.12);
+                    HorizontalLayout {
+                        padding-left: Tokens.sp3;
+                        padding-right: Tokens.sp3;
+                        spacing: Tokens.sp2;
+                        Text {
+                            text: root.run-block-text;
+                            color: Tokens.text;
+                            font-size: Tokens.font-sm;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        if root.run-block-action != "": VerticalLayout {
+                            alignment: center;
+                            SecondaryButton {
+                                text: root.run-block-action;
+                                clicked => { root.run-block-act(); }
+                            }
+                        }
+                    }
+                }
                 HorizontalLayout {
                     height: 44px;
                     padding-left: Tokens.sp3;
@@ -396,9 +426,11 @@ export component QueryPane inherits Rectangle {
                     VerticalLayout {
                         alignment: center;
                         PrimaryButton {
-                            text: root.query-running ? "Running…" : "▶ Run  " + Shortcut.primary + Shortcut.separator + Shortcut.enter;
+                            text: root.query-running ? "Running…"
+                                : root.run-needs-connect ? "▶ Connect & Run"
+                                : "▶ Run  " + Shortcut.primary + Shortcut.separator + Shortcut.enter;
                             tooltip: "Run selected SQL or the current statement  " + Shortcut.primary + Shortcut.separator + Shortcut.enter;
-                            enabled: !root.query-running;
+                            enabled: !root.query-running && root.run-block-text == "";
                             clicked => { root.run(); }
                         }
                     }

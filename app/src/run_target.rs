@@ -24,6 +24,11 @@ pub(crate) enum TabMode {
 }
 
 impl TabMode {
+    /// Whether focusing a tab moves the sidebar onto the tab's connection.
+    pub(crate) fn tab_drives_sidebar(self) -> bool {
+        !matches!(self, TabMode::Sidebar { .. })
+    }
+
     pub(crate) fn from_ui(ui: &UiState) -> Self {
         if ui.query_tabs_by_connection {
             return TabMode::Follow;
@@ -49,6 +54,16 @@ pub(crate) enum RunTarget {
     Mismatch { origin: Option<String> },
     /// Nothing to run on until a connection is picked.
     NoConnection,
+}
+
+impl RunTarget {
+    /// The connection the query goes to, open or not.
+    pub(crate) fn connection(&self) -> Option<&str> {
+        match self {
+            RunTarget::Ready(id) | RunTarget::NeedsConnect(id) => Some(id),
+            _ => None,
+        }
+    }
 }
 
 /// Query language of a badge key; `None` for a tab bound to nothing yet.

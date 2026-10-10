@@ -861,6 +861,9 @@ fn handle_connect_clicked(state: &AppState, fns: &AppFns, weak: slint::Weak<Main
         );
         *current_connection_id.lock().unwrap() = Some(sc.id.clone());
     }
+    if let Some(w) = weak.upgrade() {
+        paint_run_states(&w, state);
+    }
     // Fresh connection: nothing browsed, nothing expanded.
     *cur_engine.borrow_mut() = Some(sc.engine);
     // Editors were lexed before the engine was known; repaint both panes
