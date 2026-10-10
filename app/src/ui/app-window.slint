@@ -1563,6 +1563,7 @@ callback create-table-commit();
                                             height: 6px;
                                             border-radius: 3px;
                                             background: tab.has-custom-color ? tab.color : Tokens.db-color(tab.engine);
+                                            opacity: tab.offline ? 0.35 : 1;
                                         }
                                     }
                                     if tab.kind == "table": VerticalLayout {
@@ -1758,6 +1759,7 @@ callback create-table-commit();
                                             height: 6px;
                                             border-radius: 3px;
                                             background: tab.has-custom-color ? tab.color : Tokens.db-color(tab.engine);
+                                            opacity: tab.offline ? 0.35 : 1;
                                         }
                                     }
                                     Text {

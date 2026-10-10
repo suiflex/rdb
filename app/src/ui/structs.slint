@@ -88,7 +88,8 @@ export struct TableCol { name: string, type-name: string, nullable: bool, pk: bo
 // `engine` is the DbBadge key ("postgres" etc, empty when no connection was
 // active when the tab was created); `connection-name` is the full name shown
 // via tooltip / inline label.
-export struct TabItem { title: string, kind: string, preview: bool, engine: string, connection-name: string, color: color, has-custom-color: bool }
+// `offline`: the tab's connection is closed; its dot is drawn dimmed.
+export struct TabItem { title: string, kind: string, preview: bool, engine: string, connection-name: string, color: color, has-custom-color: bool, offline: bool }
 // One "Result N" chip in the results panel (a tab can accumulate several runs).
 // `engine`/`connection-name` identify which connection produced that specific
 // run — distinct from the connection on the owning TabItem, since a long-lived
