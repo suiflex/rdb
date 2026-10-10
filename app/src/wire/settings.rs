@@ -225,6 +225,15 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 save_active_tab(&w);
                 save_p1_tab(&w);
             }
+            {
+                let store = state.store.borrow();
+                let cur = state.current_connection_id.lock().unwrap().clone();
+                let order: Vec<String> = store.list().iter().map(|c| c.id.clone()).collect();
+                let mut tabs = workspace_tabs.lock().unwrap();
+                regroup_for_follow(&mut tabs, enabled, cur.as_deref(), &order, &|id| {
+                    connection_badge_info(&store, id)
+                });
+            }
             let _ = settings
                 .borrow_mut()
                 .update(|s| s.ui_state.query_tabs_by_connection = enabled);
@@ -445,5 +454,76 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 set_p_error_mark(&w, pane, mark);
             }
         });
+    }
+}
+
+/// Regroups the tab list when "Query tabs follow connection" flips. Never
+/// drops a tab.
+///
+/// Turning it on files a tab bound to nothing under the sidebar's
+/// connection, or it would show under every connection at once. Turning it
+/// off merges the per-connection sets into one strip, ordered by connection
+/// as the sidebar lists them (stable within each, unbound tabs last).
+fn regroup_for_follow(
+    tabs: &mut [WorkspaceTab],
+    follow: bool,
+    active: Option<&str>,
+    connection_order: &[String],
+    badge_for: &dyn Fn(&str) -> ConnBadgeInfo,
+) {
+    if follow {
+        let Some(active) = active else {
+            return;
+        };
+        for tab in tabs.iter_mut().filter(|t| t.connection_id.is_none()) {
+            bind_tab_to(tab, active, badge_for(active));
+        }
+    } else {
+        tabs.sort_by_key(|t| {
+            t.connection_id
+                .as_ref()
+                .and_then(|id| connection_order.iter().position(|c| c == id))
+                .unwrap_or(usize::MAX)
+        });
+    }
+}
+
+#[cfg(test)]
+mod regroup_tests {
+    use super::*;
+
+    fn tab(id: &str, conn: Option<&str>) -> WorkspaceTab {
+        let mut t = WorkspaceTab::sql(id.into(), 1);
+        t.connection_id = conn.map(str::to_string);
+        t
+    }
+
+    fn ids(tabs: &[WorkspaceTab]) -> Vec<&str> {
+        tabs.iter().map(|t| t.id.as_str()).collect()
+    }
+
+    #[test]
+    fn turning_follow_on_files_unbound_tabs_under_the_sidebar_connection() {
+        let mut tabs = vec![tab("q1", None), tab("b1", Some("b"))];
+        regroup_for_follow(&mut tabs, true, Some("a"), &[], &|_| {
+            ConnBadgeInfo::default()
+        });
+        assert_eq!(tabs[0].connection_id.as_deref(), Some("a"));
+        assert_eq!(tabs[1].connection_id.as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn turning_follow_off_orders_tabs_by_connection_and_keeps_them_all() {
+        let mut tabs = vec![
+            tab("b1", Some("b")),
+            tab("q1", None),
+            tab("a1", Some("a")),
+            tab("b2", Some("b")),
+        ];
+        let order = vec!["a".to_string(), "b".to_string()];
+        regroup_for_follow(&mut tabs, false, None, &order, &|_| {
+            ConnBadgeInfo::default()
+        });
+        assert_eq!(ids(&tabs), ["a1", "b1", "b2", "q1"]);
     }
 }
