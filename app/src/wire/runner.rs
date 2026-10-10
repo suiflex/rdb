@@ -14,8 +14,12 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::*;
 
-/// Marks the tab as loading, saves the text it is about to run, and returns
-/// the connection that run must go to.
+/// Marks the tab as loading, saves the editor buffer it runs from, and
+/// returns the connection that run must go to.
+///
+/// `editor_text` is the whole buffer, not the statement being run: storing
+/// the run fragment here replaced the tab's text with just that statement
+/// whenever a restore followed without a save in between.
 ///
 /// First run on a scratch tab (opened before any connection was tracked, or
 /// restored from disk without one) locks it to whatever it runs against now —
@@ -29,13 +33,18 @@ fn bind_tab_connection_for_runner(
     badge_for: &dyn Fn(&str) -> ConnBadgeInfo,
     target_id: &str,
     sql: &str,
+    editor_text: &str,
 ) -> (Option<String>, bool) {
     let mut tabs = workspace_tabs.lock().unwrap();
     let Some(tab) = tabs.iter_mut().find(|tab| tab.id == target_id) else {
         return (None, false);
     };
     tab.loading = true;
-    tab.query_text = sql.to_string();
+    tab.query_text = if tab.kind == "sql" {
+        editor_text.to_string()
+    } else {
+        sql.to_string()
+    };
     // A tab bound to nothing yet latches onto the connection the workspace
     // shows, and so does one whose own connection is gone: running it is
     // asking for an answer from the connection that is there. Its name and
@@ -71,6 +80,7 @@ fn bind_tab_for_run(
     connected_ids: &std::sync::Mutex<HashSet<String>>,
     target_id: &str,
     sql: &str,
+    editor_text: &str,
 ) -> Option<String> {
     let (id, rebound) = bind_tab_connection_for_runner(
         workspace_tabs,
@@ -79,6 +89,7 @@ fn bind_tab_for_run(
         &|cid| connection_badge_info(&store.borrow(), cid),
         target_id,
         sql,
+        editor_text,
     );
     if let (true, Some(cid)) = (rebound, &id) {
         show_rebound_tab(w, &store.borrow(), workspace_tabs, active_tab_id, cid);
@@ -528,6 +539,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             let Some(target_id) = active_id.lock().unwrap().clone() else {
                 return;
             };
+            let editor_text = panes[pane].ed_state.borrow().text();
             let tab_connection_id = weak.upgrade().and_then(|w| {
                 bind_tab_for_run(
                     &w,
@@ -538,6 +550,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                     &connected_ids,
                     &target_id,
                     &sql,
+                    &editor_text,
                 )
             });
             let weak2 = weak.clone();
@@ -810,6 +823,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                 &connected_ids,
                 &target_id,
                 &sql,
+                &panes[pane].ed_state.borrow().text(),
             );
             set_p_query_running(&w, pane, true);
             set_p_streaming(&w, pane, true);
@@ -1226,8 +1240,9 @@ mod bind_tab_connection_tests {
             name: format!("name of {cid}"),
             ..Default::default()
         };
-        let (id, rebound) =
-            bind_tab_connection_for_runner(&tabs, &current, &live, &badge, "t", "select 1");
+        let (id, rebound) = bind_tab_connection_for_runner(
+            &tabs, &current, &live, &badge, "t", "select 1", "select 1",
+        );
         let tab = tabs.into_inner().unwrap().remove(0);
         (id, rebound, tab)
     }
@@ -1255,5 +1270,24 @@ mod bind_tab_connection_tests {
         assert_eq!(id.as_deref(), Some("conn-a"));
         assert!(rebound);
         assert_eq!(tab.connection_name, "name of conn-a");
+    }
+
+    /// Regression: running one statement replaced the tab's whole buffer
+    /// with that statement once a restore skipped the save before it.
+    #[test]
+    fn a_run_keeps_the_whole_buffer_not_the_statement() {
+        let tabs = std::sync::Mutex::new(vec![WorkspaceTab::sql("t".into(), 1)]);
+        let current = std::sync::Mutex::new(None);
+        let badge = |_: &str| ConnBadgeInfo::default();
+        bind_tab_connection_for_runner(
+            &tabs,
+            &current,
+            &HashSet::new(),
+            &badge,
+            "t",
+            "select 2",
+            "select 1;\nselect 2",
+        );
+        assert_eq!(tabs.lock().unwrap()[0].query_text, "select 1;\nselect 2");
     }
 }
