@@ -332,6 +332,7 @@ async fn finish_connect_success(
                 w.set_connecting(false);
                 w.set_tree_loading(false);
                 w.invoke_refresh_connections();
+                w.invoke_connect_finished(connection_id.into(), true);
             }
         });
         return;
@@ -399,7 +400,7 @@ async fn finish_connect_success(
     let _ = slint::invoke_from_event_loop(move || {
         // What the workspace now shows, for `ConnContext`'s snapshot on the
         // way out.
-        *painted_connection.lock().unwrap() = Some(connection_id);
+        *painted_connection.lock().unwrap() = Some(connection_id.clone());
         if let Some(w) = weak.upgrade() {
             w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
             w.set_sql_capable(sql_capable);
@@ -426,6 +427,7 @@ async fn finish_connect_success(
             // Sidebar dot now shows this connection live, even before any
             // tab has run a query against it.
             w.invoke_refresh_connections();
+            w.invoke_connect_finished(connection_id.into(), true);
         }
     });
     // Load every other schema's tables so cross-schema `schema.table`
@@ -472,6 +474,7 @@ fn finish_connect_failure(weak: slint::Weak<MainWindow>, e: rdb_core::error::Rdb
     eprintln!("connect failed: {e}");
     let _ = slint::invoke_from_event_loop(move || {
         if let Some(w) = weak.upgrade() {
+            w.invoke_connect_finished(SharedString::default(), false);
             w.set_connected(false);
             w.set_connecting(false);
             w.set_tree_loading(false);

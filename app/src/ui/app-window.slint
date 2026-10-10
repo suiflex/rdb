@@ -9,7 +9,7 @@ import {
     MenuItem as MaterialMenuItem
 } from "@material";
 import {
-    AppMenu, SearchCommandPill, BreadcrumbChip, DbBadge, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SettingsSectionHeader, TextButton, Toggle, ToggleRow, ChoiceRow, Tooltip, TooltipArea, Shortcut
+    AppMenu, SearchCommandPill, BreadcrumbChip, DbBadge, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SettingsSectionHeader, TextButton, Toggle, ToggleRow, ChoiceRow, DangerButton, Tooltip, TooltipArea, Shortcut
 } from "components.slint";
 export { Shortcut }
 import { NavCluster } from "nav-cluster.slint";
@@ -228,6 +228,15 @@ callback cancel-connect();
 callback open-rename(int, string);
 callback rename-commit();
 in-out property <bool> rename-modal-open: false;
+// A tab from a non-production connection about to run on a production one
+// for the first time waits on this.
+in-out property <bool> prod-confirm-open: false;
+in property <string> prod-confirm-name;
+callback prod-confirm-accept();
+callback prod-confirm-cancel();
+// A connect finished: a "Connect & Run" waiting on it runs on success and
+// is dropped on failure (the id is empty then).
+callback connect-finished(string, bool);
 in-out property <int> rename-target: -1;
 in-out property <int> rename-group: 0;
 in-out property <string> rename-text;
@@ -2429,6 +2438,66 @@ callback create-table-commit();
                         clicked => {
                             root.rename-commit();
                             root.rename-modal-open = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- Confirm a first run on a production connection -----
+    prod-confirm-modal := Rectangle {
+        visible: root.prod-confirm-open;
+        background: Tokens.veil;
+        if root.prod-confirm-open: TouchArea {
+            clicked => {
+                root.prod-confirm-open = false;
+                root.prod-confirm-cancel();
+            }
+        }
+        Rectangle {
+            width: 400px;
+            x: (parent.width - self.width) / 2;
+            y: 120px;
+            height: prod-box.preferred-height;
+            border-radius: Tokens.modal-radius;
+            background: MaterialPalette.surface_container_high;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: MaterialPalette.shadow.with-alpha(0.3);
+            TouchArea {}
+            prod-box := VerticalLayout {
+                padding: Tokens.sp4;
+                spacing: Tokens.sp3;
+                Text {
+                    text: "Run on production?";
+                    color: Tokens.text;
+                    font-size: MaterialTypography.headline_small.font_size;
+                    font-weight: MaterialTypography.headline_small.font_weight;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "This tab has not run on " + root.prod-confirm-name + " before. It is labelled PRODUCTION.";
+                    color: Tokens.text-dim;
+                    font-size: Tokens.font-md;
+                    wrap: word-wrap;
+                    horizontal-alignment: center;
+                }
+                HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    alignment: end;
+                    SecondaryButton {
+                        text: "Cancel";
+                        clicked => {
+                            root.prod-confirm-open = false;
+                            root.prod-confirm-cancel();
+                        }
+                    }
+                    DangerButton {
+                        text: "Run on production";
+                        clicked => {
+                            root.prod-confirm-open = false;
+                            root.prod-confirm-accept();
                         }
                     }
                 }

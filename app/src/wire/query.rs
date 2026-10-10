@@ -36,6 +36,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         recent_queries,
         saved_queries,
         history_cap,
+        pending_run,
+        active_group1_tab_id,
         ..
     } = state.clone();
     let AppFns {
@@ -46,6 +48,79 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         ..
     } = fns.clone();
     let ed_state = panes[0].ed_state.clone();
+
+    // ----- replay a run held back for a connect or the production confirm -----
+    {
+        let replay: Rc<dyn Fn(PendingRun)> = {
+            let run_sql = run_sql.clone();
+            let run_stream = run_stream.clone();
+            let active_tab_id = active_tab_id.clone();
+            let active_group1_tab_id = active_group1_tab_id.clone();
+            Rc::new(move |run: PendingRun| {
+                // The runner runs the pane's active tab. If the user moved on
+                // meanwhile, the held query belongs to a tab no longer there.
+                let active = if run.pane == 1 {
+                    &active_group1_tab_id
+                } else {
+                    &active_tab_id
+                };
+                if active.lock().unwrap().as_deref() != Some(run.tab_id.as_str()) {
+                    return;
+                }
+                if run.stream {
+                    run_stream(run.pane, run.sql);
+                } else {
+                    run_sql(run.pane, run.sql);
+                }
+            })
+        };
+        {
+            let pending_run = pending_run.clone();
+            let replay = replay.clone();
+            window.on_connect_finished(move |id, ok| {
+                let waiting = matches!(
+                    pending_run.borrow().as_ref().map(|r| &r.wait),
+                    Some(RunWait::Connect(c)) if !ok || *c == id.as_str()
+                );
+                if !waiting {
+                    return;
+                }
+                let Some(run) = pending_run.borrow_mut().take() else {
+                    return;
+                };
+                if ok {
+                    replay(run);
+                }
+            });
+        }
+        {
+            let pending_run = pending_run.clone();
+            let workspace_tabs = workspace_tabs.clone();
+            window.on_prod_confirm_accept(move || {
+                let Some(run) = pending_run.borrow_mut().take() else {
+                    return;
+                };
+                let RunWait::Confirm(target) = &run.wait else {
+                    return;
+                };
+                if let Some(tab) = workspace_tabs
+                    .lock()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|t| t.id == run.tab_id)
+                {
+                    tab.prod_confirmed.insert(target.clone());
+                }
+                replay(run);
+            });
+        }
+        {
+            let pending_run = pending_run.clone();
+            window.on_prod_confirm_cancel(move || {
+                pending_run.borrow_mut().take();
+            });
+        }
+    }
 
     // ----- run query (editor) -----
     {

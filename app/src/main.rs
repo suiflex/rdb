@@ -24,6 +24,7 @@ mod model;
 mod pane;
 mod query_parse;
 mod release_notes;
+mod run_target;
 mod self_update;
 #[cfg(feature = "mock")]
 mod shot;
@@ -1777,6 +1778,10 @@ struct WorkspaceTab {
     // Cursor and selection, so coming back to a tab lands where it was left
     // instead of on line 1. In memory only.
     caret: editor::Caret,
+    // Production connections this tab was confirmed to run on. A tab from a
+    // non-production connection asks once per production target. In memory
+    // only: a restart asks again.
+    prod_confirmed: HashSet<String>,
     // Connection the tab was created against (snapshot, not live-tracked).
     connection_id: Option<String>,
     // DbBadge key, e.g. "postgres"; empty when no connection was active yet.
@@ -1819,6 +1824,7 @@ impl WorkspaceTab {
             pane1_query: String::new(),
             folded_heads: Vec::new(),
             caret: Default::default(),
+            prod_confirmed: HashSet::new(),
             connection_id: None,
             engine: String::new(),
             connection_name: String::new(),
@@ -1870,6 +1876,75 @@ fn connection_badge_info(store: &rdb_connstore::ConnStore, connection_id: &str) 
             has_custom_color: c.color.is_some(),
         })
         .unwrap_or_default()
+}
+
+/// Where `tab` runs right now under the user's tab settings, given the
+/// sidebar's connection `active`. The Run path and the topbar both read this.
+fn tab_run_target(
+    settings: &rdb_connstore::SettingsStore,
+    store: &rdb_connstore::ConnStore,
+    active: Option<&str>,
+    live: &HashSet<String>,
+    tab: &WorkspaceTab,
+) -> run_target::RunTarget {
+    // Table and function tabs name objects on one server; they never move.
+    let mode = if tab.kind == "sql" {
+        run_target::TabMode::from_ui(&settings.get().ui_state)
+    } else {
+        run_target::TabMode::Tab
+    };
+    let active_family = active
+        .and_then(|id| store.list().iter().find(|c| c.id == id))
+        .map(|c| c.engine.language());
+    run_target::resolve(
+        mode,
+        run_target::TabSide {
+            origin: tab.connection_id.as_deref(),
+            family: run_target::family(&tab.engine),
+        },
+        run_target::SidebarSide {
+            active,
+            family: active_family,
+        },
+        live,
+    )
+}
+
+/// Moves `tab` onto connection `id`: its dot colour, name and engine follow.
+fn bind_tab_to(tab: &mut WorkspaceTab, id: &str, badge: ConnBadgeInfo) {
+    tab.connection_id = Some(id.to_string());
+    tab.engine = badge.engine;
+    tab.connection_name = badge.name;
+    tab.color = badge.color;
+    tab.has_custom_color = badge.has_custom_color;
+}
+
+/// A tab from a non-production connection about to run on a production one
+/// for the first time.
+fn needs_prod_confirm(store: &rdb_connstore::ConnStore, tab: &WorkspaceTab, target: &str) -> bool {
+    let env = |id: &str| store.list().iter().find(|c| c.id == id).map(|c| c.env_tag);
+    env(target) == Some(rdb_connstore::EnvTag::Production)
+        && tab.connection_id.as_deref().and_then(env) != Some(rdb_connstore::EnvTag::Production)
+        && !tab.prod_confirmed.contains(target)
+}
+
+/// What a held-back run is waiting on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RunWait {
+    /// "Connect & Run": the connection is opening.
+    Connect(String),
+    /// The production confirmation is showing.
+    Confirm(String),
+}
+
+/// A run the Run path held back, replayed once its wait is over.
+#[derive(Clone, Debug)]
+pub(crate) struct PendingRun {
+    pane: usize,
+    tab_id: String,
+    sql: String,
+    stream: bool,
+    wait: RunWait,
 }
 
 /// Re-derives every bound tab's engine, name and colour from the connection
@@ -5225,6 +5300,7 @@ struct AppState {
     conn_filter: Rc<RefCell<String>>,
     editing_id: Rc<RefCell<String>>,
     tab_runs: TabRuns,
+    pending_run: Rc<RefCell<Option<PendingRun>>>,
 }
 
 /// Everything the workspace displays *about* one connection, kept per
@@ -5649,6 +5725,7 @@ fn main() -> Result<(), slint::PlatformError> {
         conn_filter: conn_filter.clone(),
         editing_id: editing_id.clone(),
         tab_runs: TabRuns::default(),
+        pending_run: Rc::default(),
     };
 
     let rebuild_sidebar = {

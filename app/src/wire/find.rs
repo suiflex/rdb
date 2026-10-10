@@ -302,6 +302,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     pane1_query: String::new(),
                     folded_heads: Vec::new(),
                     caret: Default::default(),
+                    prod_confirmed: HashSet::new(),
                     connection_id,
                     engine: badge.engine,
                     connection_name: badge.name,

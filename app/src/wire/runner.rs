@@ -14,87 +14,123 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::*;
 
-/// Marks the tab as loading, saves the editor buffer it runs from, and
-/// returns the connection that run must go to.
+/// Marks the tab as loading on `target`, saves the editor buffer it runs
+/// from, and moves the tab onto `target` if it isn't there yet. Returns
+/// whether it moved.
 ///
 /// `editor_text` is the whole buffer, not the statement being run: storing
 /// the run fragment here replaced the tab's text with just that statement
 /// whenever a restore followed without a save in between.
 ///
-/// First run on a scratch tab (opened before any connection was tracked, or
-/// restored from disk without one) locks it to whatever it runs against now —
-/// otherwise it keeps following `current_connection_id` around on every later
-/// click, and never counts as "live" for a given connection (disconnect's
-/// other-still-live check, the sidebar dot) since nothing ever points at it.
-fn bind_tab_connection_for_runner(
-    workspace_tabs: &std::sync::Mutex<Vec<WorkspaceTab>>,
-    current_connection_id: &std::sync::Mutex<Option<String>>,
-    live: &HashSet<String>,
+/// The move is what "the tab takes the connection once it runs there" means:
+/// an unbound scratch tab latches on, and a tab run on the sidebar's
+/// connection takes it as its own, dot colour and all.
+fn mark_tab_running(
+    tab: &mut WorkspaceTab,
+    target: &str,
     badge_for: &dyn Fn(&str) -> ConnBadgeInfo,
-    target_id: &str,
     sql: &str,
     editor_text: &str,
-) -> (Option<String>, bool) {
-    let mut tabs = workspace_tabs.lock().unwrap();
-    let Some(tab) = tabs.iter_mut().find(|tab| tab.id == target_id) else {
-        return (None, false);
-    };
+) -> bool {
     tab.loading = true;
     tab.query_text = if tab.kind == "sql" {
         editor_text.to_string()
     } else {
         sql.to_string()
     };
-    // A tab bound to nothing yet latches onto the connection the workspace
-    // shows, and so does one whose own connection is gone: running it is
-    // asking for an answer from the connection that is there. Its name and
-    // colour move with it, or the strip keeps naming a connection the query
-    // never touched.
-    let dead = tab
-        .connection_id
-        .as_ref()
-        .is_some_and(|id| !live.contains(id));
-    if tab.connection_id.is_none() || dead {
-        if let Some(cur) = current_connection_id.lock().unwrap().clone() {
-            let badge = badge_for(&cur);
-            tab.connection_id = Some(cur);
-            tab.engine = badge.engine;
-            tab.connection_name = badge.name;
-            tab.color = badge.color;
-            tab.has_custom_color = badge.has_custom_color;
-            return (tab.connection_id.clone(), true);
-        }
+    if tab.connection_id.as_deref() == Some(target) {
+        return false;
     }
-    (tab.connection_id.clone(), false)
+    bind_tab_to(tab, target, badge_for(target));
+    true
 }
 
-/// `bind_tab_connection_for_runner` for a run about to start, repainting the
-/// strip and topbar when it moved the tab onto another connection.
+/// Decides where tab `target_id`'s run goes, before anything is touched.
+/// `None` means the run does not start now: it waits on a connect or the
+/// production confirmation (replayed from `state.pending_run`), or it has
+/// nowhere to go.
 #[allow(clippy::too_many_arguments)]
-fn bind_tab_for_run(
+fn begin_run(
     w: &MainWindow,
-    store: &Rc<RefCell<rdb_connstore::ConnStore>>,
-    workspace_tabs: &std::sync::Mutex<Vec<WorkspaceTab>>,
-    active_tab_id: &std::sync::Mutex<Option<String>>,
-    current_connection_id: &std::sync::Mutex<Option<String>>,
-    connected_ids: &std::sync::Mutex<HashSet<String>>,
+    state: &AppState,
+    pane: usize,
     target_id: &str,
     sql: &str,
     editor_text: &str,
+    stream: bool,
 ) -> Option<String> {
-    let (id, rebound) = bind_tab_connection_for_runner(
-        workspace_tabs,
-        current_connection_id,
-        &connected_ids.lock().unwrap(),
-        &|cid| connection_badge_info(&store.borrow(), cid),
-        target_id,
-        sql,
-        editor_text,
+    let store = state.store.borrow();
+    let mut tabs = state.workspace_tabs.lock().unwrap();
+    let tab = tabs.iter_mut().find(|tab| tab.id == target_id)?;
+    let active = state.current_connection_id.lock().unwrap().clone();
+    let target = tab_run_target(
+        &state.settings.borrow(),
+        &store,
+        active.as_deref(),
+        &state.connected_ids.lock().unwrap(),
+        tab,
     );
-    if let (true, Some(cid)) = (rebound, &id) {
-        show_rebound_tab(w, &store.borrow(), workspace_tabs, active_tab_id, cid);
+    let hold = |wait: RunWait| {
+        *state.pending_run.borrow_mut() = Some(PendingRun {
+            pane,
+            tab_id: target_id.to_string(),
+            sql: sql.to_string(),
+            stream,
+            wait,
+        });
+    };
+    match target {
+        run_target::RunTarget::Ready(id) => {
+            if needs_prod_confirm(&store, tab, &id) {
+                hold(RunWait::Confirm(id.clone()));
+                drop(tabs);
+                let name = connection_badge_info(&store, &id).name;
+                w.set_prod_confirm_name(name.into());
+                w.set_prod_confirm_open(true);
+                return None;
+            }
+            let moved = mark_tab_running(
+                tab,
+                &id,
+                &|cid| connection_badge_info(&store, cid),
+                sql,
+                editor_text,
+            );
+            drop(tabs);
+            if moved {
+                show_rebound_tab(w, &store, &state.workspace_tabs, &state.active_tab_id, &id);
+            }
+            Some(id)
+        }
+        run_target::RunTarget::NeedsConnect(id) => {
+            hold(RunWait::Connect(id.clone()));
+            drop(tabs);
+            let idx = store.list().iter().position(|c| c.id == id);
+            drop(store);
+            if let Some(idx) = idx {
+                w.invoke_connect_clicked(idx as i32);
+            }
+            None
+        }
+        run_target::RunTarget::Mismatch { .. } => {
+            drop(tabs);
+            set_p_result_status(
+                w,
+                pane,
+                SharedString::from("This tab runs on another kind of database"),
+            );
+            None
+        }
+        run_target::RunTarget::NoConnection => {
+            drop(tabs);
+            set_p_result_status(
+                w,
+                pane,
+                SharedString::from("Pick a connection to run this tab"),
+            );
+            None
+        }
     }
-    id
 }
 
 /// Repaints the tab strip and topbar after a run moved its tab onto the
@@ -492,7 +528,6 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
         active_tab_id,
         active_group1_tab_id,
         current_connection_id,
-        connected_ids,
         painted_connection,
         query_console,
         last_view,
@@ -512,7 +547,6 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
         let driver_pool = driver_pool.clone();
         let current_connection_id = current_connection_id.clone();
         let painted_connection = painted_connection.clone();
-        let connected_ids = connected_ids.clone();
         let store = store.clone();
         let last_view = last_view.clone();
         let panes = panes.clone();
@@ -520,6 +554,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
         let active_tab_id = active_tab_id.clone();
         let active_group1_tab_id = active_group1_tab_id.clone();
         let query_console = query_console.clone();
+        let state = state.clone();
         Rc::new(move |pane: usize, sql: String| {
             // Per-pane live state; pane 1 (right split) uses its own buffers so a
             // run in one pane never disturbs the other.
@@ -552,19 +587,17 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                 return;
             };
             let editor_text = panes[pane].ed_state.borrow().text();
-            let tab_connection_id = weak.upgrade().and_then(|w| {
-                bind_tab_for_run(
-                    &w,
-                    &store,
-                    &workspace_tabs,
-                    &active_tab_id,
-                    &current_connection_id,
-                    &connected_ids,
-                    &target_id,
-                    &sql,
-                    &editor_text,
-                )
-            });
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some(tab_connection_id) =
+                begin_run(&w, &state, pane, &target_id, &sql, &editor_text, false)
+            else {
+                // Held back: the replay needs the same editor offset.
+                panes[pane].pending_run_origin.set(run_origin);
+                return;
+            };
+            let tab_connection_id = Some(tab_connection_id);
             let weak2 = weak.clone();
             let current = current.clone();
             let driver_pool = driver_pool.clone();
@@ -787,7 +820,6 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
         let driver_pool = driver_pool.clone();
         let current_connection_id = current_connection_id.clone();
         let painted_connection = painted_connection.clone();
-        let connected_ids = connected_ids.clone();
         let store = store.clone();
         let query_console = query_console.clone();
         let workspace_tabs = workspace_tabs.clone();
@@ -795,6 +827,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
         let active_group1_tab_id = active_group1_tab_id.clone();
         let panes = panes.clone();
         let last_view = last_view.clone();
+        let state = state.clone();
         Rc::new(move |pane, sql: String| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -824,6 +857,14 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             let Some(target_id) = active_id.lock().unwrap().clone() else {
                 return;
             };
+            let editor_text = panes[pane].ed_state.borrow().text();
+            let Some(tab_connection_id) =
+                begin_run(&w, &state, pane, &target_id, &sql, &editor_text, true)
+            else {
+                panes[pane].pending_run_origin.set(run_origin);
+                return;
+            };
+            let tab_connection_id = Some(tab_connection_id);
             let new_tab = result_new_tab.swap(false, std::sync::atomic::Ordering::SeqCst);
             // A new stream in this tab stops the tab's previous one; runs in
             // other tabs are left alone.
@@ -835,17 +876,6 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             // Log the RAW sql (clean `SELECT * FROM t`, no injected LIMIT).
             append_query_console(&query_console, sql.clone());
             sync_query_console(&w, &query_console);
-            let tab_connection_id = bind_tab_for_run(
-                &w,
-                &store,
-                &workspace_tabs,
-                &active_tab_id,
-                &current_connection_id,
-                &connected_ids,
-                &target_id,
-                &sql,
-                &panes[pane].ed_state.borrow().text(),
-            );
             set_p_query_running(&w, pane, true);
             set_p_streaming(&w, pane, true);
             set_p_read_only(&w, pane, true);
@@ -1266,49 +1296,51 @@ mod db_for_query_tests {
 }
 
 #[cfg(test)]
-mod bind_tab_connection_tests {
+mod mark_tab_running_tests {
     use super::*;
 
-    fn bind(tab_conn: Option<&str>, live: &[&str]) -> (Option<String>, bool, WorkspaceTab) {
-        let mut tab = WorkspaceTab::sql("t".into(), 1);
-        tab.connection_id = tab_conn.map(str::to_string);
-        tab.connection_name = "old".into();
-        let tabs = std::sync::Mutex::new(vec![tab]);
-        let current = std::sync::Mutex::new(Some("conn-a".to_string()));
-        let live: HashSet<String> = live.iter().map(|s| s.to_string()).collect();
-        let badge = |cid: &str| ConnBadgeInfo {
+    fn badge(cid: &str) -> ConnBadgeInfo {
+        ConnBadgeInfo {
             name: format!("name of {cid}"),
             ..Default::default()
-        };
-        let (id, rebound) = bind_tab_connection_for_runner(
-            &tabs, &current, &live, &badge, "t", "select 1", "select 1",
-        );
-        let tab = tabs.into_inner().unwrap().remove(0);
-        (id, rebound, tab)
+        }
+    }
+
+    fn tab_on(conn: Option<&str>) -> WorkspaceTab {
+        let mut tab = WorkspaceTab::sql("t".into(), 1);
+        tab.connection_id = conn.map(str::to_string);
+        tab.connection_name = "old".into();
+        tab
     }
 
     #[test]
-    fn a_tab_on_a_live_connection_keeps_it() {
-        let (id, rebound, tab) = bind(Some("conn-b"), &["conn-a", "conn-b"]);
-        assert_eq!(id.as_deref(), Some("conn-b"));
-        assert!(!rebound);
+    fn a_tab_running_on_its_own_connection_keeps_it() {
+        let mut tab = tab_on(Some("conn-b"));
+        assert!(!mark_tab_running(
+            &mut tab, "conn-b", &badge, "select 1", "select 1"
+        ));
         assert_eq!(tab.connection_name, "old");
+        assert!(tab.loading);
     }
 
-    /// Regression: the tab kept B's name and colour while its query ran on A.
+    /// The tab's dot and name move with the run, or the strip keeps naming a
+    /// connection the query never touched.
     #[test]
-    fn a_tab_whose_connection_is_gone_moves_to_the_workspace_one() {
-        let (id, rebound, tab) = bind(Some("conn-b"), &["conn-a"]);
-        assert_eq!(id.as_deref(), Some("conn-a"));
-        assert!(rebound);
+    fn a_tab_run_elsewhere_takes_that_connection() {
+        let mut tab = tab_on(Some("conn-b"));
+        assert!(mark_tab_running(
+            &mut tab, "conn-a", &badge, "select 1", "select 1"
+        ));
+        assert_eq!(tab.connection_id.as_deref(), Some("conn-a"));
         assert_eq!(tab.connection_name, "name of conn-a");
     }
 
     #[test]
     fn an_unbound_tab_latches_with_its_badge() {
-        let (id, rebound, tab) = bind(None, &["conn-a"]);
-        assert_eq!(id.as_deref(), Some("conn-a"));
-        assert!(rebound);
+        let mut tab = tab_on(None);
+        assert!(mark_tab_running(
+            &mut tab, "conn-a", &badge, "select 1", "select 1"
+        ));
         assert_eq!(tab.connection_name, "name of conn-a");
     }
 
@@ -1316,18 +1348,14 @@ mod bind_tab_connection_tests {
     /// with that statement once a restore skipped the save before it.
     #[test]
     fn a_run_keeps_the_whole_buffer_not_the_statement() {
-        let tabs = std::sync::Mutex::new(vec![WorkspaceTab::sql("t".into(), 1)]);
-        let current = std::sync::Mutex::new(None);
-        let badge = |_: &str| ConnBadgeInfo::default();
-        bind_tab_connection_for_runner(
-            &tabs,
-            &current,
-            &HashSet::new(),
+        let mut tab = tab_on(Some("conn-a"));
+        mark_tab_running(
+            &mut tab,
+            "conn-a",
             &badge,
-            "t",
             "select 2",
             "select 1;\nselect 2",
         );
-        assert_eq!(tabs.lock().unwrap()[0].query_text, "select 1;\nselect 2");
+        assert_eq!(tab.query_text, "select 1;\nselect 2");
     }
 }
