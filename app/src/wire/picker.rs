@@ -970,7 +970,12 @@ fn schedule_connect_timer(
     // "tooltip" hovers a control on this same pre-connect screen.
     if matches!(
         screen,
-        "connections" | "tooltip" | "export-menu" | "menu-hover" | "multi-connection"
+        "connections"
+            | "tooltip"
+            | "export-menu"
+            | "menu-hover"
+            | "multi-connection"
+            | "multi-connection-sidebar"
     ) {
         return;
     }
@@ -1087,7 +1092,7 @@ fn schedule_multi_connection_scenario(
     store: &Rc<RefCell<rdb_connstore::ConnStore>>,
     screen: &str,
 ) {
-    if screen != "multi-connection" {
+    if screen != "multi-connection" && screen != "multi-connection-sidebar" {
         return;
     }
     // The screen seeds its own pair rather than leaning on the mock list:
@@ -1127,13 +1132,23 @@ fn schedule_multi_connection_scenario(
             "the seeded connection pair is missing; saw {names:?}"
         ));
     };
+    if screen == "multi-connection-sidebar" {
+        schedule_sidebar_mode_scenario(window, pg, mongo);
+        return;
+    }
     sequence(
         window,
         vec![
             (
                 "connect to postgres",
                 Rc::new(|w: &MainWindow| !w.get_connecting()),
-                Rc::new(move |w: &MainWindow| w.invoke_connect_clicked(pg)),
+                Rc::new(move |w: &MainWindow| {
+                    // This scenario is the tab-decides flow: focusing a tab
+                    // moves the sidebar to the tab's connection.
+                    w.set_tab_focus(1);
+                    w.invoke_set_tab_focus(1);
+                    w.invoke_connect_clicked(pg)
+                }),
             ),
             (
                 "open a table on postgres",
@@ -1212,27 +1227,6 @@ fn schedule_multi_connection_scenario(
                         && w.get_selected_conn() == mongo
                         && w.get_schema_tree().row_count() > 0
                 }),
-                // Run something in it, the way a user would.
-                Rc::new(|w: &MainWindow| {
-                    w.invoke_editor_key("db.users.find()".into(), false, false, false);
-                    w.invoke_run_query();
-                }),
-            ),
-            (
-                "running a dead connection's tab moves it to the live one",
-                // Name, colour and engine on the strip follow the query to
-                // mongo instead of still claiming postgres.
-                Rc::new(|w: &MainWindow| {
-                    active_tab_engine(w) == "mongo" && w.get_conn_status() == "connected"
-                }),
-                // Another postgres tab (the emiten table), still offline.
-                Rc::new(|w: &MainWindow| w.invoke_select_tab(1)),
-            ),
-            (
-                "another dead tab still shows offline",
-                Rc::new(|w: &MainWindow| {
-                    active_tab_engine(w) == "postgres" && w.get_conn_status() == "offline"
-                }),
                 // The topbar's Connect button.
                 Rc::new(|w: &MainWindow| w.invoke_reconnect()),
             ),
@@ -1244,7 +1238,92 @@ fn schedule_multi_connection_scenario(
                 Rc::new(move |w: &MainWindow| {
                     connection_is_live(w, pg) && active_tab_engine(w) == "postgres"
                 }),
+                // Drop postgres again; focus moves to the live mongo tab.
+                Rc::new(|w: &MainWindow| w.invoke_disconnect()),
+            ),
+            (
+                "the disconnect moves to mongo again",
+                Rc::new(move |w: &MainWindow| {
+                    active_tab_engine(w) == "mongo"
+                        && !connection_is_live(w, pg)
+                        && w.get_conn_status() == "connected"
+                }),
+                Rc::new(|w: &MainWindow| w.invoke_select_tab(0)),
+            ),
+            (
+                "an offline tab offers Connect & Run",
+                Rc::new(|w: &MainWindow| {
+                    active_tab_engine(w) == "postgres" && w.get_run_needs_connect()
+                }),
+                // Run it, the way a user would.
+                Rc::new(|w: &MainWindow| {
+                    w.invoke_editor_key("select 1".into(), false, false, false);
+                    w.invoke_run_query();
+                }),
+            ),
+            (
+                "Connect & Run opens the tab's own connection, not a live one",
+                // Regression: the run used to move the tab onto whatever was
+                // live, possibly production, while the topbar named this one.
+                Rc::new(move |w: &MainWindow| {
+                    connection_is_live(w, pg)
+                        && active_tab_engine(w) == "postgres"
+                        && !w.get_run_needs_connect()
+                }),
                 // The rail's Home.
+                Rc::new(|w: &MainWindow| w.invoke_disconnect_all()),
+            ),
+            (
+                "home closes every connection and shows the picker",
+                Rc::new(move |w: &MainWindow| {
+                    !w.get_connected()
+                        && !connection_is_live(w, pg)
+                        && !connection_is_live(w, mongo)
+                }),
+                Rc::new(|_w: &MainWindow| {}),
+            ),
+        ],
+    );
+}
+
+/// The default flow: the sidebar decides where a tab runs. Switching
+/// connection keeps the open tab; a tab of another driver family can't run
+/// and offers the way back to its own connection.
+fn schedule_sidebar_mode_scenario(window: &MainWindow, pg: i32, mongo: i32) {
+    sequence(
+        window,
+        vec![
+            (
+                "connect to postgres",
+                Rc::new(|w: &MainWindow| !w.get_connecting()),
+                Rc::new(move |w: &MainWindow| w.invoke_connect_clicked(pg)),
+            ),
+            (
+                "postgres is up with a tab of its own",
+                Rc::new(|w: &MainWindow| {
+                    w.get_connected() && !w.get_tree_loading() && active_tab_engine(w) == "postgres"
+                }),
+                Rc::new(move |w: &MainWindow| w.invoke_connect_clicked(mongo)),
+            ),
+            (
+                "switching connection keeps the postgres tab, blocked with a banner",
+                Rc::new(move |w: &MainWindow| {
+                    connection_is_live(w, mongo)
+                        && !w.get_tree_loading()
+                        && active_tab_engine(w) == "postgres"
+                        && w.get_run_block_text() != ""
+                        && w.get_selected_conn() == mongo
+                }),
+                // The banner's "Switch to …".
+                Rc::new(|w: &MainWindow| w.invoke_run_block_act(0)),
+            ),
+            (
+                "the banner action moves the sidebar back to postgres",
+                Rc::new(move |w: &MainWindow| {
+                    !w.get_tree_loading()
+                        && w.get_selected_conn() == pg
+                        && w.get_run_block_text() == ""
+                }),
                 Rc::new(|w: &MainWindow| w.invoke_disconnect_all()),
             ),
             (
