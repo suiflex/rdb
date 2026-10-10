@@ -5384,6 +5384,9 @@ struct AppState {
     editing_id: Rc<RefCell<String>>,
     tab_runs: TabRuns,
     pending_run: Rc<RefCell<Option<PendingRun>>>,
+    // The tab last open on each connection (connection id → tab id), so
+    // coming back to a connection lands where it was left.
+    last_tab_by_conn: Rc<RefCell<HashMap<String, String>>>,
 }
 
 /// Everything the workspace displays *about* one connection, kept per
@@ -5809,6 +5812,7 @@ fn main() -> Result<(), slint::PlatformError> {
         editing_id: editing_id.clone(),
         tab_runs: TabRuns::default(),
         pending_run: Rc::default(),
+        last_tab_by_conn: Rc::default(),
     };
 
     let rebuild_sidebar = {
@@ -6019,6 +6023,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 *active_tab_id.lock().unwrap() = Some(tab.id.clone());
             } else {
                 *active_group1_tab_id.lock().unwrap() = Some(tab.id.clone());
+            }
+            if let Some(cid) = &tab.connection_id {
+                state
+                    .last_tab_by_conn
+                    .borrow_mut()
+                    .insert(cid.clone(), tab.id.clone());
             }
             let mode = run_target::TabMode::from_ui(&state.settings.borrow().get().ui_state);
             point_context_at_tab(
