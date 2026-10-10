@@ -178,7 +178,15 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let active_group1_tab_id = active_group1_tab_id.clone();
         let restore_tab = restore_tab.clone();
         let restore_p1_tab = fns.restore_p1_tab.clone();
+        let save_active_tab = fns.save_active_tab.clone();
+        let save_p1_tab = fns.save_p1_tab.clone();
         window.on_set_query_tabs_by_connection(move |enabled| {
+            // The restore below reloads both panes from the tab list; without
+            // a save first, whatever was typed since the last switch is lost.
+            if let Some(w) = weak.upgrade() {
+                save_active_tab(&w);
+                save_p1_tab(&w);
+            }
             let _ = settings
                 .borrow_mut()
                 .update(|s| s.ui_state.query_tabs_by_connection = enabled);
