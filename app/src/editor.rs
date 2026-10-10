@@ -184,6 +184,9 @@ struct Snap {
     col: usize,
 }
 
+/// Cursor `(line, col)` plus the selection anchor, if any.
+pub type Caret = ((usize, usize), Option<(usize, usize)>);
+
 /// Editor buffer + cursor. The text is the single source of truth; the UI
 /// mirrors it through the span model rebuilt per edited line.
 #[derive(Default)]
@@ -633,6 +636,20 @@ impl EditorState {
         self.set_selecting(extend);
         self.line = (line.max(0) as usize).min(self.lines.len() - 1);
         self.col = (col.max(0) as usize).min(self.lines[self.line].chars().count());
+    }
+
+    /// Cursor and selection anchor, what a tab keeps of its editor across a
+    /// switch.
+    pub fn caret(&self) -> Caret {
+        ((self.line, self.col), self.sel)
+    }
+
+    /// Put back a `caret()` snapshot, clamped to the buffer.
+    pub fn set_caret(&mut self, (cursor, anchor): Caret) {
+        if let Some((line, col)) = anchor {
+            self.move_to(line as i32, col as i32, false);
+        }
+        self.move_to(cursor.0 as i32, cursor.1 as i32, anchor.is_some());
     }
 
     /// Select the identifier/word under (line, col) — double-click behaviour.
@@ -1976,5 +1993,20 @@ mod tests {
         assert_eq!(ed.text(), "SELECT id FROM ");
         ed.undo();
         assert_eq!(ed.text(), "SELECT id FROM users");
+    }
+
+    #[test]
+    fn caret_round_trips_through_a_reload() {
+        let mut ed = EditorState::from_text("select 1;\nselect 22");
+        ed.move_to(1, 2, false);
+        ed.move_to(1, 9, true);
+        let caret = ed.caret();
+        let mut back = EditorState::from_text(&ed.text());
+        back.set_caret(caret);
+        assert_eq!(back.caret(), ((1, 9), Some((1, 2))));
+        // A snapshot past the end of a shorter buffer clamps instead of panicking.
+        let mut short = EditorState::from_text("x");
+        short.set_caret(caret);
+        assert_eq!(short.caret(), ((0, 1), Some((0, 1))));
     }
 }
