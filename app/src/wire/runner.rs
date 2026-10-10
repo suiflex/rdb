@@ -886,6 +886,17 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                         let Some(w) = weak.upgrade() else {
                             return;
                         };
+                        // Rows keep accumulating for the tab that started the
+                        // stream; the pane only shows them while that tab is
+                        // the one on screen, or they painted over another tab.
+                        let on_screen = {
+                            let active_id = if pane == 1 {
+                                &active_group1_tab_id
+                            } else {
+                                &active_tab_id
+                            };
+                            active_id.lock().unwrap().as_deref() == Some(target_id.as_str())
+                        };
                         loop {
                             match ui_rx.try_recv() {
                                 Ok(StreamMsg::Meta(cols)) => {
@@ -896,14 +907,16 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                                             type_name: c.type_name.clone().into(),
                                         })
                                         .collect();
-                                    set_p_col_count(&w, pane, gcols.len() as i32);
-                                    set_p_columns(
-                                        &w,
-                                        pane,
-                                        ModelRc::from(Rc::new(VecModel::from(gcols))),
-                                    );
                                     let vm = Rc::new(VecModel::<GridCell>::default());
-                                    set_p_cells(&w, pane, ModelRc::from(vm.clone()));
+                                    if on_screen {
+                                        set_p_col_count(&w, pane, gcols.len() as i32);
+                                        set_p_columns(
+                                            &w,
+                                            pane,
+                                            ModelRc::from(Rc::new(VecModel::from(gcols))),
+                                        );
+                                        set_p_cells(&w, pane, ModelRc::from(vm.clone()));
+                                    }
                                     *cells_model.borrow_mut() = Some(vm);
                                     *accum.borrow_mut() = model::GridModel {
                                         columns: cols,
@@ -927,6 +940,9 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                                                 vmrow.push(model::VmCell { text, is_null });
                                             }
                                             acc.rows.push(vmrow);
+                                        }
+                                        if !on_screen {
+                                            continue;
                                         }
                                         set_p_result_status(
                                             &w,
