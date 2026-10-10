@@ -2197,6 +2197,21 @@ fn visible_group_relative_index(w: &MainWindow, tabs: &[WorkspaceTab], abs: usiz
         .count()
 }
 
+/// `AppState::connected_ids`, for the tab strip: a tab of a closed
+/// connection draws its dot dimmed, and `set_workspace_tabs` has two dozen
+/// callers that would otherwise all have to pass the set in.
+static LIVE_CONNECTIONS: std::sync::OnceLock<Arc<Mutex<HashSet<String>>>> =
+    std::sync::OnceLock::new();
+
+fn tab_offline(tab: &WorkspaceTab) -> bool {
+    let Some(id) = &tab.connection_id else {
+        return false;
+    };
+    LIVE_CONNECTIONS
+        .get()
+        .is_some_and(|live| !live.lock().unwrap().contains(id))
+}
+
 fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&str>) {
     let left: Vec<&WorkspaceTab> = tabs
         .iter()
@@ -2212,6 +2227,7 @@ fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&
             connection_name: tab.connection_name.clone().into(),
             color: tab.color,
             has_custom_color: tab.has_custom_color,
+            offline: tab_offline(tab),
         })
         .collect();
     w.set_tabs(ModelRc::from(Rc::new(VecModel::from(items))));
@@ -2235,6 +2251,7 @@ fn set_workspace_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active_id: Option<&
             connection_name: tab.connection_name.clone().into(),
             color: tab.color,
             has_custom_color: tab.has_custom_color,
+            offline: tab_offline(tab),
         })
         .collect();
     w.set_p1_tabs(ModelRc::from(Rc::new(VecModel::from(p1_items))));
@@ -5682,6 +5699,7 @@ fn main() -> Result<(), slint::PlatformError> {
         Arc::new(std::sync::Mutex::new(None));
     let connected_ids: Arc<std::sync::Mutex<HashSet<String>>> =
         Arc::new(std::sync::Mutex::new(HashSet::new()));
+    let _ = LIVE_CONNECTIONS.set(connected_ids.clone());
     // One-shot database override for the next connect: the database switcher sets
     // it, then re-invokes the connect path, which consumes it (take) so a plain
     // reconnect from the picker still uses the connection's saved database.

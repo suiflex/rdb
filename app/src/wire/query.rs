@@ -82,6 +82,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             window.on_connect_finished(move |id, ok| {
                 if let Some(w) = weak.upgrade() {
                     paint_run_states(&w, &state);
+                    // Its tabs' dots light back up.
+                    let tabs = state.workspace_tabs.lock().unwrap();
+                    let left = state.active_tab_id.lock().unwrap().clone();
+                    set_workspace_tabs(&w, &tabs, left.as_deref());
                 }
                 let waiting = matches!(
                     pending_run.borrow().as_ref().map(|r| &r.wait),
