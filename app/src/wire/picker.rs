@@ -976,6 +976,7 @@ fn schedule_connect_timer(
             | "menu-hover"
             | "multi-connection"
             | "multi-connection-sidebar"
+            | "prod-confirm"
     ) {
         return;
     }
@@ -1092,6 +1093,10 @@ fn schedule_multi_connection_scenario(
     store: &Rc<RefCell<rdb_connstore::ConnStore>>,
     screen: &str,
 ) {
+    if screen == "prod-confirm" {
+        schedule_prod_confirm_scenario(window, store);
+        return;
+    }
     if screen != "multi-connection" && screen != "multi-connection-sidebar" {
         return;
     }
@@ -1332,6 +1337,119 @@ fn schedule_sidebar_mode_scenario(window: &MainWindow, pg: i32, mongo: i32) {
                     !w.get_connected()
                         && !connection_is_live(w, pg)
                         && !connection_is_live(w, mongo)
+                }),
+                Rc::new(|_w: &MainWindow| {}),
+            ),
+        ],
+    );
+}
+
+/// A tab from a staging connection run on a PRODUCTION one asks first, once.
+fn schedule_prod_confirm_scenario(
+    window: &MainWindow,
+    store: &Rc<RefCell<rdb_connstore::ConnStore>>,
+) {
+    for (name, env) in [
+        ("screen staging", rdb_connstore::EnvTag::Staging),
+        ("screen prod", rdb_connstore::EnvTag::Production),
+    ] {
+        if store.borrow().list().iter().any(|c| c.name == name) {
+            continue;
+        }
+        let mut conn = rdb_connstore::SavedConnection::new(
+            name,
+            rdb_connstore::Engine::Postgres,
+            "203.0.113.10",
+            5432,
+            "screen_user",
+        );
+        conn.env_tag = env;
+        if store.borrow_mut().add(conn).is_err() {
+            screen_fail(&format!("could not seed the '{name}' connection"));
+        }
+    }
+    let idx_of = |name: &str| {
+        store
+            .borrow()
+            .list()
+            .iter()
+            .position(|s| s.name == name)
+            .map(|i| i as i32)
+    };
+    let (Some(stg), Some(prod)) = (idx_of("screen staging"), idx_of("screen prod")) else {
+        screen_fail("the seeded staging/prod pair is missing");
+    };
+    let tab_conn = |w: &MainWindow| -> String {
+        use slint::Model as _;
+        let i = w.get_active_tab();
+        w.get_tabs()
+            .row_data(i.max(0) as usize)
+            .map(|t| t.connection_name.to_string())
+            .unwrap_or_default()
+    };
+    sequence(
+        window,
+        vec![
+            (
+                "connect to staging",
+                Rc::new(|w: &MainWindow| !w.get_connecting()),
+                Rc::new(move |w: &MainWindow| w.invoke_connect_clicked(stg)),
+            ),
+            (
+                "staging is up with its own tab",
+                Rc::new(move |w: &MainWindow| {
+                    w.get_connected() && !w.get_tree_loading() && tab_conn(w) == "screen staging"
+                }),
+                // Sidebar decides (the default): the staging tab stays open.
+                Rc::new(move |w: &MainWindow| w.invoke_connect_clicked(prod)),
+            ),
+            (
+                "prod is up and the staging tab is still open",
+                Rc::new(move |w: &MainWindow| {
+                    connection_is_live(w, prod)
+                        && !w.get_tree_loading()
+                        && tab_conn(w) == "screen staging"
+                }),
+                Rc::new(|w: &MainWindow| {
+                    w.invoke_editor_key("select 1".into(), false, false, false);
+                    w.invoke_run_query();
+                }),
+            ),
+            (
+                "the first run on production asks first",
+                Rc::new(|w: &MainWindow| w.get_prod_confirm_open()),
+                Rc::new(move |w: &MainWindow| {
+                    // Nothing ran while it waits.
+                    if tab_conn(w) != "screen staging" {
+                        screen_fail("the tab moved to prod before the confirmation");
+                    }
+                    w.set_prod_confirm_open(false);
+                    w.invoke_prod_confirm_accept();
+                }),
+            ),
+            (
+                "confirming runs it there and the tab takes prod",
+                Rc::new(move |w: &MainWindow| {
+                    !w.get_query_running() && tab_conn(w) == "screen prod"
+                }),
+                Rc::new(|w: &MainWindow| w.invoke_run_query()),
+            ),
+            (
+                "a second run does not ask again",
+                Rc::new(|w: &MainWindow| !w.get_query_running()),
+                Rc::new(|w: &MainWindow| {
+                    if w.get_prod_confirm_open() {
+                        screen_fail("the confirmation came back on the second run");
+                    }
+                    w.invoke_disconnect_all();
+                }),
+            ),
+            (
+                "home closes every connection",
+                Rc::new(move |w: &MainWindow| {
+                    !w.get_connected()
+                        && !connection_is_live(w, stg)
+                        && !connection_is_live(w, prod)
                 }),
                 Rc::new(|_w: &MainWindow| {}),
             ),

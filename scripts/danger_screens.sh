@@ -75,6 +75,7 @@ workspace-sql
 workspace-tabflow
 multi-connection
 multi-connection-sidebar
+prod-confirm
 "
 
 # Named screens override the list, for debugging one scenario:
@@ -98,7 +99,7 @@ for screen in $SCREENS; do
   # multi-connection drives two connects, a table open, a tab switch and a new
   # tab before it asserts; the default delay shoots the frame mid-scenario.
   delay=$DELAY
-  case "$screen" in multi-connection|multi-connection-sidebar) [ "$DELAY" -lt 12000 ] && delay=12000;; esac
+  case "$screen" in multi-connection|multi-connection-sidebar|prod-confirm) [ "$DELAY" -lt 12000 ] && delay=12000;; esac
   (
     export RDB_MOCK=1
     export RDB_SCREEN="$screen"
