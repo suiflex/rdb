@@ -169,6 +169,33 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 .update(|s| s.ui_state.sidebar_right = v);
         });
     }
+    // ----- settings: which side decides a tab's connection, and when it moves -----
+    {
+        let settings = settings.clone();
+        window.on_set_tab_focus(move |i| {
+            let focus = if i == 1 {
+                rdb_connstore::TabFocus::Tab
+            } else {
+                rdb_connstore::TabFocus::Sidebar
+            };
+            let _ = settings
+                .borrow_mut()
+                .update(|s| s.ui_state.tab_focus = focus);
+        });
+    }
+    {
+        let settings = settings.clone();
+        window.on_set_tab_rebind(move |i| {
+            let rebind = if i == 1 {
+                rdb_connstore::TabRebind::OnOpen
+            } else {
+                rdb_connstore::TabRebind::OnRun
+            };
+            let _ = settings
+                .borrow_mut()
+                .update(|s| s.ui_state.tab_rebind = rebind);
+        });
+    }
     // ----- settings: connection-scoped query tabs toggle -----
     {
         let weak = window.as_weak();

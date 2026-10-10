@@ -5404,6 +5404,14 @@ fn main() -> Result<(), slint::PlatformError> {
     window.set_update_check_enabled(settings.borrow().get().update_check);
     window.set_sidebar_right(settings.borrow().get().ui_state.sidebar_right);
     window.set_query_tabs_by_connection(settings.borrow().get().ui_state.query_tabs_by_connection);
+    window.set_tab_focus(match settings.borrow().get().ui_state.tab_focus {
+        rdb_connstore::TabFocus::Sidebar => 0,
+        rdb_connstore::TabFocus::Tab => 1,
+    });
+    window.set_tab_rebind(match settings.borrow().get().ui_state.tab_rebind {
+        rdb_connstore::TabRebind::OnRun => 0,
+        rdb_connstore::TabRebind::OnOpen => 1,
+    });
     let history_cap = Rc::new(Cell::new(
         settings.borrow().get().editor.history_max_entries.max(1) as usize,
     ));
