@@ -40,7 +40,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         driver_pool,
         active_tab_id,
         active_group1_tab_id,
-        workspace_tabs,
+        tab_runs,
         ..
     } = state.clone();
     let displayed_grid = panes[0].displayed_grid.clone();
@@ -167,17 +167,34 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
     }
 
     // ----- Cancel a running stream ("No limit" fetch) -----
-    {
+    for pane in 0..2 {
         let weak = window.as_weak();
-        let panes = panes.clone();
-        window.on_cancel_stream(move || {
-            if let Some(c) = panes[0].stream_cancel.borrow().as_ref() {
-                c.store(true, std::sync::atomic::Ordering::SeqCst);
+        let tab_runs = tab_runs.clone();
+        let active_id = if pane == 1 {
+            active_group1_tab_id.clone()
+        } else {
+            active_tab_id.clone()
+        };
+        let cancel = move || {
+            // The stream of the tab on screen in this pane, not whichever
+            // stream the pane started last.
+            // The timer stays with the run so it still drains what the
+            // producer sends once it sees the flag.
+            let id = active_id.lock().unwrap().clone();
+            if let Some(id) = id {
+                if let Some(run) = tab_runs.borrow_mut().get_mut(&id) {
+                    run.stop();
+                }
             }
             if let Some(w) = weak.upgrade() {
-                set_p_streaming(&w, 0, false);
+                set_p_streaming(&w, pane, false);
             }
-        });
+        };
+        if pane == 0 {
+            window.on_cancel_stream(cancel);
+        } else {
+            window.on_p1_cancel_stream(cancel);
+        }
     }
 
     // ----- Cancel a running buffered query -----
@@ -196,35 +213,40 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
     // the user lacks the privilege — neither is worth a modal over.
     for pane in 0..2 {
         let weak = window.as_weak();
-        let panes = panes.clone();
         let rt = rt.clone();
         let current = current.clone();
         let driver_pool = driver_pool.clone();
-        let active_tab_id = active_tab_id.clone();
-        let active_group1_tab_id = active_group1_tab_id.clone();
-        let workspace_tabs = workspace_tabs.clone();
+        let tab_runs = tab_runs.clone();
+        let active_id = if pane == 1 {
+            active_group1_tab_id.clone()
+        } else {
+            active_tab_id.clone()
+        };
         let cancel = move || {
             let current = current.clone();
             let driver_pool = driver_pool.clone();
-            // The active tab's own connection, not whatever `current` is —
-            // and each pane's own tab, or cancelling on the right kills a
-            // query on the left group's connection instead.
-            let tab_connection_id = if pane == 1 {
-                right_pane_connection_id(&active_tab_id, &active_group1_tab_id, &workspace_tabs)
-            } else {
-                focused_tab_connection_id(&active_tab_id, &workspace_tabs)
+            // The run of this pane's tab, on the connection that run went to:
+            // the tab may have been pointed elsewhere since it started.
+            let id = active_id.lock().unwrap().clone();
+            let mut runs = tab_runs.borrow_mut();
+            let Some(run) = id.and_then(|id| runs.get_mut(&id)) else {
+                drop(runs);
+                if let Some(w) = weak.upgrade() {
+                    set_p_query_running(&w, pane, false);
+                }
+                return;
             };
+            let run_connection_id = run.connection_id.clone();
             rt.spawn(async move {
-                let driver = resolve_driver(&driver_pool, &current, tab_connection_id.as_deref())
+                let driver = resolve_driver(&driver_pool, &current, run_connection_id.as_deref())
                     .await
                     .map(|(_, d)| d);
                 if let Some(d) = driver {
                     let _ = d.cancel_running().await;
                 }
             });
-            if let Some(h) = panes[pane].query_abort.borrow_mut().take() {
-                h.abort();
-            }
+            run.stop();
+            drop(runs);
             if let Some(w) = weak.upgrade() {
                 set_p_query_running(&w, pane, false);
             }
@@ -711,18 +733,6 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                     }
                 });
             });
-        });
-    }
-    {
-        let weak = window.as_weak();
-        let panes = panes.clone();
-        window.on_p1_cancel_stream(move || {
-            if let Some(c) = panes[1].stream_cancel.borrow().as_ref() {
-                c.store(true, std::sync::atomic::Ordering::SeqCst);
-            }
-            if let Some(w) = weak.upgrade() {
-                set_p_streaming(&w, 1, false);
-            }
         });
     }
 }

@@ -115,6 +115,16 @@ fn show_rebound_tab(
     w.set_conn_status(SharedString::from("connected"));
 }
 
+/// Stops a stream's drain timer from inside its own callback. The callback
+/// holds only a weak ref: the timer belongs to the tab's `TabRun`.
+fn stop_timer(cell: &std::rc::Weak<RefCell<Option<slint::Timer>>>) {
+    if let Some(cell) = cell.upgrade() {
+        if let Some(t) = cell.borrow().as_ref() {
+            t.stop();
+        }
+    }
+}
+
 /// One statement's result, kept only when Run Selection asked for a result
 /// tab per statement.
 struct SplitResult {
@@ -486,6 +496,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
         painted_connection,
         query_console,
         last_view,
+        tab_runs,
         ..
     } = state.clone();
 
@@ -496,6 +507,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
     let run_sql: Rc<dyn Fn(usize, String)> = {
         let weak = window.as_weak();
         let rt = rt.clone();
+        let tab_runs = tab_runs.clone();
         let current = current.clone();
         let driver_pool = driver_pool.clone();
         let current_connection_id = current_connection_id.clone();
@@ -599,6 +611,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                 .map(|cid| connection_badge_info(&store.borrow(), cid))
                 .unwrap_or_default();
             let started = std::time::Instant::now();
+            let run_key = (target_id.clone(), query_connection_id.clone());
             let jh = rt.spawn(async move {
                 let picked =
                     resolve_driver(&driver_pool, &current, query_connection_id.as_deref()).await;
@@ -749,7 +762,15 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             // lives in `wire::split_pane`'s cancel handlers, which call
             // `AnyDriver::cancel_running` before aborting so the statement
             // actually stops instead of running on unwatched.
-            *panes[pane].query_abort.borrow_mut() = Some(jh.abort_handle());
+            let (run_tab, run_connection) = run_key;
+            tab_runs.borrow_mut().insert(
+                run_tab,
+                TabRun {
+                    connection_id: run_connection,
+                    abort: Some(jh.abort_handle()),
+                    ..Default::default()
+                },
+            );
         })
     };
 
@@ -761,6 +782,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
     let run_stream: Rc<dyn Fn(usize, String)> = {
         let weak = window.as_weak();
         let rt = rt.clone();
+        let tab_runs = tab_runs.clone();
         let current = current.clone();
         let driver_pool = driver_pool.clone();
         let current_connection_id = current_connection_id.clone();
@@ -793,8 +815,6 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
             let col_filters = panes[pane].col_filters.clone();
             let edit_buf = panes[pane].edit_buf.clone();
             let browse = panes[pane].browse.clone();
-            let stream_cancel = panes[pane].stream_cancel.clone();
-            let stream_timer = panes[pane].stream_timer.clone();
             let result_new_tab = panes[pane].result_new_tab.clone();
             let active_id = if pane == 1 {
                 &active_group1_tab_id
@@ -805,12 +825,13 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                 return;
             };
             let new_tab = result_new_tab.swap(false, std::sync::atomic::Ordering::SeqCst);
-            // Stop any in-flight stream, then arm a fresh cancel flag.
-            if let Some(prev) = stream_cancel.borrow().as_ref() {
-                prev.store(true, std::sync::atomic::Ordering::SeqCst);
+            // A new stream in this tab stops the tab's previous one; runs in
+            // other tabs are left alone.
+            if let Some(prev) = tab_runs.borrow_mut().get_mut(&target_id) {
+                prev.stop();
             }
             let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            *stream_cancel.borrow_mut() = Some(cancel.clone());
+            let timer_cell: Rc<RefCell<Option<slint::Timer>>> = Rc::default();
             // Log the RAW sql (clean `SELECT * FROM t`, no injected LIMIT).
             append_query_console(&query_console, sql.clone());
             sync_query_console(&w, &query_console);
@@ -875,7 +896,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                 let active_result = active_result.clone();
                 let active_tab_id = active_tab_id.clone();
                 let active_group1_tab_id = active_group1_tab_id.clone();
-                let stream_timer_stop = stream_timer.clone();
+                let stream_timer_stop = Rc::downgrade(&timer_cell);
                 let target_id = target_id.clone();
                 let query_connection_id = query_connection_id.clone();
                 let query_badge = query_badge.clone();
@@ -1049,9 +1070,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                                             set_p_read_only(&w, pane, !editable);
                                         }
                                     }
-                                    if let Some(t) = stream_timer_stop.borrow().as_ref() {
-                                        t.stop();
-                                    }
+                                    stop_timer(&stream_timer_stop);
                                     return;
                                 }
                                 Ok(StreamMsg::Err(e)) => {
@@ -1092,18 +1111,14 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                                         set_p_query_running(&w, pane, false);
                                         set_p_streaming(&w, pane, false);
                                     }
-                                    if let Some(t) = stream_timer_stop.borrow().as_ref() {
-                                        t.stop();
-                                    }
+                                    stop_timer(&stream_timer_stop);
                                     return;
                                 }
                                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
                                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                                     set_p_query_running(&w, pane, false);
                                     set_p_streaming(&w, pane, false);
-                                    if let Some(t) = stream_timer_stop.borrow().as_ref() {
-                                        t.stop();
-                                    }
+                                    stop_timer(&stream_timer_stop);
                                     return;
                                 }
                             }
@@ -1111,7 +1126,16 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                     },
                 );
             }
-            *stream_timer.borrow_mut() = Some(timer);
+            *timer_cell.borrow_mut() = Some(timer);
+            tab_runs.borrow_mut().insert(
+                target_id.clone(),
+                TabRun {
+                    connection_id: query_connection_id.clone(),
+                    abort: None,
+                    cancel: Some(cancel.clone()),
+                    _timer: timer_cell,
+                },
+            );
 
             // Producer task: stream from the driver, forward Send batches to the
             // UI channel. The driver is cloned out of the mutex up front (the

@@ -1661,15 +1661,9 @@ struct GroupRuntime {
     sort_state: Arc<std::sync::Mutex<(i32, bool)>>,
     col_order: Arc<std::sync::Mutex<Vec<usize>>>,
     col_filters: Arc<std::sync::Mutex<Vec<String>>>,
-    stream_cancel: Rc<RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>>,
-    stream_timer: Rc<RefCell<Option<slint::Timer>>>,
     // Prevent duplicate exports while serialization, dialog selection, or file
     // writing is still in progress.
     export_busy: Arc<std::sync::atomic::AtomicBool>,
-    // Abort handle for the in-flight buffered query task, so a slow query can be
-    // hard-cancelled. Overwritten on each run; aborting a finished task is a
-    // no-op, so no clearing on completion is needed.
-    query_abort: Rc<RefCell<Option<tokio::task::AbortHandle>>>,
     // Editor error highlight: (line the engine pointed at, first line of the
     // failing statement, last line of it), 0-based in the buffer. Kept here so
     // a re-lex (any edit or cursor move) can re-apply it instead of dropping it.
@@ -1681,6 +1675,45 @@ struct GroupRuntime {
     // query, table browse) is unaffected.
     pending_run_origin: Rc<Cell<(i32, i32)>>,
 }
+
+/// What stops one tab's in-flight run, and where that run went.
+///
+/// Keyed by tab id rather than held per pane: a pane slot was overwritten by
+/// the next run in any tab of that group, so starting a query in tab B took
+/// tab A's cancel handle, and a new stream stopped A's stream outright.
+#[derive(Default)]
+pub(crate) struct TabRun {
+    connection_id: Option<String>,
+    // Buffered run's task. Aborting a finished task is a no-op, so nothing
+    // clears it on completion.
+    abort: Option<tokio::task::AbortHandle>,
+    // Streaming run's stop flag, and the UI timer draining its batches. The
+    // timer is owned here; its own callback only holds a weak ref to it.
+    cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+    _timer: Rc<RefCell<Option<slint::Timer>>>,
+}
+
+impl TabRun {
+    /// Client-side stop: flag the stream and abort the task. The server-side
+    /// `cancel_running` is the caller's job, it needs the driver.
+    fn stop(&mut self) {
+        if let Some(c) = &self.cancel {
+            c.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        if let Some(h) = self.abort.take() {
+            h.abort();
+        }
+    }
+
+    fn is_stream(&self) -> bool {
+        self.cancel
+            .as_ref()
+            .is_some_and(|c| !c.load(std::sync::atomic::Ordering::SeqCst))
+    }
+}
+
+/// Tab id → its in-flight run. UI-thread only.
+pub(crate) type TabRuns = Rc<RefCell<HashMap<String, TabRun>>>;
 
 impl GroupRuntime {
     fn new() -> Self {
@@ -1703,10 +1736,7 @@ impl GroupRuntime {
             sort_state: Arc::new(std::sync::Mutex::new((-1, true))),
             col_order: Arc::new(std::sync::Mutex::new(Vec::new())),
             col_filters: Arc::new(std::sync::Mutex::new(Vec::new())),
-            stream_cancel: Rc::new(RefCell::new(None)),
-            stream_timer: Rc::new(RefCell::new(None)),
             export_busy: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            query_abort: Rc::new(RefCell::new(None)),
             error_mark: Arc::new(Mutex::new(None)),
             pending_run_origin: Rc::new(Cell::new((0, 0))),
         }
@@ -5194,6 +5224,7 @@ struct AppState {
     collapsed: Rc<RefCell<HashSet<String>>>,
     conn_filter: Rc<RefCell<String>>,
     editing_id: Rc<RefCell<String>>,
+    tab_runs: TabRuns,
 }
 
 /// Everything the workspace displays *about* one connection, kept per
@@ -5609,6 +5640,7 @@ fn main() -> Result<(), slint::PlatformError> {
         collapsed: collapsed.clone(),
         conn_filter: conn_filter.clone(),
         editing_id: editing_id.clone(),
+        tab_runs: TabRuns::default(),
     };
 
     let rebuild_sidebar = {
@@ -5797,6 +5829,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let active_group1_tab_id = active_group1_tab_id.clone();
         let load_editor_text = load_editor_text.clone();
         let sync_editor = sync_editor.clone();
+        let tab_runs = state.tab_runs.clone();
         let panes = panes.clone();
         let last_view = last_view.clone();
         let store = store.clone();
@@ -5891,8 +5924,19 @@ fn main() -> Result<(), slint::PlatformError> {
             // group-local so moving a table keeps its toolbar and footer.
             if pane == 0 {
                 w.set_fn_mode(tab.kind == "function");
-                w.set_query_running(tab.loading);
             }
+            // Running is the tab's own state: a query still going in the tab
+            // left behind must not spin here, and one in this tab must.
+            set_p_query_running(w, pane, tab.loading);
+            set_p_streaming(
+                w,
+                pane,
+                tab.loading
+                    && tab_runs
+                        .borrow()
+                        .get(&tab.id)
+                        .is_some_and(TabRun::is_stream),
+            );
             set_p_active_table(
                 w,
                 pane,
