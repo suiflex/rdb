@@ -52,6 +52,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         collapsed_categories,
         workspace_tabs,
         active_tab_id,
+        current_connection_id,
         ..
     } = state.clone();
     let AppFns {
@@ -169,6 +170,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let load_editor_text = load_editor_text.clone();
         let query_console = query_console.clone();
         let ed_state = ed_state.clone();
+        let current_connection_id = current_connection_id.clone();
         window.on_schema_choose(move |idx| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -200,10 +202,18 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                         tab.query_text = ed_state.borrow().text();
                     }
                 }
+                // The fallback stays on this connection's left-group tabs: the
+                // first tab overall may belong to another connection, whose
+                // text then loaded here with the sidebar still on this one.
+                let current = current_connection_id.lock().unwrap().clone();
                 prev_active
                     .clone()
                     .filter(|id| tabs.iter().any(|t| &t.id == id))
-                    .or_else(|| tabs.first().map(|t| t.id.clone()))
+                    .or_else(|| {
+                        tabs.iter()
+                            .find(|t| t.group == 0 && t.connection_id == current)
+                            .map(|t| t.id.clone())
+                    })
             };
             // Standby: the active tab survives, so its result is still valid —
             // leave the grid up instead of blanking it.
