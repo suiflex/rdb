@@ -77,7 +77,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         {
             let pending_run = pending_run.clone();
             let replay = replay.clone();
+            let weak = window.as_weak();
+            let state = state.clone();
             window.on_connect_finished(move |id, ok| {
+                if let Some(w) = weak.upgrade() {
+                    paint_run_states(&w, &state);
+                }
                 let waiting = matches!(
                     pending_run.borrow().as_ref().map(|r| &r.wait),
                     Some(RunWait::Connect(c)) if !ok || *c == id.as_str()
@@ -120,6 +125,71 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 pending_run.borrow_mut().take();
             });
         }
+    }
+
+    // ----- the Run banner's action: go where the tab can run -----
+    {
+        let weak = window.as_weak();
+        let state = state.clone();
+        window.on_run_block_act(move |pane| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let pane = pane.clamp(0, 1) as usize;
+            let active = if pane == 1 {
+                &state.active_group1_tab_id
+            } else {
+                &state.active_tab_id
+            };
+            let Some(id) = active.lock().unwrap().clone() else {
+                return;
+            };
+            let cur = state.current_connection_id.lock().unwrap().clone();
+            let target = {
+                let tabs = state.workspace_tabs.lock().unwrap();
+                let Some(tab) = tabs.iter().find(|t| t.id == id) else {
+                    return;
+                };
+                tab_run_target(
+                    &state.settings.borrow(),
+                    &state.store.borrow(),
+                    cur.as_deref(),
+                    &state.connected_ids.lock().unwrap(),
+                    tab,
+                )
+            };
+            match target {
+                // Move the sidebar to the connection the tab came from.
+                crate::run_target::RunTarget::Mismatch {
+                    origin: Some(origin),
+                } => {
+                    let idx = state
+                        .store
+                        .borrow()
+                        .list()
+                        .iter()
+                        .position(|c| c.id == origin);
+                    if let Some(idx) = idx {
+                        w.invoke_connect_clicked(idx as i32);
+                    }
+                }
+                // Give the tab the sidebar's connection.
+                crate::run_target::RunTarget::NoConnection => {
+                    let Some(cur) = cur else {
+                        return;
+                    };
+                    let badge = connection_badge_info(&state.store.borrow(), &cur);
+                    let mut tabs = state.workspace_tabs.lock().unwrap();
+                    if let Some(tab) = tabs.iter_mut().find(|t| t.id == id) {
+                        bind_tab_to(tab, &cur, badge);
+                    }
+                    let left = state.active_tab_id.lock().unwrap().clone();
+                    set_workspace_tabs(&w, &tabs, left.as_deref());
+                }
+                _ => {}
+            }
+            paint_run_states(&w, &state);
+        });
     }
 
     // ----- run query (editor) -----

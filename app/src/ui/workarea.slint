@@ -242,6 +242,9 @@ export component WorkArea inherits Rectangle {
     // Pane 1 callbacks carry no pane arg here; they are wired to pane-1 handlers
     // on MainWindow (a later step). Left unhandled = no-op until then.
     callback p1-run();
+    in property <bool> p1-run-needs-connect;
+    in property <string> p1-run-block-text;
+    in property <string> p1-run-block-action;
     callback p1-run-new-tab();
     callback p1-format-sql();
     callback p1-explain-query();
@@ -291,6 +294,10 @@ export component WorkArea inherits Rectangle {
     in property <int> scroll-top-tick;
 
     callback run();
+    in property <bool> run-needs-connect;
+    in property <string> run-block-text;
+    in property <string> run-block-action;
+    callback run-block-act(int);
     callback run-new-tab();
     callback format-sql();
     callback explain-query();
@@ -443,6 +450,10 @@ export component WorkArea inherits Rectangle {
             limit-text <=> root.limit-text;
             query-label: root.query-label;
             run() => { root.run(); }
+            run-needs-connect: root.run-needs-connect;
+            run-block-text: root.run-block-text;
+            run-block-action: root.run-block-action;
+            run-block-act() => { root.run-block-act(0); }
             run-new-tab() => { root.run-new-tab(); }
             format-sql() => { root.format-sql(); }
             explain-query() => { root.explain-query(); }
@@ -598,6 +609,10 @@ export component WorkArea inherits Rectangle {
                 limit-text <=> root.p1-limit-text;
                 query-label: root.p1-query-label;
                 run() => { root.p1-run(); }
+                run-needs-connect: root.p1-run-needs-connect;
+                run-block-text: root.p1-run-block-text;
+                run-block-action: root.p1-run-block-action;
+                run-block-act() => { root.run-block-act(1); }
                 run-new-tab() => { root.p1-run-new-tab(); }
                 format-sql() => { root.p1-format-sql(); }
                 explain-query() => { root.p1-explain-query(); }

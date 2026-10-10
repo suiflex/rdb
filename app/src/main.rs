@@ -1928,6 +1928,73 @@ fn needs_prod_confirm(store: &rdb_connstore::ConnStore, tab: &WorkspaceTab, targ
         && !tab.prod_confirmed.contains(target)
 }
 
+/// Paints where Run stands for the tab on screen in `pane`: "Connect & Run"
+/// for a closed connection, or a banner saying why it can't run here and
+/// what would fix it.
+fn paint_run_state(w: &MainWindow, state: &AppState, pane: usize) {
+    use run_target::RunTarget;
+    let active = if pane == 1 {
+        &state.active_group1_tab_id
+    } else {
+        &state.active_tab_id
+    };
+    let id = active.lock().unwrap().clone();
+    let store = state.store.borrow();
+    let tabs = state.workspace_tabs.lock().unwrap();
+    let cur = state.current_connection_id.lock().unwrap().clone();
+    let name = |id: &str| connection_badge_info(&store, id).name;
+    let target = id
+        .and_then(|id| tabs.iter().find(|t| t.id == id))
+        .map(|tab| {
+            let target = tab_run_target(
+                &state.settings.borrow(),
+                &store,
+                cur.as_deref(),
+                &state.connected_ids.lock().unwrap(),
+                tab,
+            );
+            (target, tab.engine.clone())
+        });
+    let (needs_connect, text, action) = match target {
+        Some((RunTarget::NeedsConnect(_), _)) => (true, String::new(), String::new()),
+        Some((RunTarget::Mismatch { origin }, engine)) => {
+            let kind = rdb_connstore::Engine::from_key(&engine).map_or("another", |e| e.display());
+            let here = cur.as_deref().map(name).unwrap_or_default();
+            (
+                false,
+                format!("This is a {kind} tab and can't run on {here}."),
+                origin
+                    .map(|o| format!("Switch to {}", name(&o)))
+                    .unwrap_or_default(),
+            )
+        }
+        Some((RunTarget::NoConnection, _)) => (
+            false,
+            "This tab has no connection yet.".to_string(),
+            cur.as_deref()
+                .map(|c| format!("Use {}", name(c)))
+                .unwrap_or_default(),
+        ),
+        _ => (false, String::new(), String::new()),
+    };
+    if pane == 1 {
+        w.set_p1_run_needs_connect(needs_connect);
+        w.set_p1_run_block_text(text.into());
+        w.set_p1_run_block_action(action.into());
+    } else {
+        w.set_run_needs_connect(needs_connect);
+        w.set_run_block_text(text.into());
+        w.set_run_block_action(action.into());
+    }
+}
+
+/// `paint_run_state` for both panes, after anything that can move a target:
+/// a connect or disconnect, a sidebar switch, a settings change.
+fn paint_run_states(w: &MainWindow, state: &AppState) {
+    paint_run_state(w, state, 0);
+    paint_run_state(w, state, 1);
+}
+
 /// What a held-back run is waiting on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum RunWait {
@@ -5161,15 +5228,31 @@ fn right_pane_connection_id(
 ///
 /// Lives outside `restore_tab_for_pane` because it is the one part of a tab
 /// restore that is about the *connection* rather than the tab's own runtime.
+#[allow(clippy::too_many_arguments)]
 fn point_context_at_tab(
     w: &MainWindow,
     tab: &WorkspaceTab,
     pane: usize,
+    mode: run_target::TabMode,
     store: &Rc<RefCell<rdb_connstore::ConnStore>>,
     current_connection_id: &std::sync::Mutex<Option<String>>,
     connected_ids: &std::sync::Mutex<HashSet<String>>,
     activate_connection: &WindowConnFn,
 ) {
+    if !mode.tab_drives_sidebar() {
+        // The sidebar decides: it and every "what does a new action target"
+        // pointer stay put, and the topbar names the sidebar's connection,
+        // which is where this tab's Run goes (or the banner says why not).
+        let cur = current_connection_id.lock().unwrap().clone();
+        sync_conn_chrome(w, &store.borrow(), cur.as_deref());
+        let live = cur
+            .as_ref()
+            .is_some_and(|c| connected_ids.lock().unwrap().contains(c));
+        if live && w.get_conn_status() == "offline" {
+            w.set_conn_status(SharedString::from("connected"));
+        }
+        return;
+    }
     // Topbar identity follows whichever tab is now on screen, not the last
     // connection explicitly picked from the connect flow.
     sync_conn_chrome(w, &store.borrow(), tab.connection_id.as_deref());
@@ -5915,6 +5998,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let load_editor_text = load_editor_text.clone();
         let sync_editor = sync_editor.clone();
         let tab_runs = state.tab_runs.clone();
+        let state = state.clone();
         let panes = panes.clone();
         let last_view = last_view.clone();
         let store = store.clone();
@@ -5936,15 +6020,43 @@ fn main() -> Result<(), slint::PlatformError> {
             } else {
                 *active_group1_tab_id.lock().unwrap() = Some(tab.id.clone());
             }
+            let mode = run_target::TabMode::from_ui(&state.settings.borrow().get().ui_state);
             point_context_at_tab(
                 w,
                 &tab,
                 pane,
+                mode,
                 &store,
                 &current_connection_id,
                 &connected_ids,
                 &activate_connection,
             );
+            if mode
+                == (run_target::TabMode::Sidebar {
+                    rebind_on_open: true,
+                })
+                && tab.kind == "sql"
+            {
+                // "On open": the tab takes the sidebar's connection as soon as
+                // it is opened against it, not on its first run there.
+                let store = store.borrow();
+                let cur = current_connection_id.lock().unwrap().clone();
+                let target = tab_run_target(
+                    &state.settings.borrow(),
+                    &store,
+                    cur.as_deref(),
+                    &connected_ids.lock().unwrap(),
+                    &tab,
+                );
+                if let Some(c) = target.connection() {
+                    if tab.connection_id.as_deref() != Some(c) {
+                        let mut tabs = tabs.lock().unwrap();
+                        if let Some(t) = tabs.iter_mut().find(|t| t.id == tab.id) {
+                            bind_tab_to(t, c, connection_badge_info(&store, c));
+                        }
+                    }
+                }
+            }
             {
                 // Keep the group-0 selection stable when restoring the right group.
                 let tabs_guard = tabs.lock().unwrap();
@@ -6084,6 +6196,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 set_p_results_meta(w, pane, SharedString::default());
                 set_p_result_status(w, pane, SharedString::default());
             }
+            paint_run_state(w, &state, pane);
         })
     };
 

@@ -652,6 +652,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let activate_connection = crate::wire::connect::build_activate_connection(state);
         let restore_tab = restore_tab.clone();
         let save_active_tab = save_active_tab.clone();
+        let state = state.clone();
         window.on_disconnect(move || {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -804,6 +805,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             } else {
                 w.set_connected(false);
             }
+            paint_run_states(&w, &state);
         });
     }
 
