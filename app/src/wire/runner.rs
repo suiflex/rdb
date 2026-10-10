@@ -151,6 +151,75 @@ fn show_rebound_tab(
     w.set_conn_status(SharedString::from("connected"));
 }
 
+/// A stream's column header: starts a fresh row buffer, and a fresh grid
+/// when the tab that started the stream is the one on screen.
+fn stream_meta(
+    w: &MainWindow,
+    pane: usize,
+    cols: Vec<model::VmColumn>,
+    on_screen: bool,
+    cells_model: &RefCell<Option<Rc<VecModel<GridCell>>>>,
+    accum: &RefCell<model::GridModel>,
+) {
+    let vm = Rc::new(VecModel::<GridCell>::default());
+    if on_screen {
+        let gcols: Vec<GridColumn> = cols
+            .iter()
+            .map(|c| GridColumn {
+                name: c.name.clone().into(),
+                type_name: c.type_name.clone().into(),
+            })
+            .collect();
+        set_p_col_count(w, pane, gcols.len() as i32);
+        set_p_columns(w, pane, ModelRc::from(Rc::new(VecModel::from(gcols))));
+        set_p_cells(w, pane, ModelRc::from(vm.clone()));
+    }
+    *cells_model.borrow_mut() = Some(vm);
+    *accum.borrow_mut() = model::GridModel {
+        columns: cols,
+        rows: Vec::new(),
+    };
+}
+
+/// A batch of streamed rows: always kept for the tab, counted on screen only
+/// while that tab is showing.
+fn stream_batch(
+    w: &MainWindow,
+    pane: usize,
+    rows: &[rdb_core::result::Row],
+    on_screen: bool,
+    cells_model: &RefCell<Option<Rc<VecModel<GridCell>>>>,
+    accum: &RefCell<model::GridModel>,
+) {
+    let Some(vm) = cells_model.borrow().clone() else {
+        return;
+    };
+    let mut acc = accum.borrow_mut();
+    // One pass over the batch's cells: each lands in the grid model and in
+    // the tab's kept copy.
+    let cell = |cell: &rdb_core::result::Cell| {
+        let is_null = matches!(cell, rdb_core::result::Cell::Null);
+        let text = cell.render();
+        vm.push(GridCell {
+            text: text.clone().into(),
+            is_null,
+            state: 0,
+        });
+        model::VmCell { text, is_null }
+    };
+    acc.rows.extend(
+        rows.iter()
+            .map(|row| row.iter().map(cell).collect::<Vec<_>>()),
+    );
+    if on_screen {
+        set_p_result_status(
+            w,
+            pane,
+            SharedString::from(format!("loaded {}", acc.rows.len())),
+        );
+    }
+}
+
 /// Stops a stream's drain timer from inside its own callback. The callback
 /// holds only a weak ref: the timer belongs to the tab's `TabRun`.
 fn stop_timer(cell: &std::rc::Weak<RefCell<Option<slint::Timer>>>) {
@@ -951,59 +1020,10 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                         loop {
                             match ui_rx.try_recv() {
                                 Ok(StreamMsg::Meta(cols)) => {
-                                    let gcols: Vec<GridColumn> = cols
-                                        .iter()
-                                        .map(|c| GridColumn {
-                                            name: c.name.clone().into(),
-                                            type_name: c.type_name.clone().into(),
-                                        })
-                                        .collect();
-                                    let vm = Rc::new(VecModel::<GridCell>::default());
-                                    if on_screen {
-                                        set_p_col_count(&w, pane, gcols.len() as i32);
-                                        set_p_columns(
-                                            &w,
-                                            pane,
-                                            ModelRc::from(Rc::new(VecModel::from(gcols))),
-                                        );
-                                        set_p_cells(&w, pane, ModelRc::from(vm.clone()));
-                                    }
-                                    *cells_model.borrow_mut() = Some(vm);
-                                    *accum.borrow_mut() = model::GridModel {
-                                        columns: cols,
-                                        rows: Vec::new(),
-                                    };
+                                    stream_meta(&w, pane, cols, on_screen, &cells_model, &accum);
                                 }
                                 Ok(StreamMsg::Batch(rows)) => {
-                                    if let Some(vm) = cells_model.borrow().as_ref() {
-                                        let mut acc = accum.borrow_mut();
-                                        for row in &rows {
-                                            let mut vmrow = Vec::with_capacity(row.len());
-                                            for cell in row {
-                                                let is_null =
-                                                    matches!(cell, rdb_core::result::Cell::Null);
-                                                let text = cell.render();
-                                                vm.push(GridCell {
-                                                    text: text.clone().into(),
-                                                    is_null,
-                                                    state: 0,
-                                                });
-                                                vmrow.push(model::VmCell { text, is_null });
-                                            }
-                                            acc.rows.push(vmrow);
-                                        }
-                                        if !on_screen {
-                                            continue;
-                                        }
-                                        set_p_result_status(
-                                            &w,
-                                            pane,
-                                            SharedString::from(format!(
-                                                "loaded {}",
-                                                acc.rows.len()
-                                            )),
-                                        );
-                                    }
+                                    stream_batch(&w, pane, &rows, on_screen, &cells_model, &accum);
                                 }
                                 Ok(StreamMsg::Done {
                                     capped,
