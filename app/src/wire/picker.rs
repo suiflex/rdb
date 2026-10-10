@@ -16,7 +16,6 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         rt,
         store,
         settings,
-        panes,
         current,
         driver_pool,
         cur_engine,
@@ -34,6 +33,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         query_number,
         conn_modal_map,
         connect_handle,
+        tab_runs,
         ..
     } = state.clone();
     let AppFns {
@@ -641,8 +641,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let raw_nodes = raw_nodes.clone();
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
+        let active_group1_tab_id = active_group1_tab_id.clone();
         let current_connection_id = current_connection_id.clone();
-        let panes = panes.clone();
+        let tab_runs = tab_runs.clone();
         let driver_pool = driver_pool.clone();
         let store = store.clone();
         let collapsed = collapsed.clone();
@@ -687,15 +688,24 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     }
                 });
             }
-            for p in [0usize, 1] {
-                if let Some(c) = panes[p].stream_cancel.borrow().as_ref() {
-                    c.store(true, std::sync::atomic::Ordering::SeqCst);
+            // Only runs on this connection stop. A query another tab started
+            // on a connection that stays open carries on.
+            let stopped: HashSet<String> = {
+                let mut runs = tab_runs.borrow_mut();
+                runs.iter_mut()
+                    .filter(|(_, run)| run.connection_id == disconnecting_id)
+                    .map(|(id, run)| {
+                        run.stop();
+                        id.clone()
+                    })
+                    .collect()
+            };
+            for (p, active) in [(0usize, &active_tab_id), (1, &active_group1_tab_id)] {
+                let on_screen = active.lock().unwrap().clone();
+                if on_screen.is_some_and(|id| stopped.contains(&id)) {
+                    set_p_query_running(&w, p, false);
+                    set_p_streaming(&w, p, false);
                 }
-                if let Some(h) = panes[p].query_abort.borrow_mut().take() {
-                    h.abort();
-                }
-                set_p_query_running(&w, p, false);
-                set_p_streaming(&w, p, false);
             }
             w.set_selected_conn(-1);
             w.set_active_table(SharedString::default());
@@ -713,7 +723,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             // spinner is cleared, since nothing is loading any more.
             {
                 let mut tabs = workspace_tabs.lock().unwrap();
-                for t in tabs.iter_mut() {
+                for t in tabs.iter_mut().filter(|t| stopped.contains(&t.id)) {
                     t.loading = false;
                 }
                 let keep_active = active_tab_id
