@@ -49,6 +49,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         conn_filter,
         editing_id,
         connected_ids,
+        workspace_tabs,
+        active_tab_id,
         ..
     } = state.clone();
 
@@ -501,6 +503,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let weak = window.as_weak();
         let store = store.clone();
         let editing_id = editing_id.clone();
+        let workspace_tabs = workspace_tabs.clone();
+        let active_tab_id = active_tab_id.clone();
         let rebuild = {
             let weak = window.as_weak();
             let store = store.clone();
@@ -621,6 +625,22 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 Ok(()) => {
                     w.set_form_open(false);
                     rebuild();
+                    // The list rows rebuild above; the detail panel, tab badges
+                    // and topbar only refresh on select / connect, so an edited
+                    // name or colour stayed stale there until the next click.
+                    w.invoke_select_conn(w.get_selected_conn());
+                    if !id.is_empty() {
+                        let st = store.borrow();
+                        let mut tabs = workspace_tabs.lock().unwrap();
+                        refresh_tab_badges(&mut tabs, &st);
+                        let active = active_tab_id.lock().unwrap().clone();
+                        set_workspace_tabs(&w, &tabs, active.as_deref());
+                        let chrome_conn = workspace_tab_index(&tabs, active.as_deref())
+                            .and_then(|i| tabs[i].connection_id.clone());
+                        if chrome_conn.as_deref() == Some(id.as_str()) {
+                            sync_conn_chrome(&w, &st, Some(&id));
+                        }
+                    }
                 }
                 Err(e) => {
                     w.set_form_error(SharedString::from(format!("save failed: {e}")));
