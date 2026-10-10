@@ -9,7 +9,7 @@ import {
     MenuItem as MaterialMenuItem
 } from "@material";
 import {
-    AppMenu, SearchCommandPill, BreadcrumbChip, DbBadge, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SettingsSectionHeader, TextButton, Toggle, ToggleRow, Tooltip, TooltipArea, Shortcut
+    AppMenu, SearchCommandPill, BreadcrumbChip, DbBadge, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SettingsSectionHeader, TextButton, Toggle, ToggleRow, ChoiceRow, Tooltip, TooltipArea, Shortcut
 } from "components.slint";
 export { Shortcut }
 import { NavCluster } from "nav-cluster.slint";
@@ -711,6 +711,14 @@ callback create-table-commit();
     in-out property <bool> query-tabs-by-connection: false;
     in property <string> query-scope-connection;
     callback set-query-tabs-by-connection(bool);
+    // With tabs not following the connection: 0 = the sidebar decides where a
+    // tab runs, 1 = opening a tab moves the sidebar to the tab's connection.
+    in-out property <int> tab-focus: 0;
+    callback set-tab-focus(int);
+    // Sidebar-decides only: 0 = a tab takes the new connection once it runs
+    // there, 1 = as soon as it is opened against it.
+    in-out property <int> tab-rebind: 0;
+    callback set-tab-rebind(int);
     // Auto-append alias when accepting a table name from completion in FROM/JOIN position.
     in-out property <bool> auto-table-alias: true;
     callback set-auto-table-alias(bool);
@@ -2970,6 +2978,30 @@ callback create-table-commit();
                             checked: root.query-tabs-by-connection;
                             toggled => {
                                 root.set-query-tabs-by-connection(!root.query-tabs-by-connection);
+                            }
+                        }
+                        ChoiceRow {
+                            label: "When switching tabs";
+                            description: "Which side decides the connection a tab runs on.";
+                            option-a: "Sidebar";
+                            option-b: "Tab";
+                            index: root.tab-focus;
+                            enabled: !root.query-tabs-by-connection;
+                            chosen(i) => {
+                                root.tab-focus = i;
+                                root.set-tab-focus(i);
+                            }
+                        }
+                        ChoiceRow {
+                            label: "Tab moves to the connection";
+                            description: "When a tab opened on another connection takes it as its own.";
+                            option-a: "On run";
+                            option-b: "On open";
+                            index: root.tab-rebind;
+                            enabled: !root.query-tabs-by-connection && root.tab-focus == 0;
+                            chosen(i) => {
+                                root.tab-rebind = i;
+                                root.set-tab-rebind(i);
                             }
                         }
                     }

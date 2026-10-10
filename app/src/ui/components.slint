@@ -65,6 +65,55 @@ export component ToggleRow inherits HorizontalLayout {
     }
 }
 
+// Settings row choosing between two options. A row that doesn't apply under
+// the current settings stays visible but dimmed and inert, so the dependency
+// between settings is readable instead of rows appearing and vanishing.
+export component ChoiceRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> description: "";
+    in property <string> option-a;
+    in property <string> option-b;
+    in property <int> index;
+    in property <bool> enabled: true;
+    callback chosen(int);
+    spacing: Tokens.sp3;
+    opacity: root.enabled ? 1 : 0.45;
+    VerticalLayout {
+        alignment: center;
+        horizontal-stretch: 1;
+        spacing: 2px;
+        Text {
+            text: root.label;
+            color: Tokens.text;
+            font-size: Tokens.font-md;
+        }
+        if root.description != "": Text {
+            text: root.description;
+            color: Tokens.text-dim;
+            font-size: Tokens.font-xs;
+            wrap: word-wrap;
+        }
+    }
+    VerticalLayout {
+        alignment: center;
+        Rectangle {
+            sb := SegmentedButton {
+                items: [{ text: root.option-a }, { text: root.option-b }];
+                current-index: root.index;
+                index-changed(i) => {
+                    if i != root.index {
+                        root.chosen(i);
+                    }
+                }
+            }
+            // Swallows clicks while disabled; the button itself has no
+            // enabled state.
+            if !root.enabled: TouchArea { }
+        }
+    }
+    changed index => { sb.current-index = root.index; }
+}
+
 // A small uppercase-ish section label for grouping settings rows, with a
 // hairline divider below.
 export component SettingsSectionHeader inherits VerticalLayout {
