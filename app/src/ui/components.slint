@@ -193,7 +193,7 @@ component EngineLogo inherits Image {
         : @image-url("");
 }
 
-// String-valued dropdown (model + current-value) drawn as a Material filled
+// String-valued dropdown (model + current-value) drawn as a Material outlined
 // field with a Material menu. Material's own DropDownMenu is index-based,
 // which the Rust-fed, string-bound selects (Engine, SSL, Group, filter
 // column/operator) can't use; the closed field is composed here instead of
@@ -207,15 +207,16 @@ export component SelectBox {
     // sets this — every other SelectBox (SSL mode, Group, …) is unaffected.
     in property <bool> show-logo: false;
     callback selected(string);
-    min-height: MaterialStyleMetrics.size_56;
+    min-height: 36px;
     accessible-role: combobox;
     accessible-value: root.current-value;
     Rectangle {
-        // 12px on all corners (the field rule); clip keeps the hover layer and
-        // the underline inside them.
+        // Match the outlined text fields while retaining the engine brand logo.
         clip: true;
-        border-radius: MaterialStyleMetrics.border_radius_12;
-        background: MaterialPalette.surface_container_highest;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: ta.has-hover ? MaterialPalette.outline : MaterialPalette.outline_variant;
+        background: MaterialPalette.surface_container_low;
         StateLayer {
             width: 100%;
             height: 100%;
@@ -234,7 +235,7 @@ export component SelectBox {
             Text {
                 text: root.current-value;
                 color: MaterialPalette.on_surface;
-                font-size: MaterialTypography.body_large.font_size;
+                font-size: MaterialTypography.body_medium.font_size;
                 vertical-alignment: center;
                 horizontal-stretch: 1;
                 overflow: elide;
@@ -244,39 +245,36 @@ export component SelectBox {
                 AppIcon { name: "caret"; size: MaterialStyleMetrics.icon_size_18; color: MaterialPalette.on_surface_variant; }
             }
         }
-        // M3 filled-field active indicator.
-        Rectangle {
-            y: parent.height - self.height;
-            height: 1px;
-            background: MaterialPalette.on_surface_variant;
-        }
     }
     ta := TouchArea {
         clicked => { popup.show(); }
     }
     popup := PopupWindow {
         x: 0;
-        y: root.height;
+        y: root.height + 4px;
         width: root.width;
         close-policy: close-on-click-outside;
         Rectangle {
-            background: MaterialPalette.surface_container;
+            background: MaterialPalette.surface_container_high;
+            border-width: 1px;
+            border-color: MaterialPalette.outline_variant;
             border-radius: MaterialStyleMetrics.border_radius_12;
             clip: true;
-            drop-shadow-blur: 8px;
-            drop-shadow-color: MaterialPalette.shadow.with-alpha(0.3);
+            drop-shadow-blur: 16px;
+            drop-shadow-color: MaterialPalette.shadow.with-alpha(0.35);
             VerticalLayout {
-                padding-top: MaterialStyleMetrics.padding_8;
-                padding-bottom: MaterialStyleMetrics.padding_8;
+                padding-top: 6px;
+                padding-bottom: 6px;
                 for opt in root.model: Rectangle {
-                    height: MaterialStyleMetrics.size_48;
-                    background: opt == root.current-value ? MaterialPalette.secondary_container : transparent;
-                    StateLayer {
-                        width: 100%;
-                        height: 100%;
-                        background: MaterialPalette.on_surface;
-                        has-hover: opt-ta.has-hover;
-                        enabled: true;
+                    height: 36px;
+                    Rectangle {
+                        x: 5px;
+                        y: 2px;
+                        width: parent.width - 10px;
+                        height: parent.height - 4px;
+                        border-radius: 7px;
+                        background: opt-ta.has-hover ? Tokens.accent
+                            : (opt == root.current-value ? MaterialPalette.secondary_container : transparent);
                     }
                     // Emit before closing: closing the popup first cancels
                     // the rest of this handler.
@@ -297,8 +295,8 @@ export component SelectBox {
                         }
                         Text {
                             text: opt;
-                            color: MaterialPalette.on_surface;
-                            font-size: MaterialTypography.body_large.font_size;
+                            color: opt-ta.has-hover ? white : MaterialPalette.on_surface;
+                            font-size: MaterialTypography.body_medium.font_size;
                             vertical-alignment: center;
                         }
                     }
@@ -316,38 +314,54 @@ export component AppMenu inherits Rectangle {
     in property <[string]> items;
     in property <int> danger-index: -1;
     callback activated(int);
-    background: MaterialPalette.surface_container;
-    border-radius: MaterialStyleMetrics.border_radius_12;
+    background: MaterialPalette.surface_container_high;
+    border-width: 1px;
+    border-color: MaterialPalette.outline_variant;
+    border-radius: 10px;
     clip: true;
-    drop-shadow-blur: 12px;
-    drop-shadow-color: MaterialPalette.shadow.with-alpha(0.3);
+    drop-shadow-blur: 24px;
+    drop-shadow-offset-y: 6px;
+    drop-shadow-color: MaterialPalette.shadow.with-alpha(0.42);
     VerticalLayout {
-        padding-top: MaterialStyleMetrics.padding_8;
-        padding-bottom: MaterialStyleMetrics.padding_8;
+        padding-top: 5px;
+        padding-bottom: 5px;
         for label[i] in root.items: Rectangle {
-            height: MaterialStyleMetrics.size_48;
-            // Sized explicitly (as the vendored StateLayerArea does): left
-            // unsized it painted nothing, so the menu had no hover feedback.
-            StateLayer {
-                width: 100%;
-                height: 100%;
-                background: MaterialPalette.on_surface;
-                has-hover: row-ta.has-hover;
-                enabled: true;
+            property <bool> is-sep: label == "---";
+            property <bool> is-danger: i == root.danger-index;
+            height: is-sep ? 9px : 32px;
+            if is-sep: Rectangle {
+                x: 10px;
+                y: 4px;
+                width: parent.width - 20px;
+                height: 1px;
+                background: MaterialPalette.outline_variant.with-alpha(0.65);
             }
-            HorizontalLayout {
-                padding-left: MaterialStyleMetrics.padding_16;
-                padding-right: MaterialStyleMetrics.padding_16;
+            if !is-sep: Rectangle {
+                x: 5px;
+                y: 2px;
+                width: parent.width - 10px;
+                height: parent.height - 4px;
+                border-radius: 6px;
+                background: row-ta.has-hover
+                    ? (is-danger ? MaterialPalette.error : Tokens.accent)
+                    : transparent;
+            }
+            if !is-sep: HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
                 Text {
                     text: label;
-                    color: i == root.danger-index ? MaterialPalette.error : MaterialPalette.on_surface;
-                    font-size: MaterialTypography.body_large.font_size;
+                    color: row-ta.has-hover ? white
+                        : (is-danger ? MaterialPalette.error : MaterialPalette.on_surface);
+                    font-size: MaterialTypography.body_medium.font_size;
+                    font-weight: 500;
                     vertical-alignment: center;
                 }
             }
             // Emits before the caller closes the popup: closing first would
             // cancel the rest of the click handler.
             row-ta := TouchArea {
+                enabled: !is-sep;
                 clicked => { root.activated(i); }
             }
         }
@@ -383,12 +397,13 @@ export component IndexDropDown {
 export component DbBadge inherits Rectangle {
     in property <string> engine; // "postgres" | "mysql" | "redis" | "sqlite" | "mongo" | "cassandra" | "clickhouse" | "mssql" | "oracle"
     in property <length> size: 24px;
+    in property <bool> circular: false;
     // Callers with a per-connection custom accent can override this; the
     // default keeps every existing call site's engine-colored look as-is.
     in property <brush> fill: Tokens.db-color(engine);
     width: self.size;
     height: self.size;
-    border-radius: self.size * 0.28;
+    border-radius: self.circular ? self.size / 2 : self.size * 0.28;
     background: self.fill;
     // Known engine → white brand glyph (icons/db-<engine>.svg via AppIcon).
     property <bool> known: engine == "postgres" || engine == "mysql"
@@ -447,10 +462,10 @@ export component SecondaryButton inherits OutlineButton {}
 export component DangerButton inherits StateLayerArea {
     in property <string> text;
     color: Tokens.error;
-    border-radius: self.height / 2;
-    min-width: label.preferred-width + 2 * MaterialStyleMetrics.padding_24;
+    border-radius: 8px;
+    min-width: label.preferred-width + 2 * MaterialStyleMetrics.padding_14;
     preferred-width: self.min-width;
-    min-height: MaterialStyleMetrics.size_40;
+    min-height: MaterialStyleMetrics.size_32;
     accessible-role: button;
     accessible-label: root.text;
     accessible-enabled: root.enabled;
@@ -503,20 +518,17 @@ export component ExportButton {
     }
 }
 
-// Form text input (conn form): Material filled text field. `placeholder`
-// becomes its label, which floats up once the field has text or focus.
-// Material's filled field only rounds its top corners; the clip gives it the
-// app's 12px on all four without patching the vendored field.
+// Form text input (conn form): outlined field with a static placeholder.
 export component FormField {
     in property <string> placeholder;
     in-out property <string> text <=> tf.text;
     in property <InputType> input-type <=> tf.input-type;
     callback accepted(string);
-    min-height: MaterialStyleMetrics.size_56;
+    min-height: 36px;
     forward-focus: tf;
     Rectangle {
         clip: true;
-        border-radius: MaterialStyleMetrics.border_radius_12;
+        border-radius: 8px;
         tf := TextField {
             width: 100%;
             height: 100%;
@@ -549,8 +561,8 @@ export component KeyCap inherits Rectangle {
 export component SearchCommandPill inherits Rectangle {
     in property <string> placeholder: "Search or run a command...";
     callback activated;
-    height: MaterialStyleMetrics.size_40; // same as the other titlebar controls
-    border-radius: self.height / 2;
+    height: 34px;
+    border-radius: 8px;
     // surface-container-high maps to the titlebar chrome itself, which made the
     // pill vanish into the bar; one step lighter plus an outline keeps it found.
     background: MaterialPalette.surface_container;
@@ -601,9 +613,9 @@ export component BreadcrumbChip inherits Rectangle {
     in property <string> tooltip;            // optional hover label
     callback clicked;
     // 40px like every titlebar control (Material buttons can't go lower).
-    height: MaterialStyleMetrics.size_40;
-    width: content.preferred-width + 2 * MaterialStyleMetrics.padding_12;
-    border-radius: self.height / 2;
+    height: 30px;
+    width: content.preferred-width + 2 * MaterialStyleMetrics.padding_10;
+    border-radius: 8px;
     border-width: 1px;
     border-color: MaterialPalette.outline_variant;
     background: MaterialPalette.surface_container_low;
@@ -856,12 +868,11 @@ export component FilterField {
     callback completion-key(string) -> bool;
     public function focus-input() { tf.focus(); }
     forward-focus: tf;
-    min-height: MaterialStyleMetrics.size_56;
-    // 12px on all corners (see FormField). Only the field is clipped, so the
+    min-height: 36px;
     // completion list below can still hang outside it.
     Rectangle {
         clip: true;
-        border-radius: MaterialStyleMetrics.border_radius_12;
+        border-radius: 8px;
         tf := TextField {
             width: 100%;
             height: 100%;

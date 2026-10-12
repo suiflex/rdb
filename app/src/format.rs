@@ -32,19 +32,31 @@ pub fn dispatch(dialect: QueryDialect, text: &str) -> Option<String> {
     }
 }
 
-fn run(spec: &Spec, text: &str) -> String {
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Tok {
+    Word(String, String), // (original, upper)
+    Quoted(String),
+    LineComment(String),
+    BlockComment(String),
+    Punct(char, bool), // (punct, had_leading_whitespace)
+}
+
+fn tokenize(text: &str) -> Vec<Tok> {
     let chars: Vec<char> = text.chars().collect();
-    let mut out = String::with_capacity(text.len());
+    let mut out = Vec::new();
     let mut i = 0;
-    let mut prev_word = String::new();
     while i < chars.len() {
         let c = chars[i];
+        if c.is_whitespace() {
+            i += 1;
+            continue;
+        }
         if c == '-' && chars.get(i + 1) == Some(&'-') {
             let start = i;
             while i < chars.len() && chars[i] != '\n' {
                 i += 1;
             }
-            out.extend(chars[start..i].iter());
+            out.push(Tok::LineComment(chars[start..i].iter().collect()));
             continue;
         }
         if c == '/' && chars.get(i + 1) == Some(&'*') {
@@ -54,16 +66,15 @@ fn run(spec: &Spec, text: &str) -> String {
                 i += 1;
             }
             i = (i + 2).min(chars.len());
-            out.extend(chars[start..i].iter());
+            out.push(Tok::BlockComment(chars[start..i].iter().collect()));
             continue;
         }
-        if c == '\'' || c == '"' {
+        if c == '\'' || c == '"' || c == '`' {
             let start = i;
             i += 1;
             while i < chars.len() {
                 if chars[i] == c {
                     i += 1;
-                    // doubled quote = escaped, keep scanning
                     if chars.get(i) == Some(&c) {
                         i += 1;
                         continue;
@@ -72,16 +83,7 @@ fn run(spec: &Spec, text: &str) -> String {
                 }
                 i += 1;
             }
-            out.extend(chars[start..i].iter());
-            continue;
-        }
-        if c.is_whitespace() {
-            while i < chars.len() && chars[i].is_whitespace() {
-                i += 1;
-            }
-            if !out.is_empty() && !out.ends_with('\n') {
-                out.push(' ');
-            }
+            out.push(Tok::Quoted(chars[start..i].iter().collect()));
             continue;
         }
         if c.is_alphanumeric() || c == '_' {
@@ -91,33 +93,263 @@ fn run(spec: &Spec, text: &str) -> String {
             }
             let word: String = chars[start..i].iter().collect();
             let upper = word.to_uppercase();
-            if (spec.is_keyword)(&upper) {
-                let joins_previous =
-                    upper == "JOIN" && spec.join_qualifiers.contains(&prev_word.as_str());
-                if spec.clause_starters.contains(&upper.as_str())
-                    && !out.is_empty()
-                    && !joins_previous
-                {
-                    while out.ends_with(' ') {
-                        out.pop();
-                    }
-                    if !out.ends_with('\n') {
-                        out.push('\n');
-                    }
-                }
-                out.push_str(&upper);
-                prev_word = upper;
-            } else {
-                out.push_str(&word);
-                prev_word = String::new();
-            }
+            out.push(Tok::Word(word, upper));
             continue;
         }
-        out.push(c);
-        prev_word = String::new();
+        let had_space = i > 0 && chars[i - 1].is_whitespace();
+        out.push(Tok::Punct(c, had_space));
         i += 1;
     }
-    out.trim().to_string()
+    out
+}
+
+fn trim_trailing_spaces(out: &mut String) {
+    let trimmed_len = out.trim_end_matches(' ').len();
+    out.truncate(trimmed_len);
+}
+
+fn push_indent(out: &mut String, indent: usize) {
+    out.push_str(&"    ".repeat(indent));
+}
+
+fn push_newline_indent(out: &mut String, indent: usize) {
+    trim_trailing_spaces(out);
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    push_indent(out, indent);
+}
+
+fn push_sep(out: &mut String, indent: usize) {
+    if out.is_empty() {
+        return;
+    }
+    if out.ends_with('\n') {
+        push_indent(out, indent);
+    } else if !out.ends_with(' ') && !out.ends_with('(') && !out.ends_with('.') {
+        out.push(' ');
+    }
+}
+
+fn is_body_clause(upper: &str) -> bool {
+    matches!(
+        upper,
+        "SELECT" | "FROM" | "WHERE" | "HAVING" | "LIMIT" | "OFFSET" | "VALUES" | "SET" | "JOIN"
+    )
+}
+
+#[derive(Default)]
+struct FmtState {
+    out: String,
+    indent: usize,
+    in_cond_clause: bool,
+    between_pending: bool,
+    prev_kw: String,
+    paren_stack: Vec<bool>,
+}
+
+impl FmtState {
+    fn inside_inline_paren(&self) -> bool {
+        self.paren_stack.iter().any(|&b| !b)
+    }
+
+    fn emit_open_paren(&mut self, had_space: bool) {
+        let block_paren = self.in_cond_clause
+            && matches!(self.prev_kw.as_str(), "AND" | "OR" | "WHERE" | "HAVING");
+        if block_paren {
+            self.indent += 1;
+            push_newline_indent(&mut self.out, self.indent);
+            self.out.push('(');
+            self.indent += 1;
+            push_newline_indent(&mut self.out, self.indent);
+            self.paren_stack.push(true);
+        } else {
+            let needs_space = !self.out.is_empty()
+                && !self.out.ends_with(['\n', ' ', '('])
+                && (had_space || !self.prev_kw.is_empty());
+            if needs_space {
+                self.out.push(' ');
+            }
+            self.out.push('(');
+            self.paren_stack.push(false);
+        }
+        self.prev_kw.clear();
+    }
+
+    fn emit_close_paren(&mut self) {
+        if self.paren_stack.pop().unwrap_or(false) {
+            self.indent = self.indent.saturating_sub(1);
+            push_newline_indent(&mut self.out, self.indent);
+            self.out.push(')');
+            self.indent = self.indent.saturating_sub(1);
+        } else {
+            trim_trailing_spaces(&mut self.out);
+            self.out.push(')');
+        }
+        self.prev_kw.clear();
+    }
+
+    fn emit_punct(&mut self, c: char, had_space: bool, has_more: bool) {
+        match c {
+            '(' => self.emit_open_paren(had_space),
+            ')' => self.emit_close_paren(),
+            ',' | '.' => {
+                trim_trailing_spaces(&mut self.out);
+                self.out.push(c);
+                self.prev_kw.clear();
+            }
+            ';' => {
+                trim_trailing_spaces(&mut self.out);
+                self.out.push(';');
+                self.indent = 0;
+                self.in_cond_clause = false;
+                self.between_pending = false;
+                self.paren_stack.clear();
+                self.prev_kw.clear();
+                if has_more {
+                    self.out.push('\n');
+                }
+            }
+            other => {
+                let attaches = self.out.ends_with(['<', '>', '!', ':', '-', '='])
+                    && matches!(other, '=' | '>' | ':');
+                if !attaches {
+                    push_sep(&mut self.out, self.indent);
+                }
+                self.out.push(other);
+                self.prev_kw.clear();
+            }
+        }
+    }
+
+    fn emit_clause_starter(&mut self, spec: &Spec, upper: &str, next_tok: Option<&Tok>) {
+        self.indent = 0;
+        self.in_cond_clause = matches!(upper, "WHERE" | "HAVING");
+        self.between_pending = false;
+        if !self.out.is_empty() {
+            push_newline_indent(&mut self.out, 0);
+        }
+        self.out.push_str(upper);
+        self.prev_kw = upper.to_string();
+
+        let next_upper = next_tok.and_then(|t| match t {
+            Tok::Word(_, u) if (spec.is_keyword)(u) => Some(u.as_str()),
+            _ => None,
+        });
+        let stays_on_header = matches!(
+            (upper, next_upper),
+            ("SELECT", Some("DISTINCT" | "TOP"))
+                | ("GROUP" | "ORDER", Some("BY"))
+                | ("ALLOW", Some("FILTERING"))
+                | ("UNION", Some("ALL"))
+        ) || spec.join_qualifiers.contains(&upper);
+
+        if !stays_on_header && is_body_clause(upper) && next_tok.is_some() {
+            self.indent = 1;
+            push_newline_indent(&mut self.out, self.indent);
+        }
+    }
+
+    fn emit_keyword(&mut self, spec: &Spec, upper: &str, toks: &[Tok], idx: &mut usize) {
+        if upper == "BETWEEN" {
+            self.between_pending = true;
+        }
+        let joins_prev = (upper == "JOIN" && spec.join_qualifiers.contains(&self.prev_kw.as_str()))
+            || (upper == "OUTER" && matches!(self.prev_kw.as_str(), "LEFT" | "RIGHT" | "FULL"));
+        let inline = self.inside_inline_paren();
+        let has_more = *idx + 1 < toks.len();
+
+        if !inline && (upper == "SELECT" || spec.clause_starters.contains(&upper)) && !joins_prev {
+            self.emit_clause_starter(spec, upper, toks.get(*idx + 1));
+            return;
+        }
+        if !inline
+            && ((matches!(upper, "DISTINCT" | "BY")
+                && matches!(self.prev_kw.as_str(), "SELECT" | "GROUP" | "ORDER"))
+                || (joins_prev && upper == "JOIN"))
+        {
+            push_sep(&mut self.out, self.indent);
+            self.out.push_str(upper);
+            self.prev_kw = upper.to_string();
+            if has_more {
+                self.indent = 1;
+                push_newline_indent(&mut self.out, self.indent);
+            }
+            return;
+        }
+        if !inline && upper == "TOP" && self.prev_kw == "SELECT" {
+            push_sep(&mut self.out, self.indent);
+            self.out.push_str(upper);
+            if let Some(Tok::Word(num, _)) = toks.get(*idx + 1) {
+                if num.chars().all(|ch| ch.is_ascii_digit()) {
+                    self.out.push(' ');
+                    self.out.push_str(num);
+                    *idx += 1;
+                }
+            }
+            self.prev_kw = upper.to_string();
+            if *idx + 1 < toks.len() {
+                self.indent = 1;
+                push_newline_indent(&mut self.out, self.indent);
+            }
+            return;
+        }
+        if !inline && self.in_cond_clause && matches!(upper, "AND" | "OR") {
+            if upper == "AND" && self.between_pending {
+                self.between_pending = false;
+                push_sep(&mut self.out, self.indent);
+            } else {
+                push_newline_indent(&mut self.out, self.indent);
+            }
+            self.out.push_str(upper);
+            self.prev_kw = upper.to_string();
+            return;
+        }
+        push_sep(&mut self.out, self.indent);
+        self.out.push_str(upper);
+        self.prev_kw = upper.to_string();
+    }
+}
+
+fn run(spec: &Spec, text: &str) -> String {
+    let toks = tokenize(text);
+    let mut st = FmtState {
+        out: String::with_capacity(text.len() + 32),
+        ..FmtState::default()
+    };
+    let mut idx = 0;
+    while idx < toks.len() {
+        match &toks[idx] {
+            Tok::LineComment(s) => {
+                push_sep(&mut st.out, st.indent);
+                st.out.push_str(s);
+                st.out.push('\n');
+            }
+            Tok::BlockComment(s) => {
+                push_sep(&mut st.out, st.indent);
+                st.out.push_str(s);
+            }
+            Tok::Quoted(s) => {
+                push_sep(&mut st.out, st.indent);
+                st.out.push_str(s);
+                st.prev_kw.clear();
+            }
+            Tok::Punct(c, had_space) => {
+                st.emit_punct(*c, *had_space, idx + 1 < toks.len());
+            }
+            Tok::Word(word, upper) => {
+                if (spec.is_keyword)(upper) {
+                    st.emit_keyword(spec, upper, &toks, &mut idx);
+                } else {
+                    push_sep(&mut st.out, st.indent);
+                    st.out.push_str(word);
+                    st.prev_kw.clear();
+                }
+            }
+        }
+        idx += 1;
+    }
+    st.out.trim().to_string()
 }
 
 #[cfg(test)]
@@ -133,7 +365,16 @@ mod tests {
     fn uppercases_and_splits_clauses() {
         assert_eq!(
             format("select  a, b from t where a = 1 order by b desc limit 10"),
-            "SELECT a, b\nFROM t\nWHERE a = 1\nORDER BY b DESC\nLIMIT 10"
+            "SELECT\n    a, b\nFROM\n    t\nWHERE\n    a = 1\nORDER BY\n    b DESC\nLIMIT\n    10"
+        );
+    }
+
+    #[test]
+    fn indents_where_and_parenthesized_conditions() {
+        let sql = "select * from oss_rba.col_logs icl where icl.tid = 'DELETE' and icl.tablename = 'oss_rba.permohonan' and (updated_at >= '2026-01-01' and updated_at < '2026-10-01') limit 10;";
+        assert_eq!(
+            format(sql),
+            "SELECT\n    *\nFROM\n    oss_rba.col_logs icl\nWHERE\n    icl.tid = 'DELETE'\n    AND icl.tablename = 'oss_rba.permohonan'\n    AND\n        (\n            updated_at >= '2026-01-01'\n            AND updated_at < '2026-10-01'\n        )\nLIMIT\n    10;"
         );
     }
 
@@ -141,7 +382,7 @@ mod tests {
     fn join_qualifier_stays_with_join() {
         assert_eq!(
             format("select * from a left join b on a.id = b.id"),
-            "SELECT *\nFROM a\nLEFT JOIN b ON a.id = b.id"
+            "SELECT\n    *\nFROM\n    a\nLEFT JOIN\n    b ON a.id = b.id"
         );
     }
 
@@ -149,7 +390,7 @@ mod tests {
     fn literals_and_comments_untouched() {
         assert_eq!(
             format("select 'from x' as \"From\" -- from here\nfrom t"),
-            "SELECT 'from x' AS \"From\" -- from here\nFROM t"
+            "SELECT\n    'from x' AS \"From\" -- from here\nFROM\n    t"
         );
     }
 
@@ -157,7 +398,7 @@ mod tests {
     fn formats_a_full_multi_statement_selection() {
         assert_eq!(
             format("select a from t where a=1;"),
-            "SELECT a\nFROM t\nWHERE a=1;"
+            "SELECT\n    a\nFROM\n    t\nWHERE\n    a = 1;"
         );
     }
 
@@ -174,7 +415,10 @@ mod tests {
             "select * from ks.t where k=1 allow filtering",
         )
         .unwrap();
-        assert_eq!(got, "SELECT *\nFROM ks.t\nWHERE k=1\nALLOW FILTERING");
+        assert_eq!(
+            got,
+            "SELECT\n    *\nFROM\n    ks.t\nWHERE\n    k = 1\nALLOW FILTERING"
+        );
     }
 
     #[test]
@@ -191,7 +435,7 @@ mod tests {
     fn full_join_stays_on_one_line_and_uppercase() {
         assert_eq!(
             format("select * from a full join b on a.id = b.id"),
-            "SELECT *\nFROM a\nFULL JOIN b ON a.id = b.id"
+            "SELECT\n    *\nFROM\n    a\nFULL JOIN\n    b ON a.id = b.id"
         );
     }
 
@@ -202,13 +446,13 @@ mod tests {
             "select top 10 * from t",
         )
         .unwrap();
-        assert_eq!(mssql, "SELECT TOP 10 *\nFROM t");
+        assert_eq!(mssql, "SELECT TOP 10\n    *\nFROM\n    t");
 
         let postgres = dispatch(
             QueryDialect::Sql(SqlDialect::Postgres),
             "select top 10 * from t",
         )
         .unwrap();
-        assert_eq!(postgres, "SELECT top 10 *\nFROM t");
+        assert_eq!(postgres, "SELECT\n    top 10 *\nFROM\n    t");
     }
 }

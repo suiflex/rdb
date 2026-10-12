@@ -12,6 +12,277 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::*;
 
+fn qualified_table_ident(
+    db: &str,
+    schema: &str,
+    label: &str,
+    eng: rdb_connstore::Engine,
+) -> String {
+    if !db.is_empty() {
+        format!("{}.{}", quote_ident(db, eng), quote_ident(label, eng))
+    } else if !schema.is_empty()
+        && matches!(
+            eng,
+            rdb_connstore::Engine::Postgres
+                | rdb_connstore::Engine::Mssql
+                | rdb_connstore::Engine::Oracle
+        )
+    {
+        format!("{}.{}", quote_ident(schema, eng), quote_ident(label, eng))
+    } else {
+        quote_ident(label, eng)
+    }
+}
+
+fn copy_to_meta(w: &MainWindow, text: &str, ok_msg: &'static str) {
+    let msg = if clip_set(text) {
+        ok_msg
+    } else {
+        "copy failed"
+    };
+    w.set_results_meta(msg.into());
+}
+fn sync_table_structure(
+    w: &MainWindow,
+    raw_nodes: &Arc<std::sync::Mutex<Vec<model::VmTreeNode>>>,
+    table_label: &str,
+) {
+    let mut fields = Vec::new();
+    if let Ok(nodes) = raw_nodes.lock() {
+        let mut in_table = false;
+        for n in nodes.iter() {
+            let is_container = matches!(n.kind.as_str(), "table" | "collection" | "keyspace");
+            if is_container {
+                in_table = n.label == table_label;
+            } else if n.kind == "field" && in_table {
+                let (name, rest) = n.label.split_once(':').unwrap_or((&n.label, ""));
+                let ty = rest
+                    .trim()
+                    .trim_end_matches("PK")
+                    .trim_end_matches("FK")
+                    .trim();
+                fields.push(StructField {
+                    name: name.trim().into(),
+                    type_name: ty.into(),
+                    nullable: !rest.contains("PK"),
+                });
+            } else if n.kind != "field" {
+                in_table = false;
+            }
+        }
+    }
+    if !fields.is_empty() {
+        w.set_structure_columns(ModelRc::from(Rc::new(VecModel::from(fields))));
+    }
+}
+
+struct ImportOutcome {
+    summary: String,
+    has_error: bool,
+    log_entries: Vec<String>,
+}
+
+fn format_failed_indices(indices: &[usize]) -> String {
+    let shown: Vec<String> = indices.iter().take(5).map(|i| i.to_string()).collect();
+    if indices.len() > 5 {
+        format!("{} (+{} more)", shown.join(", "), indices.len() - 5)
+    } else {
+        shown.join(", ")
+    }
+}
+
+async fn execute_import_ops(
+    engine: rdb_connstore::Engine,
+    driver: &AnyDriver,
+    ops: Vec<rdb_core::write::WriteOp>,
+) -> ImportOutcome {
+    let total = ops.len();
+    // Fast path: attempt a single atomic transaction first.
+    if driver.commit(&ops).await.is_ok() {
+        return ImportOutcome {
+            summary: format!("imported {total} row(s)"),
+            has_error: false,
+            log_entries: vec![format!("-- imported {total} row(s) in batch")],
+        };
+    }
+    // Guardrail fallback: the batch transaction rolled back because one or more
+    // rows (at the start, middle, or end) violated a constraint (e.g. UNIQUE / PK
+    // duplicate). Isolate row-by-row so all valid rows commit and every failing
+    // row is reported with its exact 1-based row number and database error.
+    let mut ok_count = 0usize;
+    let mut failed_rows = Vec::new();
+    let mut first_err: Option<(usize, String)> = None;
+    let mut log_entries = Vec::new();
+
+    for (idx, op) in ops.iter().enumerate() {
+        let row_num = idx + 1;
+        let single = std::slice::from_ref(op);
+        match driver.commit(single).await {
+            Ok(_) => ok_count += 1,
+            Err(e) => {
+                let clean = editor::strip_error_marker(&e.to_string()).into_owned();
+                let stmt = dispatch::write_statements(engine, single)
+                    .into_iter()
+                    .next()
+                    .unwrap_or_default();
+                failed_rows.push(row_num);
+                log_entries.push(format!("-- [import error row {row_num}] {clean}\n{stmt}"));
+                if first_err.is_none() {
+                    first_err = Some((row_num, clean));
+                }
+            }
+        }
+    }
+
+    let fail_count = failed_rows.len();
+    let rows_list = format_failed_indices(&failed_rows);
+    let (_, detail) = first_err.unwrap_or_else(|| (1, "unknown error".into()));
+    ImportOutcome {
+        summary: format!(
+            "error: imported {ok_count}/{total} row(s); {fail_count} failed (row {rows_list}: {detail})"
+        ),
+        has_error: fail_count > 0,
+        log_entries,
+    }
+}
+
+async fn execute_import_sql(
+    engine: rdb_connstore::Engine,
+    driver: &AnyDriver,
+    stmts: Vec<String>,
+) -> ImportOutcome {
+    let total = stmts.len();
+    let mut ok_count = 0usize;
+    let mut failed_stmts = Vec::new();
+    let mut first_err: Option<(usize, String)> = None;
+    let mut log_entries = Vec::new();
+
+    for (idx, stmt) in stmts.iter().enumerate() {
+        let stmt_num = idx + 1;
+        let outcome = match query_parse::parse_query(engine, stmt) {
+            Ok(q) => driver
+                .query(&q)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            Err(e) => Err(e),
+        };
+        match outcome {
+            Ok(()) => ok_count += 1,
+            Err(raw_err) => {
+                let clean = editor::strip_error_marker(&raw_err).into_owned();
+                failed_stmts.push(stmt_num);
+                log_entries.push(format!("-- [import error stmt {stmt_num}] {clean}\n{stmt}"));
+                if first_err.is_none() {
+                    first_err = Some((stmt_num, clean));
+                }
+            }
+        }
+    }
+
+    if failed_stmts.is_empty() {
+        ImportOutcome {
+            summary: format!("imported {ok_count} statement(s)"),
+            has_error: false,
+            log_entries: vec![format!("-- imported {ok_count} statement(s)")],
+        }
+    } else {
+        let fail_count = failed_stmts.len();
+        let stmts_list = format_failed_indices(&failed_stmts);
+        let (_, detail) = first_err.unwrap_or_else(|| (1, "unknown error".into()));
+        ImportOutcome {
+            summary: format!(
+                "error: imported {ok_count}/{total} statement(s); {fail_count} failed (stmt {stmts_list}: {detail})"
+            ),
+            has_error: true,
+            log_entries,
+        }
+    }
+}
+
+async fn execute_import_payload(
+    engine: rdb_connstore::Engine,
+    driver: &AnyDriver,
+    payload: export::ImportPayload,
+) -> ImportOutcome {
+    match payload {
+        export::ImportPayload::WriteOps(ops) => execute_import_ops(engine, driver, ops).await,
+        export::ImportPayload::SqlStatements(stmts) => {
+            execute_import_sql(engine, driver, stmts).await
+        }
+    }
+}
+
+fn apply_import_status(w: &MainWindow, summary: &str, has_error: bool) {
+    w.set_status_error(has_error);
+    w.set_result_status(SharedString::from(summary));
+    w.set_results_meta(SharedString::from(summary));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn start_table_import(
+    w: &MainWindow,
+    table_ref: rdb_core::write::TableRef,
+    db_arg: SharedString,
+    label_arg: SharedString,
+    rt: Arc<tokio::runtime::Runtime>,
+    current: Arc<tokio::sync::Mutex<Option<(rdb_connstore::Engine, Arc<AnyDriver>)>>>,
+    driver_pool: DriverPool,
+    conn_id: Option<String>,
+    query_console: Arc<std::sync::Mutex<Vec<String>>>,
+) {
+    let prompt = format!("Import into {} (CSV, JSON, SQL)", label_arg);
+    pick_file_via_dialog(w, prompt, move |w, picked| {
+        let (path, contents) = match picked {
+            Ok(pair) => pair,
+            Err(msg) => {
+                w.set_results_meta(msg.into());
+                return;
+            }
+        };
+        let payload = match export::parse_import_file(&table_ref, &path, &contents) {
+            Ok(p) => p,
+            Err(e) => {
+                let msg = format!("error: import failed — {e}");
+                apply_import_status(w, &msg, true);
+                return;
+            }
+        };
+        let weak_done = w.as_weak();
+        rt.spawn(async move {
+            let Some((engine, driver)) =
+                resolve_driver(&driver_pool, &current, conn_id.as_deref()).await
+            else {
+                return;
+            };
+            let outcome = execute_import_payload(engine, &driver, payload).await;
+            for entry in outcome.log_entries {
+                append_query_console(&query_console, entry);
+            }
+            let summary = outcome.summary;
+            let has_error = outcome.has_error;
+            let weak_after = weak_done.clone();
+            let summary_after = summary.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(w) = weak_done.upgrade() else {
+                    return;
+                };
+                sync_query_console(&w, &query_console);
+                w.invoke_open_table(db_arg, label_arg);
+                apply_import_status(&w, &summary, has_error);
+            });
+            if has_error {
+                tokio::time::sleep(std::time::Duration::from_millis(320)).await;
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak_after.upgrade() {
+                        apply_import_status(&w, &summary_after, true);
+                    }
+                });
+            }
+        });
+    });
+}
+
 pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
     let AppState {
         rt,
@@ -123,6 +394,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let displayed_grid = displayed_grid.clone();
         let results = results.clone();
         let store = store.clone();
+        let raw_nodes_for_open = state.raw_nodes.clone();
         window.on_open_table(move |db, label| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -159,6 +431,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             if let Some(index) = existing_index {
                 save_active_tab(&w);
                 restore_tab(&w, index);
+                sync_table_structure(&w, &raw_nodes_for_open, &label);
                 return;
             }
             let table = rdb_core::write::TableRef {
@@ -218,6 +491,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             }
             w.set_mongo_filter(SharedString::default());
             w.set_fn_mode(false);
+            sync_table_structure(&w, &raw_nodes_for_open, &label);
             w.set_active_table(SharedString::from(label));
             w.set_show_structure(false);
             w.set_total_rows(-1);
@@ -971,6 +1245,124 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 &sidebar_filter.lock().unwrap(),
             );
             w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
+        });
+    }
+    // ----- sidebar schema tree: table context menu actions -----
+    {
+        let weak = window.as_weak();
+        let cur_engine = cur_engine.clone();
+        let load_editor_text = load_editor_text.clone();
+        let rt = rt.clone();
+        let current = current.clone();
+        let driver_pool = state.driver_pool.clone();
+        let current_connection_id = state.current_connection_id.clone();
+        let query_console = state.query_console.clone();
+        window.on_table_action(move |db, label, action| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let eng = (*cur_engine.borrow()).unwrap_or(rdb_connstore::Engine::Postgres);
+            let schema = w.get_schema_name().to_string();
+            let qual = qualified_table_ident(&db, &schema, &label, eng);
+            match action {
+                0 => {
+                    w.invoke_open_table(db.clone(), label.clone());
+                    w.invoke_pin_table(db, label);
+                }
+                1 => {
+                    w.invoke_open_table(db.clone(), label.clone());
+                    w.invoke_pin_table(db, label);
+                    w.set_show_structure(false);
+                    w.set_show_structure(true);
+                }
+                3 => copy_to_meta(&w, &label, "copied table name"),
+                4 => copy_to_meta(&w, &qual, "copied qualified table name"),
+                5 => {
+                    let sql = format!("SELECT\n    *\nFROM\n    {qual}\nLIMIT\n    100;");
+                    copy_to_meta(&w, &sql, "copied SELECT script");
+                }
+                7 => {
+                    let table_ref = rdb_core::write::TableRef {
+                        database: (!db.is_empty()).then(|| db.to_string()),
+                        schema: matches!(eng, rdb_connstore::Engine::Postgres).then_some(schema),
+                        name: label.to_string(),
+                    };
+                    let conn_id = current_connection_id.lock().ok().and_then(|g| g.clone());
+                    start_table_import(
+                        &w,
+                        table_ref,
+                        db,
+                        label,
+                        rt.clone(),
+                        current.clone(),
+                        driver_pool.clone(),
+                        conn_id,
+                        query_console.clone(),
+                    );
+                }
+                8 => {
+                    w.invoke_open_table(db, label);
+                    w.invoke_export_results(0);
+                }
+                9 => w.invoke_new_table(),
+                11 => {
+                    let sql = format!("TRUNCATE TABLE {qual};");
+                    w.invoke_new_tab();
+                    load_editor_text(0, &sql);
+                }
+                _ => {}
+            }
+        });
+    }
+    // ----- sidebar schema tree: copy column name(s) from a field row -----
+    {
+        let weak = window.as_weak();
+        let raw_nodes = raw_nodes.clone();
+        let cur_engine = cur_engine.clone();
+        window.on_copy_tree_field(move |table, field_label, action| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let target_col = completion::field_name(&field_label).to_string();
+            if target_col.is_empty() {
+                return;
+            }
+            let mut names = Vec::new();
+            if let Ok(nodes) = raw_nodes.lock() {
+                let mut in_table = false;
+                for n in nodes.iter() {
+                    let is_container =
+                        matches!(n.kind.as_str(), "table" | "collection" | "keyspace");
+                    if is_container {
+                        in_table = n.label == table.as_str();
+                    } else if n.kind == "field" && in_table {
+                        let col = completion::field_name(&n.label).to_string();
+                        if !col.is_empty() {
+                            names.push(col);
+                        }
+                    } else if n.kind != "field" {
+                        in_table = false;
+                    }
+                }
+            }
+            if names.is_empty() {
+                names.push(target_col.clone());
+            }
+            let col_idx = names.iter().position(|c| c == &target_col).unwrap_or(0);
+            let Some(text) = crate::wire::split_pane::column_names_text(
+                &names,
+                col_idx,
+                action,
+                *cur_engine.borrow(),
+            ) else {
+                return;
+            };
+            let msg = if clip_set(&text) {
+                "copied column name(s)"
+            } else {
+                "copy failed"
+            };
+            w.set_results_meta(msg.into());
         });
     }
 

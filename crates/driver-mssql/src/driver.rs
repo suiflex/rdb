@@ -167,6 +167,23 @@ impl Driver for MssqlDriver {
             }
         };
         let mut client = self.client.lock().await;
+        let first_word = sql
+            .lines()
+            .map(str::trim_start)
+            .find(|l| !l.is_empty() && !l.starts_with("--"))
+            .and_then(|l| l.split_whitespace().next())
+            .unwrap_or("")
+            .to_ascii_uppercase();
+        let has_output = sql
+            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .any(|w| w.eq_ignore_ascii_case("output"));
+        if matches!(first_word.as_str(), "INSERT" | "UPDATE" | "DELETE") && !has_output {
+            let res = client
+                .execute(sql.as_str(), &[])
+                .await
+                .map_err(|e| RdbError::Query(ts_err(&e)))?;
+            return Ok(ResultSet::Affected(res.total()));
+        }
         let mut stream = client
             .simple_query(sql.as_str())
             .await

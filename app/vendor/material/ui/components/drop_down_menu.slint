@@ -19,7 +19,7 @@ export component DropDownMenu {
 
     callback selected(index: int);
 
-    property <length> item_height: MaterialStyleMetrics.size_56;
+    property <length> item_height: MaterialStyleMetrics.size_40;
     property <int> max_displayed_items: 6;
     property <string> text <=> text_field.text;
 
@@ -41,6 +41,7 @@ export component DropDownMenu {
     state_layer := StateLayer {
         width: 100%;
         height: 100%;
+        border_radius: MaterialStyleMetrics.border_radius_12;
         background: MaterialPalette.on_surface;
         has_hover: touch_area.has_hover;
         enabled: root.enabled;
@@ -85,8 +86,11 @@ export component DropDownMenu {
             Rectangle {
                 width: 100%;
                 height: min(max(root.item_height, items.length * root.item_height), root.max_displayed_items * root.item_height);
-                background: MaterialPalette.surface_container;
-
+                background: MaterialPalette.surface_container_high;
+                border_radius: MaterialStyleMetrics.border_radius_12;
+                border_width: 1px;
+                border_color: MaterialPalette.outline_variant;
+                clip: true;
                 ScrollView {
                     VerticalLayout {
                         menu_inner := MenuInner {

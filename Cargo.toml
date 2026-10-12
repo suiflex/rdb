@@ -35,10 +35,40 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
-# Dev builds: keep target/ small. Backtraces still show file:line.
+# Dev builds: keep target/ small while preserving file:line backtraces and fast
+# incremental rebuilds. `split-debuginfo = "off"` embeds line tables directly
+# instead of exporting thousands of unpacked `.rcgu.o` files into `target/debug/deps`
+# on macOS.
 [profile.dev]
 debug = "line-tables-only"
+split-debuginfo = "off"
+incremental = true
 
 # Dependencies rarely need stepping through — no debug info at all.
 [profile.dev.package."*"]
+debug = false
+
+# Build scripts (`slint-build`) and proc-macros: strip symbol tables and skip
+# incremental caches so `target/debug/build/rdb-*` stays compact.
+[profile.dev.build-override]
+opt-level = 0
+debug = false
+strip = "symbols"
+incremental = false
+
+[profile.release.build-override]
+debug = false
+strip = "symbols"
+incremental = false
+
+# Test profile: disable incremental caching on test harnesses (`rdb` test binary
+# alone writes a 1.7 GB `dep-graph.bin` + `query-cache.bin` because of the
+# 28 MB Slint-generated `app-window.rs` module) while keeping line-table
+# backtraces for test failures.
+[profile.test]
+debug = "line-tables-only"
+split-debuginfo = "off"
+incremental = false
+
+[profile.test.package."*"]
 debug = false

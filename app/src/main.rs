@@ -235,6 +235,83 @@ fn save_via_dialog(
     }
 }
 
+/// Open a native "choose file" dialog for importing `.csv`, `.json`, or `.sql`
+/// into a table, and pass `(path, contents)` to `on_loaded` on the UI thread.
+fn pick_file_via_dialog(
+    w: &MainWindow,
+    prompt: String,
+    on_loaded: impl FnOnce(&MainWindow, Result<(String, String), String>) + Send + 'static,
+) {
+    let weak = w.as_weak();
+    #[cfg(target_os = "macos")]
+    {
+        std::thread::spawn(move || {
+            let safe_prompt = prompt.replace(['"', '\\'], "");
+            let script = format!(
+                "POSIX path of (choose file with prompt \"{safe_prompt}\" of type {{\"csv\", \"json\", \"sql\", \"public.comma-separated-values-text\", \"public.json\", \"public.sql\", \"public.plain-text\"}})"
+            );
+            let out = std::process::Command::new("osascript")
+                .arg("-e")
+                .arg(&script)
+                .output();
+            let path = match out {
+                Ok(o) if o.status.success() => {
+                    String::from_utf8_lossy(&o.stdout).trim().to_string()
+                }
+                _ => {
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = weak.upgrade() {
+                            on_loaded(&w, Err("import cancelled".into()));
+                        }
+                    });
+                    return;
+                }
+            };
+            if path.is_empty() {
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak.upgrade() {
+                        on_loaded(&w, Err("import cancelled".into()));
+                    }
+                });
+                return;
+            }
+            let res = std::fs::read_to_string(&path)
+                .map(|contents| (path, contents))
+                .map_err(|e| format!("read failed: {e}"));
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(w) = weak.upgrade() {
+                    on_loaded(&w, res);
+                }
+            });
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let parent = w.window().window_handle();
+        let _ = slint::spawn_local(async move {
+            let picked = rfd::AsyncFileDialog::new()
+                .set_parent(&parent)
+                .set_title(&prompt)
+                .add_filter("Data & SQL files", &["csv", "json", "sql"])
+                .pick_file()
+                .await;
+            let Some(file) = picked else {
+                if let Some(w) = weak.upgrade() {
+                    on_loaded(&w, Err("import cancelled".into()));
+                }
+                return;
+            };
+            let path = file.path().to_string_lossy().to_string();
+            let res = std::fs::read_to_string(file.path())
+                .map(|contents| (path, contents))
+                .map_err(|e| format!("read failed: {e}"));
+            if let Some(w) = weak.upgrade() {
+                on_loaded(&w, res);
+            }
+        });
+    }
+}
+
 /// Next cursor line when moving vertically past folded (hidden) lines. A closed
 /// fold at head `h` hides its body `h+1..=e`; stepping into that body jumps to
 /// the first visible line beyond it (down) or back to the fold head (up), so the
@@ -576,7 +653,7 @@ fn emit_group_subtree(
     let expanded = !collapsed.contains(path);
     rows.push(ConnItem {
         id: SharedString::default(),
-        name: rdb_connstore::group_leaf(path).to_uppercase().into(),
+        name: rdb_connstore::group_leaf(path).into(),
         engine: SharedString::default(),
         color: theme::accent_or_default(""),
         has_custom_color: false,
@@ -1134,6 +1211,7 @@ fn container_rows(
 ) {
     // Walk the flat nodes: containers + (when expanded) their fields.
     let mut show_fields = false;
+    let mut cur_table = String::new();
     for n in nodes {
         let is_container = matches!(n.kind.as_str(), "table" | "collection" | "keyspace");
         if n.kind == "field" {
@@ -1147,15 +1225,17 @@ fn container_rows(
                 expanded: false,
                 db: SharedString::default(),
                 count: 0,
-                sub: SharedString::default(),
+                sub: cur_table.clone().into(),
                 sub_color: Default::default(),
                 sub_has_custom_color: false,
             });
         } else if is_container {
             if !matches(&n.label) {
                 show_fields = false;
+                cur_table.clear();
                 continue;
             }
+            cur_table = n.label.clone();
             show_fields = expanded_tables.contains(&n.label);
             rows.push(TreeNode {
                 label: n.label.clone().into(),
@@ -1171,6 +1251,7 @@ fn container_rows(
         } else if n.kind != "function" {
             // database row: categories replace it; reset field visibility
             show_fields = false;
+            cur_table.clear();
         }
     }
 }
@@ -2335,11 +2416,13 @@ fn sync_query_console(w: &MainWindow, log: &Arc<std::sync::Mutex<Vec<String>>>) 
 /// 1-based display bounds of the current page window plus prev/next
 /// availability. `shown` is how many rows the page actually returned.
 /// Quote a database/schema/table identifier for `engine`, doubling the quote
-/// char so a name with an embedded quote can't break out. MySQL uses backticks,
-/// everything else standard double-quotes.
+/// char so a name with an embedded quote can't break out. MySQL and MariaDB use
+/// backticks; everything else uses standard double-quotes.
 fn quote_ident(name: &str, engine: rdb_connstore::Engine) -> String {
     match engine {
-        rdb_connstore::Engine::MySql => format!("`{}`", name.replace('`', "``")),
+        rdb_connstore::Engine::MySql | rdb_connstore::Engine::MariaDb => {
+            format!("`{}`", name.replace('`', "``"))
+        }
         _ => format!("\"{}\"", name.replace('"', "\"\"")),
     }
 }
@@ -4683,10 +4766,10 @@ fn present_view(
         _ => 0,
     };
     let shown = match v {
-        model::ResultView::Table(g) => g.rows.len(),
-        model::ResultView::Documents(d) => d.grid.rows.len(),
-        model::ResultView::Affected(_) => 0,
-    } as u64;
+        model::ResultView::Table(g) => g.rows.len() as u64,
+        model::ResultView::Documents(d) => d.grid.rows.len() as u64,
+        model::ResultView::Affected(s) => model::parse_affected_count(s),
+    };
     *last_view.lock().unwrap() = Some(v.clone());
     set_p_grid_filter(w, pane, SharedString::default());
     hidden_cols.lock().unwrap().clear();

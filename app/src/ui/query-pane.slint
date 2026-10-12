@@ -132,6 +132,7 @@ export component QueryPane inherits Rectangle {
     in property <int> scroll-grid-tick;
     in property <int> scroll-top-tick;
     callback sort-col(int);
+    callback copy-column(int, int);
     callback reorder-col(int, length);
     callback set-col-filter(int, string);
     callback resize-col(int, length);
@@ -418,11 +419,19 @@ export component QueryPane inherits Rectangle {
                         }
                     }
                 }
-                HorizontalLayout {
-                    height: 44px;
-                    padding-left: Tokens.sp3;
-                    padding-right: Tokens.sp3;
-                    spacing: Tokens.sp2;
+                Rectangle {
+                    height: 48px;
+                    background: Tokens.chrome;
+                    Rectangle {
+                        y: parent.height - 1px;
+                        height: 1px;
+                        width: parent.width;
+                        background: Tokens.border;
+                    }
+                    HorizontalLayout {
+                        padding-left: Tokens.sp3;
+                        padding-right: Tokens.sp3;
+                        spacing: Tokens.sp2;
                     VerticalLayout {
                         alignment: center;
                         PrimaryButton {
@@ -519,6 +528,7 @@ export component QueryPane inherits Rectangle {
                         color: Tokens.text-faint;
                         font-size: Tokens.font-sm;
                         vertical-alignment: center;
+                        }
                     }
                 }
                 // find bar (⌘F): input + match count + prev/next + close
@@ -804,6 +814,7 @@ export component QueryPane inherits Rectangle {
                 sorted-col: root.grid-sort-col;
                 sort-asc: root.grid-sort-asc;
                 sort-col(i) => { root.sort-col(i); }
+                copy-column(i, action) => { root.copy-column(i, action); }
                 reorder-col(i, x) => { root.reorder-col(i, x); }
                 filter-open: root.filter-open;
                 col-filter-values: root.grid-col-filters;

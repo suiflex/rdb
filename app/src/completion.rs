@@ -24,7 +24,7 @@ pub struct Candidate {
 
 /// Field nodes store `"name: type"` for the sidebar; completions insert the
 /// bare column name only.
-fn field_name(label: &str) -> &str {
+pub(crate) fn field_name(label: &str) -> &str {
     label.split(':').next().unwrap_or(label).trim()
 }
 
