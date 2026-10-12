@@ -136,7 +136,11 @@ find "$TARGET_DIR" -path "*/incremental/*" -mindepth 3 -maxdepth 3 -type d -prin
             n = split(dir, p, "/")
             base = p[n]
             sub(/-[0-9a-z]{13}$/, "", base)
-            key = p[n - 2] "|" base
+            prof_dir = ""
+            for (i = 1; i <= n - 2; i++) {
+                prof_dir = (i == 1 ? p[i] : prof_dir "/" p[i])
+            }
+            key = prof_dir "|" base
             if (seen[key]++) {
                 print dir
             }

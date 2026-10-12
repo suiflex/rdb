@@ -9,7 +9,7 @@ import {
     MenuItem as MaterialMenuItem
 } from "@material";
 import {
-    AppMenu, SearchCommandPill, BreadcrumbChip, DbBadge, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SettingsSectionHeader, TextButton, Toggle, ToggleRow, ChoiceRow, DangerButton, Tooltip, TooltipArea, Shortcut
+    AppMenu, SearchCommandPill, BreadcrumbChip, DbBadge, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SelectBox, SettingsSectionHeader, TextButton, Toggle, ToggleRow, ChoiceRow, DangerButton, Tooltip, TooltipArea, Shortcut
 } from "components.slint";
 export { Shortcut }
 import { NavCluster } from "nav-cluster.slint";
@@ -30,6 +30,8 @@ import {
     TabItem,
     StructField,
     TableCol,
+    ImportCol,
+    ImportPreviewRow,
     Span,
     ChartBar,
     IndexRow,
@@ -273,6 +275,28 @@ callback table-remove-col(int);
 callback table-set-col-name(int, string);
 callback table-set-col-type(int, string);
 callback table-toggle-null(int);
+    // Import JSON / CSV Wizard modal
+    in-out property <bool> import-modal-open: false;
+    in-out property <string> import-wizard-title: "Import JSON Wizard";
+    in-out property <string> import-file-info: "";
+    in-out property <string> import-preview-caption: "First 100 rows of the JSON file";
+    in property <[string]> import-table-options;
+    in-out property <string> import-target-table;
+    in-out property <bool> import-create-table: false;
+    in-out property <string> import-new-table-name;
+    in-out property <string> import-match-mode: "Match Columns by Name and Order";
+    in property <[string]> import-target-col-options;
+    in property <[ImportCol]> import-cols;
+    in property <[ImportPreviewRow]> import-preview-rows;
+    in-out property <string> import-summary: "";
+    in-out property <string> import-encoding: "utf8";
+    in-out property <string> import-insert-option: "STOP ON ERROR";
+    in-out property <string> import-error: "";
+    callback import-table-changed(string);
+    callback import-create-toggled(bool);
+    callback import-match-mode-changed(string);
+    callback import-col-target-changed(int, string);
+    callback import-commit();
 callback table-toggle-pk(int);
 callback create-table-commit();
     callback toggle-group(string);
@@ -2873,6 +2897,366 @@ callback create-table-commit();
                     PrimaryButton {
                         text: "Create";
                         clicked => { root.create-table-commit(); }
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- Import JSON / CSV Wizard modal (TablePlus-style preview & mapping) -----
+    import-modal := Rectangle {
+        visible: root.import-modal-open;
+        background: Tokens.veil;
+        if root.import-modal-open: TouchArea { clicked => { root.import-modal-open = false; } }
+        property <int> active-col-menu: -1;
+        property <length> col-menu-x: 0px;
+        property <length> col-menu-y: 0px;
+
+        wizard-card := Rectangle {
+            width: min(820px, parent.width - 64px);
+            height: min(560px, parent.height - 64px);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: 14px;
+            border-width: 1px;
+            border-color: Tokens.border-strong;
+            background: MaterialPalette.surface_container_high;
+            drop-shadow-blur: 28px;
+            drop-shadow-offset-y: 10px;
+            drop-shadow-color: MaterialPalette.shadow.with-alpha(0.45);
+            TouchArea {}
+
+            col-target-popup := PopupWindow {
+                close-policy: close-on-click-outside;
+                x: clamp(import-modal.col-menu-x, 8px, wizard-card.width - self.width - 8px);
+                y: clamp(import-modal.col-menu-y, 8px, wizard-card.height - 200px);
+                width: 210px;
+                AppMenu {
+                    items: root.import-target-col-options;
+                    activated(opt_i) => {
+                        root.import-col-target-changed(
+                            import-modal.active-col-menu,
+                            root.import-target-col-options[opt_i]
+                        );
+                        col-target-popup.close();
+                    }
+                }
+            }
+
+            VerticalLayout {
+                padding: Tokens.sp4;
+                spacing: Tokens.sp3;
+
+                // Title
+                Text {
+                    text: root.import-wizard-title;
+                    color: Tokens.text;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+
+                // Row 1: Table selector + Create new table + file name/size
+                HorizontalLayout {
+                    spacing: Tokens.sp3;
+                    Text {
+                        text: "Table";
+                        color: Tokens.text-dim;
+                        font-size: Tokens.font-sm;
+                        vertical-alignment: center;
+                    }
+                    if !root.import-create-table: SelectBox {
+                        width: 190px;
+                        model: root.import-table-options;
+                        current-value <=> root.import-target-table;
+                        selected(v) => { root.import-table-changed(v); }
+                    }
+                    if root.import-create-table: Rectangle {
+                        width: 190px;
+                        height: 36px;
+                        border-radius: 8px;
+                        background: MaterialPalette.surface_container_low;
+                        border-width: new-tbl-in.has-focus ? 2px : 1px;
+                        border-color: new-tbl-in.has-focus ? MaterialPalette.primary : MaterialPalette.outline_variant;
+                        new-tbl-in := TextInput {
+                            x: Tokens.sp2;
+                            width: parent.width - 2 * Tokens.sp2;
+                            vertical-alignment: center;
+                            text <=> root.import-new-table-name;
+                            color: Tokens.text;
+                            font-family: Tokens.mono;
+                            font-size: Tokens.font-sm;
+                            single-line: true;
+                        }
+                    }
+                    // Create new table checkbox
+                    Rectangle {
+                        width: create-lbl.preferred-width + 26px;
+                        height: 36px;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 16px;
+                                    height: 16px;
+                                    border-radius: 4px;
+                                    border-width: 1px;
+                                    border-color: root.import-create-table ? Tokens.accent : Tokens.border-strong;
+                                    background: root.import-create-table ? Tokens.accent : MaterialPalette.surface_container_low;
+                                    if root.import-create-table: Text {
+                                        text: "✓";
+                                        color: white;
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                            create-lbl := Text {
+                                text: "Create new table";
+                                color: Tokens.text;
+                                font-size: Tokens.font-sm;
+                                vertical-alignment: center;
+                            }
+                        }
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.import-create-table = !root.import-create-table;
+                                root.import-create-toggled(root.import-create-table);
+                            }
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text {
+                        text: root.import-file-info;
+                        color: Tokens.text-dim;
+                        font-size: Tokens.font-sm;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Row 2: Preview caption + Match Columns mode
+                HorizontalLayout {
+                    spacing: Tokens.sp3;
+                    Text {
+                        text: root.import-preview-caption;
+                        color: Tokens.text-dim;
+                        font-size: Tokens.font-sm;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    SelectBox {
+                        width: 260px;
+                        model: [
+                            "Match Columns by Name and Order",
+                            "Match Columns by Name",
+                            "Match Columns by Order"
+                        ];
+                        current-value <=> root.import-match-mode;
+                        selected(v) => { root.import-match-mode-changed(v); }
+                    }
+                }
+
+                // Preview table (2-axis scrollable: target mapping row + file header row + first 100 rows)
+                Rectangle {
+                    vertical-stretch: 1;
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: Tokens.border-strong;
+                    background: Tokens.canvas;
+                    clip: true;
+
+                    preview-flick := Flickable {
+                        width: 100%;
+                        height: 100%;
+                        viewport-width: max(self.width, root.import-cols.length * 150px);
+                        viewport-height: (root.import-preview-rows.length + 2) * 26px + 4px;
+
+                        VerticalLayout {
+                            width: preview-flick.viewport-width;
+                            spacing: 0px;
+
+                            // Target column mapping row ("Do not import ⇅" / "<col> ⇅")
+                            Rectangle {
+                                height: 28px;
+                                background: Tokens.chrome;
+                                HorizontalLayout {
+                                    spacing: 0px;
+                                    for col[ci] in root.import-cols: map-cell := Rectangle {
+                                        width: 150px;
+                                        height: 28px;
+                                        background: map-ta.has-hover ? Tokens.border : transparent;
+                                        HorizontalLayout {
+                                            padding-left: Tokens.sp2;
+                                            padding-right: Tokens.sp2;
+                                            spacing: 4px;
+                                            Text {
+                                                horizontal-stretch: 1;
+                                                text: col.target-col;
+                                                color: col.target-col == "Do not import" ? Tokens.text-dim : Tokens.text;
+                                                font-size: Tokens.font-xs;
+                                                font-weight: col.target-col == "Do not import" ? 400 : 600;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+                                            Text {
+                                                text: "⇅";
+                                                color: Tokens.text-faint;
+                                                font-size: 10px;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                        Rectangle {
+                                            x: parent.width - 1px;
+                                            width: 1px;
+                                            height: parent.height;
+                                            background: Tokens.border;
+                                        }
+                                        map-ta := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => {
+                                                import-modal.active-col-menu = ci;
+                                                import-modal.col-menu-x = map-cell.absolute-position.x - wizard-card.absolute-position.x;
+                                                import-modal.col-menu-y = map-cell.absolute-position.y - wizard-card.absolute-position.y + map-cell.height;
+                                                col-target-popup.show();
+                                            }
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    y: parent.height - 1px;
+                                    width: parent.width;
+                                    height: 1px;
+                                    background: Tokens.border-strong;
+                                }
+                            }
+
+                            // File column header row
+                            Rectangle {
+                                height: 26px;
+                                background: Tokens.card;
+                                HorizontalLayout {
+                                    spacing: 0px;
+                                    for col[ci] in root.import-cols: Rectangle {
+                                        width: 150px;
+                                        height: 26px;
+                                        Text {
+                                            x: Tokens.sp2;
+                                            width: parent.width - 2 * Tokens.sp2;
+                                            text: col.file-col;
+                                            color: Tokens.text;
+                                            font-family: Tokens.mono;
+                                            font-size: Tokens.font-xs;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                        Rectangle {
+                                            x: parent.width - 1px;
+                                            width: 1px;
+                                            height: parent.height;
+                                            background: Tokens.border;
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    y: parent.height - 1px;
+                                    width: parent.width;
+                                    height: 1px;
+                                    background: Tokens.border-strong;
+                                }
+                            }
+
+                            // Preview data rows (up to 100 rows)
+                            for prow[ri] in root.import-preview-rows: Rectangle {
+                                height: 24px;
+                                background: mod(ri, 2) == 1 ? Tokens.chrome.with-alpha(0.4) : transparent;
+                                HorizontalLayout {
+                                    spacing: 0px;
+                                    for cell-val[ci] in prow.cells: Rectangle {
+                                        width: 150px;
+                                        height: 24px;
+                                        Text {
+                                            x: Tokens.sp2;
+                                            width: parent.width - 2 * Tokens.sp2;
+                                            text: cell-val;
+                                            color: cell-val == "NULL" ? Tokens.text-ghost : Tokens.text;
+                                            font-italic: cell-val == "NULL";
+                                            font-family: Tokens.mono;
+                                            font-size: Tokens.font-xs;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                        Rectangle {
+                                            x: parent.width - 1px;
+                                            width: 1px;
+                                            height: parent.height;
+                                            background: Tokens.border;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Summary text ("JSON 61 columns, table 12 columns, matched 10 columns")
+                Text {
+                    text: root.import-summary;
+                    color: Tokens.text-dim;
+                    font-size: Tokens.font-sm;
+                }
+
+                // Encoding + Insert option row
+                HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    Text {
+                        text: "Encoding";
+                        color: Tokens.text-dim;
+                        font-size: Tokens.font-sm;
+                        vertical-alignment: center;
+                    }
+                    SelectBox {
+                        width: 110px;
+                        model: ["utf8", "latin1"];
+                        current-value <=> root.import-encoding;
+                    }
+                    Rectangle { width: Tokens.sp3; }
+                    Text {
+                        text: "Insert option";
+                        color: Tokens.text-dim;
+                        font-size: Tokens.font-sm;
+                        vertical-alignment: center;
+                    }
+                    SelectBox {
+                        width: 200px;
+                        model: ["STOP ON ERROR", "CONTINUE ON ERROR", "SKIP DUPLICATES"];
+                        current-value <=> root.import-insert-option;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+
+                if root.import-error != "": Text {
+                    text: root.import-error;
+                    color: Tokens.error;
+                    font-size: Tokens.font-sm;
+                    wrap: word-wrap;
+                }
+
+                // Footer Cancel / Import buttons
+                HorizontalLayout {
+                    spacing: Tokens.sp2;
+                    alignment: end;
+                    SecondaryButton {
+                        text: "Cancel";
+                        clicked => { root.import-modal-open = false; }
+                    }
+                    PrimaryButton {
+                        text: "Import";
+                        clicked => { root.import-commit(); }
                     }
                 }
             }

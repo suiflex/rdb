@@ -3134,11 +3134,13 @@ pub(crate) fn stash_closed_sql_tab_in(
     let Some(conn_id) = tab.connection_id.as_deref().filter(|id| !id.is_empty()) else {
         return;
     };
-    if tab.query_text.trim().is_empty() {
-        return;
-    }
     let slot = sql_tab_slot_number(tab).unwrap_or(1);
-    map.insert(format!("{conn_id}:{slot}"), tab.query_text.clone());
+    let key = format!("{conn_id}:{slot}");
+    if tab.query_text.trim().is_empty() {
+        map.remove(&key);
+    } else {
+        map.insert(key, tab.query_text.clone());
+    }
 }
 
 pub(crate) fn take_closed_sql_buffer_from(
@@ -5066,6 +5068,11 @@ mod fmt_tests {
             "SELECT * FROM only_in_a;"
         );
         assert_eq!(take_closed_sql_buffer_from(&map, "conn-b", 1), "");
+
+        // Clearing a restored tab and closing it removes the stashed slot buffer.
+        a1.query_text = "   ".into();
+        stash_closed_sql_tab_in(&mut map, &a1);
+        assert_eq!(take_closed_sql_buffer_from(&map, "conn-a", 1), "");
     }
 
     #[test]

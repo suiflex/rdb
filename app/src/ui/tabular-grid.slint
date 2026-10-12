@@ -85,7 +85,11 @@ export component TabularGrid inherits Rectangle {
     property <length> editing-row-h: !root.is-inline-editing || root.editing-compact ? Tokens.grid-row-h
         : max(Tokens.grid-row-h + 6px, root.editing-est-lines * 18px + 10px);
     property <length> editing-extra-h: root.editing-row-h - Tokens.grid-row-h;
-    property <int> first-row: clamp(floor(-flick.viewport-y / Tokens.grid-row-h), 0, max(0, root.row-count - 1));
+    property <length> scroll-y: -flick.viewport-y;
+    property <length> adjusted-scroll-y: root.is-inline-editing && self.scroll-y > root.editing-row * Tokens.grid-row-h
+        ? max(root.editing-row * Tokens.grid-row-h, self.scroll-y - root.editing-extra-h)
+        : self.scroll-y;
+    property <int> first-row: clamp(floor(self.adjusted-scroll-y / Tokens.grid-row-h), 0, max(0, root.row-count - 1));
     property <int> win-count: min(root.row-count - root.first-row, ceil(la.height / Tokens.grid-row-h) + 2);
 
     pure function is-boolean(t: string) -> bool {

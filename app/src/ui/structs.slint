@@ -84,6 +84,10 @@ export struct KvRow { k: string, v: string }
 export struct StructField { name: string, type-name: string, nullable: bool }
 // One editable row of the new-table designer.
 export struct TableCol { name: string, type-name: string, nullable: bool, pk: bool }
+// Import JSON/CSV Wizard: one file column -> target table column mapping, and
+// one preview row of up to 100 rows.
+export struct ImportCol { file-col: string, target-col: string }
+export struct ImportPreviewRow { cells: [string] }
 // `kind` picks the tab glyph; preview table tabs are italic until pinned.
 // `engine` is the DbBadge key ("postgres" etc, empty when no connection was
 // active when the tab was created); `connection-name` is the full name shown
