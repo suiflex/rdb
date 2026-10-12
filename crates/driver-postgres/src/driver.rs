@@ -392,6 +392,7 @@ enum SqlScanState {
     LineComment,
     BlockComment,
     Quoted(u8),
+    DollarQuoted(usize, usize),
 }
 
 fn flush_word(cur: &mut String, words: &mut Vec<String>) {
@@ -400,12 +401,28 @@ fn flush_word(cur: &mut String, words: &mut Vec<String>) {
     }
 }
 
+fn dollar_quote_tag_len(bytes: &[u8], start: usize) -> Option<usize> {
+    if bytes.get(start) != Some(&b'$') {
+        return None;
+    }
+    let rest = &bytes[start + 1..];
+    let end = rest.iter().position(|&b| b == b'$')?;
+    let tag = &rest[..end];
+    let valid = tag.first().is_none_or(|&first| {
+        (first.is_ascii_alphabetic() || first == b'_')
+            && tag.iter().all(|&b| b.is_ascii_alphanumeric() || b == b'_')
+    });
+    valid.then_some(end + 2)
+}
+
 fn step_code_byte(
-    b: u8,
-    next: Option<u8>,
+    bytes: &[u8],
+    i: usize,
     cur: &mut String,
     words: &mut Vec<String>,
 ) -> (SqlScanState, usize) {
+    let b = bytes[i];
+    let next = bytes.get(i + 1).copied();
     if b == b'-' && next == Some(b'-') {
         flush_word(cur, words);
         return (SqlScanState::LineComment, 2);
@@ -417,6 +434,12 @@ fn step_code_byte(
     if b == b'\'' || b == b'"' {
         flush_word(cur, words);
         return (SqlScanState::Quoted(b), 1);
+    }
+    if b == b'$' {
+        if let Some(tag_len) = dollar_quote_tag_len(bytes, i) {
+            flush_word(cur, words);
+            return (SqlScanState::DollarQuoted(i, tag_len), tag_len);
+        }
     }
     if b.is_ascii_alphanumeric() || b == b'_' {
         cur.push((b as char).to_ascii_lowercase());
@@ -436,7 +459,7 @@ fn unquoted_sql_words(sql: &str) -> Vec<String> {
         let b = bytes[i];
         let next = bytes.get(i + 1).copied();
         let (next_state, step) = match state {
-            SqlScanState::Code => step_code_byte(b, next, &mut cur, &mut words),
+            SqlScanState::Code => step_code_byte(bytes, i, &mut cur, &mut words),
             SqlScanState::LineComment if b == b'\n' => (SqlScanState::Code, 1),
             SqlScanState::LineComment => (SqlScanState::LineComment, 1),
             SqlScanState::BlockComment if b == b'*' && next == Some(b'/') => {
@@ -446,6 +469,10 @@ fn unquoted_sql_words(sql: &str) -> Vec<String> {
             SqlScanState::Quoted(q) if b == q && next == Some(q) => (SqlScanState::Quoted(q), 2),
             SqlScanState::Quoted(q) if b == q => (SqlScanState::Code, 1),
             SqlScanState::Quoted(q) => (SqlScanState::Quoted(q), 1),
+            SqlScanState::DollarQuoted(ts, tl) if bytes[i..].starts_with(&bytes[ts..ts + tl]) => {
+                (SqlScanState::Code, tl)
+            }
+            SqlScanState::DollarQuoted(ts, tl) => (SqlScanState::DollarQuoted(ts, tl), 1),
         };
         state = next_state;
         i += step;
@@ -617,6 +644,12 @@ mod tests {
         ));
         assert!(is_row_returning(
             "INSERT INTO logs (msg) VALUES ('x') RETURNING id"
+        ));
+        assert!(!is_row_returning(
+            "INSERT INTO logs (msg) VALUES ($$returning$$)"
+        ));
+        assert!(!is_row_returning(
+            "UPDATE logs SET msg = $tag$returning$tag$ WHERE id = 1"
         ));
     }
 
