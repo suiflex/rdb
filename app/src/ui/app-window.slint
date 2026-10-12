@@ -240,6 +240,7 @@ in property <string> p1-run-block-text;
 in property <string> p1-run-block-action;
 callback run-block-act(int);
 in property <string> prod-confirm-name;
+in property <string> prod-confirm-tab;
 callback prod-confirm-accept();
 callback prod-confirm-cancel();
 // A connect finished: a "Connect & Run" waiting on it runs on success and
@@ -2473,32 +2474,120 @@ callback create-table-commit();
             }
         }
         Rectangle {
-            width: 400px;
+            width: 440px;
             x: (parent.width - self.width) / 2;
-            y: 120px;
+            y: (parent.height - self.height) / 2;
             height: prod-box.preferred-height;
             border-radius: Tokens.modal-radius;
             background: MaterialPalette.surface_container_high;
+            border-width: 1px;
+            border-color: Tokens.error.with-alpha(0.35);
             drop-shadow-blur: 24px;
             drop-shadow-offset-y: 8px;
             drop-shadow-color: MaterialPalette.shadow.with-alpha(0.3);
             TouchArea {}
             prod-box := VerticalLayout {
                 padding: Tokens.sp4;
-                spacing: Tokens.sp3;
-                Text {
-                    text: "Run on production?";
-                    color: Tokens.text;
-                    font-size: MaterialTypography.headline_small.font_size;
-                    font-weight: MaterialTypography.headline_small.font_weight;
-                    horizontal-alignment: center;
+                padding-top: 20px;
+                spacing: Tokens.sp4;
+                HorizontalLayout {
+                    spacing: Tokens.sp3;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 32px;
+                            height: 32px;
+                            border-radius: 16px;
+                            background: Tokens.error-tint;
+                            Text {
+                                text: "!";
+                                color: Tokens.error;
+                                font-size: 18px;
+                                font-weight: 800;
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: "Run on production?";
+                            color: Tokens.text;
+                            font-size: MaterialTypography.title_medium.font_size;
+                            font-weight: Tokens.weight-emphasis;
+                        }
+                        Text {
+                            text: "This tab has not run here before.";
+                            color: Tokens.text-dim;
+                            font-size: Tokens.font-sm;
+                        }
+                    }
+                }
+                // What is about to run where, so the answer is not a guess.
+                Rectangle {
+                    border-radius: Tokens.radius;
+                    background: Tokens.canvas;
+                    border-width: 1px;
+                    border-color: Tokens.border;
+                    height: ctx.preferred-height;
+                    ctx := VerticalLayout {
+                        padding: Tokens.sp3;
+                        spacing: Tokens.sp2;
+                        HorizontalLayout {
+                            spacing: Tokens.sp3;
+                            Text {
+                                width: 84px;
+                                text: "Tab";
+                                color: Tokens.text-faint;
+                                font-size: Tokens.font-sm;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: root.prod-confirm-tab;
+                                color: Tokens.text;
+                                font-size: Tokens.font-md;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: Tokens.sp3;
+                            Text {
+                                width: 84px;
+                                text: "Connection";
+                                color: Tokens.text-faint;
+                                font-size: Tokens.font-sm;
+                                vertical-alignment: center;
+                            }
+                            HorizontalLayout {
+                                spacing: Tokens.sp2;
+                                alignment: start;
+                                horizontal-stretch: 1;
+                                Text {
+                                    text: root.prod-confirm-name;
+                                    color: Tokens.text;
+                                    font-size: Tokens.font-md;
+                                    font-weight: Tokens.weight-emphasis;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                                VerticalLayout {
+                                    alignment: center;
+                                    OutlineChip {
+                                        text: "PRODUCTION";
+                                        tint: Tokens.error;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 Text {
-                    text: "This tab has not run on " + root.prod-confirm-name + " before. It is labelled PRODUCTION.";
-                    color: Tokens.text-dim;
-                    font-size: Tokens.font-md;
+                    text: "You will only be asked once for this tab.";
+                    color: Tokens.text-faint;
+                    font-size: Tokens.font-sm;
                     wrap: word-wrap;
-                    horizontal-alignment: center;
                 }
                 HorizontalLayout {
                     spacing: Tokens.sp2;

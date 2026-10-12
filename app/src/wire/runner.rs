@@ -82,10 +82,12 @@ fn begin_run(
     match target {
         run_target::RunTarget::Ready(id) => {
             if needs_prod_confirm(&store, tab, &id) {
+                let title = tab.title.clone();
                 hold(RunWait::Confirm(id.clone()));
                 drop(tabs);
                 let name = connection_badge_info(&store, &id).name;
                 w.set_prod_confirm_name(name.into());
+                w.set_prod_confirm_tab(title.into());
                 w.set_prod_confirm_open(true);
                 return None;
             }
