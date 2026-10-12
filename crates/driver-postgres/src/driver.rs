@@ -391,7 +391,7 @@ enum SqlScanState {
     Code,
     LineComment,
     BlockComment,
-    Quoted(u8),
+    Quoted(u8, bool),
     DollarQuoted(usize, usize),
 }
 
@@ -432,8 +432,9 @@ fn step_code_byte(
         return (SqlScanState::BlockComment, 2);
     }
     if b == b'\'' || b == b'"' {
+        let esc = b == b'\'' && cur == "e";
         flush_word(cur, words);
-        return (SqlScanState::Quoted(b), 1);
+        return (SqlScanState::Quoted(b, esc), 1);
     }
     if b == b'$' {
         if let Some(tag_len) = dollar_quote_tag_len(bytes, i) {
@@ -466,9 +467,14 @@ fn unquoted_sql_words(sql: &str) -> Vec<String> {
                 (SqlScanState::Code, 2)
             }
             SqlScanState::BlockComment => (SqlScanState::BlockComment, 1),
-            SqlScanState::Quoted(q) if b == q && next == Some(q) => (SqlScanState::Quoted(q), 2),
-            SqlScanState::Quoted(q) if b == q => (SqlScanState::Code, 1),
-            SqlScanState::Quoted(q) => (SqlScanState::Quoted(q), 1),
+            SqlScanState::Quoted(q, true) if b == b'\\' && next.is_some() => {
+                (SqlScanState::Quoted(q, true), 2)
+            }
+            SqlScanState::Quoted(q, esc) if b == q && next == Some(q) => {
+                (SqlScanState::Quoted(q, esc), 2)
+            }
+            SqlScanState::Quoted(q, _) if b == q => (SqlScanState::Code, 1),
+            SqlScanState::Quoted(q, esc) => (SqlScanState::Quoted(q, esc), 1),
             SqlScanState::DollarQuoted(ts, tl) if bytes[i..].starts_with(&bytes[ts..ts + tl]) => {
                 (SqlScanState::Code, tl)
             }
@@ -650,6 +656,9 @@ mod tests {
         ));
         assert!(!is_row_returning(
             "UPDATE logs SET msg = $tag$returning$tag$ WHERE id = 1"
+        ));
+        assert!(!is_row_returning(
+            "INSERT INTO logs (msg) VALUES (E'it\\'s returning')"
         ));
     }
 

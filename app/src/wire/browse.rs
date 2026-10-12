@@ -314,6 +314,32 @@ async fn execute_import_ops(
     }
 }
 
+fn sql_tx_delimiters(
+    engine: rdb_connstore::Engine,
+) -> Option<(&'static str, &'static str, &'static str)> {
+    match engine {
+        rdb_connstore::Engine::Postgres | rdb_connstore::Engine::Sqlite => {
+            Some(("BEGIN", "COMMIT", "ROLLBACK"))
+        }
+        rdb_connstore::Engine::Mssql => Some(("BEGIN TRANSACTION", "COMMIT", "ROLLBACK")),
+        _ => None,
+    }
+}
+
+fn has_explicit_tx_control(stmts: &[String]) -> bool {
+    stmts.iter().any(|s| {
+        let first = s
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim_end_matches(';');
+        matches!(
+            first.to_ascii_uppercase().as_str(),
+            "BEGIN" | "START" | "COMMIT" | "ROLLBACK"
+        )
+    })
+}
+
 async fn execute_import_sql(
     engine: rdb_connstore::Engine,
     driver: &AnyDriver,
@@ -328,6 +354,20 @@ async fn execute_import_sql(
     let mut failed_stmts = Vec::new();
     let mut first_err: Option<(usize, String)> = None;
     let mut log_entries = Vec::new();
+
+    let tx_delims = if stop_on_error && !has_explicit_tx_control(&stmts) {
+        if let Some((begin_sql, commit_sql, rollback_sql)) = sql_tx_delimiters(engine) {
+            driver
+                .query(&rdb_core::query::Query::Sql(begin_sql.into()))
+                .await
+                .ok()
+                .map(|_| (commit_sql, rollback_sql))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     for (idx, stmt) in stmts.iter().enumerate() {
         let stmt_num = idx + 1;
@@ -360,6 +400,11 @@ async fn execute_import_sql(
     }
 
     if failed_stmts.is_empty() {
+        if let Some((commit_sql, _)) = tx_delims {
+            let _ = driver
+                .query(&rdb_core::query::Query::Sql(commit_sql.into()))
+                .await;
+        }
         let summary = if skipped_dups > 0 {
             format!(
                 "imported {ok_count}/{total} statement(s) ({skipped_dups} duplicate(s) skipped)"
@@ -373,9 +418,21 @@ async fn execute_import_sql(
             log_entries: vec![format!("-- imported {ok_count} statement(s)")],
         }
     } else {
+        let (_, detail) = first_err.unwrap_or_else(|| (1, "unknown error".into()));
+        if let Some((_, rollback_sql)) = tx_delims {
+            let _ = driver
+                .query(&rdb_core::query::Query::Sql(rollback_sql.into()))
+                .await;
+            return ImportOutcome {
+                summary: format!(
+                    "error: import aborted (rolled back {total} statement(s)) — {detail}"
+                ),
+                has_error: true,
+                log_entries,
+            };
+        }
         let fail_count = failed_stmts.len();
         let stmts_list = format_failed_indices(&failed_stmts);
-        let (_, detail) = first_err.unwrap_or_else(|| (1, "unknown error".into()));
         ImportOutcome {
             summary: format!(
                 "error: imported {ok_count}/{total} statement(s); {fail_count} failed (stmt {stmts_list}: {detail})"
