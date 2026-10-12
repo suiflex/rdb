@@ -30,7 +30,6 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         active_group1_tab_id,
         current_connection_id,
         connected_ids,
-        query_number,
         conn_modal_map,
         connect_handle,
         tab_runs,
@@ -173,7 +172,6 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let active_tab_id = active_tab_id.clone();
         let active_group1_tab_id = active_group1_tab_id.clone();
         let current_connection_id = current_connection_id.clone();
-        let query_number = query_number.clone();
         let save_p1_tab = save_p1_tab.clone();
         let restore_p1_tab = restore_p1_tab.clone();
         let store = store.clone();
@@ -186,17 +184,18 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 return;
             }
             save_p1_tab(&w);
-            let number = query_number.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
             let connection = current_connection_id
                 .lock()
                 .unwrap()
                 .clone()
                 .unwrap_or_default();
-            let id = format!("query:{connection}:{number}");
             let badge = connection_badge_info(&store.borrow(), &connection);
-            let right_index = {
+            let (id, right_index) = {
                 let mut tabs = workspace_tabs.lock().unwrap();
+                let number = next_query_slot_number(&tabs, &connection);
+                let id = format!("query:{connection}:{number}");
                 let mut tab = WorkspaceTab::sql(id.clone(), number);
+                tab.query_text = take_closed_sql_buffer(&connection, number);
                 tab.group = 1;
                 tab.connection_id = (!connection.is_empty()).then(|| connection.clone());
                 tab.engine = badge.engine;
@@ -207,7 +206,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 let left = active_tab_id.lock().unwrap().clone();
                 set_workspace_tabs(&w, &tabs, left.as_deref());
                 save_query_tabs(&w, &tabs, left.as_deref());
-                tabs.iter().filter(|tab| tab.group == 1).count() - 1
+                (id, tabs.iter().filter(|tab| tab.group == 1).count() - 1)
             };
             *active_group1_tab_id.lock().unwrap() = Some(id);
             restore_p1_tab(&w, right_index);

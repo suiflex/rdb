@@ -114,9 +114,11 @@ fn plan_tab_restore(
         if !created {
             return None;
         }
-        let number = query_number.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        let number = next_query_slot_number(&tabs, connection_id);
+        let _ = query_number.fetch_max(number, std::sync::atomic::Ordering::Relaxed);
         let id = format!("query:{connection_id}:{number}");
         let mut tab = WorkspaceTab::sql(id.clone(), number);
+        tab.query_text = take_closed_sql_buffer(connection_id, number);
         tab.connection_id = Some(connection_id.to_string());
         tab.engine = badge.engine.clone();
         tab.connection_name = badge.name.clone();
