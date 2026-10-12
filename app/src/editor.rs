@@ -937,7 +937,7 @@ enum StmtScanMode<'a> {
     TopLevel,
     LineComment,
     BlockComment,
-    Quoted(u8),
+    Quoted(u8, bool),
     DollarQuoted(&'a [u8]),
 }
 
@@ -951,6 +951,12 @@ fn match_dollar_tag(bytes: &[u8], i: usize) -> Option<&[u8]> {
     (valid_start && tail.get(len) == Some(&b'$')).then(|| &bytes[i..i + len + 2])
 }
 
+fn is_e_quote_prefix(bytes: &[u8], i: usize) -> bool {
+    i > 0
+        && matches!(bytes[i - 1], b'e' | b'E')
+        && (i == 1 || !(bytes[i - 2].is_ascii_alphanumeric() || bytes[i - 2] == b'_'))
+}
+
 fn step_top_level_stmt<'a>(bytes: &'a [u8], i: usize) -> (StmtScanMode<'a>, usize, bool) {
     let b = bytes[i];
     let next = bytes.get(i + 1).copied();
@@ -961,7 +967,8 @@ fn step_top_level_stmt<'a>(bytes: &'a [u8], i: usize) -> (StmtScanMode<'a>, usiz
         return (StmtScanMode::BlockComment, 2, false);
     }
     if matches!(b, b'\'' | b'"' | b'`') {
-        return (StmtScanMode::Quoted(b), 1, false);
+        let esc = b == b'\'' && is_e_quote_prefix(bytes, i);
+        return (StmtScanMode::Quoted(b, esc), 1, false);
     }
     if let Some(tag) = match_dollar_tag(bytes, i) {
         return (StmtScanMode::DollarQuoted(tag), tag.len(), false);
@@ -1001,9 +1008,14 @@ fn scan_statements(text: &str) -> Vec<Statement<'_>> {
                 (StmtScanMode::TopLevel, 2)
             }
             StmtScanMode::BlockComment => (StmtScanMode::BlockComment, 1),
-            StmtScanMode::Quoted(q) if b == q && next == Some(q) => (StmtScanMode::Quoted(q), 2),
-            StmtScanMode::Quoted(q) if b == q => (StmtScanMode::TopLevel, 1),
-            StmtScanMode::Quoted(q) => (StmtScanMode::Quoted(q), 1),
+            StmtScanMode::Quoted(q, true) if b == b'\\' && next.is_some() => {
+                (StmtScanMode::Quoted(q, true), 2)
+            }
+            StmtScanMode::Quoted(q, esc) if b == q && next == Some(q) => {
+                (StmtScanMode::Quoted(q, esc), 2)
+            }
+            StmtScanMode::Quoted(q, _) if b == q => (StmtScanMode::TopLevel, 1),
+            StmtScanMode::Quoted(q, esc) => (StmtScanMode::Quoted(q, esc), 1),
             StmtScanMode::DollarQuoted(tag) if bytes[i..].starts_with(tag) => {
                 (StmtScanMode::TopLevel, tag.len())
             }
