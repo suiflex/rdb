@@ -77,6 +77,7 @@ export component WorkArea inherits Rectangle {
     in property <int> grid-sort-col: -1; // client-side sort: display col + dir
     in property <bool> grid-sort-asc: true;
     callback sort-col(int);
+    callback copy-column(int, int);
     callback reorder-col(int, length);
     in property <[string]> grid-col-filters;
     in property <[string]> grid-detail-pretty;
@@ -269,6 +270,7 @@ export component WorkArea inherits Rectangle {
     callback p1-copy-results(bool);
     callback p1-export-results(int);
     callback p1-sort-col(int);
+    callback p1-copy-column(int, int);
     callback p1-reorder-col(int, length);
     callback p1-set-col-filter(int, string);
     callback p1-resize-col(int, length);
@@ -283,6 +285,13 @@ export component WorkArea inherits Rectangle {
     property <bool> browse-mode: root.active-table != "";
     // Footer view segments: 0 Data · 1 Structure · 2 Indexes
     property <int> view-mode: root.show-structure ? 1 : 0;
+    changed show-structure => {
+        if (root.show-structure) {
+            root.view-mode = 1;
+        } else if (root.view-mode == 1) {
+            root.view-mode = 0;
+        }
+    }
     // Expandable filter panel: one real condition row.
     in-out property <bool> filter-open: false;
     in property <[string]> filter-columns;   // "any column" + real columns
@@ -523,6 +532,7 @@ export component WorkArea inherits Rectangle {
             scroll-grid-tick: root.scroll-grid-tick;
             scroll-top-tick: root.scroll-top-tick;
             sort-col(i) => { root.sort-col(i); }
+            copy-column(i, action) => { root.copy-column(i, action); }
             reorder-col(i, x) => { root.reorder-col(i, x); }
             set-col-filter(i, t) => { root.set-col-filter(i, t); }
             resize-col(i, d) => { root.resize-col(i, d); }
@@ -682,6 +692,7 @@ export component WorkArea inherits Rectangle {
                 scroll-grid-tick: root.p1-scroll-grid-tick;
                 scroll-top-tick: root.p1-scroll-top-tick;
                 sort-col(i) => { root.p1-sort-col(i); }
+                copy-column(i, action) => { root.p1-copy-column(i, action); }
                 reorder-col(i, x) => { root.p1-reorder-col(i, x); }
                 set-col-filter(i, t) => { root.p1-set-col-filter(i, t); }
                 resize-col(i, d) => { root.p1-resize-col(i, d); }

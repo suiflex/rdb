@@ -252,10 +252,10 @@ impl Driver for ClickhouseDriver {
                 .execute()
                 .await
                 .map_err(|e| RdbError::Query(ch_err(&e.to_string())))?;
-            // ClickHouse's HTTP interface doesn't report an affected-row
-            // count for DDL/INSERT — same situation as driver-cassandra and
-            // driver-mssql.
-            return Ok(ResultSet::Affected(0));
+            let is_dml = ["INSERT", "UPDATE", "DELETE"]
+                .iter()
+                .any(|kw| upper.starts_with(kw));
+            return Ok(ResultSet::Affected(u64::from(is_dml)));
         }
 
         let body = fetch_json_tagged(

@@ -52,6 +52,8 @@ export component NavCluster inherits HorizontalLayout {
     callback open-table(string, string);
     callback pin-table(string, string);
     callback toggle-fields(string, string);
+    callback copy-tree-field(string, string, int);
+    callback table-action(string, string, int);
     callback toggle-node(string);
     callback select-schema(string);
     callback filter-tree(string);
@@ -123,6 +125,8 @@ export component NavCluster inherits HorizontalLayout {
             open-table(db, t) => { root.open-table(db, t); }
             pin-table(db, t) => { root.pin-table(db, t); }
             toggle-fields(db, t) => { root.toggle-fields(db, t); }
+            copy-field(t, f, a) => { root.copy-tree-field(t, f, a); }
+            table-action(db, t, a) => { root.table-action(db, t, a); }
             toggle-node(t) => { root.toggle-node(t); }
             select-schema(s) => { root.select-schema(s); }
             filter-tree(t) => { root.filter-tree(t); }

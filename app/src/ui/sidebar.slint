@@ -26,6 +26,8 @@ export component Sidebar inherits Rectangle {
     callback open-table(string, string);   // (database, container)
     callback pin-table(string, string);    // double-click keeps this object tab
     callback toggle-fields(string, string); // (database, table) — expand columns inline
+    callback copy-field(string, string, int); // (table, field label, action)
+    callback table-action(string, string, int); // (database, table, action)
     callback open-function(string);
     callback open-query(string, int);      // (label, index in its section)
     callback insert-query(int);            // History row: append its SQL to editor
@@ -53,6 +55,14 @@ export component Sidebar inherits Rectangle {
     property <length> history-menu-y: 0px;
     property <int> query-menu-index: -1;
     property <length> query-menu-y: 0px;
+    property <string> field-menu-table: "";
+    property <string> field-menu-label: "";
+    property <length> field-menu-x: 0px;
+    property <length> field-menu-y: 0px;
+    property <string> table-menu-db: "";
+    property <string> table-menu-label: "";
+    property <length> table-menu-x: 0px;
+    property <length> table-menu-y: 0px;
     click-timer := Timer {
         interval: 220ms;
         running: false;
@@ -74,28 +84,31 @@ export component Sidebar inherits Rectangle {
     // straight into the card (the notch); the gutter stays on the other side.
     card := Rectangle {
         background: MaterialPalette.surface;
-        border-radius: MaterialStyleMetrics.border_radius_12;
-        x: root.mirror ? Tokens.sp1 : 0;
-        y: Tokens.sp1;
-        width: parent.width - Tokens.sp1;
-        height: parent.height - 2 * Tokens.sp1;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: Tokens.border;
+        x: Tokens.sp2;
+        y: Tokens.sp2;
+        width: parent.width - 2 * Tokens.sp2;
+        height: parent.height - 2 * Tokens.sp2;
 
     VerticalLayout {
         spacing: 0;
 
         // ----- Items | Queries | History -----
         Rectangle {
-            height: 38px;
+            height: 42px;
             HorizontalLayout {
-                padding-left: Tokens.sp2;
-                padding-right: Tokens.sp2;
+                padding-left: Tokens.sp3;
+                padding-right: Tokens.sp3;
+                padding-top: 4px;
                 spacing: Tokens.sp1;
                 alignment: start;
                 for label[m] in ["Items", "Queries", "History"]: Rectangle {
                     width: t.preferred-width + 20px;
-                    height: 24px;
+                    height: 26px;
                     y: (parent.height - self.height) / 2;
-                    border-radius: 5px;
+                    border-radius: 6px;
                     background: root.mode == m ? Tokens.border-strong
                         : (mt.has-hover ? Tokens.border : transparent);
                     t := Text {
@@ -119,8 +132,8 @@ export component Sidebar inherits Rectangle {
 
         // ----- filter -----
         HorizontalLayout {
-            padding-left: Tokens.sp2;
-            padding-right: Tokens.sp2;
+            padding-left: Tokens.sp3;
+            padding-right: Tokens.sp3;
             padding-bottom: Tokens.sp2;
             fld := FilterField {
                 placeholder: root.mode == 1 ? "Filter queries..." : "Filter items...";
@@ -137,8 +150,8 @@ export component Sidebar inherits Rectangle {
             height: parent.height;
             VerticalLayout {
                 width: tree-scroll.visible-width;
-                padding-left: Tokens.sp2;
-                padding-right: Tokens.sp2;
+                padding-left: Tokens.sp3;
+                padding-right: Tokens.sp3;
                 spacing: 0;
                 alignment: start;
 
@@ -152,12 +165,14 @@ export component Sidebar inherits Rectangle {
                     property <bool> is-hint: node.kind == "hint";
                     property <bool> is-active: (is-container && node.label == root.active-table)
                         || (is-query && node.expanded);
+                    property <bool> is-table-target: is-container && node.label == root.table-menu-label && root.table-menu-label != "";
                     height: is-category ? 28px : 26px;
-                    border-radius: Tokens.radius;
-                    background: is-active ? Tokens.accent-tint
-                        : (row-ta.has-hover && !is-category && !is-field && !is-hint
+                    border-radius: 6px;
+                    border-width: is-table-target ? 1.5px : 0px;
+                    border-color: Tokens.accent;
+                    background: is-active || is-table-target ? Tokens.accent-tint
+                        : (row-ta.has-hover && !is-category && !is-hint
                             ? Tokens.border : transparent);
-
                     // selection = 2px accent left bar + tint (never a pill)
                     if is-active: Rectangle {
                         x: 0;
@@ -168,7 +183,7 @@ export component Sidebar inherits Rectangle {
                     }
 
                     row-ta := TouchArea {
-                        enabled: !is-hint && !is-field;
+                        enabled: !is-hint;
                         changed has-hover => {
                             if (self.has-hover && node.kind == "recent") {
                                 Tooltip.text = node.db;
@@ -191,6 +206,21 @@ export component Sidebar inherits Rectangle {
                                 root.query-menu-index = node.count;
                                 root.query-menu-y = self.absolute-position.y - root.absolute-position.y;
                                 query-menu.show();
+                            } else if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right
+                                && is-container) {
+                                click-timer.running = false;
+                                root.table-menu-db = node.db;
+                                root.table-menu-label = node.label;
+                                root.table-menu-x = self.absolute-position.x - root.absolute-position.x + self.mouse-x;
+                                root.table-menu-y = self.absolute-position.y - root.absolute-position.y + self.height;
+                                table-menu.show();
+                            } else if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right
+                                && node.kind == "field") {
+                                root.field-menu-table = node.sub;
+                                root.field-menu-label = node.label;
+                                root.field-menu-x = self.absolute-position.x - root.absolute-position.x + self.mouse-x;
+                                root.field-menu-y = self.absolute-position.y - root.absolute-position.y + self.mouse-y;
+                                field-menu.show();
                             }
                         }
                         clicked => {
@@ -463,6 +493,49 @@ export component Sidebar inherits Rectangle {
             activated(action) => {
                 root.query-action(root.query-menu-index, action);
                 query-menu.close();
+            }
+        }
+    }
+
+    field-menu := PopupWindow {
+        close-policy: close-on-click-outside;
+        x: min(root.field-menu-x, root.width - self.width - 4px);
+        y: min(root.field-menu-y, root.height - self.height - 4px);
+        width: 220px;
+        AppMenu {
+            items: ["Copy Column Name", "Copy with Quotes", "Copy All Column Names"];
+            activated(action) => {
+                root.copy-field(root.field-menu-table, root.field-menu-label, action);
+                field-menu.close();
+            }
+        }
+    }
+
+    table-menu := PopupWindow {
+        close-policy: close-on-click-outside;
+        x: min(root.table-menu-x, root.width - self.width - 4px);
+        y: min(root.table-menu-y, root.height - self.height - 4px);
+        width: 220px;
+        AppMenu {
+            items: [
+                "Open in new tab",
+                "Open structure",
+                "---",
+                "Copy name",
+                "Copy qualified name",
+                "Copy SELECT script",
+                "---",
+                "Import (CSV / JSON / SQL)…",
+                "Export…",
+                "New table…",
+                "---",
+                "Truncate…"
+            ];
+            danger-index: 11;
+            activated(action) => {
+                root.table-action(root.table-menu-db, root.table-menu-label, action);
+                root.table-menu-label = "";
+                table-menu.close();
             }
         }
     }

@@ -219,6 +219,8 @@ export component ConnPicker inherits Rectangle {
     callback add-conn-in-group(string);
     callback edit-clicked(int);
     // Export saved connections to ~/Downloads. Arg is the format: 0 = JSON, 1 = CSV.
+    // Context-menu actions on a connection row: 0 = Duplicate, 1 = Copy as URL, 2 = Delete.
+    callback conn-context-action(int, int);
     callback export-conns(int);
     callback toggle-group(string);
     // Right-click a group header: rename (old, new) or delete it (its
@@ -240,6 +242,11 @@ export component ConnPicker inherits Rectangle {
     property <int> group-menu-target-depth: 0;
     property <length> group-menu-x: 0px;
     property <length> group-menu-y: 0px;
+    property <int> conn-menu-index: -1;
+    property <bool> conn-menu-favorite: false;
+    property <bool> conn-menu-open: false;
+    property <length> conn-menu-x: 0px;
+    property <length> conn-menu-y: 0px;
     property <bool> rename-modal-open: false;
     property <string> rename-old: "";
     property <string> rename-text: "";
@@ -251,143 +258,102 @@ export component ConnPicker inherits Rectangle {
     HorizontalLayout {
         spacing: 0;
 
-        // ================= left: floating grouped list =================
-        // Canvas gutter around the card so the sidebar reads as a floating
-        // panel (rounded, bordered, drop-shadow) instead of a flush column.
+        // ================= left: flat native connection tree =================
         Rectangle {
-            width: 560px;
-            background: Tokens.canvas;
+            width: 500px;
+            background: Tokens.sidebar;
 
-            card := ElevatedCard {
-                x: Tokens.sp3;
-                y: Tokens.sp3;
-                width: parent.width - 2 * Tokens.sp3;
-                height: parent.height - 2 * Tokens.sp3;
+            // Right hairline separating the connection tree from the detail canvas
+            Rectangle {
+                x: parent.width - 1px;
+                width: 1px;
+                height: parent.height;
+                background: Tokens.border;
+            }
 
             VerticalLayout {
-                spacing: 0;
+                spacing: 0px;
 
-                // ----- filter row -----
+                // ----- top bar: [+] + Search input (TablePlus layout) -----
                 HorizontalLayout {
-                    padding: Tokens.sp3;
-                    padding-top: Tokens.sp4;
-                    padding-bottom: Tokens.sp3;
-                    spacing: Tokens.sp3;
-                    FilterField {
-                        horizontal-stretch: 1;
-                        placeholder: "Filter connections...";
-                        edited(t) => { root.filter(t); }
-                    }
+                    padding-left: Tokens.sp4;
+                    padding-right: Tokens.sp4;
+                    padding-top: Tokens.sp3;
+                    padding-bottom: Tokens.sp2;
+                    spacing: Tokens.sp2;
                     VerticalLayout {
                         alignment: center;
-                        IconButton {
-                            icon: "plus";
-                            tooltip: "New connection";
-                            clicked => { root.add-clicked(); }
+                        Rectangle {
+                            width: 34px;
+                            height: 34px;
+                            border-radius: 8px;
+                            background: add-top-ta.has-hover ? MaterialPalette.on_surface.with-alpha(0.08) : transparent;
+                            AppIcon {
+                                name: "plus";
+                                size: 16px;
+                                color: Tokens.text-dim;
+                            }
+                            add-top-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.add-clicked(); }
+                            }
                         }
+                    }
+                    FilterField {
+                        horizontal-stretch: 1;
+                        placeholder: "Search for connection...";
+                        edited(t) => { root.filter(t); }
                     }
                 }
 
-                // ----- grouped rows -----
+                // ----- flat grouped tree rows -----
                 ScrollView {
                     vertical-stretch: 1;
                     list-content := VerticalLayout {
                         padding-left: Tokens.sp3;
                         padding-right: Tokens.sp3;
-                        // Spacing here is *between* top-level group cards only
-                        // — each card below is its own element now, so this
-                        // is the one place that gap needs to be expressed.
-                        spacing: Tokens.sp2;
+                        padding-top: Tokens.sp1;
+                        padding-bottom: Tokens.sp4;
+                        spacing: 2px;
                         alignment: start;
 
                         for grp[gi] in root.connections: Rectangle {
-                            // One continuous card around a whole top-level
-                            // group — its header, every nested subgroup, and
-                            // any of its own direct connections — so all of
-                            // it reads as belonging to the same group no
-                            // matter how a nested subgroup's own distinct
-                            // color breaks up the fill inside. The no-groups
-                            // case (`has-header` false, nothing ever put in a
-                            // group) has nothing to outline — it's just the
-                            // bare connection list on the canvas, as before.
                             height: gwrap.preferred-height;
-                            background: grp.has-header ? Tokens.card : transparent;
-                            border-width: grp.has-header ? 1px : 0px;
-                            border-color: Tokens.border-strong;
-                            border-radius: Tokens.radius-lg;
+                            background: transparent;
 
                             gwrap := VerticalLayout {
-                                padding: grp.has-header ? 1px : 0px;
+                                padding: 0px;
                                 spacing: 0px;
                                 alignment: start;
 
                                 for item[i] in grp.rows: Rectangle {
-                            // A box "starts" on a header row (top-level group or
-                            // nested subgroup alike), or on a *nested* row whose
-                            // depth differs from the row before it (a subgroup's
-                            // own connections resuming after a deeper nested
-                            // subgroup ends). A depth-0 row never starts its own
-                            // box this way — a group's direct connections
-                            // resuming after a subgroup must stay flush and same
-                            // color as their header, or they read as detached
-                            // from the group instead of still belonging to it.
-                            // A box "ends" on the last row before depth drops
-                            // back out of it, or before a sibling header at the
-                            // same depth begins — which also naturally closes a
-                            // collapsed (childless) header's box on itself. This
-                            // one rule generalizes the old depth-0-only
-                            // `is-group-end` special case to any nesting depth.
                             property <bool> box-top: item.is-header || i == 0
                                 || (item.depth > 0 && grp.rows[i - 1].depth != item.depth);
                             property <bool> box-bottom: i == grp.rows.length - 1
                                 || grp.rows[i + 1].depth < item.depth
                                 || (grp.rows[i + 1].depth == item.depth && grp.rows[i + 1].is-header)
-                                // A collapsed header's hidden subtree follows it.
                                 || grp.rows[i + 1].hidden;
-                            property <length> content-h: item.is-header ? 28px : 40px;
-                            // A gap only belongs *between* sibling boxes at the
-                            // same-or-shallower level (a new subgroup starting,
-                            // or a parent's own rows resuming after one ends) —
-                            // never between a header and the first row of its
-                            // own box, which must stay visually attached.
-                            property <bool> needs-gap: box-top && i > 0
-                                && grp.rows[i - 1].depth >= item.depth;
+                            property <length> content-h: item.is-header ? 38px : 46px;
+                            property <bool> needs-gap: item.is-header && i > 0;
 
-                            // Collapsed rows stay in the model with `hidden` set, so a
-                            // group folds shut and opens as an animation instead of
-                            // its rows popping in and out.
-                            height: item.hidden ? 0px : (needs-gap ? content-h + Tokens.sp2 : content-h);
+                            height: item.hidden ? 0px : (needs-gap ? content-h + 4px : content-h);
                             clip: true;
                             animate height { duration: 180ms; easing: ease-in-out; }
                             background: transparent;
 
-                            // Card surface: the top-level group's card keeps its
-                            // usual full-width fill; a subgroup gets an inset,
-                            // differently-shaded surface so it reads as its own
-                            // card nested inside the parent group's card.
                             card-box := Rectangle {
                                 y: parent.height - content-h;
                                 height: content-h;
-                                x: item.depth * Tokens.sp2;
-                                width: parent.width - 2 * self.x;
-                                background: item.depth > 0 ? Tokens.canvas : Tokens.card;
-                                border-top-left-radius: box-top ? Tokens.radius-lg : 0px;
-                                border-top-right-radius: box-top ? Tokens.radius-lg : 0px;
-                                border-bottom-left-radius: box-bottom ? Tokens.radius-lg : 0px;
-                                border-bottom-right-radius: box-bottom ? Tokens.radius-lg : 0px;
+                                x: 0px;
+                                width: parent.width;
+                                background: transparent;
 
                             // --- group header row ---
                             if item.is-header: Rectangle {
                                 width: parent.width;
                                 height: parent.height;
-                                StateLayer {
-                                    width: 100%;
-                                    height: 100%;
-                                    background: MaterialPalette.on_surface;
-                                    border-radius: Tokens.radius-lg;
-                                    has-hover: hdr-ta.has-hover;
-                                    enabled: true;
-                                }
+                                border-radius: 7px;
+                                background: hdr-ta.has-hover ? MaterialPalette.on_surface.with-alpha(0.05) : transparent;
                                 hdr-ta := TouchArea {
                                     // `item.group` is the raw-case key stored on
                                     // SavedConnection; `item.name` is uppercased
@@ -401,8 +367,8 @@ export component ConnPicker inherits Rectangle {
                                             && item.group != "Ungrouped") {
                                             root.group-menu-target = item.group;
                                             root.group-menu-target-depth = item.depth;
-                                            root.group-menu-x = self.absolute-position.x - root.absolute-position.x;
-                                            root.group-menu-y = self.absolute-position.y - root.absolute-position.y;
+                                            root.group-menu-x = self.absolute-position.x - root.absolute-position.x + self.mouse-x;
+                                            root.group-menu-y = self.absolute-position.y - root.absolute-position.y + self.mouse-y;
                                             group-menu.show();
                                         }
                                     }
@@ -417,53 +383,52 @@ export component ConnPicker inherits Rectangle {
                                     // position.
                                     width: parent.width;
                                     height: parent.height;
-                                    padding-left: Tokens.sp2 + item.depth * Tokens.sp3;
+                                    padding-left: Tokens.sp2 + item.depth * 18px;
+                                    padding-right: Tokens.sp2;
                                     spacing: Tokens.sp2;
-                                    // No `alignment: start` here (deliberately) — that
-                                    // mode disables stretch factors entirely, which is
-                                    // exactly what silently broke the menu button
-                                    // pushing itself to the right edge. Default
-                                    // (stretch) leaves the Text children untouched
-                                    // (content-sized, so their stretch factor is 0)
-                                    // and lets the trailing spacer Rectangle absorb
-                                    // the remaining width instead.
-                                    // Plain chevron that turns as the group opens
-                                    // and closes, in step with the rows' height
-                                    // animation below.
                                     VerticalLayout {
                                         alignment: center;
                                         AppIcon {
                                             name: "caret";
-                                            size: 14px;
+                                            size: 12px;
                                             color: Tokens.text-dim;
                                             transform-rotation: item.expanded ? 0deg : -90deg;
                                             animate transform-rotation { duration: 180ms; easing: ease-in-out; }
                                         }
                                     }
-                                    // All-caps text has no descenders, so its visible
-                                    // glyphs sit slightly above the true vertical center
-                                    // of the line box — the extra padding-top (vs. none
-                                    // on bottom) shifts the centered position down ~1px
-                                    // to read level with the caret badge / "⋯" button.
+                                    // Circular group badge (TablePlus-style warm orange ring + icon)
                                     VerticalLayout {
                                         alignment: center;
-                                        padding-top: 2px;
+                                        Rectangle {
+                                            width: 26px;
+                                            height: 26px;
+                                            border-radius: 13px;
+                                            border-width: 1.5px;
+                                            border-color: #E08A3C;
+                                            background: #E08A3C.with-alpha(0.14);
+                                            AppIcon {
+                                                name: "database";
+                                                size: 12px;
+                                                color: #E08A3C;
+                                            }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
                                         Text {
                                             text: item.name;
-                                            color: Tokens.text-dim;
-                                            font-size: Tokens.font-xs;
-                                            font-weight: 700;
-                                            letter-spacing: 0.8px;
+                                            color: Tokens.text;
+                                            font-size: 14px;
+                                            font-weight: 600;
                                             vertical-alignment: center;
                                         }
                                     }
                                     VerticalLayout {
                                         alignment: center;
-                                        padding-top: 2px;
                                         Text {
                                             text: item.count;
                                             color: Tokens.text-faint;
-                                            font-size: Tokens.font-sm;
+                                            font-size: Tokens.font-xs;
                                             vertical-alignment: center;
                                         }
                                     }
@@ -527,16 +492,16 @@ export component ConnPicker inherits Rectangle {
                                 // the badge square); hover gets a faint tint.
                                 property <color> tint: item.has-custom-color ? item.color : Tokens.db-color(item.engine);
                                 property <bool> selected: item.index == root.selected-conn;
-                                border-radius: Tokens.radius-lg;
-                                background: selected ? tint
-                                    : row-ta.has-hover ? tint.with-alpha(0.14)
+                                x: 2px;
+                                y: 1px;
+                                width: parent.width - 4px;
+                                height: parent.height - 2px;
+                                border-radius: 7px;
+                                background: selected ? (item.has-custom-color ? item.color : Tokens.accent)
+                                    : row-ta.has-hover ? MaterialPalette.on_surface.with-alpha(0.06)
                                     : transparent;
                                 animate background { duration: Tokens.fade; }
-                                // "Grabbed" affordance while dragging the handle:
-                                // Slint can't cheaply follow the cursor without a
-                                // feedback loop, so lift + outline signals the drag
-                                // is live; the drop lands on pointer release.
-                                border-width: grip-ta.pressed ? 1px : 0;
+                                border-width: grip-ta.pressed ? 1px : 0px;
                                 border-color: Tokens.accent;
                                 drop-shadow-blur: grip-ta.pressed ? 14px : 0;
                                 drop-shadow-color: #00000055;
@@ -544,12 +509,22 @@ export component ConnPicker inherits Rectangle {
                                 row-ta := TouchArea {
                                     clicked => { root.select-conn(item.index); }
                                     double-clicked => { root.connect-clicked(item.index); }
+                                    pointer-event(e) => {
+                                        if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+                                            root.select-conn(item.index);
+                                            root.conn-menu-index = item.index;
+                                            root.conn-menu-favorite = item.favorite;
+                                            root.conn-menu-x = self.absolute-position.x - root.absolute-position.x + self.mouse-x;
+                                            root.conn-menu-y = self.absolute-position.y - root.absolute-position.y + self.mouse-y;
+                                            root.conn-menu-open = true;
+                                        }
+                                    }
                                 }
 
                                 HorizontalLayout {
-                                    padding-left: Tokens.sp3 + item.depth * Tokens.sp3;
+                                    padding-left: Tokens.sp2 + (item.depth + (grp.has-header ? 1 : 0)) * 18px;
                                     padding-right: Tokens.sp3;
-                                    spacing: Tokens.sp3;
+                                    spacing: Tokens.sp2;
                                     // Drag handle: reorders within the group.
                                     // Always rendered (so the pointer grab isn't
                                     // dropped mid-drag when the row loses hover);
@@ -577,9 +552,9 @@ export component ConnPicker inherits Rectangle {
                                                         // scroll offset cancels out of the subtraction.
                                                         root.reorder-conn(
                                                             item.index,
-                                                            round((self.mouse-y - self.pressed-y) / 40px),
+                                                            round((self.mouse-y - self.pressed-y) / 46px),
                                                             round((self.absolute-position.y + self.mouse-y
-                                                                - list-content.absolute-position.y) / 1px));
+                                                                - list-content.absolute-position.y) * 40 / 46 / 1px));
                                                     }
                                                 }
                                                 changed has-hover => {
@@ -601,15 +576,14 @@ export component ConnPicker inherits Rectangle {
                                         // on the solid selected fill
                                         DbBadge {
                                             engine: item.engine;
-                                            size: 24px;
+                                            size: 28px;
+                                            circular: true;
                                             fill: item.has-custom-color ? item.color : Tokens.db-color(item.engine);
-                                            border-width: selected ? 1px : 0;
-                                            border-color: white.with-alpha(0.5);
                                         }
                                     }
                                     VerticalLayout {
                                         alignment: center;
-                                        spacing: 1px;
+                                        spacing: 2px;
                                         horizontal-stretch: 1;
                                         Text {
                                             text: item.name;
@@ -736,7 +710,6 @@ export component ConnPicker inherits Rectangle {
                         }
                     }
                 }
-            }
             }
         }
 
@@ -931,9 +904,7 @@ export component ConnPicker inherits Rectangle {
     }
 
     group-menu := PopupWindow {
-        // Anchored to the "⋯" button's actual position (was hardcoded to
-        // 60px — the reason the menu opened in an unrelated spot). Clamp so
-        // it stays on screen if the button sits near the panel's edge.
+        // Anchor to the pointer or the visible menu button, then keep it on screen.
         x: min(root.group-menu-x, root.width - self.width - 8px);
         y: min(root.group-menu-y, root.height - self.height - 8px);
         width: 180px;
@@ -958,6 +929,43 @@ export component ConnPicker inherits Rectangle {
                     root.delete-confirm-open = true;
                 }
                 group-menu.close();
+            }
+        }
+    }
+
+    if root.conn-menu-open: Rectangle {
+        background: transparent;
+        TouchArea { clicked => { root.conn-menu-open = false; } }
+        conn-ctx-menu := AppMenu {
+            x: min(root.conn-menu-x, root.width - self.width - 8px);
+            y: min(root.conn-menu-y, root.height - self.height - 8px);
+            width: 210px;
+            height: self.preferred-height;
+            items: [
+                "Connect",
+                "---",
+                "New Connection",
+                "Edit…",
+                "Duplicate",
+                "---",
+                "Copy as URL",
+                root.conn-menu-favorite ? "Remove Favorite" : "Add Favorite",
+                "---",
+                "Export Connections",
+                "---",
+                "Delete"
+            ];
+            danger-index: 11;
+            activated(i) => {
+                if (i == 0) { root.connect-clicked(root.conn-menu-index); }
+                else if (i == 2) { root.add-clicked(); }
+                else if (i == 3) { root.edit-clicked(root.conn-menu-index); }
+                else if (i == 4) { root.conn-context-action(root.conn-menu-index, 0); }
+                else if (i == 6) { root.conn-context-action(root.conn-menu-index, 1); }
+                else if (i == 7) { root.toggle-favorite(root.conn-menu-index); }
+                else if (i == 9) { root.export-conns(0); }
+                else if (i == 11) { root.conn-context-action(root.conn-menu-index, 2); }
+                root.conn-menu-open = false;
             }
         }
     }
@@ -992,11 +1000,11 @@ export component ConnPicker inherits Rectangle {
                     horizontal-alignment: center;
                 }
                 Rectangle {
-                    height: 34px;
-                    border-radius: Tokens.radius;
-                    background: Tokens.canvas;
-                    border-width: 1px;
-                    border-color: Tokens.border;
+                    height: 38px;
+                    border-radius: Tokens.radius-lg;
+                    background: MaterialPalette.surface_container_low;
+                    border-width: rti.has-focus ? 2px : 1px;
+                    border-color: rti.has-focus ? MaterialPalette.primary : MaterialPalette.outline_variant;
                     rti := TextInput {
                         x: Tokens.sp2;
                         width: parent.width - 2 * Tokens.sp2;

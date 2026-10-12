@@ -4,7 +4,7 @@
 import { Tokens } from "tokens.slint";
 import { GridColumn, GridCell } from "structs.slint";
 import { ComboBox, DatePickerPopup, ScrollView, TextEdit } from "std-widgets.slint";
-import { Shortcut } from "components.slint";
+import { AppMenu, Shortcut } from "components.slint";
 
 export component TabularGrid inherits Rectangle {
     in property <[GridColumn]> columns;
@@ -17,6 +17,7 @@ export component TabularGrid inherits Rectangle {
     in property <int> sorted-col: -1;       // display col currently sorted, -1 none
     in property <bool> sort-asc: true;
     callback sort-col(int);                 // header click → sort by this column
+    callback copy-column(int, int);         // display column, menu action
     callback reorder-col(int, length);      // header drag → (col, drop x in cell)
     in property <bool> filter-open;         // show the per-column filter row
     in property <[string]> col-filter-values; // current text per display column
@@ -54,10 +55,36 @@ export component TabularGrid inherits Rectangle {
     in property <int> scroll-top-tick;
     property <int> date-row: -1;
     property <int> date-col: -1;
+    property <int> menu-col: -1;
+    property <length> menu-x;
+    property <length> menu-y;
+    column-menu := PopupWindow {
+        close-policy: close-on-click-outside;
+        x: min(root.menu-x, root.width - self.width - 8px);
+        y: min(root.menu-y, root.height - self.height - 8px);
+        width: 230px;
+        AppMenu {
+            items: ["Copy Column Name", "Copy with Quotes", "Copy All Column Names"];
+            activated(action) => { root.copy-column(root.menu-col, action); column-menu.close(); }
+        }
+    }
     // Manual row virtualization: only the on-screen window of rows is built, so a
     // single two-axis Flickable can scroll both ways smoothly without paying to
     // instantiate every row of a large result. `r` rebinds as the window slides.
     property <int> row-count: root.col-count > 0 ? root.cells.length / root.col-count : 0;
+    property <bool> is-inline-editing: root.editing-row >= 0 && root.editing-col >= 0
+        && !root.read-only && !root.editing-large;
+    property <bool> editing-compact: root.is-inline-editing && root.columns.length > root.editing-col
+        && (root.is-boolean(root.columns[root.editing-col].type-name)
+            || root.is-date(root.columns[root.editing-col].type-name));
+    property <length> editing-col-w: root.is-inline-editing && root.col-widths.length > root.editing-col
+        ? root.col-widths[root.editing-col] : 140px;
+    property <length> editing-avail-w: max(36px, root.editing-col-w - 2 * Tokens.sp2 - 4px);
+    property <int> editing-est-lines: !root.is-inline-editing || root.editing-compact ? 1
+        : clamp(ceil((max(1, root.editing-value.character-count) * 7.5px) / root.editing-avail-w), 1, 8);
+    property <length> editing-row-h: !root.is-inline-editing || root.editing-compact ? Tokens.grid-row-h
+        : max(Tokens.grid-row-h + 6px, root.editing-est-lines * 18px + 10px);
+    property <length> editing-extra-h: root.editing-row-h - Tokens.grid-row-h;
     property <int> first-row: clamp(floor(-flick.viewport-y / Tokens.grid-row-h), 0, max(0, root.row-count - 1));
     property <int> win-count: min(root.row-count - root.first-row, ceil(la.height / Tokens.grid-row-h) + 2);
 
@@ -163,8 +190,13 @@ export component TabularGrid inherits Rectangle {
                         }
                     }
                     pointer-event(e) => {
-                        if (e.kind == PointerEventKind.down) { self.dragging = false; }
-                        if (e.kind == PointerEventKind.up) {
+                        if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+                            root.menu-col = c;
+                            root.menu-x = self.absolute-position.x - root.absolute-position.x + self.mouse-x;
+                            root.menu-y = self.absolute-position.y - root.absolute-position.y + self.height;
+                            column-menu.show();
+                        } else if (e.kind == PointerEventKind.down) { self.dragging = false; }
+                        if (e.kind == PointerEventKind.up && e.button == PointerEventButton.left) {
                             if (self.dragging) {
                                 root.reorder-col(c, self.mouse-x);
                             } else {
@@ -257,14 +289,14 @@ export component TabularGrid inherits Rectangle {
                 width: 100%;
                 height: 100%;
                 viewport-width: max(hdr.preferred-width, la.width);
-                viewport-height: root.row-count * Tokens.grid-row-h;
+                viewport-height: root.row-count * Tokens.grid-row-h + root.editing-extra-h;
 
-        // ----- rows (24px): windowed — `r` is the real row index -----
+        // ----- rows (24px, or expanded when inline editing): windowed — `r` is the real row index -----
         for i in root.win-count: Rectangle {
             property <int> r: root.first-row + i;
-            y: r * Tokens.grid-row-h;
+            y: r * Tokens.grid-row-h + (root.is-inline-editing && r > root.editing-row ? root.editing-extra-h : 0px);
             width: flick.viewport-width;
-            height: Tokens.grid-row-h;
+            height: root.is-inline-editing && r == root.editing-row ? root.editing-row-h : Tokens.grid-row-h;
             property <bool> row-deleted: root.cells[r * root.col-count].state == 2;
             property <bool> row-inserted: root.cells[r * root.col-count].state == 3;
             background: row-deleted ? Tokens.error-tint
@@ -307,7 +339,7 @@ export component TabularGrid inherits Rectangle {
                         && r >= min(root.range-anchor-row, root.selected-row)
                         && r <= max(root.range-anchor-row, root.selected-row);
                     width: root.col-widths.length > c ? root.col-widths[c] : 140px;
-                    clip: !(r == root.editing-row && c == root.editing-col);
+                    clip: true;
                     background: in-range ? Tokens.accent-tint.with-alpha(0.3) : transparent;
                     cell-ta := TouchArea {
                         // Row under the pointer, even once the drag has moved past
@@ -382,115 +414,140 @@ export component TabularGrid inherits Rectangle {
                         border-color: Tokens.accent;
                         background: transparent;
                     }
-                    // inline editor overlay: short values only (editable
-                    // grids). Large/JSON values divert to the centered
-                    // inspector modal below instead — this box is exactly
-                    // row-height, on purpose, and was never meant to host a
-                    // scrollable multi-line editor (see the modal's comment
-                    // for why that doesn't work in a box this size).
-                    if r == root.editing-row && c == root.editing-col && !root.read-only && !root.editing-large: Rectangle {
-                        property <bool> compact-editor: root.is-boolean(root.columns[c].type-name)
-                            || root.is-date(root.columns[c].type-name);
-                        // ponytail: ~7px per glyph at Tokens.font-sm in the mono
-                        // face — an estimate, not a measurement, so the editor can
-                        // size itself to the value without a layout round-trip.
-                        // Bump the constant if short values start wrapping.
-                        property <length> text-w: root.editing-value.character-count * 7px + 2 * Tokens.sp2;
-                        // Never narrower than the cell, never wider than the value
-                        // needs, still capped so a huge value can't span the pane.
-                        property <length> editor-w: self.compact-editor ? parent.width
-                            : max(parent.width, min(self.text-w, min(520px, root.width - 2 * Tokens.sp2)));
-                        property <length> visible-x: parent.x + flick.viewport-x;
-                        z: 100;
-                        x: self.compact-editor ? 0px
-                            : max(-self.visible-x, min(0px, root.width - self.visible-x - self.editor-w));
-                        width: self.editor-w;
-                        // Always exactly row-height: editing-large already
-                        // diverted anything that wouldn't fit to the modal.
-                        height: parent.height;
-                        background: Tokens.card;
-                        border-width: 2px;
-                        border-color: Tokens.edit-outline;
-                        if root.is-boolean(root.columns[c].type-name): ComboBox {
-                            x: 1px;
-                            y: 1px;
-                            width: parent.width - 2px;
-                            height: parent.height - 2px;
-                            model: ["true", "false"];
-                            current-value: cell.is-null ? "" : cell.text;
-                            selected(value) => {
-                                root.editing-value = value;
-                                root.cell-edited(r, c, value);
+                }
+                // trailing filler so the row spans the full width
+                Rectangle { horizontal-stretch: 1; }
+            }
+        }
+        // ----- inline editor overlay: rendered above all rows (z: 50) -----
+        if root.is-inline-editing: Rectangle {
+            property <int> r: root.editing-row;
+            y: r * Tokens.grid-row-h;
+            width: flick.viewport-width;
+            height: root.editing-row-h;
+            z: 50;
+            HorizontalLayout {
+                Rectangle { width: 44px; }
+                for c in root.col-count: Rectangle {
+                    width: root.col-widths.length > c ? root.col-widths[c] : 140px;
+                    if c == root.editing-col: editor-frame := Rectangle {
+                        property <GridCell> cell: root.cells[r * root.col-count + c];
+                        property <int> est-lines: root.editing-est-lines;
+                        x: -2px;
+                        y: -2px;
+                        width: parent.width + 4px;
+                        height: root.editing-row-h + 4px;
+                        border-radius: 5px;
+                        background: Tokens.accent.with-alpha(0.35);
+                        border-width: 1.5px;
+                        border-color: Tokens.accent;
+                        drop-shadow-blur: 10px;
+                        drop-shadow-color: #00000066;
+
+                        editor-box := Rectangle {
+                            x: 2px;
+                            y: 2px;
+                            width: parent.width - 4px;
+                            height: parent.height - 4px;
+                            border-radius: 3px;
+                            background: Tokens.card;
+                            border-width: 1.5px;
+                            border-color: Tokens.edit-outline;
+                            clip: true;
+
+                            if root.is-boolean(root.columns[c].type-name): ComboBox {
+                                x: 1px;
+                                y: 1px;
+                                width: parent.width - 2px;
+                                height: parent.height - 2px;
+                                model: ["true", "false"];
+                                current-value: cell.is-null ? "" : cell.text;
+                                selected(value) => {
+                                    root.editing-value = value;
+                                    root.cell-edited(r, c, value);
+                                }
                             }
-                        }
-                        if root.is-date(root.columns[c].type-name): HorizontalLayout {
-                            padding-left: Tokens.sp2;
-                            padding-right: 2px;
-                            spacing: Tokens.sp1;
-                            date-input := TextInput {
-                                horizontal-stretch: 1;
+                            if root.is-date(root.columns[c].type-name): HorizontalLayout {
+                                padding-left: Tokens.sp2;
+                                padding-right: 2px;
+                                spacing: Tokens.sp1;
+                                date-input := TextInput {
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                    text: cell.is-null ? "" : cell.text;
+                                    edited => { root.editing-value = self.text; }
+                                    color: Tokens.text;
+                                    font-family: Tokens.mono;
+                                    font-size: Tokens.font-sm;
+                                    single-line: true;
+                                    accepted => { root.cell-edited(r, c, self.text); }
+                                    key-pressed(e) => {
+                                        if (e.text == Key.Escape) { root.edit-cancelled(); return accept; }
+                                        return reject;
+                                    }
+                                    init => { self.focus(); self.select-all(); }
+                                }
+                                Rectangle {
+                                    width: 22px;
+                                    Text {
+                                        text: "▣";
+                                        color: Tokens.text-dim;
+                                        vertical-alignment: center;
+                                        horizontal-alignment: center;
+                                    }
+                                    TouchArea {
+                                        clicked => {
+                                            root.date-row = r;
+                                            root.date-col = c;
+                                            date-picker.show();
+                                        }
+                                    }
+                                }
+                            }
+                            if !root.is-boolean(root.columns[c].type-name)
+                                && !root.is-date(root.columns[c].type-name)
+                                && root.editing-value == "": Text {
+                                x: Tokens.sp2;
+                                y: 4px;
+                                width: parent.width - 2 * Tokens.sp2;
+                                height: parent.height - 8px;
                                 vertical-alignment: center;
+                                text: cell.is-null ? "NULL" : "EMPTY";
+                                color: Tokens.text-ghost;
+                                font-family: Tokens.mono;
+                                font-size: Tokens.font-sm;
+                            }
+                            if !root.is-boolean(root.columns[c].type-name) && !root.is-date(root.columns[c].type-name): edit-input := TextInput {
+                                x: Tokens.sp2;
+                                y: 4px;
+                                width: parent.width - 2 * Tokens.sp2;
+                                height: parent.height - 8px;
+                                vertical-alignment: editor-frame.est-lines > 1 ? top : center;
                                 text: cell.is-null ? "" : cell.text;
                                 edited => { root.editing-value = self.text; }
                                 color: Tokens.text;
                                 font-family: Tokens.mono;
                                 font-size: Tokens.font-sm;
-                                single-line: true;
+                                single-line: false;
+                                wrap: word-wrap;
                                 accepted => { root.cell-edited(r, c, self.text); }
                                 key-pressed(e) => {
-                                    if (e.text == Key.Escape) { root.edit-cancelled(); return accept; }
+                                    if (e.text == Key.Escape) {
+                                        root.edit-cancelled();
+                                        return accept;
+                                    }
+                                    if (e.text == Key.Tab || e.text == Key.Backtab) {
+                                        root.cell-advance(r, c, self.text,
+                                            e.text == Key.Tab && !e.modifiers.shift);
+                                        return accept;
+                                    }
                                     return reject;
                                 }
                                 init => { self.focus(); self.select-all(); }
                             }
-                            Rectangle {
-                                width: 22px;
-                                Text {
-                                    text: "▣";
-                                    color: Tokens.text-dim;
-                                    vertical-alignment: center;
-                                    horizontal-alignment: center;
-                                }
-                                TouchArea {
-                                    clicked => {
-                                        root.date-row = r;
-                                        root.date-col = c;
-                                        date-picker.show();
-                                    }
-                                }
-                            }
-                        }
-                        if !root.is-boolean(root.columns[c].type-name) && !root.is-date(root.columns[c].type-name): edit-input := TextInput {
-                            x: Tokens.sp2;
-                            y: Tokens.sp1;
-                            width: parent.width - 2 * Tokens.sp2;
-                            height: parent.height - 2 * Tokens.sp1;
-                            vertical-alignment: top;
-                            text: cell.is-null ? "" : cell.text;
-                            edited => { root.editing-value = self.text; }
-                            color: Tokens.text;
-                            font-family: Tokens.mono;
-                            font-size: Tokens.font-sm;
-                            single-line: false;
-                            wrap: word-wrap;
-                            accepted => { root.cell-edited(r, c, self.text); }
-                            key-pressed(e) => {
-                                if (e.text == Key.Escape) {
-                                    root.edit-cancelled();
-                                    return accept;
-                                }
-                                if (e.text == Key.Tab || e.text == Key.Backtab) {
-                                    root.cell-advance(r, c, self.text,
-                                        e.text == Key.Tab && !e.modifiers.shift);
-                                    return accept;
-                                }
-                                return reject;
-                            }
-                            init => { self.focus(); self.select-all(); }
                         }
                     }
                 }
-                // trailing filler so the row spans the full width
                 Rectangle { horizontal-stretch: 1; }
             }
         }

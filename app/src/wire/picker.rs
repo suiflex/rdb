@@ -529,6 +529,104 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             ));
         });
     }
+    // ----- connection context menu actions (0 = Duplicate, 1 = Copy as URL, 2 = Delete) -----
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let collapsed = collapsed.clone();
+        let conn_filter = conn_filter.clone();
+        let connected_ids = connected_ids.clone();
+        let fill_detail = fill_detail.clone();
+        window.on_conn_context_action(move |idx, action| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            match action {
+                0 => {
+                    // Duplicate connection
+                    let dup_result = {
+                        let mut st = store.borrow_mut();
+                        let Some(src) = st.list().get(idx as usize).cloned() else {
+                            return;
+                        };
+                        let pw = st.get_password(&src.id).ok().flatten().unwrap_or_default();
+                        let ssh_sec = st.get_ssh_secret(&src.id).ok().flatten();
+                        let mut dup = rdb_connstore::SavedConnection::new(
+                            format!("{} Copy", src.name),
+                            src.engine,
+                            src.host.clone(),
+                            src.port,
+                            src.user.clone(),
+                        );
+                        dup.database = src.database;
+                        dup.sslmode = src.sslmode;
+                        dup.color = src.color;
+                        dup.env_tag = src.env_tag;
+                        dup.group = src.group;
+                        dup.params = src.params;
+                        dup.local = src.local;
+                        dup.tags = src.tags;
+                        dup.ssh_enabled = src.ssh_enabled;
+                        dup.ssh_host = src.ssh_host;
+                        dup.ssh_port = src.ssh_port;
+                        dup.ssh_user = src.ssh_user;
+                        dup.ssh_auth_mode = src.ssh_auth_mode;
+                        dup.ssh_key_path = src.ssh_key_path;
+                        let new_id = dup.id.clone();
+                        st.save_connection_with_ssh(dup, Some(&pw), ssh_sec.as_deref())
+                            .ok()
+                            .and_then(|()| st.list().iter().position(|c| c.id == new_id))
+                    };
+                    if let Some(new_idx) = dup_result {
+                        if let Ok(cids) = connected_ids.lock() {
+                            w.set_connections(build_sidebar_model(
+                                &store.borrow(),
+                                &collapsed.borrow(),
+                                &conn_filter.borrow(),
+                                &cids,
+                            ));
+                        }
+                        fill_detail(new_idx as i32);
+                    }
+                }
+                1 => {
+                    // Copy as URL
+                    let url = {
+                        let st = store.borrow();
+                        let Some(sc) = st.list().get(idx as usize) else {
+                            return;
+                        };
+                        let pw = st.get_password(&sc.id).ok().flatten();
+                        export::conn_to_url(sc, pw.as_deref())
+                    };
+                    let _ = clip_set(&url);
+                }
+                2 => {
+                    // Delete connection
+                    let removed = {
+                        let mut st = store.borrow_mut();
+                        let Some(id) = st.list().get(idx as usize).map(|c| c.id.clone()) else {
+                            return;
+                        };
+                        let _ = st.delete_password(&id);
+                        st.remove(&id).is_ok()
+                    };
+                    if removed {
+                        w.set_selected_conn(-1);
+                        if let Ok(cids) = connected_ids.lock() {
+                            w.set_connections(build_sidebar_model(
+                                &store.borrow(),
+                                &collapsed.borrow(),
+                                &conn_filter.borrow(),
+                                &cids,
+                            ));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        });
+    }
 
     // ----- drag-reorder within a group, or drop onto a different group -----
     {

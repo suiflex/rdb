@@ -7,7 +7,7 @@ BE_FLAGS = $(addprefix -p ,$(BE_PKGS))
 
 .DEFAULT_GOAL := help
 
-.PHONY: help ui-test be-build be-test be-check fe-build fe-run fe-run-mock fe-build-run fe-show fmt fmt-check lint test test-it build all clean
+.PHONY: help ui-test be-build be-test be-check fe-build fe-run fe-run-mock fe-build-run fe-show fmt fmt-check lint test test-it build all clean target-audit clean-stale
 
 FE_BIN = target/debug/$(FE_PKG)
 
@@ -92,5 +92,11 @@ build: ## Build the whole workspace
 
 all: fmt-check lint test build ## CI-style gate: fmt-check + lint + test + build
 
-clean: ## Remove build artifacts
+target-audit: ## Report target/ disk usage and stale artifact candidates (dry-run)
+	./scripts/target-clean.sh --dry-run
+
+clean-stale: ## Remove superseded build hashes and stale incremental caches (preserves active deps)
+	./scripts/target-clean.sh
+
+clean: ## Remove all build artifacts
 	cargo clean

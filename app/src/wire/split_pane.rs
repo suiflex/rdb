@@ -32,18 +32,73 @@ fn copied_msg(grid: &model::GridModel, r: CellRange) -> String {
     }
 }
 
+pub(crate) fn column_names_text(
+    names: &[String],
+    column: usize,
+    action: i32,
+    engine: Option<rdb_connstore::Engine>,
+) -> Option<String> {
+    let name = names.get(column)?;
+    match action {
+        0 => Some(name.clone()),
+        1 => Some(quote_ident(
+            name,
+            engine.unwrap_or(rdb_connstore::Engine::Postgres),
+        )),
+        2 => Some(names.join(", ")),
+        _ => None,
+    }
+}
+
 pub(crate) fn wire(window: &MainWindow, state: &AppState) {
     let AppState {
         panes,
         rt,
         current,
         driver_pool,
+        cur_engine,
         active_tab_id,
         active_group1_tab_id,
         tab_runs,
         ..
     } = state.clone();
     let displayed_grid = panes[0].displayed_grid.clone();
+
+    for pane in [0usize, 1usize] {
+        let weak = window.as_weak();
+        let cur_engine = cur_engine.clone();
+        let handler = move |column: i32, action: i32| {
+            let Some(w) = weak.upgrade() else { return };
+            let (columns, tabs, active) = if pane == 0 {
+                (w.get_grid_columns(), w.get_tabs(), w.get_active_tab())
+            } else {
+                (w.get_p1_columns(), w.get_p1_tabs(), w.get_p1_active_tab())
+            };
+            let names: Vec<String> = columns.iter().map(|c| c.name.to_string()).collect();
+            let engine = (active >= 0)
+                .then(|| tabs.row_data(active as usize))
+                .flatten()
+                .and_then(|tab| rdb_connstore::Engine::from_key(&tab.engine))
+                .or(*cur_engine.borrow());
+            let Some(text) = usize::try_from(column)
+                .ok()
+                .and_then(|column| column_names_text(&names, column, action, engine))
+            else {
+                return;
+            };
+            let msg = if clip_set(&text) {
+                "copied column name(s)"
+            } else {
+                "copy failed"
+            };
+            set_p_results_meta(&w, pane, msg.into());
+        };
+        if pane == 0 {
+            window.on_copy_column(handler);
+        } else {
+            window.on_p1_copy_column(handler);
+        }
+    }
 
     // ----- Details panel: copy one field value to the clipboard -----
     {
@@ -734,5 +789,33 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 });
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod column_copy_tests {
+    use super::column_names_text;
+    use rdb_connstore::Engine;
+
+    #[test]
+    fn copy_column_names_follows_visible_order_and_escapes_quotes() {
+        let names = vec!["last`name".to_string(), "id".to_string()];
+        assert_eq!(
+            column_names_text(&names, 0, 0, None).as_deref(),
+            Some("last`name")
+        );
+        assert_eq!(
+            column_names_text(&names, 0, 1, Some(Engine::MariaDb)).as_deref(),
+            Some("`last``name`")
+        );
+        assert_eq!(
+            column_names_text(&names, 0, 2, None).as_deref(),
+            Some("last`name, id")
+        );
+        assert_eq!(column_names_text(&names, 2, 0, None), None);
+        assert_eq!(
+            column_names_text(&["a\"b".into()], 0, 1, Some(Engine::Postgres)).as_deref(),
+            Some("\"a\"\"b\"")
+        );
     }
 }

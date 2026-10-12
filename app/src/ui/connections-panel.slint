@@ -29,8 +29,8 @@ export component ConnectionsPanel inherits Rectangle {
     background: Tokens.sidebar;
 
     VerticalLayout {
-        padding-top: Tokens.sp2;
-        padding-bottom: Tokens.sp2;
+        padding-top: Tokens.sp3;
+        padding-bottom: Tokens.sp3;
         spacing: Tokens.sp2;
         list := ScrollView {
             vertical-stretch: 1;
@@ -44,24 +44,23 @@ export component ConnectionsPanel inherits Rectangle {
                         property <bool> active: !item.is-header && item.index == root.selected-conn;
                         // Active tile in the card's colour, running into the card
                         // on its inner edge: a tab, not a separate highlight.
-                        property <bool> joined: active && root.notch;
+                        property <bool> joined: false;
                         visible: open;
-                        height: open ? 72px : 0px;
+                        height: open ? 68px : 0px;
                         tile := Rectangle {
-                            x: joined && root.mirror ? 0 : Tokens.sp1;
-                            y: Tokens.sp1;
-                            width: parent.width - (joined ? Tokens.sp1 : 2 * Tokens.sp1);
-                            height: parent.height - 2 * Tokens.sp1;
-                            border-top-left-radius: joined && root.mirror ? 0 : Tokens.radius;
-                            border-bottom-left-radius: joined && root.mirror ? 0 : Tokens.radius;
-                            border-top-right-radius: joined && !root.mirror ? 0 : Tokens.radius;
-                            border-bottom-right-radius: joined && !root.mirror ? 0 : Tokens.radius;
-                            background: joined ? MaterialPalette.surface : active ? Tokens.accent-tint : transparent;
+                            x: 6px;
+                            y: 4px;
+                            width: parent.width - 12px;
+                            height: parent.height - 8px;
+                            border-radius: 10px;
+                            border-width: active ? 1.5px : 0px;
+                            border-color: Tokens.accent;
+                            background: active ? Tokens.accent-tint : transparent;
                             StateLayer {
                                 width: 100%;
                                 height: 100%;
                                 background: MaterialPalette.on_surface;
-                                border-radius: Tokens.radius;
+                                border-radius: 10px;
                                 has-hover: tile-ta.has-hover;
                                 enabled: true;
                             }

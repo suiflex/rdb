@@ -426,6 +426,17 @@ pub fn format_affected(status: &str, verb: Option<&str>, latency: &str) -> Strin
     }
 }
 
+/// Extract the affected row count from a formatted status string
+/// (e.g. `"1 rows affected"` or `"UPDATE — 1 rows affected · 12 ms"` -> `1`).
+pub fn parse_affected_count(status: &str) -> u64 {
+    status
+        .split(" rows affected")
+        .next()
+        .and_then(|head| head.split_whitespace().last())
+        .and_then(|num| num.parse::<u64>().ok())
+        .unwrap_or(0)
+}
+
 /// Convert any ResultSet into its presentation-ready view. Each variant keeps
 /// its own shape instead of collapsing to a single grid.
 pub fn to_result_view(rs: &ResultSet) -> ResultView {
@@ -771,6 +782,14 @@ mod tests {
             format_affected("3 rows affected", None, "12 ms"),
             "3 rows affected · 12 ms"
         );
+    }
+
+    #[test]
+    fn parse_affected_count_extracts_number_from_raw_and_formatted_status() {
+        assert_eq!(parse_affected_count("1 rows affected"), 1);
+        assert_eq!(parse_affected_count("UPDATE — 1 rows affected · 12 ms"), 1);
+        assert_eq!(parse_affected_count("INSERT — 25 rows affected · 4 ms"), 25);
+        assert_eq!(parse_affected_count("error: syntax error"), 0);
     }
 
     #[test]

@@ -211,6 +211,7 @@ export component MainWindow inherits Window {
     in property <int> grid-sort-col: -1;  // client-side result sort
     in property <bool> grid-sort-asc: true;
     callback sort-col(int);
+    callback copy-column(int, int);
     callback reorder-col(int, length);
     in property <[string]> grid-col-filters;
     // Per-column indented JSON for the selected row (Details panel preview).
@@ -278,10 +279,13 @@ callback create-table-commit();
     callback group-rename(string, string);
     callback group-delete(string);
     callback toggle-favorite(int);          // star/unstar a saved connection
+    callback conn-context-action(int, int); // (store index, 0=Duplicate | 1=Copy URL | 2=Delete)
     callback reorder-conn(int, int, int);   // (dragged store index, row-step delta, drop-Y)
     callback open-table(string, string);   // (database, container)
     callback pin-table(string, string);    // double-click pins the object tab
     callback toggle-fields(string, string); // (database, table) — expand columns inline
+    callback table-action(string, string, int);
+    callback copy-tree-field(string, string, int);
     callback toggle-schema-node(string);
     callback select-schema(string);
     callback filter-tree(string);
@@ -660,6 +664,7 @@ callback create-table-commit();
     callback p1-copy-results(bool);
     callback p1-export-results(int);
     callback p1-sort-col(int);
+    callback p1-copy-column(int, int);
     callback p1-reorder-col(int, length);
     callback p1-set-col-filter(int, string);
     callback p1-resize-col(int, length);
@@ -1000,7 +1005,7 @@ callback create-table-commit();
 
             HorizontalLayout {
                 padding-left: Tokens.sp4;
-                padding-right: Tokens.sp3;
+                padding-right: Tokens.sp4;
                 spacing: Tokens.sp3;
 
                 // --- left: brand (connections) or breadcrumb (workspace) ---
@@ -1053,7 +1058,7 @@ callback create-table-commit();
                         alignment: center;
                         // 40px like the other titlebar controls (OutlineChip keeps
                         // its compact 20px default in list rows).
-                        OutlineChip { height: 40px; text: root.active-env-tag-label; tint: root.active-env-tag-color; }
+                        OutlineChip { height: 26px; text: root.active-env-tag-label; tint: root.active-env-tag-color; }
                     }
                     // Status word only when it needs attention; the healthy case
                     // is already conveyed by the green dot on the chip above.
@@ -1161,9 +1166,9 @@ callback create-table-commit();
                         // carrying its mark: "SQL" in the same grey read the same
                         // for every engine, so nothing said which one was live.
                         Rectangle {
-                            height: 40px;
+                            height: 30px;
                             horizontal-stretch: 0;
-                            border-radius: self.height / 2;
+                            border-radius: 8px;
                             border-width: 1px;
                             border-color: Tokens.db-color(root.active-engine);
                             background: Tokens.db-color(root.active-engine).with-alpha(0.12);
@@ -1372,6 +1377,7 @@ callback create-table-commit();
             group-delete(g) => { root.group-delete(g); }
             toggle-favorite(i) => { root.toggle-favorite(i); }
             reorder-conn(i, d, y) => { root.reorder-conn(i, d, y); }
+            conn-context-action(i, a) => { root.conn-context-action(i, a); }
             filter(t) => { root.conn-filter(t); }
             export-conns(fmt) => { root.export-conns(fmt); }
             open-url(u) => { root.open-url(u); }
@@ -1430,7 +1436,9 @@ callback create-table-commit();
                     mode-changed(m) => { root.sidebar-mode = m; root.sidebar-mode-changed(m); }
                     open-table(db, t) => { root.open-table(db, t); }
                     pin-table(db, t) => { root.pin-table(db, t); }
+                    table-action(db, t, a) => { root.table-action(db, t, a); }
                     toggle-fields(db, t) => { root.toggle-fields(db, t); }
+                    copy-tree-field(t, f, a) => { root.copy-tree-field(t, f, a); }
                     toggle-node(t) => { root.toggle-schema-node(t); }
                     select-schema(s) => { root.select-schema(s); }
                     filter-tree(t) => { root.filter-tree(t); }
@@ -1463,7 +1471,7 @@ callback create-table-commit();
                             left-row := HorizontalLayout {
                                 width: left-flick.viewport-width;
                                 height: left-flick.height;
-                                padding-left: Tokens.sp2;
+                                padding-left: Tokens.sp3;
                                 padding-top: Tokens.doc-tab-row-h - Tokens.doc-tab-h;
                                 spacing: Tokens.sp2;
                             for tab[i] in root.tabs: tab-root := Rectangle {
@@ -1956,6 +1964,7 @@ callback create-table-commit();
                         p1-copy-results(all) => { root.p1-copy-results(all); }
                         p1-export-results(i) => { root.p1-export-results(i); }
                         p1-sort-col(i) => { root.p1-sort-col(i); }
+                        p1-copy-column(i, action) => { root.p1-copy-column(i, action); }
                         p1-reorder-col(i, x) => { root.p1-reorder-col(i, x); }
                         p1-set-col-filter(i, t) => { root.p1-set-col-filter(i, t); }
                         p1-resize-col(i, d) => { root.p1-resize-col(i, d); }
@@ -1991,6 +2000,7 @@ callback create-table-commit();
                         grid-sort-col: root.grid-sort-col;
                         grid-sort-asc: root.grid-sort-asc;
                         sort-col(i) => { root.sort-col(i); }
+                        copy-column(i, action) => { root.copy-column(i, action); }
                         reorder-col(i, x) => { root.reorder-col(i, x); }
                         grid-col-filters: root.grid-col-filters;
                         grid-detail-pretty: root.grid-detail-pretty;
@@ -2312,7 +2322,9 @@ callback create-table-commit();
                     mode-changed(m) => { root.sidebar-mode = m; root.sidebar-mode-changed(m); }
                     open-table(db, t) => { root.open-table(db, t); }
                     pin-table(db, t) => { root.pin-table(db, t); }
+                    table-action(db, t, a) => { root.table-action(db, t, a); }
                     toggle-fields(db, t) => { root.toggle-fields(db, t); }
+                    copy-tree-field(t, f, a) => { root.copy-tree-field(t, f, a); }
                     toggle-node(t) => { root.toggle-schema-node(t); }
                     select-schema(s) => { root.select-schema(s); }
                     filter-tree(t) => { root.filter-tree(t); }
@@ -2424,11 +2436,11 @@ callback create-table-commit();
                     horizontal-alignment: center;
                 }
                 Rectangle {
-                    height: 34px;
-                    border-radius: Tokens.radius;
-                    background: Tokens.canvas;
-                    border-width: 1px;
-                    border-color: Tokens.border;
+                    height: 38px;
+                    border-radius: Tokens.radius-lg;
+                    background: MaterialPalette.surface_container_low;
+                    border-width: ti.has-focus ? 2px : 1px;
+                    border-color: ti.has-focus ? MaterialPalette.primary : MaterialPalette.outline_variant;
                     ti := TextInput {
                         x: Tokens.sp2;
                         width: parent.width - 2 * Tokens.sp2;
@@ -2641,11 +2653,11 @@ callback create-table-commit();
                     horizontal-alignment: center;
                 }
                 Rectangle {
-                    height: 34px;
-                    border-radius: Tokens.radius;
-                    background: Tokens.canvas;
-                    border-width: 1px;
-                    border-color: Tokens.border;
+                    height: 38px;
+                    border-radius: Tokens.radius-lg;
+                    background: MaterialPalette.surface_container_low;
+                    border-width: cti.has-focus ? 2px : 1px;
+                    border-color: cti.has-focus ? MaterialPalette.primary : MaterialPalette.outline_variant;
                     cti := TextInput {
                         x: Tokens.sp2;
                         width: parent.width - 2 * Tokens.sp2;
@@ -2713,11 +2725,11 @@ callback create-table-commit();
                 }
                 // table name
                 Rectangle {
-                    height: 34px;
-                    border-radius: Tokens.radius;
-                    background: Tokens.canvas;
-                    border-width: 1px;
-                    border-color: Tokens.border;
+                    height: 38px;
+                    border-radius: Tokens.radius-lg;
+                    background: MaterialPalette.surface_container_low;
+                    border-width: tname.has-focus ? 2px : 1px;
+                    border-color: tname.has-focus ? MaterialPalette.primary : MaterialPalette.outline_variant;
                     tname := TextInput {
                         x: Tokens.sp2;
                         width: parent.width - 2 * Tokens.sp2;

@@ -388,19 +388,34 @@ async fn query_stream_impl(
 /// leading keywords. Anything else (INSERT/UPDATE/DELETE/CREATE/DROP/...) is
 /// treated as a write and routed to `execute` for an affected-row count.
 fn is_row_returning(sql: &str) -> bool {
-    // Skip leading `-- line` comments and blank lines before classifying.
-    let head = sql
-        .lines()
-        .map(str::trim_start)
-        .find(|l| !l.is_empty() && !l.starts_with("--"))
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    head.starts_with("select")
-        || head.starts_with("with")
-        || head.starts_with("show")
-        || head.starts_with("values")
-        || head.starts_with("table")
-        || head.starts_with("explain")
+    let mut body = sql.trim();
+    loop {
+        if body.starts_with("--") {
+            body = body.split_once('\n').map_or("", |(_, rest)| rest.trim());
+        } else if body.starts_with("/*") {
+            body = body.split_once("*/").map_or("", |(_, rest)| rest.trim());
+        } else {
+            break;
+        }
+    }
+    let words: Vec<String> = body
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .filter(|w| !w.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect();
+    let Some(first) = words.first().map(String::as_str) else {
+        return false;
+    };
+    if words.iter().any(|w| w == "returning") {
+        return true;
+    }
+    if first == "with" {
+        let has_dml = words
+            .iter()
+            .any(|w| matches!(w.as_str(), "insert" | "update" | "delete"));
+        return !has_dml;
+    }
+    matches!(first, "select" | "show" | "values" | "table" | "explain")
 }
 
 /// Build `Column` metadata from the first row (empty result -> no columns).

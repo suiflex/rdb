@@ -317,7 +317,7 @@ fn view_row_count(v: &model::ResultView) -> u64 {
     match v {
         model::ResultView::Table(g) => g.rows.len() as u64,
         model::ResultView::Documents(d) => d.grid.rows.len() as u64,
-        model::ResultView::Affected(_) => 0,
+        model::ResultView::Affected(s) => model::parse_affected_count(s),
     }
 }
 
