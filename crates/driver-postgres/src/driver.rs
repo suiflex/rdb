@@ -387,22 +387,75 @@ async fn query_stream_impl(
 /// Heuristic: does this statement return rows? Covers the common row-returning
 /// leading keywords. Anything else (INSERT/UPDATE/DELETE/CREATE/DROP/...) is
 /// treated as a write and routed to `execute` for an affected-row count.
-fn is_row_returning(sql: &str) -> bool {
-    let mut body = sql.trim();
-    loop {
-        if body.starts_with("--") {
-            body = body.split_once('\n').map_or("", |(_, rest)| rest.trim());
-        } else if body.starts_with("/*") {
-            body = body.split_once("*/").map_or("", |(_, rest)| rest.trim());
-        } else {
-            break;
-        }
+enum SqlScanState {
+    Code,
+    LineComment,
+    BlockComment,
+    Quoted(u8),
+}
+
+fn flush_word(cur: &mut String, words: &mut Vec<String>) {
+    if !cur.is_empty() {
+        words.push(std::mem::take(cur));
     }
-    let words: Vec<String> = body
-        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
-        .filter(|w| !w.is_empty())
-        .map(str::to_ascii_lowercase)
-        .collect();
+}
+
+fn step_code_byte(
+    b: u8,
+    next: Option<u8>,
+    cur: &mut String,
+    words: &mut Vec<String>,
+) -> (SqlScanState, usize) {
+    if b == b'-' && next == Some(b'-') {
+        flush_word(cur, words);
+        return (SqlScanState::LineComment, 2);
+    }
+    if b == b'/' && next == Some(b'*') {
+        flush_word(cur, words);
+        return (SqlScanState::BlockComment, 2);
+    }
+    if b == b'\'' || b == b'"' {
+        flush_word(cur, words);
+        return (SqlScanState::Quoted(b), 1);
+    }
+    if b.is_ascii_alphanumeric() || b == b'_' {
+        cur.push((b as char).to_ascii_lowercase());
+    } else {
+        flush_word(cur, words);
+    }
+    (SqlScanState::Code, 1)
+}
+
+fn unquoted_sql_words(sql: &str) -> Vec<String> {
+    let bytes = sql.as_bytes();
+    let mut i = 0;
+    let mut state = SqlScanState::Code;
+    let mut cur = String::new();
+    let mut words = Vec::new();
+    while i < bytes.len() {
+        let b = bytes[i];
+        let next = bytes.get(i + 1).copied();
+        let (next_state, step) = match state {
+            SqlScanState::Code => step_code_byte(b, next, &mut cur, &mut words),
+            SqlScanState::LineComment if b == b'\n' => (SqlScanState::Code, 1),
+            SqlScanState::LineComment => (SqlScanState::LineComment, 1),
+            SqlScanState::BlockComment if b == b'*' && next == Some(b'/') => {
+                (SqlScanState::Code, 2)
+            }
+            SqlScanState::BlockComment => (SqlScanState::BlockComment, 1),
+            SqlScanState::Quoted(q) if b == q && next == Some(q) => (SqlScanState::Quoted(q), 2),
+            SqlScanState::Quoted(q) if b == q => (SqlScanState::Code, 1),
+            SqlScanState::Quoted(q) => (SqlScanState::Quoted(q), 1),
+        };
+        state = next_state;
+        i += step;
+    }
+    flush_word(&mut cur, &mut words);
+    words
+}
+
+fn is_row_returning(sql: &str) -> bool {
+    let words = unquoted_sql_words(sql);
     let Some(first) = words.first().map(String::as_str) else {
         return false;
     };
@@ -548,4 +601,33 @@ async fn schema_impl(client: &Client, schema: &str) -> Result<Schema> {
             containers,
         }],
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_row_returning;
+
+    #[test]
+    fn returning_inside_string_literal_or_comment_is_not_row_returning() {
+        assert!(!is_row_returning(
+            "INSERT INTO logs (msg) VALUES ('returning')"
+        ));
+        assert!(!is_row_returning(
+            "-- returning rows\nUPDATE logs SET msg = 'ok'"
+        ));
+        assert!(is_row_returning(
+            "INSERT INTO logs (msg) VALUES ('x') RETURNING id"
+        ));
+    }
+
+    #[test]
+    fn with_cte_distinguishes_select_from_dml() {
+        assert!(is_row_returning("WITH t AS (SELECT 1) SELECT * FROM t"));
+        assert!(!is_row_returning(
+            "WITH s AS (SELECT 1) UPDATE logs SET msg = 'ok'"
+        ));
+        assert!(is_row_returning(
+            "WITH u AS (UPDATE logs SET msg = 'ok' RETURNING id) SELECT * FROM u"
+        ));
+    }
 }

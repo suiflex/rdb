@@ -211,8 +211,9 @@ impl FmtState {
                 }
             }
             other => {
-                let attaches = self.out.ends_with(['<', '>', '!', ':', '-', '='])
-                    && matches!(other, '=' | '>' | ':');
+                let attaches = (self.out.ends_with(['<', '>', '!', ':', '-', '='])
+                    && matches!(other, '=' | '>' | ':'))
+                    || (self.out.ends_with('|') && other == '|');
                 if !attaches {
                     push_sep(&mut self.out, self.indent);
                 }
@@ -454,5 +455,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(postgres, "SELECT\n    top 10 *\nFROM\n    t");
+    }
+
+    #[test]
+    fn concat_operator_stays_together() {
+        assert_eq!(
+            format("select a || b from t"),
+            "SELECT\n    a || b\nFROM\n    t"
+        );
     }
 }

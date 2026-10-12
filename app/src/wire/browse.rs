@@ -91,25 +91,173 @@ fn format_failed_indices(indices: &[usize]) -> String {
     }
 }
 
+#[derive(Clone)]
+struct PendingImport {
+    db: String,
+    sheet: export::ImportSheet,
+    target_cols: Vec<String>,
+}
+
+fn schema_table_names(raw_nodes: &Arc<std::sync::Mutex<Vec<model::VmTreeNode>>>) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Ok(nodes) = raw_nodes.lock() {
+        for n in nodes.iter() {
+            if matches!(n.kind.as_str(), "table" | "collection" | "keyspace")
+                && !out.contains(&n.label)
+            {
+                out.push(n.label.clone());
+            }
+        }
+    }
+    out
+}
+
+fn table_column_names(
+    raw_nodes: &Arc<std::sync::Mutex<Vec<model::VmTreeNode>>>,
+    table_label: &str,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Ok(nodes) = raw_nodes.lock() {
+        let mut in_table = false;
+        for n in nodes.iter() {
+            let is_container = matches!(n.kind.as_str(), "table" | "collection" | "keyspace");
+            if is_container {
+                in_table = n.label == table_label;
+            } else if n.kind == "field" && in_table {
+                let col = completion::field_name(&n.label).to_string();
+                if !col.is_empty() {
+                    out.push(col);
+                }
+            } else if n.kind != "field" {
+                in_table = false;
+            }
+        }
+    }
+    out
+}
+
+fn sync_import_cols_and_summary(
+    w: &MainWindow,
+    sheet: &export::ImportSheet,
+    target_cols: &[String],
+    table_col_count: usize,
+) {
+    let cols_model: Vec<ImportCol> = sheet
+        .headers
+        .iter()
+        .zip(target_cols.iter())
+        .map(|(fc, tc)| ImportCol {
+            file_col: fc.clone().into(),
+            target_col: tc.clone().into(),
+        })
+        .collect();
+    let matched = target_cols
+        .iter()
+        .filter(|tc| !tc.is_empty() && tc.as_str() != "Do not import")
+        .count();
+    w.set_import_cols(ModelRc::from(Rc::new(VecModel::from(cols_model))));
+    w.set_import_summary(
+        format!(
+            "{} {} columns, table {} columns, matched {} columns",
+            sheet.format_label,
+            sheet.headers.len(),
+            table_col_count,
+            matched
+        )
+        .into(),
+    );
+}
+
+fn refresh_import_wizard_mapping(
+    w: &MainWindow,
+    pending: &mut PendingImport,
+    raw_nodes: &Arc<std::sync::Mutex<Vec<model::VmTreeNode>>>,
+) {
+    let target_table = w.get_import_target_table().to_string();
+    let create_table = w.get_import_create_table();
+    let mode = w.get_import_match_mode().to_string();
+    let tcols = table_column_names(raw_nodes, &target_table);
+
+    let mut options: Vec<SharedString> = vec!["Do not import".into()];
+    for tc in &tcols {
+        options.push(tc.clone().into());
+    }
+    if create_table {
+        for fc in &pending.sheet.headers {
+            let s = SharedString::from(fc.as_str());
+            if !options.contains(&s) {
+                options.push(s);
+            }
+        }
+    }
+    w.set_import_target_col_options(ModelRc::from(Rc::new(VecModel::from(options))));
+
+    pending.target_cols =
+        export::match_import_columns(&pending.sheet.headers, &tcols, &mode, create_table);
+    let table_col_count = if create_table {
+        pending.sheet.headers.len()
+    } else {
+        tcols.len()
+    };
+    sync_import_cols_and_summary(w, &pending.sheet, &pending.target_cols, table_col_count);
+}
+
+fn is_duplicate_db_error(msg: &str) -> bool {
+    let lower = msg.to_ascii_lowercase();
+    lower.contains("duplicate")
+        || lower.contains("unique constraint")
+        || lower.contains("23505")
+        || lower.contains("1062")
+}
+
+fn is_transactional_import_engine(engine: rdb_connstore::Engine) -> bool {
+    matches!(
+        engine,
+        rdb_connstore::Engine::Postgres
+            | rdb_connstore::Engine::MySql
+            | rdb_connstore::Engine::MariaDb
+            | rdb_connstore::Engine::Sqlite
+            | rdb_connstore::Engine::Mssql
+            | rdb_connstore::Engine::Oracle
+    )
+}
+
 async fn execute_import_ops(
     engine: rdb_connstore::Engine,
     driver: &AnyDriver,
     ops: Vec<rdb_core::write::WriteOp>,
+    insert_option: &str,
 ) -> ImportOutcome {
     let total = ops.len();
-    // Fast path: attempt a single atomic transaction first.
-    if driver.commit(&ops).await.is_ok() {
-        return ImportOutcome {
-            summary: format!("imported {total} row(s)"),
-            has_error: false,
-            log_entries: vec![format!("-- imported {total} row(s) in batch")],
+    let stop_on_error = insert_option == "STOP ON ERROR";
+    let skip_duplicates = insert_option == "SKIP DUPLICATES";
+
+    // Atomic batch transaction only when STOP ON ERROR is selected on an engine
+    // whose `commit(&ops)` rolls back on failure. Non-transactional engines
+    // (Mongo, Cassandra, Redis, Valkey, ClickHouse) and CONTINUE/SKIP modes
+    // execute per-row so committed rows are never re-applied.
+    if stop_on_error && is_transactional_import_engine(engine) {
+        return match driver.commit(&ops).await {
+            Ok(_) => ImportOutcome {
+                summary: format!("imported {total} row(s)"),
+                has_error: false,
+                log_entries: vec![format!("-- imported {total} row(s) in batch")],
+            },
+            Err(e) => {
+                let clean = editor::strip_error_marker(&e.to_string()).into_owned();
+                ImportOutcome {
+                    summary: format!(
+                        "error: import aborted (rolled back {total} row(s)) — {clean}"
+                    ),
+                    has_error: true,
+                    log_entries: vec![format!("-- [import rolled back] {clean}")],
+                }
+            }
         };
     }
-    // Guardrail fallback: the batch transaction rolled back because one or more
-    // rows (at the start, middle, or end) violated a constraint (e.g. UNIQUE / PK
-    // duplicate). Isolate row-by-row so all valid rows commit and every failing
-    // row is reported with its exact 1-based row number and database error.
+
     let mut ok_count = 0usize;
+    let mut skipped_dups = 0usize;
     let mut failed_rows = Vec::new();
     let mut first_err: Option<(usize, String)> = None;
     let mut log_entries = Vec::new();
@@ -121,6 +269,10 @@ async fn execute_import_ops(
             Ok(_) => ok_count += 1,
             Err(e) => {
                 let clean = editor::strip_error_marker(&e.to_string()).into_owned();
+                if skip_duplicates && is_duplicate_db_error(&clean) {
+                    skipped_dups += 1;
+                    continue;
+                }
                 let stmt = dispatch::write_statements(engine, single)
                     .into_iter()
                     .next()
@@ -130,8 +282,24 @@ async fn execute_import_ops(
                 if first_err.is_none() {
                     first_err = Some((row_num, clean));
                 }
+                if stop_on_error {
+                    break;
+                }
             }
         }
+    }
+
+    if failed_rows.is_empty() {
+        let summary = if skipped_dups > 0 {
+            format!("imported {ok_count}/{total} row(s) ({skipped_dups} duplicate(s) skipped)")
+        } else {
+            format!("imported {ok_count} row(s)")
+        };
+        return ImportOutcome {
+            summary,
+            has_error: false,
+            log_entries,
+        };
     }
 
     let fail_count = failed_rows.len();
@@ -141,7 +309,7 @@ async fn execute_import_ops(
         summary: format!(
             "error: imported {ok_count}/{total} row(s); {fail_count} failed (row {rows_list}: {detail})"
         ),
-        has_error: fail_count > 0,
+        has_error: true,
         log_entries,
     }
 }
@@ -150,8 +318,10 @@ async fn execute_import_sql(
     engine: rdb_connstore::Engine,
     driver: &AnyDriver,
     stmts: Vec<String>,
+    insert_option: &str,
 ) -> ImportOutcome {
     let total = stmts.len();
+    let stop_on_error = insert_option == "STOP ON ERROR";
     let mut ok_count = 0usize;
     let mut failed_stmts = Vec::new();
     let mut first_err: Option<(usize, String)> = None;
@@ -175,6 +345,9 @@ async fn execute_import_sql(
                 log_entries.push(format!("-- [import error stmt {stmt_num}] {clean}\n{stmt}"));
                 if first_err.is_none() {
                     first_err = Some((stmt_num, clean));
+                }
+                if stop_on_error {
+                    break;
                 }
             }
         }
@@ -200,36 +373,18 @@ async fn execute_import_sql(
     }
 }
 
-async fn execute_import_payload(
-    engine: rdb_connstore::Engine,
-    driver: &AnyDriver,
-    payload: export::ImportPayload,
-) -> ImportOutcome {
-    match payload {
-        export::ImportPayload::WriteOps(ops) => execute_import_ops(engine, driver, ops).await,
-        export::ImportPayload::SqlStatements(stmts) => {
-            execute_import_sql(engine, driver, stmts).await
-        }
-    }
-}
-
 fn apply_import_status(w: &MainWindow, summary: &str, has_error: bool) {
     w.set_status_error(has_error);
     w.set_result_status(SharedString::from(summary));
     w.set_results_meta(SharedString::from(summary));
 }
 
-#[allow(clippy::too_many_arguments)]
-fn start_table_import(
+fn open_import_wizard_for_table(
     w: &MainWindow,
-    table_ref: rdb_core::write::TableRef,
     db_arg: SharedString,
     label_arg: SharedString,
-    rt: Arc<tokio::runtime::Runtime>,
-    current: Arc<tokio::sync::Mutex<Option<(rdb_connstore::Engine, Arc<AnyDriver>)>>>,
-    driver_pool: DriverPool,
-    conn_id: Option<String>,
-    query_console: Arc<std::sync::Mutex<Vec<String>>>,
+    raw_nodes: Arc<std::sync::Mutex<Vec<model::VmTreeNode>>>,
+    pending_import: Arc<std::sync::Mutex<Option<PendingImport>>>,
 ) {
     let prompt = format!("Import into {} (CSV, JSON, SQL)", label_arg);
     pick_file_via_dialog(w, prompt, move |w, picked| {
@@ -240,46 +395,77 @@ fn start_table_import(
                 return;
             }
         };
-        let payload = match export::parse_import_file(&table_ref, &path, &contents) {
-            Ok(p) => p,
+        let sheet = match export::parse_import_sheet(&path, &contents) {
+            Ok(s) => s,
             Err(e) => {
                 let msg = format!("error: import failed — {e}");
                 apply_import_status(w, &msg, true);
                 return;
             }
         };
-        let weak_done = w.as_weak();
-        rt.spawn(async move {
-            let Some((engine, driver)) =
-                resolve_driver(&driver_pool, &current, conn_id.as_deref()).await
-            else {
-                return;
-            };
-            let outcome = execute_import_payload(engine, &driver, payload).await;
-            for entry in outcome.log_entries {
-                append_query_console(&query_console, entry);
-            }
-            let summary = outcome.summary;
-            let has_error = outcome.has_error;
-            let weak_after = weak_done.clone();
-            let summary_after = summary.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                let Some(w) = weak_done.upgrade() else {
-                    return;
-                };
-                sync_query_console(&w, &query_console);
-                w.invoke_open_table(db_arg, label_arg);
-                apply_import_status(&w, &summary, has_error);
-            });
-            if has_error {
-                tokio::time::sleep(std::time::Duration::from_millis(320)).await;
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(w) = weak_after.upgrade() {
-                        apply_import_status(&w, &summary_after, true);
-                    }
-                });
-            }
-        });
+
+        let mut tables = schema_table_names(&raw_nodes);
+        if !label_arg.is_empty() && !tables.iter().any(|t| t == label_arg.as_str()) {
+            tables.insert(0, label_arg.to_string());
+        }
+        let table_opts: Vec<SharedString> =
+            tables.iter().cloned().map(SharedString::from).collect();
+        w.set_import_table_options(ModelRc::from(Rc::new(VecModel::from(table_opts))));
+        w.set_import_target_table(label_arg.clone());
+        w.set_import_new_table_name(
+            std::path::Path::new(&sheet.file_name)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("imported_table")
+                .into(),
+        );
+        w.set_import_create_table(false);
+        w.set_import_wizard_title(format!("Import {} Wizard", sheet.format_label).into());
+        w.set_import_file_info(
+            format!(
+                "{} - {}",
+                sheet.file_name,
+                export::format_byte_size(sheet.size_bytes)
+            )
+            .into(),
+        );
+        w.set_import_preview_caption(
+            format!("First 100 rows of the {} file", sheet.format_label).into(),
+        );
+        w.set_import_match_mode("Match Columns by Name and Order".into());
+        w.set_import_encoding("utf8".into());
+        w.set_import_insert_option("STOP ON ERROR".into());
+        w.set_import_error(SharedString::default());
+
+        let preview_rows: Vec<ImportPreviewRow> = sheet
+            .rows
+            .iter()
+            .take(100)
+            .map(|r| {
+                let cells: Vec<SharedString> = r
+                    .iter()
+                    .map(|c| match c {
+                        rdb_core::result::Cell::Null => SharedString::from("NULL"),
+                        other => SharedString::from(other.render()),
+                    })
+                    .collect();
+                ImportPreviewRow {
+                    cells: ModelRc::from(Rc::new(VecModel::from(cells))),
+                }
+            })
+            .collect();
+        w.set_import_preview_rows(ModelRc::from(Rc::new(VecModel::from(preview_rows))));
+
+        let mut pending = PendingImport {
+            db: db_arg.to_string(),
+            sheet,
+            target_cols: Vec::new(),
+        };
+        refresh_import_wizard_mapping(w, &mut pending, &raw_nodes);
+        if let Ok(mut guard) = pending_import.lock() {
+            *guard = Some(pending);
+        }
+        w.set_import_modal_open(true);
     });
 }
 
@@ -1247,16 +1433,220 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
         });
     }
-    // ----- sidebar schema tree: table context menu actions -----
+    // ----- sidebar schema tree: table context menu actions & Import Wizard -----
+    let pending_import: Arc<std::sync::Mutex<Option<PendingImport>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    {
+        let weak = window.as_weak();
+        let raw_nodes = state.raw_nodes.clone();
+        let pending_import = pending_import.clone();
+        window.on_import_table_changed(move |_tbl| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if let Ok(mut guard) = pending_import.lock() {
+                if let Some(pending) = guard.as_mut() {
+                    refresh_import_wizard_mapping(&w, pending, &raw_nodes);
+                }
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let raw_nodes = state.raw_nodes.clone();
+        let pending_import = pending_import.clone();
+        window.on_import_create_toggled(move |_create| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if let Ok(mut guard) = pending_import.lock() {
+                if let Some(pending) = guard.as_mut() {
+                    refresh_import_wizard_mapping(&w, pending, &raw_nodes);
+                }
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let raw_nodes = state.raw_nodes.clone();
+        let pending_import = pending_import.clone();
+        window.on_import_match_mode_changed(move |_mode| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            if let Ok(mut guard) = pending_import.lock() {
+                if let Some(pending) = guard.as_mut() {
+                    refresh_import_wizard_mapping(&w, pending, &raw_nodes);
+                }
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let raw_nodes = state.raw_nodes.clone();
+        let pending_import = pending_import.clone();
+        window.on_import_col_target_changed(move |col_idx, target_col| {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Ok(mut guard) = pending_import.lock() else {
+                return;
+            };
+            let Some(pending) = guard.as_mut() else {
+                return;
+            };
+            if let Some(slot) = pending.target_cols.get_mut(col_idx.max(0) as usize) {
+                *slot = target_col.to_string();
+            }
+            let tcols = table_column_names(&raw_nodes, &w.get_import_target_table());
+            let table_col_count = if w.get_import_create_table() {
+                pending.sheet.headers.len()
+            } else {
+                tcols.len()
+            };
+            sync_import_cols_and_summary(&w, &pending.sheet, &pending.target_cols, table_col_count);
+        });
+    }
     {
         let weak = window.as_weak();
         let cur_engine = cur_engine.clone();
-        let load_editor_text = load_editor_text.clone();
         let rt = rt.clone();
         let current = current.clone();
         let driver_pool = state.driver_pool.clone();
         let current_connection_id = state.current_connection_id.clone();
         let query_console = state.query_console.clone();
+        let pending_import = pending_import.clone();
+        window.on_import_commit(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            let Some(pending) = pending_import.lock().ok().and_then(|g| g.clone()) else {
+                return;
+            };
+            let eng = (*cur_engine.borrow()).unwrap_or(rdb_connstore::Engine::Postgres);
+            let schema = w.get_schema_name().to_string();
+            let create_table = w.get_import_create_table();
+            let target_table = if create_table {
+                w.get_import_new_table_name().trim().to_string()
+            } else {
+                w.get_import_target_table().trim().to_string()
+            };
+            if target_table.is_empty() {
+                w.set_import_error("Table name is required".into());
+                return;
+            }
+            let table_ref = rdb_core::write::TableRef {
+                database: (!pending.db.is_empty()).then(|| pending.db.clone()),
+                schema: matches!(eng, rdb_connstore::Engine::Postgres)
+                    .then(|| schema.clone())
+                    .filter(|s| !s.is_empty()),
+                name: target_table.clone(),
+            };
+            let ops = if pending.sheet.sql_statements.is_empty() {
+                match export::build_import_ops_from_sheet(
+                    &pending.sheet,
+                    &table_ref,
+                    &pending.target_cols,
+                ) {
+                    Ok(ops) => ops,
+                    Err(e) => {
+                        w.set_import_error(e.into());
+                        return;
+                    }
+                }
+            } else {
+                Vec::new()
+            };
+            let sql_statements = pending.sheet.sql_statements.clone();
+            let insert_option = w.get_import_insert_option().to_string();
+            let create_ddl = if create_table && sql_statements.is_empty() {
+                let qual = qualified_table_ident(&pending.db, &schema, &target_table, eng);
+                let cols_ddl: Vec<String> = pending
+                    .target_cols
+                    .iter()
+                    .filter(|tc| !tc.is_empty() && tc.as_str() != "Do not import")
+                    .map(|tc| format!("{} TEXT", quote_ident(tc, eng)))
+                    .collect();
+                Some(format!("CREATE TABLE {qual} ({});", cols_ddl.join(", ")))
+            } else {
+                None
+            };
+            w.set_import_error(SharedString::default());
+            let conn_id = current_connection_id.lock().ok().and_then(|g| g.clone());
+            let db_arg = SharedString::from(pending.db.clone());
+            let label_arg = SharedString::from(target_table);
+            let query_console = query_console.clone();
+            let weak_done = w.as_weak();
+            let rt_inner = rt.clone();
+            let current = current.clone();
+            let driver_pool = driver_pool.clone();
+            rt.spawn(async move {
+                let Some((engine, driver)) =
+                    resolve_driver(&driver_pool, &current, conn_id.as_deref()).await
+                else {
+                    return;
+                };
+                if let Some(ddl) = create_ddl {
+                    append_query_console(&query_console, ddl.clone());
+                    if let Ok(q) = query_parse::parse_query(engine, &ddl) {
+                        if let Err(e) = driver.query(&q).await {
+                            let clean = editor::strip_error_marker(&e.to_string()).into_owned();
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(w) = weak_done.upgrade() {
+                                    w.set_import_error(
+                                        format!("CREATE TABLE failed: {clean}").into(),
+                                    );
+                                }
+                            });
+                            return;
+                        }
+                    }
+                }
+                let outcome = if !sql_statements.is_empty() {
+                    execute_import_sql(engine, &driver, sql_statements, &insert_option).await
+                } else {
+                    execute_import_ops(engine, &driver, ops, &insert_option).await
+                };
+                for entry in outcome.log_entries {
+                    append_query_console(&query_console, entry);
+                }
+                let summary = outcome.summary;
+                let has_error = outcome.has_error;
+                let stop_failed = has_error && insert_option == "STOP ON ERROR";
+                let weak_after = weak_done.clone();
+                let summary_after = summary.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(w) = weak_done.upgrade() else {
+                        return;
+                    };
+                    sync_query_console(&w, &query_console);
+                    if stop_failed {
+                        w.set_import_error(summary.clone().into());
+                        apply_import_status(&w, &summary, true);
+                    } else {
+                        w.set_import_modal_open(false);
+                        w.invoke_open_table(db_arg, label_arg);
+                        apply_import_status(&w, &summary, has_error);
+                    }
+                });
+                if has_error && !stop_failed {
+                    let _ = rt_inner;
+                    tokio::time::sleep(std::time::Duration::from_millis(320)).await;
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = weak_after.upgrade() {
+                            apply_import_status(&w, &summary_after, true);
+                        }
+                    });
+                }
+            });
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let cur_engine = cur_engine.clone();
+        let load_editor_text = load_editor_text.clone();
+        let raw_nodes = state.raw_nodes.clone();
+        let pending_import = pending_import.clone();
         window.on_table_action(move |db, label, action| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -1282,22 +1672,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     copy_to_meta(&w, &sql, "copied SELECT script");
                 }
                 7 => {
-                    let table_ref = rdb_core::write::TableRef {
-                        database: (!db.is_empty()).then(|| db.to_string()),
-                        schema: matches!(eng, rdb_connstore::Engine::Postgres).then_some(schema),
-                        name: label.to_string(),
-                    };
-                    let conn_id = current_connection_id.lock().ok().and_then(|g| g.clone());
-                    start_table_import(
+                    open_import_wizard_for_table(
                         &w,
-                        table_ref,
                         db,
                         label,
-                        rt.clone(),
-                        current.clone(),
-                        driver_pool.clone(),
-                        conn_id,
-                        query_console.clone(),
+                        raw_nodes.clone(),
+                        pending_import.clone(),
                     );
                 }
                 8 => {

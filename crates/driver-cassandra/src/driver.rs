@@ -164,11 +164,7 @@ impl Driver for CassandraDriver {
             .await
             .map_err(|e| RdbError::Query(e.to_string()))?;
         if !res.is_rows() {
-            let upper = cql.trim_start().to_ascii_uppercase();
-            let is_dml = ["INSERT", "UPDATE", "DELETE"]
-                .iter()
-                .any(|kw| upper.starts_with(kw));
-            return Ok(ResultSet::Affected(u64::from(is_dml)));
+            return Ok(ResultSet::Affected(0));
         }
         let rows_res = res
             .into_rows_result()

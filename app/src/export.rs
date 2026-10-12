@@ -228,13 +228,6 @@ pub fn to_sql_insert(g: &GridModel, table: &str) -> String {
     out
 }
 
-/// Parsed table import payload ready for execution.
-#[derive(Debug)]
-pub enum ImportPayload {
-    WriteOps(Vec<rdb_core::write::WriteOp>),
-    SqlStatements(Vec<String>),
-}
-
 fn json_val_to_cell(v: &serde_json::Value) -> rdb_core::result::Cell {
     use rdb_core::result::Cell;
     match v {
@@ -254,54 +247,40 @@ fn json_val_to_cell(v: &serde_json::Value) -> rdb_core::result::Cell {
     }
 }
 
-fn json_obj_to_op(
-    table: &rdb_core::write::TableRef,
-    obj: &serde_json::Map<String, serde_json::Value>,
-) -> Option<rdb_core::write::WriteOp> {
-    let values: Vec<(String, rdb_core::result::Cell)> = obj
-        .iter()
-        .map(|(k, v)| (k.clone(), json_val_to_cell(v)))
-        .collect();
-    (!values.is_empty()).then(|| rdb_core::write::WriteOp::Insert {
-        table: table.clone(),
-        values,
-    })
-}
-
-/// Parse a JSON array of objects (or single object / NDJSON) into `WriteOp::Insert`s.
-pub fn parse_import_json(
-    table: &rdb_core::write::TableRef,
+fn parse_json_objects(
     content: &str,
-) -> Result<Vec<rdb_core::write::WriteOp>, String> {
+) -> Result<Vec<serde_json::Map<String, serde_json::Value>>, String> {
     let trimmed = content.trim();
     if trimmed.is_empty() {
         return Err("empty JSON file".into());
     }
-    let val: serde_json::Value =
-        serde_json::from_str(trimmed).map_err(|e| format!("invalid JSON: {e}"))?;
-    let mut ops = Vec::new();
-    match &val {
-        serde_json::Value::Array(arr) => {
-            for item in arr {
-                let obj = item
-                    .as_object()
-                    .ok_or_else(|| "JSON array items must be objects".to_string())?;
-                if let Some(op) = json_obj_to_op(table, obj) {
-                    ops.push(op);
-                }
-            }
-        }
-        serde_json::Value::Object(obj) => {
-            if let Some(op) = json_obj_to_op(table, obj) {
-                ops.push(op);
-            }
-        }
-        _ => return Err("JSON root must be an array of objects or an object".into()),
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        return match val {
+            serde_json::Value::Array(arr) => arr
+                .into_iter()
+                .map(|item| match item {
+                    serde_json::Value::Object(obj) => Ok(obj),
+                    _ => Err("JSON array items must be objects".to_string()),
+                })
+                .collect(),
+            serde_json::Value::Object(obj) => Ok(vec![obj]),
+            _ => Err("JSON root must be an array of objects or an object".into()),
+        };
     }
-    if ops.is_empty() {
-        return Err("no rows found in JSON".into());
+    let mut objs = Vec::new();
+    for (idx, line) in trimmed.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let val: serde_json::Value = serde_json::from_str(line)
+            .map_err(|e| format!("invalid JSON on line {}: {e}", idx + 1))?;
+        match val {
+            serde_json::Value::Object(obj) => objs.push(obj),
+            _ => return Err(format!("NDJSON line {} must be a JSON object", idx + 1)),
+        }
     }
-    Ok(ops)
+    Ok(objs)
 }
 
 fn parse_csv_records(content: &str) -> Vec<Vec<(String, bool)>> {
@@ -376,83 +355,261 @@ fn csv_cell_value(raw: &str, was_quoted: bool) -> rdb_core::result::Cell {
     Cell::Text(raw.to_string())
 }
 
-fn csv_row_to_op(
-    table: &rdb_core::write::TableRef,
+/// Parsed tabular/SQL import sheet backing the Import JSON / CSV Wizard preview.
+#[derive(Debug, Clone)]
+pub struct ImportSheet {
+    pub format_label: &'static str, // "JSON" | "CSV" | "SQL"
+    pub file_name: String,
+    pub size_bytes: usize,
+    pub headers: Vec<String>,
+    pub rows: Vec<Vec<rdb_core::result::Cell>>,
+    pub sql_statements: Vec<String>,
+}
+
+pub fn format_byte_size(bytes: usize) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+fn collect_json_headers(objs: &[serde_json::Map<String, serde_json::Value>]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    objs.iter()
+        .flat_map(|obj| obj.keys())
+        .filter(|k| seen.insert((*k).clone()))
+        .cloned()
+        .collect()
+}
+
+fn build_json_sheet_row(
     headers: &[String],
-    row: &[(String, bool)],
-) -> Option<rdb_core::write::WriteOp> {
-    let values: Vec<(String, rdb_core::result::Cell)> = headers
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Vec<rdb_core::result::Cell> {
+    headers
         .iter()
-        .zip(row.iter())
-        .filter(|(h, _)| !h.trim().is_empty())
-        .map(|(h, (val, quoted))| (h.trim().to_string(), csv_cell_value(val, *quoted)))
+        .map(|h| match obj.get(h) {
+            Some(v) => json_val_to_cell(v),
+            None => rdb_core::result::Cell::Null,
+        })
+        .collect()
+}
+
+fn parse_json_sheet(
+    file_name: String,
+    size_bytes: usize,
+    content: &str,
+) -> Result<ImportSheet, String> {
+    let objs = parse_json_objects(content)?;
+    let headers = collect_json_headers(&objs);
+    if headers.is_empty() {
+        return Err("no columns found in JSON".into());
+    }
+    let rows: Vec<Vec<rdb_core::result::Cell>> = objs
+        .iter()
+        .map(|obj| build_json_sheet_row(&headers, obj))
         .collect();
-    (!values.is_empty()).then(|| rdb_core::write::WriteOp::Insert {
-        table: table.clone(),
-        values,
+    Ok(ImportSheet {
+        format_label: "JSON",
+        file_name,
+        size_bytes,
+        headers,
+        rows,
+        sql_statements: Vec::new(),
     })
 }
 
-/// Parse an RFC-4180 CSV document (header row + data rows) into `WriteOp::Insert`s.
-pub fn parse_import_csv(
-    table: &rdb_core::write::TableRef,
+fn build_csv_sheet_row(headers: &[String], rec: &[(String, bool)]) -> Vec<rdb_core::result::Cell> {
+    (0..headers.len())
+        .map(|i| match rec.get(i) {
+            Some((v, q)) => csv_cell_value(v, *q),
+            None => rdb_core::result::Cell::Null,
+        })
+        .collect()
+}
+
+fn parse_csv_sheet(
+    file_name: String,
+    size_bytes: usize,
     content: &str,
-) -> Result<Vec<rdb_core::write::WriteOp>, String> {
+) -> Result<ImportSheet, String> {
     let records = parse_csv_records(content);
     let Some((header_row, data_rows)) = records.split_first() else {
         return Err("empty CSV file".into());
     };
-    let headers: Vec<String> = header_row.iter().map(|(h, _)| h.clone()).collect();
-    let mut ops = Vec::with_capacity(data_rows.len());
-    for (row_idx, r) in data_rows.iter().enumerate() {
-        if r.len() > headers.len() {
+    let headers: Vec<String> = header_row
+        .iter()
+        .map(|(h, _)| h.trim().to_string())
+        .collect();
+    if headers.is_empty() {
+        return Err("no header columns found in CSV".into());
+    }
+    let mut rows = Vec::with_capacity(data_rows.len());
+    for (row_idx, rec) in data_rows.iter().enumerate() {
+        if rec.len() != headers.len() {
             return Err(format!(
                 "CSV row {} has {} column(s), expected {}",
                 row_idx + 2,
-                r.len(),
+                rec.len(),
                 headers.len()
             ));
         }
-        if let Some(op) = csv_row_to_op(table, &headers, r) {
-            ops.push(op);
-        }
+        rows.push(build_csv_sheet_row(&headers, rec));
     }
-    if ops.is_empty() {
+    if rows.is_empty() {
         return Err("no data rows found in CSV".into());
     }
-    Ok(ops)
+    Ok(ImportSheet {
+        format_label: "CSV",
+        file_name,
+        size_bytes,
+        headers,
+        rows,
+        sql_statements: Vec::new(),
+    })
 }
 
-/// Dispatch an imported file by extension (`.sql`, `.json`, `.csv`) into an `ImportPayload`.
-pub fn parse_import_file(
-    table: &rdb_core::write::TableRef,
-    path: &str,
-    content: &str,
-) -> Result<ImportPayload, String> {
-    let ext = std::path::Path::new(path)
+pub fn parse_import_sheet(path: &str, content: &str) -> Result<ImportSheet, String> {
+    let p = std::path::Path::new(path);
+    let file_name = p
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("import")
+        .to_string();
+    let ext = p
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
+    let size_bytes = content.len();
     let trimmed = content.trim_start();
     if ext == "sql" {
         let stmts = crate::editor::split_statements(content);
         if stmts.is_empty() {
             return Err("no SQL statements found in file".into());
         }
-        Ok(ImportPayload::SqlStatements(stmts))
+        let rows = stmts
+            .iter()
+            .map(|s| vec![rdb_core::result::Cell::Text(s.clone())])
+            .collect();
+        Ok(ImportSheet {
+            format_label: "SQL",
+            file_name,
+            size_bytes,
+            headers: vec!["statement".into()],
+            rows,
+            sql_statements: stmts,
+        })
     } else if ext == "json"
         || (ext.is_empty() && (trimmed.starts_with('[') || trimmed.starts_with('{')))
     {
-        parse_import_json(table, content).map(ImportPayload::WriteOps)
+        parse_json_sheet(file_name, size_bytes, content)
     } else {
-        parse_import_csv(table, content).map(ImportPayload::WriteOps)
+        parse_csv_sheet(file_name, size_bytes, content)
     }
+}
+
+/// Auto-match file columns against `table_cols` according to `mode`
+/// (`"Match Columns by Name and Order"`, `"Match Columns by Name"`, `"Match Columns by Order"`).
+pub fn match_import_columns(
+    file_cols: &[String],
+    table_cols: &[String],
+    mode: &str,
+    create_table: bool,
+) -> Vec<String> {
+    if create_table {
+        return file_cols.to_vec();
+    }
+    file_cols
+        .iter()
+        .enumerate()
+        .map(|(i, fc)| {
+            if mode == "Match Columns by Order" {
+                return table_cols
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_else(|| "Do not import".into());
+            }
+            if let Some(found) = table_cols.iter().find(|tc| tc.eq_ignore_ascii_case(fc)) {
+                return found.clone();
+            }
+            if mode == "Match Columns by Name and Order" {
+                if let Some(by_pos) = table_cols.get(i) {
+                    if !file_cols
+                        .iter()
+                        .any(|other| other.eq_ignore_ascii_case(by_pos))
+                    {
+                        return by_pos.clone();
+                    }
+                }
+            }
+            "Do not import".into()
+        })
+        .collect()
+}
+
+/// Build `WriteOp::Insert` operations from an `ImportSheet` and user-chosen `target_cols`.
+pub fn build_import_ops_from_sheet(
+    sheet: &ImportSheet,
+    table: &rdb_core::write::TableRef,
+    target_cols: &[String],
+) -> Result<Vec<rdb_core::write::WriteOp>, String> {
+    if !sheet.sql_statements.is_empty() {
+        return Ok(Vec::new());
+    }
+    let active_cols: Vec<(usize, String)> = target_cols
+        .iter()
+        .enumerate()
+        .filter(|(_, tc)| !tc.is_empty() && tc.as_str() != "Do not import")
+        .map(|(i, tc)| (i, tc.clone()))
+        .collect();
+    if active_cols.is_empty() {
+        return Err(
+            "No columns matched — select target column(s) or enable 'Create new table'".into(),
+        );
+    }
+    let mut ops = Vec::with_capacity(sheet.rows.len());
+    for row in &sheet.rows {
+        let values: Vec<(String, rdb_core::result::Cell)> = active_cols
+            .iter()
+            .map(|(idx, col_name)| {
+                let cell = row
+                    .get(*idx)
+                    .cloned()
+                    .unwrap_or(rdb_core::result::Cell::Null);
+                (col_name.clone(), cell)
+            })
+            .collect();
+        ops.push(rdb_core::write::WriteOp::Insert {
+            table: table.clone(),
+            values,
+        });
+    }
+    Ok(ops)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse_import_json(
+        table: &rdb_core::write::TableRef,
+        content: &str,
+    ) -> Result<Vec<rdb_core::write::WriteOp>, String> {
+        let sheet = parse_json_sheet("data.json".into(), content.len(), content)?;
+        build_import_ops_from_sheet(&sheet, table, &sheet.headers)
+    }
+
+    fn parse_import_csv(
+        table: &rdb_core::write::TableRef,
+        content: &str,
+    ) -> Result<Vec<rdb_core::write::WriteOp>, String> {
+        let sheet = parse_csv_sheet("data.csv".into(), content.len(), content)?;
+        build_import_ops_from_sheet(&sheet, table, &sheet.headers)
+    }
 
     fn grid() -> GridModel {
         use crate::model::{VmCell, VmColumn};
@@ -664,19 +821,43 @@ mod tests {
 
     #[test]
     fn import_sql_splits_dump_statements() {
-        let table = rdb_core::write::TableRef::named("users");
         let sql = "INSERT INTO users (id, name) VALUES (1, 'a');\nINSERT INTO users (id, name) VALUES (2, 'b');";
-        match parse_import_file(&table, "dump.sql", sql).unwrap() {
-            ImportPayload::SqlStatements(stmts) => {
-                assert_eq!(
-                    stmts,
-                    vec![
-                        "INSERT INTO users (id, name) VALUES (1, 'a')",
-                        "INSERT INTO users (id, name) VALUES (2, 'b')",
-                    ]
-                );
-            }
-            other => panic!("expected SqlStatements, got {other:?}"),
-        }
+        let sheet = parse_import_sheet("dump.sql", sql).unwrap();
+        assert_eq!(
+            sheet.sql_statements,
+            vec![
+                "INSERT INTO users (id, name) VALUES (1, 'a')",
+                "INSERT INTO users (id, name) VALUES (2, 'b')",
+            ]
+        );
+    }
+
+    #[test]
+    fn import_csv_rejects_short_rows() {
+        let table = rdb_core::write::TableRef::named("users");
+        let err = parse_import_csv(&table, "id,name,email\n1,Alice\n").unwrap_err();
+        assert!(err.contains("CSV row 2 has 2 column(s), expected 3"));
+    }
+
+    #[test]
+    fn import_json_parses_ndjson_lines() {
+        let table = rdb_core::write::TableRef::named("users");
+        let ndjson = "{\"id\": 1, \"name\": \"A\"}\n{\"id\": 2, \"name\": \"B\"}\n";
+        let ops = parse_import_json(&table, ndjson).unwrap();
+        assert_eq!(ops.len(), 2);
+    }
+
+    #[test]
+    fn import_sheet_column_matching_and_ops_respect_mode() {
+        let sheet = parse_import_sheet("clean.json", "[{\"id\":1,\"code\":\"BBCA\"}]").unwrap();
+        assert_eq!(sheet.headers, vec!["id", "code"]);
+        assert_eq!(sheet.rows.len(), 1);
+        let schema_cols = vec!["code".to_string(), "name".to_string()];
+        let matched =
+            match_import_columns(&sheet.headers, &schema_cols, "Match Columns by Name", false);
+        assert_eq!(matched, vec!["Do not import", "code"]);
+        let table = rdb_core::write::TableRef::named("emiten");
+        let ops = build_import_ops_from_sheet(&sheet, &table, &matched).unwrap();
+        assert_eq!(ops.len(), 1);
     }
 }

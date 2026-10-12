@@ -252,10 +252,7 @@ impl Driver for ClickhouseDriver {
                 .execute()
                 .await
                 .map_err(|e| RdbError::Query(ch_err(&e.to_string())))?;
-            let is_dml = ["INSERT", "UPDATE", "DELETE"]
-                .iter()
-                .any(|kw| upper.starts_with(kw));
-            return Ok(ResultSet::Affected(u64::from(is_dml)));
+            return Ok(ResultSet::Affected(0));
         }
 
         let body = fetch_json_tagged(
