@@ -17,7 +17,6 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         active_tab_id,
         active_group1_tab_id,
         current_connection_id,
-        query_number,
         last_view,
         history_cap,
         cur_engine,
@@ -51,7 +50,6 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let workspace_tabs = workspace_tabs.clone();
         let active_tab_id = active_tab_id.clone();
         let current_connection_id = current_connection_id.clone();
-        let query_number = query_number.clone();
         let save_active_tab = save_active_tab.clone();
         let results = results.clone();
         let active_result = active_result.clone();
@@ -64,7 +62,6 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 return;
             };
             save_active_tab(&w);
-            let number = query_number.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
             // `current_connection_id` tracks both an explicit connect-click
             // and a plain tab-switch (restore_tab_for_pane keeps it aimed at
             // whichever tab is on screen), so it's always "what a new action
@@ -75,10 +72,13 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 .unwrap()
                 .clone()
                 .unwrap_or_default();
-            let id = format!("query:{connection}:{number}");
             let badge = connection_badge_info(&store.borrow(), &connection);
             let mut tabs = workspace_tabs.lock().unwrap();
+            let number = next_query_slot_number(&tabs, &connection);
+            let id = format!("query:{connection}:{number}");
+            let restored_sql = take_closed_sql_buffer(&connection, number);
             let mut tab = WorkspaceTab::sql(id.clone(), number);
+            tab.query_text = restored_sql.clone();
             tab.connection_id = (!connection.is_empty()).then(|| connection.clone());
             tab.engine = badge.engine;
             tab.connection_name = badge.name;
@@ -89,8 +89,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             set_workspace_tabs(&w, &tabs, Some(&id));
             save_query_tabs(&w, &tabs, Some(&id));
             drop(tabs);
-            load_editor_text(0, "");
-            // Fresh query tab starts with no result tabs.
+            load_editor_text(0, &restored_sql);
             results.lock().unwrap().clear();
             *active_result.lock().unwrap() = 0;
             let limit = browse.lock().unwrap().limit;
@@ -418,6 +417,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let last_view = last_view.clone();
         let displayed_grid = displayed_grid.clone();
         let guard_pending = guard_pending.clone();
+        let recent_queries = recent_queries.clone();
+        let history_cap = history_cap.clone();
+        let store = store.clone();
+        let rebuild_query_tree = rebuild_query_tree.clone();
         window.on_close_tab(move |requested| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -451,7 +454,24 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             }
             let removed_active =
                 active_tab_id.lock().unwrap().as_deref() == Some(&tabs[remove_at].id);
-            tabs.remove(remove_at);
+            let removed_tab = tabs.remove(remove_at);
+            stash_closed_sql_tab(&removed_tab);
+            if removed_tab.kind == "sql" && !removed_tab.query_text.trim().is_empty() {
+                let conn_color = removed_tab
+                    .connection_id
+                    .as_deref()
+                    .and_then(|cid| store.borrow().get(cid).and_then(|sc| sc.color.clone()));
+                record_recent(
+                    &recent_queries,
+                    &removed_tab.query_text,
+                    history_cap.get(),
+                    (!removed_tab.engine.is_empty()).then(|| removed_tab.engine.clone()),
+                    conn_color,
+                );
+                if w.get_sidebar_mode() == 2 {
+                    rebuild_query_tree("");
+                }
+            }
             if tabs.is_empty() {
                 *active_tab_id.lock().unwrap() = None;
                 set_workspace_tabs(&w, &tabs, None);
@@ -502,6 +522,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let save_p1_tab = save_p1_tab.clone();
         let restore_p1_tab = restore_p1_tab.clone();
         let active_tab_id = active_tab_id.clone();
+        let recent_queries = recent_queries.clone();
+        let history_cap = history_cap.clone();
+        let store = store.clone();
+        let rebuild_query_tree = rebuild_query_tree.clone();
         window.on_close_p1_tab(move |requested| {
             let Some(w) = weak.upgrade() else {
                 return;
@@ -519,7 +543,24 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             let mut tabs = workspace_tabs.lock().unwrap();
             let removed_active =
                 active_group1_tab_id.lock().unwrap().as_deref() == Some(&tabs[remove_at].id);
-            tabs.remove(remove_at);
+            let removed_tab = tabs.remove(remove_at);
+            stash_closed_sql_tab(&removed_tab);
+            if removed_tab.kind == "sql" && !removed_tab.query_text.trim().is_empty() {
+                let conn_color = removed_tab
+                    .connection_id
+                    .as_deref()
+                    .and_then(|cid| store.borrow().get(cid).and_then(|sc| sc.color.clone()));
+                record_recent(
+                    &recent_queries,
+                    &removed_tab.query_text,
+                    history_cap.get(),
+                    (!removed_tab.engine.is_empty()).then(|| removed_tab.engine.clone()),
+                    conn_color,
+                );
+                if w.get_sidebar_mode() == 2 {
+                    rebuild_query_tree("");
+                }
+            }
             let remaining = tabs
                 .iter()
                 .filter(|tab| tab.group == 1 && workspace_tab_visible(&w, tab))

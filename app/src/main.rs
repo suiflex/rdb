@@ -3097,6 +3097,83 @@ fn query_tabs_path() -> Option<std::path::PathBuf> {
     rdb_connstore::ConnStore::query_tabs_path().ok()
 }
 
+static CLOSED_QUERY_BUFFERS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, String>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Extract the 1-based slot number from a SQL tab's title (`"Query N"`) or
+/// id (`"query:<conn>:<N>"`).
+pub(crate) fn sql_tab_slot_number(tab: &WorkspaceTab) -> Option<usize> {
+    tab.title
+        .strip_prefix("Query ")
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .or_else(|| tab_id_number(&tab.id))
+        .filter(|&n| n >= 1)
+}
+
+/// Lowest 1-based query slot number (`1`, `2`, ...) not currently open for
+/// `connection_id`. Strictly isolated per connection: Connection A's open
+/// tabs never advance Connection B's slot numbering, and closing all SQL
+/// tabs on a connection resets its next slot to `Query 1`.
+pub(crate) fn next_query_slot_number(tabs: &[WorkspaceTab], connection_id: &str) -> usize {
+    let used: HashSet<usize> = tabs
+        .iter()
+        .filter(|t| t.kind == "sql" && t.connection_id.as_deref().unwrap_or("") == connection_id)
+        .filter_map(sql_tab_slot_number)
+        .collect();
+    (1usize..).find(|n| !used.contains(n)).unwrap_or(1)
+}
+
+pub(crate) fn stash_closed_sql_tab_in(
+    map: &mut std::collections::HashMap<String, String>,
+    tab: &WorkspaceTab,
+) {
+    if tab.kind != "sql" {
+        return;
+    }
+    let Some(conn_id) = tab.connection_id.as_deref().filter(|id| !id.is_empty()) else {
+        return;
+    };
+    if tab.query_text.trim().is_empty() {
+        return;
+    }
+    let slot = sql_tab_slot_number(tab).unwrap_or(1);
+    map.insert(format!("{conn_id}:{slot}"), tab.query_text.clone());
+}
+
+pub(crate) fn take_closed_sql_buffer_from(
+    map: &std::collections::HashMap<String, String>,
+    connection_id: &str,
+    slot: usize,
+) -> String {
+    if connection_id.is_empty() {
+        return String::new();
+    }
+    map.get(&format!("{connection_id}:{slot}"))
+        .cloned()
+        .unwrap_or_default()
+}
+
+pub(crate) fn stash_closed_sql_tab(tab: &WorkspaceTab) {
+    if mock::mock_mode() {
+        return;
+    }
+    if let Ok(mut map) = CLOSED_QUERY_BUFFERS.lock() {
+        stash_closed_sql_tab_in(&mut map, tab);
+    }
+}
+
+pub(crate) fn take_closed_sql_buffer(connection_id: &str, slot: usize) -> String {
+    if mock::mock_mode() {
+        return String::new();
+    }
+    CLOSED_QUERY_BUFFERS
+        .lock()
+        .ok()
+        .map(|map| take_closed_sql_buffer_from(&map, connection_id, slot))
+        .unwrap_or_default()
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 struct PersistedTabs {
     tabs: Vec<PersistedTab>,
@@ -3106,6 +3183,9 @@ struct PersistedTabs {
     active_p1: Option<String>,
     #[serde(default)]
     active_group: usize,
+    // Per-connection closed query tab buffers (`"<connection_id>:<slot>" -> sql`).
+    #[serde(default)]
+    closed_buffers: std::collections::HashMap<String, String>,
 }
 
 /// Persist the SQL tabs (kind == "sql") plus each group's active tab and the
@@ -3145,11 +3225,17 @@ fn save_query_tabs(w: &MainWindow, tabs: &[WorkspaceTab], active: Option<&str>) 
         .nth(w.get_p1_active_tab().max(0) as usize)
         .filter(|t| t.kind == "sql")
         .map(|t| t.id.clone());
+    let closed_buffers = CLOSED_QUERY_BUFFERS
+        .lock()
+        .ok()
+        .map(|m| m.clone())
+        .unwrap_or_default();
     let payload = PersistedTabs {
         tabs: sql,
         active,
         active_p1,
         active_group: (w.get_active_pane().max(0) as usize).min(1),
+        closed_buffers,
     };
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -3187,6 +3273,9 @@ fn load_query_tabs() -> (
     else {
         return (Vec::new(), None, None, 0, 0);
     };
+    if let Ok(mut map) = CLOSED_QUERY_BUFFERS.lock() {
+        *map = payload.closed_buffers;
+    }
     let tabs: Vec<WorkspaceTab> = payload
         .tabs
         .into_iter()
@@ -4899,8 +4988,9 @@ fn set_result_tabs(w: &MainWindow, pane: usize, results: &[StoredResult], active
 #[cfg(test)]
 mod fmt_tests {
     use super::{
-        cell_matches, filter_operators, parse_col_filter, replaceable_table_tab_index,
-        table_tab_id, workspace_tab_index, WorkspaceTab,
+        cell_matches, filter_operators, next_query_slot_number, parse_col_filter,
+        replaceable_table_tab_index, stash_closed_sql_tab_in, table_tab_id,
+        take_closed_sql_buffer_from, workspace_tab_index, WorkspaceTab,
     };
     #[test]
     fn col_filter_prefix_ops() {
@@ -4947,6 +5037,35 @@ mod fmt_tests {
             table_tab_id("conn-1", "app", "public", "users"),
             table_tab_id("conn-2", "app", "public", "users")
         );
+    }
+
+    #[test]
+    fn query_slot_and_closed_buffer_are_isolated_per_connection() {
+        let mut tabs = Vec::new();
+        assert_eq!(next_query_slot_number(&tabs, "conn-a"), 1);
+        assert_eq!(next_query_slot_number(&tabs, "conn-b"), 1);
+
+        let mut a1 = WorkspaceTab::sql("query:conn-a:1".into(), 1);
+        a1.connection_id = Some("conn-a".into());
+        a1.query_text = "SELECT * FROM only_in_a;".into();
+        tabs.push(a1.clone());
+
+        // With Query 1 open on conn-a, conn-a's next tab is Query 2, while conn-b is still Query 1.
+        assert_eq!(next_query_slot_number(&tabs, "conn-a"), 2);
+        assert_eq!(next_query_slot_number(&tabs, "conn-b"), 1);
+
+        let mut map = std::collections::HashMap::new();
+        stash_closed_sql_tab_in(&mut map, &a1);
+        tabs.clear();
+
+        // After closing Query 1 on conn-a, conn-a resets to Query 1 and restores its SQL,
+        // while conn-b's Query 1 stays completely empty.
+        assert_eq!(next_query_slot_number(&tabs, "conn-a"), 1);
+        assert_eq!(
+            take_closed_sql_buffer_from(&map, "conn-a", 1),
+            "SELECT * FROM only_in_a;"
+        );
+        assert_eq!(take_closed_sql_buffer_from(&map, "conn-b", 1), "");
     }
 
     #[test]
@@ -6764,6 +6883,7 @@ mod tests {
             active: Some("query:c:2".into()),
             active_p1: Some("query:c:1".into()),
             active_group: 1,
+            closed_buffers: Default::default(),
         };
         let json = serde_json::to_string(&payload).unwrap();
         let back: PersistedTabs = serde_json::from_str(&json).unwrap();
@@ -6798,6 +6918,7 @@ mod tests {
             active: None,
             active_p1: None,
             active_group: 0,
+            closed_buffers: Default::default(),
         };
         let json = serde_json::to_string(&payload).unwrap();
         let back: PersistedTabs = serde_json::from_str(&json).unwrap();
