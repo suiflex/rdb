@@ -322,7 +322,9 @@ async fn execute_import_sql(
 ) -> ImportOutcome {
     let total = stmts.len();
     let stop_on_error = insert_option == "STOP ON ERROR";
+    let skip_duplicates = insert_option == "SKIP DUPLICATES";
     let mut ok_count = 0usize;
+    let mut skipped_dups = 0usize;
     let mut failed_stmts = Vec::new();
     let mut first_err: Option<(usize, String)> = None;
     let mut log_entries = Vec::new();
@@ -341,6 +343,10 @@ async fn execute_import_sql(
             Ok(()) => ok_count += 1,
             Err(raw_err) => {
                 let clean = editor::strip_error_marker(&raw_err).into_owned();
+                if skip_duplicates && is_duplicate_db_error(&clean) {
+                    skipped_dups += 1;
+                    continue;
+                }
                 failed_stmts.push(stmt_num);
                 log_entries.push(format!("-- [import error stmt {stmt_num}] {clean}\n{stmt}"));
                 if first_err.is_none() {
@@ -354,8 +360,15 @@ async fn execute_import_sql(
     }
 
     if failed_stmts.is_empty() {
+        let summary = if skipped_dups > 0 {
+            format!(
+                "imported {ok_count}/{total} statement(s) ({skipped_dups} duplicate(s) skipped)"
+            )
+        } else {
+            format!("imported {ok_count} statement(s)")
+        };
         ImportOutcome {
-            summary: format!("imported {ok_count} statement(s)"),
+            summary,
             has_error: false,
             log_entries: vec![format!("-- imported {ok_count} statement(s)")],
         }

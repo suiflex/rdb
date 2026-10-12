@@ -932,37 +932,85 @@ struct Statement<'a> {
     text: &'a str,
 }
 
+#[derive(Clone, Copy)]
+enum StmtScanMode<'a> {
+    TopLevel,
+    LineComment,
+    BlockComment,
+    Quoted(u8),
+    DollarQuoted(&'a [u8]),
+}
+
+fn match_dollar_tag(bytes: &[u8], i: usize) -> Option<&[u8]> {
+    let tail = bytes.get(i..)?.strip_prefix(b"$")?;
+    let len = tail
+        .iter()
+        .take_while(|&&c| c.is_ascii_alphanumeric() || c == b'_')
+        .count();
+    let valid_start = len == 0 || !tail[0].is_ascii_digit();
+    (valid_start && tail.get(len) == Some(&b'$')).then(|| &bytes[i..i + len + 2])
+}
+
+fn step_top_level_stmt<'a>(bytes: &'a [u8], i: usize) -> (StmtScanMode<'a>, usize, bool) {
+    let b = bytes[i];
+    let next = bytes.get(i + 1).copied();
+    if b == b'-' && next == Some(b'-') {
+        return (StmtScanMode::LineComment, 2, false);
+    }
+    if b == b'/' && next == Some(b'*') {
+        return (StmtScanMode::BlockComment, 2, false);
+    }
+    if matches!(b, b'\'' | b'"' | b'`') {
+        return (StmtScanMode::Quoted(b), 1, false);
+    }
+    if let Some(tag) = match_dollar_tag(bytes, i) {
+        return (StmtScanMode::DollarQuoted(tag), tag.len(), false);
+    }
+    (StmtScanMode::TopLevel, 1, b == b';')
+}
+
 /// Scan SQL text into statements on top-level semicolons, ignoring semicolons
-/// inside single-quoted literals and `-- line comments`. Trailing `;` and
-/// blank/comment-only segments are dropped, so text with no real statement
-/// yields nothing and a single statement (no `;`) yields one.
+/// inside single/double/backtick/dollar-quoted literals and `--` / `/* ... */`
+/// comments. Trailing `;` and blank/comment-only segments are dropped, so text
+/// with no real statement yields nothing and a single statement (no `;`) yields one.
 fn scan_statements(text: &str) -> Vec<Statement<'_>> {
     let mut out: Vec<Statement> = Vec::new();
     if opens_block_body(text) {
         push_statement(&mut out, text, 0, text.len());
         return out;
     }
-    // Byte scan: every character this looks for is ASCII, and no byte of a
-    // multibyte character can equal one, so a byte index is always a char
-    // boundary here and the slices below are safe.
     let bytes = text.as_bytes();
     let mut seg_start = 0usize;
-    let mut in_str = false;
-    let mut in_comment = false;
+    let mut mode = StmtScanMode::TopLevel;
     let mut i = 0usize;
     while i < bytes.len() {
-        match bytes[i] {
-            b'\n' => in_comment = false,
-            _ if in_comment => {}
-            b'\'' => in_str = !in_str,
-            b'-' if !in_str && bytes.get(i + 1) == Some(&b'-') => in_comment = true,
-            b';' if !in_str => {
-                push_statement(&mut out, text, seg_start, i);
-                seg_start = i + 1;
+        let b = bytes[i];
+        let next = bytes.get(i + 1).copied();
+        let (next_mode, step) = match mode {
+            StmtScanMode::TopLevel => {
+                let (m, s, is_semi) = step_top_level_stmt(bytes, i);
+                if is_semi {
+                    push_statement(&mut out, text, seg_start, i);
+                    seg_start = i + 1;
+                }
+                (m, s)
             }
-            _ => {}
-        }
-        i += 1;
+            StmtScanMode::LineComment if b == b'\n' => (StmtScanMode::TopLevel, 1),
+            StmtScanMode::LineComment => (StmtScanMode::LineComment, 1),
+            StmtScanMode::BlockComment if b == b'*' && next == Some(b'/') => {
+                (StmtScanMode::TopLevel, 2)
+            }
+            StmtScanMode::BlockComment => (StmtScanMode::BlockComment, 1),
+            StmtScanMode::Quoted(q) if b == q && next == Some(q) => (StmtScanMode::Quoted(q), 2),
+            StmtScanMode::Quoted(q) if b == q => (StmtScanMode::TopLevel, 1),
+            StmtScanMode::Quoted(q) => (StmtScanMode::Quoted(q), 1),
+            StmtScanMode::DollarQuoted(tag) if bytes[i..].starts_with(tag) => {
+                (StmtScanMode::TopLevel, tag.len())
+            }
+            StmtScanMode::DollarQuoted(tag) => (StmtScanMode::DollarQuoted(tag), 1),
+        };
+        mode = next_mode;
+        i += step;
     }
     push_statement(&mut out, text, seg_start, text.len());
     out

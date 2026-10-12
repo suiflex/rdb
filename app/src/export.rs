@@ -830,6 +830,15 @@ mod tests {
                 "INSERT INTO users (id, name) VALUES (2, 'b')",
             ]
         );
+        let quoted_sql = "INSERT INTO \"my;table\" /* a;b */ VALUES (1, 'x');\nSELECT 2;";
+        let quoted_sheet = parse_import_sheet("quoted.sql", quoted_sql).unwrap();
+        assert_eq!(
+            quoted_sheet.sql_statements,
+            vec![
+                "INSERT INTO \"my;table\" /* a;b */ VALUES (1, 'x')",
+                "SELECT 2",
+            ]
+        );
     }
 
     #[test]
