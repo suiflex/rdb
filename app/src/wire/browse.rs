@@ -328,16 +328,29 @@ fn sql_tx_delimiters(
     }
 }
 
+/// Skips leading whitespace, `--` line comments and `/* */` block comments.
+fn skip_leading_sql_comments(mut s: &str) -> &str {
+    loop {
+        s = s.trim_start();
+        if let Some(rest) = s.strip_prefix("--") {
+            s = rest.split_once('\n').map_or("", |(_, after)| after);
+        } else if let Some(rest) = s.strip_prefix("/*") {
+            s = rest.split_once("*/").map_or("", |(_, after)| after);
+        } else {
+            return s;
+        }
+    }
+}
+
 fn has_explicit_tx_control(stmts: &[String]) -> bool {
     stmts.iter().any(|s| {
-        let first = s
-            .split_whitespace()
-            .next()
-            .unwrap_or("")
-            .trim_end_matches(';');
+        let body = skip_leading_sql_comments(s);
+        let end = body
+            .find(|c: char| !c.is_ascii_alphabetic())
+            .unwrap_or(body.len());
         matches!(
-            first.to_ascii_uppercase().as_str(),
-            "BEGIN" | "START" | "COMMIT" | "ROLLBACK"
+            body[..end].to_ascii_uppercase().as_str(),
+            "BEGIN" | "START" | "COMMIT" | "ROLLBACK" | "END"
         )
     })
 }
@@ -2012,6 +2025,41 @@ mod import_sql_tests {
             panic!("expected count result");
         };
         assert_eq!(rows[0][0].render(), "0");
+    }
+
+    #[test]
+    fn tx_control_detected_after_leading_comments() {
+        let has = |s: &str| has_explicit_tx_control(&[s.to_string()]);
+        assert!(has("-- header\nBEGIN"));
+        assert!(has("/* a */ -- b\n  begin;"));
+        assert!(has("COMMIT;"));
+        assert!(!has("-- BEGIN\nINSERT INTO t VALUES (1)"));
+        assert!(!has("/* COMMIT */ SELECT 1"));
+        assert!(!has("BEGINNING_TABLE"));
+    }
+
+    #[tokio::test]
+    async fn commented_explicit_begin_is_not_double_wrapped() {
+        let driver = sqlite().await;
+        sql(&driver, "CREATE TABLE items (id INTEGER)").await;
+        let outcome = execute_import_sql(
+            rdb_connstore::Engine::Sqlite,
+            &driver,
+            vec![
+                "-- dump header\nBEGIN".into(),
+                "INSERT INTO items VALUES (1)".into(),
+                "COMMIT".into(),
+            ],
+            "STOP ON ERROR",
+        )
+        .await;
+        assert!(!outcome.has_error, "{}", outcome.summary);
+        let rdb_core::result::ResultSet::Tabular { rows, .. } =
+            sql(&driver, "SELECT COUNT(*) FROM items").await
+        else {
+            panic!("expected count result");
+        };
+        assert_eq!(rows[0][0].render(), "1");
     }
 
     #[test]
