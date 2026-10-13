@@ -322,6 +322,8 @@ fn sql_tx_delimiters(
             Some(("BEGIN", "COMMIT", "ROLLBACK"))
         }
         rdb_connstore::Engine::Mssql => Some(("BEGIN TRANSACTION", "COMMIT", "ROLLBACK")),
+        // MySQL/MariaDB query() checks out a new pooled connection each time;
+        // separate delimiters cannot make a SQL script atomic there.
         _ => None,
     }
 }
@@ -357,11 +359,20 @@ async fn execute_import_sql(
 
     let tx_delims = if stop_on_error && !has_explicit_tx_control(&stmts) {
         if let Some((begin_sql, commit_sql, rollback_sql)) = sql_tx_delimiters(engine) {
-            driver
+            if let Err(e) = driver
                 .query(&rdb_core::query::Query::Sql(begin_sql.into()))
                 .await
-                .ok()
-                .map(|_| (commit_sql, rollback_sql))
+            {
+                let clean = editor::strip_error_marker(&e.to_string()).into_owned();
+                return ImportOutcome {
+                    summary: format!(
+                        "error: import aborted before execution (BEGIN failed: {clean})"
+                    ),
+                    has_error: true,
+                    log_entries: vec![format!("-- [import BEGIN failed] {clean}")],
+                };
+            }
+            Some((commit_sql, rollback_sql))
         } else {
             None
         }
@@ -400,10 +411,27 @@ async fn execute_import_sql(
     }
 
     if failed_stmts.is_empty() {
-        if let Some((commit_sql, _)) = tx_delims {
-            let _ = driver
+        if let Some((commit_sql, rollback_sql)) = tx_delims {
+            if let Err(e) = driver
                 .query(&rdb_core::query::Query::Sql(commit_sql.into()))
-                .await;
+                .await
+            {
+                let clean = editor::strip_error_marker(&e.to_string()).into_owned();
+                let rollback = driver
+                    .query(&rdb_core::query::Query::Sql(rollback_sql.into()))
+                    .await;
+                let detail = match rollback {
+                    Ok(_) => format!("COMMIT failed; rolled back: {clean}"),
+                    Err(rollback_err) => {
+                        format!("COMMIT failed: {clean}; ROLLBACK failed: {rollback_err}")
+                    }
+                };
+                return ImportOutcome {
+                    summary: format!("error: import not confirmed ({detail})"),
+                    has_error: true,
+                    log_entries: vec![format!("-- [import error] {detail}")],
+                };
+            }
         }
         let summary = if skipped_dups > 0 {
             format!(
@@ -420,22 +448,35 @@ async fn execute_import_sql(
     } else {
         let (_, detail) = first_err.unwrap_or_else(|| (1, "unknown error".into()));
         if let Some((_, rollback_sql)) = tx_delims {
-            let _ = driver
+            let rollback = driver
                 .query(&rdb_core::query::Query::Sql(rollback_sql.into()))
                 .await;
+            let summary = match rollback {
+                Ok(_) => {
+                    format!("error: import aborted (rolled back {total} statement(s)) — {detail}")
+                }
+                Err(e) => format!("error: import aborted; ROLLBACK failed: {e} — {detail}"),
+            };
             return ImportOutcome {
-                summary: format!(
-                    "error: import aborted (rolled back {total} statement(s)) — {detail}"
-                ),
+                summary,
                 has_error: true,
                 log_entries,
             };
         }
         let fail_count = failed_stmts.len();
         let stmts_list = format_failed_indices(&failed_stmts);
+        let partial_commit_note = if matches!(
+            engine,
+            rdb_connstore::Engine::MySql | rdb_connstore::Engine::MariaDb
+        ) && stop_on_error
+        {
+            "; earlier statements may already be committed"
+        } else {
+            ""
+        };
         ImportOutcome {
             summary: format!(
-                "error: imported {ok_count}/{total} statement(s); {fail_count} failed (stmt {stmts_list}: {detail})"
+                "error: imported {ok_count}/{total} statement(s); {fail_count} failed (stmt {stmts_list}: {detail}){partial_commit_note}"
             ),
             has_error: true,
             log_entries,
@@ -1849,5 +1890,87 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             );
             w.set_schema_tree(ModelRc::from(Rc::new(VecModel::from(rows))));
         });
+    }
+}
+
+#[cfg(test)]
+mod import_sql_tests {
+    use super::*;
+
+    async fn sqlite() -> AnyDriver {
+        AnyDriver::connect(
+            rdb_connstore::Engine::Sqlite,
+            &rdb_core::conn::ConnConfig {
+                host: String::new(),
+                port: 0,
+                user: String::new(),
+                database: Some(":memory:".into()),
+                password: None,
+                sslmode: rdb_core::conn::SslMode::Disable,
+                params: None,
+                ssh: None,
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn sql(driver: &AnyDriver, statement: &str) -> rdb_core::result::ResultSet {
+        driver
+            .query(&rdb_core::query::Query::Sql(statement.into()))
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn failed_begin_runs_no_import_statements() {
+        let driver = sqlite().await;
+        sql(&driver, "CREATE TABLE items (id INTEGER)").await;
+        sql(&driver, "BEGIN").await;
+        let outcome = execute_import_sql(
+            rdb_connstore::Engine::Sqlite,
+            &driver,
+            vec!["INSERT INTO items VALUES (1)".into()],
+            "STOP ON ERROR",
+        )
+        .await;
+        assert!(outcome.has_error);
+        assert!(outcome.summary.contains("BEGIN failed"));
+        let rdb_core::result::ResultSet::Tabular { rows, .. } =
+            sql(&driver, "SELECT COUNT(*) FROM items").await
+        else {
+            panic!("expected count result");
+        };
+        assert_eq!(rows[0][0].render(), "0");
+        sql(&driver, "ROLLBACK").await;
+    }
+
+    #[tokio::test]
+    async fn failed_commit_is_reported_and_rolled_back() {
+        let driver = sqlite().await;
+        sql(&driver, "PRAGMA foreign_keys = ON").await;
+        sql(&driver, "CREATE TABLE parent (id INTEGER PRIMARY KEY)").await;
+        sql(&driver, "CREATE TABLE child (parent_id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)").await;
+        let outcome = execute_import_sql(
+            rdb_connstore::Engine::Sqlite,
+            &driver,
+            vec!["INSERT INTO child VALUES (99)".into()],
+            "STOP ON ERROR",
+        )
+        .await;
+        assert!(outcome.has_error);
+        assert!(outcome.summary.contains("COMMIT failed"));
+        let rdb_core::result::ResultSet::Tabular { rows, .. } =
+            sql(&driver, "SELECT COUNT(*) FROM child").await
+        else {
+            panic!("expected count result");
+        };
+        assert_eq!(rows[0][0].render(), "0");
+    }
+
+    #[test]
+    fn mysql_sql_scripts_are_not_marked_atomic() {
+        assert!(sql_tx_delimiters(rdb_connstore::Engine::MySql).is_none());
+        assert!(sql_tx_delimiters(rdb_connstore::Engine::MariaDb).is_none());
     }
 }
