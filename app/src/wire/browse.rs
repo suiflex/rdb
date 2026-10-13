@@ -342,44 +342,58 @@ fn has_explicit_tx_control(stmts: &[String]) -> bool {
     })
 }
 
-async fn execute_import_sql(
+type ImportTxDelims = Option<(&'static str, &'static str)>;
+
+#[derive(Default)]
+struct ImportTally {
+    ok_count: usize,
+    skipped_dups: usize,
+    failed_stmts: Vec<usize>,
+    first_err: Option<(usize, String)>,
+    log_entries: Vec<String>,
+}
+
+async fn run_tx_sql(driver: &AnyDriver, sql: &str) -> Result<(), String> {
+    driver
+        .query(&rdb_core::query::Query::Sql(sql.into()))
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Opens the wrapping transaction for a STOP ON ERROR import. `Err` carries
+/// the outcome to report when BEGIN itself fails.
+async fn begin_import_tx(
     engine: rdb_connstore::Engine,
     driver: &AnyDriver,
-    stmts: Vec<String>,
-    insert_option: &str,
-) -> ImportOutcome {
-    let total = stmts.len();
-    let stop_on_error = insert_option == "STOP ON ERROR";
-    let skip_duplicates = insert_option == "SKIP DUPLICATES";
-    let mut ok_count = 0usize;
-    let mut skipped_dups = 0usize;
-    let mut failed_stmts = Vec::new();
-    let mut first_err: Option<(usize, String)> = None;
-    let mut log_entries = Vec::new();
-
-    let tx_delims = if stop_on_error && !has_explicit_tx_control(&stmts) {
-        if let Some((begin_sql, commit_sql, rollback_sql)) = sql_tx_delimiters(engine) {
-            if let Err(e) = driver
-                .query(&rdb_core::query::Query::Sql(begin_sql.into()))
-                .await
-            {
-                let clean = editor::strip_error_marker(&e.to_string()).into_owned();
-                return ImportOutcome {
-                    summary: format!(
-                        "error: import aborted before execution (BEGIN failed: {clean})"
-                    ),
-                    has_error: true,
-                    log_entries: vec![format!("-- [import BEGIN failed] {clean}")],
-                };
-            }
-            Some((commit_sql, rollback_sql))
-        } else {
-            None
-        }
-    } else {
-        None
+    stmts: &[String],
+    stop_on_error: bool,
+) -> Result<ImportTxDelims, ImportOutcome> {
+    if !stop_on_error || has_explicit_tx_control(stmts) {
+        return Ok(None);
+    }
+    let Some((begin_sql, commit_sql, rollback_sql)) = sql_tx_delimiters(engine) else {
+        return Ok(None);
     };
+    if let Err(e) = run_tx_sql(driver, begin_sql).await {
+        let clean = editor::strip_error_marker(&e).into_owned();
+        return Err(ImportOutcome {
+            summary: format!("error: import aborted before execution (BEGIN failed: {clean})"),
+            has_error: true,
+            log_entries: vec![format!("-- [import BEGIN failed] {clean}")],
+        });
+    }
+    Ok(Some((commit_sql, rollback_sql)))
+}
 
+async fn run_import_statements(
+    engine: rdb_connstore::Engine,
+    driver: &AnyDriver,
+    stmts: &[String],
+    stop_on_error: bool,
+    skip_duplicates: bool,
+) -> ImportTally {
+    let mut tally = ImportTally::default();
     for (idx, stmt) in stmts.iter().enumerate() {
         let stmt_num = idx + 1;
         let outcome = match query_parse::parse_query(engine, stmt) {
@@ -390,97 +404,129 @@ async fn execute_import_sql(
                 .map_err(|e| e.to_string()),
             Err(e) => Err(e),
         };
-        match outcome {
-            Ok(()) => ok_count += 1,
-            Err(raw_err) => {
-                let clean = editor::strip_error_marker(&raw_err).into_owned();
-                if skip_duplicates && is_duplicate_db_error(&clean) {
-                    skipped_dups += 1;
-                    continue;
-                }
-                failed_stmts.push(stmt_num);
-                log_entries.push(format!("-- [import error stmt {stmt_num}] {clean}\n{stmt}"));
-                if first_err.is_none() {
-                    first_err = Some((stmt_num, clean));
-                }
-                if stop_on_error {
-                    break;
-                }
-            }
+        let Err(raw_err) = outcome else {
+            tally.ok_count += 1;
+            continue;
+        };
+        let clean = editor::strip_error_marker(&raw_err).into_owned();
+        if skip_duplicates && is_duplicate_db_error(&clean) {
+            tally.skipped_dups += 1;
+            continue;
+        }
+        tally.failed_stmts.push(stmt_num);
+        tally
+            .log_entries
+            .push(format!("-- [import error stmt {stmt_num}] {clean}\n{stmt}"));
+        tally.first_err.get_or_insert((stmt_num, clean));
+        if stop_on_error {
+            break;
         }
     }
+    tally
+}
 
-    if failed_stmts.is_empty() {
-        if let Some((commit_sql, rollback_sql)) = tx_delims {
-            if let Err(e) = driver
-                .query(&rdb_core::query::Query::Sql(commit_sql.into()))
-                .await
-            {
-                let clean = editor::strip_error_marker(&e.to_string()).into_owned();
-                let rollback = driver
-                    .query(&rdb_core::query::Query::Sql(rollback_sql.into()))
-                    .await;
-                let detail = match rollback {
-                    Ok(_) => format!("COMMIT failed; rolled back: {clean}"),
-                    Err(rollback_err) => {
-                        format!("COMMIT failed: {clean}; ROLLBACK failed: {rollback_err}")
-                    }
-                };
-                return ImportOutcome {
-                    summary: format!("error: import not confirmed ({detail})"),
-                    has_error: true,
-                    log_entries: vec![format!("-- [import error] {detail}")],
-                };
-            }
-        }
-        let summary = if skipped_dups > 0 {
-            format!(
-                "imported {ok_count}/{total} statement(s) ({skipped_dups} duplicate(s) skipped)"
-            )
-        } else {
-            format!("imported {ok_count} statement(s)")
-        };
-        ImportOutcome {
-            summary,
-            has_error: false,
-            log_entries: vec![format!("-- imported {ok_count} statement(s)")],
-        }
-    } else {
-        let (_, detail) = first_err.unwrap_or_else(|| (1, "unknown error".into()));
-        if let Some((_, rollback_sql)) = tx_delims {
-            let rollback = driver
-                .query(&rdb_core::query::Query::Sql(rollback_sql.into()))
-                .await;
-            let summary = match rollback {
-                Ok(_) => {
-                    format!("error: import aborted (rolled back {total} statement(s)) — {detail}")
+async fn finish_import_ok(
+    driver: &AnyDriver,
+    tx_delims: ImportTxDelims,
+    tally: ImportTally,
+    total: usize,
+) -> ImportOutcome {
+    if let Some((commit_sql, rollback_sql)) = tx_delims {
+        if let Err(e) = run_tx_sql(driver, commit_sql).await {
+            let clean = editor::strip_error_marker(&e).into_owned();
+            let detail = match run_tx_sql(driver, rollback_sql).await {
+                Ok(()) => format!("COMMIT failed; rolled back: {clean}"),
+                Err(rollback_err) => {
+                    format!("COMMIT failed: {clean}; ROLLBACK failed: {rollback_err}")
                 }
-                Err(e) => format!("error: import aborted; ROLLBACK failed: {e} — {detail}"),
             };
             return ImportOutcome {
-                summary,
+                summary: format!("error: import not confirmed ({detail})"),
                 has_error: true,
-                log_entries,
+                log_entries: vec![format!("-- [import error] {detail}")],
             };
         }
-        let fail_count = failed_stmts.len();
-        let stmts_list = format_failed_indices(&failed_stmts);
-        let partial_commit_note = if matches!(
-            engine,
-            rdb_connstore::Engine::MySql | rdb_connstore::Engine::MariaDb
-        ) && stop_on_error
-        {
-            "; earlier statements may already be committed"
-        } else {
-            ""
+    }
+    let ImportTally {
+        ok_count,
+        skipped_dups,
+        ..
+    } = tally;
+    let summary = if skipped_dups > 0 {
+        format!("imported {ok_count}/{total} statement(s) ({skipped_dups} duplicate(s) skipped)")
+    } else {
+        format!("imported {ok_count} statement(s)")
+    };
+    ImportOutcome {
+        summary,
+        has_error: false,
+        log_entries: vec![format!("-- imported {ok_count} statement(s)")],
+    }
+}
+
+async fn finish_import_err(
+    engine: rdb_connstore::Engine,
+    driver: &AnyDriver,
+    tx_delims: ImportTxDelims,
+    tally: ImportTally,
+    total: usize,
+    stop_on_error: bool,
+) -> ImportOutcome {
+    let (_, detail) = tally
+        .first_err
+        .unwrap_or_else(|| (1, "unknown error".into()));
+    if let Some((_, rollback_sql)) = tx_delims {
+        let summary = match run_tx_sql(driver, rollback_sql).await {
+            Ok(()) => {
+                format!("error: import aborted (rolled back {total} statement(s)) — {detail}")
+            }
+            Err(e) => format!("error: import aborted; ROLLBACK failed: {e} — {detail}"),
         };
-        ImportOutcome {
-            summary: format!(
-                "error: imported {ok_count}/{total} statement(s); {fail_count} failed (stmt {stmts_list}: {detail}){partial_commit_note}"
-            ),
+        return ImportOutcome {
+            summary,
             has_error: true,
-            log_entries,
-        }
+            log_entries: tally.log_entries,
+        };
+    }
+    let ok_count = tally.ok_count;
+    let fail_count = tally.failed_stmts.len();
+    let stmts_list = format_failed_indices(&tally.failed_stmts);
+    let mysql_family = matches!(
+        engine,
+        rdb_connstore::Engine::MySql | rdb_connstore::Engine::MariaDb
+    );
+    let partial_commit_note = if mysql_family && stop_on_error {
+        "; earlier statements may already be committed"
+    } else {
+        ""
+    };
+    ImportOutcome {
+        summary: format!(
+            "error: imported {ok_count}/{total} statement(s); {fail_count} failed (stmt {stmts_list}: {detail}){partial_commit_note}"
+        ),
+        has_error: true,
+        log_entries: tally.log_entries,
+    }
+}
+
+async fn execute_import_sql(
+    engine: rdb_connstore::Engine,
+    driver: &AnyDriver,
+    stmts: Vec<String>,
+    insert_option: &str,
+) -> ImportOutcome {
+    let total = stmts.len();
+    let stop_on_error = insert_option == "STOP ON ERROR";
+    let skip_duplicates = insert_option == "SKIP DUPLICATES";
+    let tx_delims = match begin_import_tx(engine, driver, &stmts, stop_on_error).await {
+        Ok(delims) => delims,
+        Err(outcome) => return outcome,
+    };
+    let tally = run_import_statements(engine, driver, &stmts, stop_on_error, skip_duplicates).await;
+    if tally.failed_stmts.is_empty() {
+        finish_import_ok(driver, tx_delims, tally, total).await
+    } else {
+        finish_import_err(engine, driver, tx_delims, tally, total, stop_on_error).await
     }
 }
 
