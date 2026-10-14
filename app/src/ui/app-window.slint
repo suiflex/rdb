@@ -3,13 +3,13 @@ export { Theme }
 import { Tokens } from "tokens.slint";
 export { Tokens }
 import {
-    CheckBox, CheckState, CircularProgressIndicator, DropDownMenu, LinearProgressIndicator, MaterialPalette, MaterialScheme,
+    CheckBox, CheckState, CircularProgressIndicator, LinearProgressIndicator, MaterialPalette, MaterialScheme,
     MaterialTypography, StateLayer, ToolTipState,
     // Aliased: the native MenuBar below uses the built-in `MenuItem` element.
     MenuItem as MaterialMenuItem
 } from "@material";
 import {
-    AppMenu, SearchCommandPill, BreadcrumbChip, DbBadge, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SelectBox, SettingsSectionHeader, TextButton, Toggle, ToggleRow, ChoiceRow, DangerButton, Tooltip, TooltipArea, Shortcut
+    AppMenu, IndexDropDown, SearchCommandPill, BreadcrumbChip, DbBadge, IconButton, OutlineChip, PrimaryButton, SecondaryButton, SelectBox, SettingsSectionHeader, TextButton, Toggle, ToggleRow, ChoiceRow, DangerButton, Tooltip, TooltipArea, Shortcut
 } from "components.slint";
 export { Shortcut }
 import { NavCluster } from "nav-cluster.slint";
@@ -3520,10 +3520,9 @@ callback create-table-commit();
                                     font-size: 13px;
                                 }
                             }
-                            // Material DropDownMenu only fills its text when
-                            // current-index changes, so seed it in init (the
-                            // settings content is rebuilt on every open).
-                            DropDownMenu {
+                            // App-owned dropdown re-seeds the selected label
+                            // whenever the settings content is rebuilt.
+                            IndexDropDown {
                                 width: 160px;
                                 items: [
                                     { text: "System", enabled: true },
@@ -3591,7 +3590,7 @@ callback create-table-commit();
                                     font-size: 13px;
                                 }
                             }
-                            DropDownMenu {
+                            IndexDropDown {
                                 width: 128px;
                                 items: [
                                     { text: "25", enabled: true },
@@ -3623,7 +3622,7 @@ callback create-table-commit();
                                     font-size: 13px;
                                 }
                             }
-                            DropDownMenu {
+                            IndexDropDown {
                                 width: 128px;
                                 items: [
                                     { text: "50", enabled: true },
