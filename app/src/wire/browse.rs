@@ -314,18 +314,33 @@ async fn execute_import_ops(
     }
 }
 
-fn sql_tx_delimiters(
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ImportTxSpec {
+    begin: Option<&'static str>,
+}
+
+fn sql_tx_spec(
     engine: rdb_connstore::Engine,
-) -> Option<(&'static str, &'static str, &'static str)> {
-    match engine {
-        rdb_connstore::Engine::Postgres | rdb_connstore::Engine::Sqlite => {
-            Some(("BEGIN", "COMMIT", "ROLLBACK"))
-        }
-        rdb_connstore::Engine::Mssql => Some(("BEGIN TRANSACTION", "COMMIT", "ROLLBACK")),
+    stop_on_error: bool,
+    has_explicit_tx_control: bool,
+) -> Option<ImportTxSpec> {
+    if has_explicit_tx_control {
+        return None;
+    }
+    let spec = match engine {
+        rdb_connstore::Engine::Postgres | rdb_connstore::Engine::Sqlite => ImportTxSpec {
+            begin: Some("BEGIN"),
+        },
+        rdb_connstore::Engine::Mssql => ImportTxSpec {
+            begin: Some("BEGIN TRANSACTION"),
+        },
+        // Oracle starts transactions implicitly on DML; commit/rollback use its session API.
+        rdb_connstore::Engine::Oracle => ImportTxSpec { begin: None },
         // MySQL/MariaDB query() checks out a new pooled connection each time;
         // separate delimiters cannot make a SQL script atomic there.
-        _ => None,
-    }
+        _ => return None,
+    };
+    (stop_on_error || spec.begin.is_none()).then_some(spec)
 }
 
 /// Skips leading whitespace, `--` line comments and `/* */` block comments.
@@ -355,7 +370,7 @@ fn has_explicit_tx_control(stmts: &[String]) -> bool {
     })
 }
 
-type ImportTxDelims = Option<(&'static str, &'static str)>;
+type ImportTxDelims = Option<ImportTxSpec>;
 
 #[derive(Default)]
 struct ImportTally {
@@ -374,29 +389,28 @@ async fn run_tx_sql(driver: &AnyDriver, sql: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// Opens the wrapping transaction for a STOP ON ERROR import. `Err` carries
-/// the outcome to report when BEGIN itself fails.
+/// Prepares a transaction for STOP ON ERROR imports and Oracle's implicit DML transaction.
+/// `Err` carries the outcome to report when BEGIN itself fails.
 async fn begin_import_tx(
     engine: rdb_connstore::Engine,
     driver: &AnyDriver,
     stmts: &[String],
     stop_on_error: bool,
 ) -> Result<ImportTxDelims, ImportOutcome> {
-    if !stop_on_error || has_explicit_tx_control(stmts) {
-        return Ok(None);
-    }
-    let Some((begin_sql, commit_sql, rollback_sql)) = sql_tx_delimiters(engine) else {
+    let Some(tx_spec) = sql_tx_spec(engine, stop_on_error, has_explicit_tx_control(stmts)) else {
         return Ok(None);
     };
-    if let Err(e) = run_tx_sql(driver, begin_sql).await {
-        let clean = editor::strip_error_marker(&e).into_owned();
-        return Err(ImportOutcome {
-            summary: format!("error: import aborted before execution (BEGIN failed: {clean})"),
-            has_error: true,
-            log_entries: vec![format!("-- [import BEGIN failed] {clean}")],
-        });
+    if let Some(begin_sql) = tx_spec.begin {
+        if let Err(e) = run_tx_sql(driver, begin_sql).await {
+            let clean = editor::strip_error_marker(&e).into_owned();
+            return Err(ImportOutcome {
+                summary: format!("error: import aborted before execution (BEGIN failed: {clean})"),
+                has_error: true,
+                log_entries: vec![format!("-- [import BEGIN failed] {clean}")],
+            });
+        }
     }
-    Ok(Some((commit_sql, rollback_sql)))
+    Ok(Some(tx_spec))
 }
 
 async fn run_import_statements(
@@ -444,10 +458,10 @@ async fn finish_import_ok(
     tally: ImportTally,
     total: usize,
 ) -> ImportOutcome {
-    if let Some((commit_sql, rollback_sql)) = tx_delims {
-        if let Err(e) = run_tx_sql(driver, commit_sql).await {
-            let clean = editor::strip_error_marker(&e).into_owned();
-            let detail = match run_tx_sql(driver, rollback_sql).await {
+    if tx_delims.is_some() {
+        if let Err(e) = driver.commit_transaction().await {
+            let clean = editor::strip_error_marker(&e.to_string()).into_owned();
+            let detail = match driver.rollback_transaction().await {
                 Ok(()) => format!("COMMIT failed; rolled back: {clean}"),
                 Err(rollback_err) => {
                     format!("COMMIT failed: {clean}; ROLLBACK failed: {rollback_err}")
@@ -488,18 +502,29 @@ async fn finish_import_err(
     let (_, detail) = tally
         .first_err
         .unwrap_or_else(|| (1, "unknown error".into()));
-    if let Some((_, rollback_sql)) = tx_delims {
-        let summary = match run_tx_sql(driver, rollback_sql).await {
-            Ok(()) => {
-                format!("error: import aborted (rolled back {total} statement(s)) — {detail}")
-            }
-            Err(e) => format!("error: import aborted; ROLLBACK failed: {e} — {detail}"),
-        };
-        return ImportOutcome {
-            summary,
-            has_error: true,
-            log_entries: tally.log_entries,
-        };
+    if tx_delims.is_some() {
+        if stop_on_error {
+            let summary = match driver.rollback_transaction().await {
+                Ok(()) => {
+                    format!("error: import aborted (rolled back {total} statement(s)) — {detail}")
+                }
+                Err(e) => format!("error: import aborted; ROLLBACK failed: {e} — {detail}"),
+            };
+            return ImportOutcome {
+                summary,
+                has_error: true,
+                log_entries: tally.log_entries,
+            };
+        }
+        if let Err(e) = driver.commit_transaction().await {
+            return ImportOutcome {
+                summary: format!(
+                    "error: imported statements could not be committed: {e} — {detail}"
+                ),
+                has_error: true,
+                log_entries: tally.log_entries,
+            };
+        }
     }
     let ok_count = tally.ok_count;
     let fail_count = tally.failed_stmts.len();
@@ -2063,8 +2088,27 @@ mod import_sql_tests {
     }
 
     #[test]
-    fn mysql_sql_scripts_are_not_marked_atomic() {
-        assert!(sql_tx_delimiters(rdb_connstore::Engine::MySql).is_none());
-        assert!(sql_tx_delimiters(rdb_connstore::Engine::MariaDb).is_none());
+    fn import_tx_policy_commits_oracle_implicit_dml() {
+        let oracle = Some(ImportTxSpec { begin: None });
+        assert_eq!(
+            sql_tx_spec(rdb_connstore::Engine::Oracle, true, false),
+            oracle
+        );
+        assert_eq!(
+            sql_tx_spec(rdb_connstore::Engine::Oracle, false, false),
+            oracle
+        );
+        assert_eq!(sql_tx_spec(rdb_connstore::Engine::Oracle, true, true), None);
+        assert_eq!(
+            sql_tx_spec(rdb_connstore::Engine::Postgres, true, false),
+            Some(ImportTxSpec {
+                begin: Some("BEGIN")
+            })
+        );
+        assert_eq!(
+            sql_tx_spec(rdb_connstore::Engine::Postgres, false, false),
+            None
+        );
+        assert_eq!(sql_tx_spec(rdb_connstore::Engine::MySql, true, false), None);
     }
 }
