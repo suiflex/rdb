@@ -228,7 +228,7 @@ pub fn to_sql_insert(g: &GridModel, table: &str) -> String {
     out
 }
 
-fn json_val_to_cell(v: &serde_json::Value) -> rdb_core::result::Cell {
+fn json_val_to_cell(v: &serde_json::Value, large_integer_prefix: &str) -> rdb_core::result::Cell {
     use rdb_core::result::Cell;
     match v {
         serde_json::Value::Null => Cell::Null,
@@ -236,60 +236,153 @@ fn json_val_to_cell(v: &serde_json::Value) -> rdb_core::result::Cell {
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Cell::Int(i)
-            } else if let Some(f) = n.as_f64() {
+            } else if n.is_u64() {
+                Cell::Text(n.to_string())
+            } else if let Some(f) = n.as_f64().filter(|f| f.is_finite()) {
                 Cell::Float(f)
             } else {
                 Cell::Text(n.to_string())
             }
         }
-        serde_json::Value::String(s) => Cell::Text(s.clone()),
+        serde_json::Value::String(s) => Cell::Text(
+            s.strip_prefix(large_integer_prefix)
+                .unwrap_or(s)
+                .to_string(),
+        ),
         other => Cell::Text(other.to_string()),
     }
 }
 
+const LARGE_JSON_INTEGER_PREFIX: &str = "__rdb_large_json_integer_";
+
+fn json_strings_contain(content: &str, needle: &str) -> bool {
+    let mut chars = content.char_indices();
+    while let Some((start, c)) = chars.next() {
+        if c != '"' {
+            continue;
+        }
+        let mut escaped = false;
+        for (end, c) in chars.by_ref() {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                if serde_json::from_str::<String>(&content[start..=end])
+                    .is_ok_and(|value| value.contains(needle))
+                {
+                    return true;
+                }
+                break;
+            }
+        }
+    }
+    false
+}
+
+fn preserve_large_json_integers(content: &str, prefix: &str) -> String {
+    let mut output = String::with_capacity(content.len());
+    let mut chars = content.char_indices().peekable();
+    let mut in_string = false;
+    let mut escaped = false;
+
+    while let Some((_, c)) = chars.next() {
+        if in_string {
+            output.push(c);
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+        } else if c == '"' {
+            in_string = true;
+            output.push(c);
+        } else if c == '-' || c.is_ascii_digit() {
+            let mut token = String::new();
+            token.push(c);
+            while let Some(&(_, next)) = chars.peek() {
+                if next.is_ascii_digit() || matches!(next, '.' | 'e' | 'E' | '+' | '-') {
+                    token.push(next);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            let digits = token.strip_prefix('-').unwrap_or(&token);
+            let valid_integer = !digits.is_empty()
+                && digits.bytes().all(|b| b.is_ascii_digit())
+                && (digits == "0" || !digits.starts_with('0'));
+            if valid_integer && token.parse::<i64>().is_err() && token.parse::<u64>().is_err() {
+                output.push('"');
+                output.push_str(prefix);
+                output.push_str(&token);
+                output.push('"');
+            } else {
+                output.push_str(&token);
+            }
+        } else {
+            output.push(c);
+        }
+    }
+    output
+}
+
 fn parse_json_objects(
     content: &str,
-) -> Result<Vec<serde_json::Map<String, serde_json::Value>>, String> {
-    let trimmed = content.trim();
+) -> Result<(Vec<serde_json::Map<String, serde_json::Value>>, String), String> {
+    let mut large_integer_prefix = LARGE_JSON_INTEGER_PREFIX.to_string();
+    while content.contains(&large_integer_prefix)
+        || json_strings_contain(content, &large_integer_prefix)
+    {
+        large_integer_prefix.push('_');
+    }
+    let preserved = preserve_large_json_integers(content, &large_integer_prefix);
+    let trimmed = preserved.trim();
     if trimmed.is_empty() {
         return Err("empty JSON file".into());
     }
-    if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
-        return match val {
+    let objs = if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        match val {
             serde_json::Value::Array(arr) => arr
                 .into_iter()
                 .map(|item| match item {
                     serde_json::Value::Object(obj) => Ok(obj),
                     _ => Err("JSON array items must be objects".to_string()),
                 })
-                .collect(),
-            serde_json::Value::Object(obj) => Ok(vec![obj]),
-            _ => Err("JSON root must be an array of objects or an object".into()),
-        };
-    }
-    let mut objs = Vec::new();
-    for (idx, line) in trimmed.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
+                .collect::<Result<Vec<_>, _>>()?,
+            serde_json::Value::Object(obj) => vec![obj],
+            _ => return Err("JSON root must be an array of objects or an object".into()),
         }
-        let val: serde_json::Value = serde_json::from_str(line)
-            .map_err(|e| format!("invalid JSON on line {}: {e}", idx + 1))?;
-        match val {
-            serde_json::Value::Object(obj) => objs.push(obj),
-            _ => return Err(format!("NDJSON line {} must be a JSON object", idx + 1)),
+    } else {
+        let mut objs = Vec::new();
+        for (idx, line) in trimmed.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let val: serde_json::Value = serde_json::from_str(line)
+                .map_err(|e| format!("invalid JSON on line {}: {e}", idx + 1))?;
+            match val {
+                serde_json::Value::Object(obj) => objs.push(obj),
+                _ => return Err(format!("NDJSON line {} must be a JSON object", idx + 1)),
+            }
         }
-    }
-    Ok(objs)
+        objs
+    };
+    Ok((objs, large_integer_prefix))
 }
 
-fn parse_csv_records(content: &str) -> Vec<Vec<(String, bool)>> {
+fn parse_csv_records(content: &str) -> Result<Vec<Vec<(String, bool)>>, String> {
     let mut rows: Vec<Vec<(String, bool)>> = Vec::new();
     let mut cur_row: Vec<(String, bool)> = Vec::new();
     let mut field = String::new();
     let mut in_quotes = false;
+    let mut after_quote = false;
     let mut was_quoted = false;
     let mut chars = content.chars().peekable();
+    let mut record_number = 1;
 
     while let Some(c) = chars.next() {
         if in_quotes {
@@ -299,13 +392,43 @@ fn parse_csv_records(content: &str) -> Vec<Vec<(String, bool)>> {
                     field.push('"');
                 } else {
                     in_quotes = false;
+                    after_quote = true;
                 }
             } else {
                 field.push(c);
             }
-        } else if c == '"' && field.is_empty() {
-            in_quotes = true;
-            was_quoted = true;
+        } else if after_quote {
+            match c {
+                ',' => {
+                    cur_row.push((std::mem::take(&mut field), was_quoted));
+                    was_quoted = false;
+                    after_quote = false;
+                }
+                '\r' | '\n' => {
+                    if c == '\r' && chars.peek() == Some(&'\n') {
+                        chars.next();
+                    }
+                    cur_row.push((std::mem::take(&mut field), was_quoted));
+                    was_quoted = false;
+                    after_quote = false;
+                    rows.push(std::mem::take(&mut cur_row));
+                    record_number += 1;
+                }
+                _ => {
+                    return Err(format!(
+                        "invalid CSV character {c:?} after closing quote in record {record_number}"
+                    ));
+                }
+            }
+        } else if c == '"' {
+            if field.is_empty() {
+                in_quotes = true;
+                was_quoted = true;
+            } else {
+                return Err(format!(
+                    "unexpected quote in unquoted CSV field in record {record_number}"
+                ));
+            }
         } else if c == ',' {
             cur_row.push((std::mem::take(&mut field), was_quoted));
             was_quoted = false;
@@ -320,17 +443,23 @@ fn parse_csv_records(content: &str) -> Vec<Vec<(String, bool)>> {
             } else {
                 cur_row.clear();
             }
+            record_number += 1;
         } else {
             field.push(c);
         }
     }
-    if !field.is_empty() || was_quoted || !cur_row.is_empty() {
+    if in_quotes {
+        return Err(format!(
+            "unclosed quoted CSV field in record {record_number}"
+        ));
+    }
+    if !field.is_empty() || was_quoted || !cur_row.is_empty() || after_quote {
         cur_row.push((field, was_quoted));
         if cur_row.len() > 1 || !cur_row[0].0.is_empty() || cur_row[0].1 {
             rows.push(cur_row);
         }
     }
-    rows
+    Ok(rows)
 }
 
 fn csv_cell_value(raw: &str, was_quoted: bool) -> rdb_core::result::Cell {
@@ -345,11 +474,24 @@ fn csv_cell_value(raw: &str, was_quoted: bool) -> rdb_core::result::Cell {
         if raw.eq_ignore_ascii_case("false") {
             return Cell::Bool(false);
         }
-        if let Ok(i) = raw.parse::<i64>() {
-            return Cell::Int(i);
+        let digits = raw
+            .strip_prefix('+')
+            .or_else(|| raw.strip_prefix('-'))
+            .unwrap_or(raw);
+        let is_integer = !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit());
+        let has_leading_zero = digits.len() > 1 && digits.starts_with('0');
+        if is_integer {
+            if !has_leading_zero {
+                if let Ok(i) = raw.parse::<i64>() {
+                    return Cell::Int(i);
+                }
+            }
+            return Cell::Text(raw.to_string());
         }
         if let Ok(f) = raw.parse::<f64>() {
-            return Cell::Float(f);
+            if f.is_finite() {
+                return Cell::Float(f);
+            }
         }
     }
     Cell::Text(raw.to_string())
@@ -388,11 +530,12 @@ fn collect_json_headers(objs: &[serde_json::Map<String, serde_json::Value>]) -> 
 fn build_json_sheet_row(
     headers: &[String],
     obj: &serde_json::Map<String, serde_json::Value>,
+    large_integer_prefix: &str,
 ) -> Vec<rdb_core::result::Cell> {
     headers
         .iter()
         .map(|h| match obj.get(h) {
-            Some(v) => json_val_to_cell(v),
+            Some(v) => json_val_to_cell(v, large_integer_prefix),
             None => rdb_core::result::Cell::Null,
         })
         .collect()
@@ -403,14 +546,14 @@ fn parse_json_sheet(
     size_bytes: usize,
     content: &str,
 ) -> Result<ImportSheet, String> {
-    let objs = parse_json_objects(content)?;
+    let (objs, large_integer_prefix) = parse_json_objects(content)?;
     let headers = collect_json_headers(&objs);
     if headers.is_empty() {
         return Err("no columns found in JSON".into());
     }
     let rows: Vec<Vec<rdb_core::result::Cell>> = objs
         .iter()
-        .map(|obj| build_json_sheet_row(&headers, obj))
+        .map(|obj| build_json_sheet_row(&headers, obj, &large_integer_prefix))
         .collect();
     Ok(ImportSheet {
         format_label: "JSON",
@@ -436,7 +579,8 @@ fn parse_csv_sheet(
     size_bytes: usize,
     content: &str,
 ) -> Result<ImportSheet, String> {
-    let records = parse_csv_records(content);
+    let content = content.strip_prefix('\u{feff}').unwrap_or(content);
+    let records = parse_csv_records(content)?;
     let Some((header_row, data_rows)) = records.split_first() else {
         return Err("empty CSV file".into());
     };
@@ -839,6 +983,105 @@ mod tests {
                 "SELECT 2",
             ]
         );
+    }
+
+    #[test]
+    fn import_csv_preserves_text_and_exact_large_integers() {
+        use rdb_core::result::Cell;
+
+        let sheet = parse_csv_sheet(
+            "data.csv".into(),
+            0,
+            "id,leading,nan,pos_inf,neg_inf,big,empty\n1,007,NaN,inf,-Infinity,9223372036854775808,\"\"\n",
+        )
+        .unwrap();
+        assert!(matches!(sheet.rows[0][0], Cell::Int(1)));
+        for (index, expected) in [
+            (1, "007"),
+            (2, "NaN"),
+            (3, "inf"),
+            (4, "-Infinity"),
+            (5, "9223372036854775808"),
+        ] {
+            assert!(matches!(&sheet.rows[0][index], Cell::Text(value) if value == expected));
+        }
+        assert!(matches!(&sheet.rows[0][6], Cell::Text(value) if value.is_empty()));
+    }
+
+    #[test]
+    fn import_csv_strips_bom_and_keeps_rfc4180_quoted_content() {
+        let clean = parse_csv_sheet(
+            "clean.csv".into(),
+            0,
+            "name,note\nAda,\"said \"\"hello\"\"\nand left\"\n",
+        )
+        .unwrap();
+        let bom = parse_csv_sheet(
+            "bom.csv".into(),
+            0,
+            "\u{feff}name,note\nAda,\"said \"\"hello\"\"\nand left\"\n",
+        )
+        .unwrap();
+        assert_eq!(bom.headers, clean.headers);
+        assert_eq!(bom.headers[0], "name");
+        assert!(matches!(
+            &bom.rows[0][0],
+            rdb_core::result::Cell::Text(value) if value == "Ada"
+        ));
+        assert!(matches!(
+            &bom.rows[0][1],
+            rdb_core::result::Cell::Text(value) if value == "said \"hello\"\nand left"
+        ));
+    }
+
+    #[test]
+    fn import_csv_rejects_malformed_quotes() {
+        for input in [
+            "id,note\n1,\"unclosed\n",
+            "id,note\n1,ab\"cd\n",
+            "id,note\n1,\"closed\"tail\n",
+        ] {
+            let err = parse_csv_sheet("data.csv".into(), input.len(), input).unwrap_err();
+            assert!(err.contains("CSV") || err.contains("quote"), "{err}");
+        }
+    }
+
+    #[test]
+    fn import_json_preserves_large_integer_digits() {
+        let sheet =
+            parse_json_sheet("data.json".into(), 0, r#"[{"value":18446744073709551616}]"#).unwrap();
+        assert!(matches!(
+            &sheet.rows[0][0],
+            rdb_core::result::Cell::Text(value) if value == "18446744073709551616"
+        ));
+    }
+
+    #[test]
+    fn import_json_preserves_strings_that_look_like_integer_markers() {
+        let sheet = parse_json_sheet(
+            "data.json".into(),
+            0,
+            r#"[{"value":"\u0000rdb-large-integer:123"}]"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            &sheet.rows[0][0],
+            rdb_core::result::Cell::Text(value) if value == "\0rdb-large-integer:123"
+        ));
+    }
+
+    #[test]
+    fn import_json_preserves_unicode_escaped_marker_like_strings() {
+        let sheet = parse_json_sheet(
+            "data.json".into(),
+            0,
+            r#"[{"value":"\u005f\u005f\u0072\u0064\u0062\u005f\u006c\u0061\u0072\u0067\u0065\u005f\u006a\u0073\u006f\u006e\u005f\u0069\u006e\u0074\u0065\u0067\u0065\u0072\u005f123"}]"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            &sheet.rows[0][0],
+            rdb_core::result::Cell::Text(value) if value == "__rdb_large_json_integer_123"
+        ));
     }
 
     #[test]
