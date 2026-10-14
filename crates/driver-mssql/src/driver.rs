@@ -167,17 +167,7 @@ impl Driver for MssqlDriver {
             }
         };
         let mut client = self.client.lock().await;
-        let first_word = sql
-            .lines()
-            .map(str::trim_start)
-            .find(|l| !l.is_empty() && !l.starts_with("--"))
-            .and_then(|l| l.split_whitespace().next())
-            .unwrap_or("")
-            .to_ascii_uppercase();
-        let has_output = sql
-            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
-            .any(|w| w.eq_ignore_ascii_case("output"));
-        if matches!(first_word.as_str(), "INSERT" | "UPDATE" | "DELETE") && !has_output {
+        if should_execute(sql) {
             let res = client
                 .execute(sql.as_str(), &[])
                 .await
@@ -361,8 +351,94 @@ async fn schema_impl(client: &Mutex<MssqlClient>, schema: &str) -> Result<Schema
 fn ts_err(e: &tiberius::error::Error) -> String {
     match e {
         tiberius::error::Error::Server(token) => with_line(&e.to_string(), token.line()),
+
         _ => e.to_string(),
     }
+}
+fn unquoted_sql_words(sql: &str) -> Vec<String> {
+    let bytes = sql.as_bytes();
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'-' if bytes.get(i + 1) == Some(&b'-') => {
+                if !current.is_empty() {
+                    words.push(std::mem::take(&mut current));
+                }
+                i += 2;
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                if !current.is_empty() {
+                    words.push(std::mem::take(&mut current));
+                }
+                i += 2;
+                while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                    i += 1;
+                }
+                i = (i + 2).min(bytes.len());
+            }
+            quote @ (b'\'' | b'"' | b'[') => {
+                if !current.is_empty() {
+                    words.push(std::mem::take(&mut current));
+                }
+                let close = if quote == b'[' { b']' } else { quote };
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == close {
+                        if bytes.get(i + 1) == Some(&close) {
+                            i += 2;
+                        } else {
+                            i += 1;
+                            break;
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            b if b.is_ascii_alphanumeric() || b == b'_' => {
+                current.push((b as char).to_ascii_uppercase());
+                i += 1;
+            }
+            b';' => {
+                if !current.is_empty() {
+                    words.push(std::mem::take(&mut current));
+                }
+                words.push(";".to_string());
+                i += 1;
+            }
+            _ => {
+                if !current.is_empty() {
+                    words.push(std::mem::take(&mut current));
+                }
+                i += 1;
+            }
+        }
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
+}
+fn should_execute(sql: &str) -> bool {
+    let words = unquoted_sql_words(sql);
+    let has_later_select = words.iter().enumerate().any(|(i, word)| {
+        word == ";"
+            && words
+                .iter()
+                .skip(i + 1)
+                .find(|next| next.as_str() != ";")
+                .is_some_and(|next| next == "SELECT")
+    });
+    matches!(
+        words.first().map(String::as_str),
+        Some("INSERT" | "UPDATE" | "DELETE")
+    ) && !words.iter().any(|word| word == "OUTPUT")
+        && !has_later_select
 }
 
 fn with_line(msg: &str, line: u32) -> String {
@@ -374,11 +450,24 @@ fn with_line(msg: &str, line: u32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::with_line;
+    use super::{should_execute, with_line};
 
     #[test]
     fn with_line_marks_a_real_batch_line_only() {
         assert_eq!(with_line("boom", 4), "[[rdb-line:4]] boom");
         assert_eq!(with_line("boom", 0), "boom");
+    }
+    #[test]
+    fn statement_detection_skips_comments_and_preserves_later_select_results() {
+        assert!(!should_execute(
+            "-- SELECT is only a comment\n/* another comment */ SELECT 1"
+        ));
+        assert!(should_execute(
+            "INSERT INTO t VALUES (1) /* SELECT is only a comment */"
+        ));
+        assert!(should_execute("INSERT INTO t SELECT id FROM source"));
+        assert!(!should_execute(
+            "INSERT INTO t VALUES (1); -- another statement follows\nSELECT * FROM t"
+        ));
     }
 }
