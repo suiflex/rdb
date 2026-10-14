@@ -195,7 +195,6 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 let number = next_query_slot_number(&tabs, &connection);
                 let id = format!("query:{connection}:{number}");
                 let mut tab = WorkspaceTab::sql(id.clone(), number);
-                tab.query_text = take_closed_sql_buffer(&connection, number);
                 tab.group = 1;
                 tab.connection_id = (!connection.is_empty()).then(|| connection.clone());
                 tab.engine = badge.engine;
