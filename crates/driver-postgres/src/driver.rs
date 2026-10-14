@@ -384,9 +384,6 @@ async fn query_stream_impl(
     Ok(())
 }
 
-/// Heuristic: does this statement return rows? Covers the common row-returning
-/// leading keywords. Anything else (INSERT/UPDATE/DELETE/CREATE/DROP/...) is
-/// treated as a write and routed to `execute` for an affected-row count.
 enum SqlScanState {
     Code,
     LineComment,
@@ -487,6 +484,9 @@ fn unquoted_sql_words(sql: &str) -> Vec<String> {
     words
 }
 
+/// Heuristic: does this statement return rows? Covers the common row-returning
+/// leading keywords. Anything else (INSERT/UPDATE/DELETE/CREATE/DROP/...) is
+/// treated as a write and routed to `execute` for an affected-row count.
 fn is_row_returning(sql: &str) -> bool {
     let words = unquoted_sql_words(sql);
     let Some(first) = words.first().map(String::as_str) else {
@@ -496,9 +496,15 @@ fn is_row_returning(sql: &str) -> bool {
         return true;
     }
     if first == "with" {
-        let has_dml = words
-            .iter()
-            .any(|w| matches!(w.as_str(), "insert" | "update" | "delete"));
+        let has_dml = words.iter().enumerate().any(|(i, w)| {
+            matches!(w.as_str(), "insert" | "delete")
+                || (w == "update"
+                    && !(i > 0 && words[i - 1] == "for")
+                    && !(i > 2
+                        && words[i - 3] == "for"
+                        && words[i - 2] == "no"
+                        && words[i - 1] == "key"))
+        });
         return !has_dml;
     }
     matches!(first, "select" | "show" | "values" | "table" | "explain")
@@ -667,6 +673,9 @@ mod tests {
         assert!(is_row_returning("WITH t AS (SELECT 1) SELECT * FROM t"));
         assert!(!is_row_returning(
             "WITH s AS (SELECT 1) UPDATE logs SET msg = 'ok'"
+        ));
+        assert!(is_row_returning(
+            "WITH x AS (SELECT * FROM accounts FOR UPDATE) SELECT * FROM x"
         ));
         assert!(is_row_returning(
             "WITH u AS (UPDATE logs SET msg = 'ok' RETURNING id) SELECT * FROM u"
