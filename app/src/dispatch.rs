@@ -346,6 +346,22 @@ impl AnyDriver {
             AnyDriverInner::Mock(d) => d.commit(ops).await,
         }
     }
+
+    /// Commit a transaction opened through SQL import control.
+    pub async fn commit_transaction(&self) -> Result<()> {
+        match &self.inner {
+            AnyDriverInner::Oracle(d) => d.commit_transaction().await,
+            _ => self.query(&Query::Sql("COMMIT".into())).await.map(|_| ()),
+        }
+    }
+
+    /// Roll back a transaction opened through SQL import control.
+    pub async fn rollback_transaction(&self) -> Result<()> {
+        match &self.inner {
+            AnyDriverInner::Oracle(d) => d.rollback_transaction().await,
+            _ => self.query(&Query::Sql("ROLLBACK".into())).await.map(|_| ()),
+        }
+    }
 }
 
 /// Exact SQL/CQL text (or native command description) produced for buffered

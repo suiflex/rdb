@@ -95,6 +95,18 @@ fn one_column(
     Ok(out)
 }
 
+impl OracleDriver {
+    /// Commit DML executed through [`Driver::query`].
+    pub async fn commit_transaction(&self) -> Result<()> {
+        on_conn(&self.conn, |conn| conn.commit()).await
+    }
+
+    /// Roll back DML executed through [`Driver::query`].
+    pub async fn rollback_transaction(&self) -> Result<()> {
+        on_conn(&self.conn, |conn| conn.rollback()).await
+    }
+}
+
 #[async_trait]
 impl Driver for OracleDriver {
     async fn connect(cfg: &ConnConfig) -> Result<Self> {
