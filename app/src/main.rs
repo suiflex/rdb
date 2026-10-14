@@ -653,7 +653,7 @@ fn emit_group_subtree(
     let expanded = !collapsed.contains(path);
     rows.push(ConnItem {
         id: SharedString::default(),
-        name: rdb_connstore::group_leaf(path).into(),
+        name: rdb_connstore::group_leaf(path).to_uppercase().into(),
         engine: SharedString::default(),
         color: theme::accent_or_default(""),
         has_custom_color: false,
