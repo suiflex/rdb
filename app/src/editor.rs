@@ -14,7 +14,7 @@ pub mod sql;
 
 pub mod command;
 
-use rdb_connstore::QueryDialect;
+use rdb_connstore::{Engine, QueryDialect};
 
 /// Span kinds, mirrored in code-editor.slint: 0 plain · 1 keyword ·
 /// 2 string · 3 function · 4 comment · 5 number. `sel` marks the span as
@@ -957,7 +957,11 @@ fn is_e_quote_prefix(bytes: &[u8], i: usize) -> bool {
         && (i == 1 || !(bytes[i - 2].is_ascii_alphanumeric() || bytes[i - 2] == b'_'))
 }
 
-fn step_top_level_stmt<'a>(bytes: &'a [u8], i: usize) -> (StmtScanMode<'a>, usize, bool) {
+fn step_top_level_stmt<'a>(
+    bytes: &'a [u8],
+    i: usize,
+    engine: Engine,
+) -> (StmtScanMode<'a>, usize, bool) {
     let b = bytes[i];
     let next = bytes.get(i + 1).copied();
     if b == b'-' && next == Some(b'-') {
@@ -967,7 +971,8 @@ fn step_top_level_stmt<'a>(bytes: &'a [u8], i: usize) -> (StmtScanMode<'a>, usiz
         return (StmtScanMode::BlockComment, 2, false);
     }
     if matches!(b, b'\'' | b'"' | b'`') {
-        let esc = b == b'\'' && is_e_quote_prefix(bytes, i);
+        let esc = b == b'\''
+            && (is_e_quote_prefix(bytes, i) || matches!(engine, Engine::MySql | Engine::MariaDb));
         return (StmtScanMode::Quoted(b, esc), 1, false);
     }
     if let Some(tag) = match_dollar_tag(bytes, i) {
@@ -980,7 +985,7 @@ fn step_top_level_stmt<'a>(bytes: &'a [u8], i: usize) -> (StmtScanMode<'a>, usiz
 /// inside single/double/backtick/dollar-quoted literals and `--` / `/* ... */`
 /// comments. Trailing `;` and blank/comment-only segments are dropped, so text
 /// with no real statement yields nothing and a single statement (no `;`) yields one.
-fn scan_statements(text: &str) -> Vec<Statement<'_>> {
+fn scan_statements(text: &str, engine: Engine) -> Vec<Statement<'_>> {
     let mut out: Vec<Statement> = Vec::new();
     if opens_block_body(text) {
         push_statement(&mut out, text, 0, text.len());
@@ -995,7 +1000,7 @@ fn scan_statements(text: &str) -> Vec<Statement<'_>> {
         let next = bytes.get(i + 1).copied();
         let (next_mode, step) = match mode {
             StmtScanMode::TopLevel => {
-                let (m, s, is_semi) = step_top_level_stmt(bytes, i);
+                let (m, s, is_semi) = step_top_level_stmt(bytes, i, engine);
                 if is_semi {
                     push_statement(&mut out, text, seg_start, i);
                     seg_start = i + 1;
@@ -1026,6 +1031,10 @@ fn scan_statements(text: &str) -> Vec<Statement<'_>> {
     }
     push_statement(&mut out, text, seg_start, text.len());
     out
+}
+
+fn scan_statements_default(text: &str) -> Vec<Statement<'_>> {
+    scan_statements(text, Engine::Postgres)
 }
 
 /// Append `text[start..end]` to `out` unless it is blank or comment-only.
@@ -1080,7 +1089,10 @@ fn opens_block_body(text: &str) -> bool {
 /// map a per-statement error position back to the full editor buffer for
 /// highlighting.
 pub fn statement_offsets(text: &str) -> Vec<usize> {
-    scan_statements(text).iter().map(|s| s.offset).collect()
+    scan_statements_default(text)
+        .iter()
+        .map(|s| s.offset)
+        .collect()
 }
 
 /// Where a failed query points in the editor buffer.
@@ -1194,7 +1206,12 @@ pub fn strip_error_marker(msg: &str) -> std::borrow::Cow<'_, str> {
 
 /// Split SQL text into individual statements, in buffer order.
 pub fn split_statements(text: &str) -> Vec<String> {
-    scan_statements(text)
+    split_statements_for_engine(text, Engine::Postgres)
+}
+
+/// Split SQL text using quote-escaping rules for the selected database engine.
+pub fn split_statements_for_engine(text: &str, engine: Engine) -> Vec<String> {
+    scan_statements(text, engine)
         .iter()
         .map(|s| s.text.to_string())
         .collect()
@@ -1738,6 +1755,36 @@ mod tests {
         assert_eq!(got, vec!["SELECT 1", "SELECT 2", "SELECT 3"]);
     }
 
+    #[test]
+    fn mysql_split_handles_backslash_escaped_quote_in_ordinary_string() {
+        let sql = "INSERT INTO t VALUES ('it\\'s'); SELECT 2;";
+        assert_eq!(
+            split_statements_for_engine(sql, Engine::MySql),
+            vec!["INSERT INTO t VALUES ('it\\'s')", "SELECT 2"]
+        );
+        assert_eq!(
+            split_statements_for_engine(sql, Engine::MariaDb),
+            vec!["INSERT INTO t VALUES ('it\\'s')", "SELECT 2"]
+        );
+    }
+
+    #[test]
+    fn quote_escaping_is_engine_specific_and_preserves_postgres_e_strings() {
+        let sql = "SELECT E'it\\'s; ok'; SELECT 2;";
+        assert_eq!(
+            split_statements_for_engine(sql, Engine::Postgres),
+            vec!["SELECT E'it\\'s; ok'", "SELECT 2"]
+        );
+        let ordinary = "SELECT 'it\\'s; SELECT 2;";
+        assert_eq!(
+            split_statements_for_engine(ordinary, Engine::Postgres),
+            vec!["SELECT 'it\\'s", "SELECT 2"]
+        );
+        assert_eq!(
+            split_statements(ordinary),
+            split_statements_for_engine(ordinary, Engine::Postgres)
+        );
+    }
     #[test]
     fn split_ignores_semicolon_in_literal() {
         let got = split_statements("INSERT INTO t VALUES ('a;b'); SELECT 2;");
