@@ -4,11 +4,136 @@ import { AppIcon, AppIcons } from "icons.slint";
 import { PaletteItem } from "structs.slint";
 import { ScrollView } from "std-widgets.slint";
 import {
-    FilledButton, OutlineButton, TextButton as MaterialTextButton, IconButton as MaterialIconButton,
-    MaterialPalette, MaterialStyleMetrics, MaterialTypography, StateLayer, StateLayerArea, Switch,
-    TextField, DropDownMenu, MenuItem as MaterialMenuItem, SegmentedButton,
+    Elevation, IconButton as MaterialIconButton,
+    MaterialPalette, MaterialStyleMetrics, MaterialTypography, StateLayer, StateLayerArea, Switch, Icon,
+    MenuItem as MaterialMenuItem, SegmentedButton,
     NavigationItem as MaterialNavigationItem
 } from "@material";
+
+// App-owned outlined text input. Material's stock field stays untouched; the
+// app uses a compact, fully outlined variant in forms and filters.
+export component AppTextField {
+    in property <string> label;
+    in property <string> supporting-text;
+    in property <bool> has-error;
+    in property <image> leading-icon;
+    in property <image> trailing-icon;
+    in property <bool> enabled: true;
+    in property <bool> read-only <=> input.read-only;
+    out property <bool> has-focus: input.has-focus;
+    in-out property <string> text <=> input.text;
+    in property <InputType> input-type <=> input.input-type;
+    callback leading-icon-clicked();
+    callback trailing-icon-clicked();
+    callback accepted(string);
+    callback edited(string);
+    callback key-pressed(event: KeyEvent) -> EventResult;
+    callback key-released(event: KeyEvent) -> EventResult;
+    property <color> highlight: root.enabled && root.has-error ? MaterialPalette.error
+        : root.has-focus ? MaterialPalette.primary : MaterialPalette.outline_variant;
+    property <bool> has-leading: root.leading-icon.width > 0 && root.leading-icon.height > 0;
+    property <bool> has-trailing: root.trailing-icon.width > 0 && root.trailing-icon.height > 0;
+    property <length> computed-x;
+    forward-focus: input;
+    accessible-role: text-input;
+    accessible-enabled: root.enabled;
+    accessible-value <=> root.text;
+    accessible-placeholder-text: root.label;
+    accessible-action-set-value(value) => { root.text = value; root.edited(value); }
+    layout := VerticalLayout {
+        spacing: MaterialStyleMetrics.spacing_4;
+        Rectangle {
+            border-radius: 8px;
+            border-width: root.has-focus ? 2px : 1px;
+            border-color: root.highlight;
+            background: MaterialPalette.surface_container_low;
+            min-height: max(36px, inner.min-height);
+            inner := HorizontalLayout {
+                padding-left: root.has-leading ? 10px : 12px;
+                padding-right: root.has-trailing ? 6px : 12px;
+                spacing: MaterialStyleMetrics.spacing_8;
+                if root.has-leading: Rectangle {
+                    width: 20px;
+                    height: 20px;
+                    Icon { source: root.leading-icon; colorize: MaterialPalette.on_surface_variant; }
+                    TouchArea {
+                        enabled: root.enabled;
+                        clicked => { root.leading-icon-clicked(); }
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                    clip: true;
+                    min-height: input.min-height;
+                    input := TextInput {
+                        x: min(0px, max(parent.width - self.width - self.text-cursor-width, root.computed-x));
+                        width: max(parent.width - self.text-cursor-width, self.preferred-width);
+                        height: 100%;
+                        font-size: MaterialTypography.body_medium.font_size;
+                        font-weight: MaterialTypography.body_medium.font_weight;
+                        text-cursor-width: 2px;
+                        vertical-alignment: center;
+                        single-line: true;
+                        color: MaterialPalette.on_surface;
+                        selection-background-color: MaterialPalette.primary.with-alpha(0.5);
+                        selection-foreground-color: self.color;
+                        enabled: root.enabled;
+                        accessible-role: none;
+                        cursor-position-changed(position) => {
+                            if position.x + root.computed-x < 0 {
+                                root.computed-x = -position.x;
+                            } else if position.x + root.computed-x > parent.width - self.text-cursor-width {
+                                root.computed-x = parent.width - position.x - self.text-cursor-width;
+                            }
+                        }
+                        accepted => { root.accepted(self.text); }
+                        edited => { root.edited(self.text); }
+                        key-pressed(event) => { root.key-pressed(event) }
+                        key-released(event) => { root.key-released(event) }
+                    }
+                    Text {
+                        y: (parent.height - self.height) / 2;
+                        width: 100%;
+                        text: root.label;
+                        color: MaterialPalette.on_surface_variant.with-alpha(0.72);
+                        font-size: MaterialTypography.body_medium.font_size;
+                        visible: root.text == "";
+                    }
+                }
+                if root.has-trailing: Rectangle {
+                    width: 26px;
+                    height: 26px;
+                    border-radius: 13px;
+                    background: trailing-area.has-hover ? MaterialPalette.on_surface.with-alpha(0.08) : transparent;
+                    Icon {
+                        source: root.trailing-icon;
+                        colorize: root.has-error ? MaterialPalette.error : MaterialPalette.on_surface_variant;
+                    }
+                    trailing-area := TouchArea {
+                        enabled: root.enabled;
+                        clicked => { root.trailing-icon-clicked(); }
+                    }
+                }
+            }
+        }
+        if root.supporting-text != "": Text {
+            text: root.supporting-text;
+            color: root.highlight;
+            font-size: MaterialTypography.body_small.font_size;
+        }
+    }
+    public function set_selection_offsets(start: int, end: int) { input.set_selection_offsets(start, end); }
+    public function select_all() { input.select_all(); }
+    public function clear_selection() { input.clear_selection(); }
+    public function cut() { input.cut(); }
+    public function copy() { input.copy(); }
+    public function paste() { input.paste(); }
+    states [
+        disabled when !root.enabled : {
+            input.opacity: MaterialPalette.disable_opacity;
+        }
+    ]
+}
 
 // On/off switch (Material). Stays controlled: the owner holds `checked` and
 // flips it in `toggled`. Material's Switch flips itself on click, which
@@ -368,29 +493,169 @@ export component AppMenu inherits Rectangle {
     }
 }
 
-// Material DropDownMenu whose index is owned outside (Rust resets it). The
-// stock menu only refreshes its text when the index changes, so a fresh item
-// list with the same index — every new chart result starts at 0 — kept the
-// previous result's label. Re-sync on init, index change and new items.
+// Compact app-owned indexed dropdown, using the app text-field and popup
+// treatment while retaining Material MenuItem selection semantics.
+component AppDropDownRow inherits StateLayerArea {
+    in property <string> text;
+    in property <image> icon;
+    in property <string> trailing-text;
+    in property <int> index;
+    in property <bool> selected;
+    callback activated(int);
+    height: MaterialStyleMetrics.size_40;
+    color: MaterialPalette.on_surface;
+    border-radius: 6px;
+    accessible-role: list-item;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.selected;
+    accessible-item-index: root.index;
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: root.border-radius;
+        background: root.has-hover ? Tokens.accent
+            : (root.selected ? MaterialPalette.secondary_container : transparent);
+    }
+    HorizontalLayout {
+        padding-left: MaterialStyleMetrics.padding_12;
+        padding-right: MaterialStyleMetrics.padding_12;
+        spacing: MaterialStyleMetrics.spacing_8;
+        if root.icon.width > 0 && root.icon.height > 0: Icon {
+            source: root.icon;
+            colorize: root.has-hover ? white : MaterialPalette.on_surface_variant;
+            width: MaterialStyleMetrics.icon_size_18;
+        }
+        Text {
+            text: root.text;
+            color: root.has-hover ? white
+                : (root.enabled ? MaterialPalette.on_surface : MaterialPalette.on_surface.with-alpha(MaterialPalette.disable_opacity));
+            font-size: MaterialTypography.body_medium.font_size;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        if root.trailing-text != "": Text {
+            text: root.trailing-text;
+            color: root.has-hover ? white : MaterialPalette.on_surface_variant;
+            font-size: MaterialTypography.body_small.font_size;
+            vertical-alignment: center;
+        }
+    }
+    clicked => { root.activated(root.index); }
+}
+
+component AppDropDown {
+    in property <[MaterialMenuItem]> items;
+    in-out property <int> current-index: -1;
+    in property <bool> enabled: true;
+    in property <string> label;
+    in property <image> leading-icon;
+    callback selected(int);
+    property <length> item-height: MaterialStyleMetrics.size_40;
+    property <string> text: "";
+    min-width: field.min-width;
+    min-height: field.min-height;
+    forward-focus: field;
+    accessible-role: combobox;
+    accessible-enabled: root.enabled;
+    accessible-expandable: true;
+    accessible-value: root.text;
+    accessible-action-expand => { popup.show(); }
+    field := AppTextField {
+        width: 100%;
+        height: 100%;
+        label: root.label;
+        text: root.text;
+        enabled: root.enabled;
+        read-only: true;
+        leading-icon: root.leading-icon;
+        trailing-icon: AppIcons.get("caret");
+        trailing-icon-clicked => { popup.show(); }
+    }
+    StateLayer {
+        width: 100%;
+        height: 100%;
+        border-radius: 8px;
+        background: MaterialPalette.on_surface;
+        has-hover: touch-area.has-hover;
+        enabled: root.enabled;
+    }
+    touch-area := TouchArea {
+        width: 100%;
+        height: 100%;
+        enabled: root.enabled;
+        clicked => { popup.show(); }
+    }
+    popup := PopupWindow {
+        x: 0;
+        width: root.width;
+        close-policy: close-on-click-outside;
+        forward-focus: popup-field;
+        VerticalLayout {
+            alignment: start;
+            popup-field := AppTextField {
+                width: root.width;
+                leading-icon: root.leading-icon;
+                trailing-icon: AppIcons.get("caret");
+                text: root.text;
+                label: root.label;
+                read-only: true;
+                trailing-icon-clicked => { popup.close(); }
+            }
+            Rectangle {
+                width: 100%;
+                height: min(max(root.item-height, root.items.length * root.item-height), 6 * root.item-height);
+                background: MaterialPalette.surface_container_high;
+                border-radius: MaterialStyleMetrics.border_radius_12;
+                border-width: 1px;
+                border-color: MaterialPalette.outline_variant;
+                clip: true;
+                ScrollView {
+                    VerticalLayout {
+                        for item[index] in root.items: AppDropDownRow {
+                            width: 100%;
+                            text: item.text;
+                            icon: item.icon;
+                            trailing-text: item.trailing_text;
+                            index: index;
+                            selected: index == root.current-index;
+                            enabled: item.enabled;
+                            activated(i) => {
+                                root.current-index = i;
+                                root.update-text();
+                                popup.close();
+                                root.selected(i);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    function update-text() {
+        root.text = root.current-index >= 0 && root.current-index < root.items.length
+            ? root.items[root.current-index].text : "";
+    }
+    init => { root.update-text(); }
+    changed current-index => { root.update-text(); }
+    changed items => { root.update-text(); }
+}
+
+// Indexed dropdown whose selection is owned by the caller.
 export component IndexDropDown {
     in property <[MaterialMenuItem]> items;
     in-out property <int> current-index;
     callback selected(int);
-    dd := DropDownMenu {
+    dd := AppDropDown {
         width: 100%;
         items: root.items;
+        current-index: root.current-index;
         selected(i) => {
             root.current-index = i;
             root.selected(i);
         }
     }
-    function sync() {
-        dd.current-index = -1;
-        dd.current-index = root.current-index;
-    }
-    init => { root.sync(); }
-    changed current-index => { root.sync(); }
-    changed items => { root.sync(); }
 }
 
 // Engine badge: rounded square with 2-letter code, engine color fill.
@@ -448,12 +713,103 @@ export component OutlineChip inherits Rectangle {
     }
 }
 
-// The main call to action. Material's filled button already has the same
-// surface (text / enabled / tooltip / clicked), so this is just its app name.
-export component PrimaryButton inherits FilledButton {}
+// App-owned compact action button, independent of vendored Material defaults.
+// Rounded corners, compact metrics and app-selected colors live here rather
+// than in the vendored Material button sources.
+export component PrimaryButton inherits StateLayerArea {
+    in property <image> icon;
+    in property <string> text;
+    color: MaterialPalette.on_primary;
+    border-radius: 8px;
+    min-width: max(MaterialStyleMetrics.size_32, content.min-width);
+    min-height: MaterialStyleMetrics.size_32;
+    accessible-role: button;
+    accessible-enabled: root.enabled;
+    accessible-label: root.text == "" ? root.tooltip : root.text;
+    accessible-action-default => { root.clicked(); }
+    tooltip-offset: root.height / 2 + MaterialStyleMetrics.icon_size_18 / 2 + MaterialStyleMetrics.padding_14;
+    elevation := Elevation {
+        border-radius: root.border-radius;
+        background: MaterialPalette.primary;
+        width: 100%;
+        height: 100%;
+    }
+    content := HorizontalLayout {
+        padding-left: MaterialStyleMetrics.padding_14;
+        padding-right: MaterialStyleMetrics.padding_14;
+        padding-top: MaterialStyleMetrics.padding_6;
+        padding-bottom: MaterialStyleMetrics.padding_6;
+        spacing: MaterialStyleMetrics.spacing_8;
+        alignment: center;
+        if root.icon.width > 0 && root.icon.height > 0: Icon {
+            source: root.icon;
+            colorize: root.enabled ? MaterialPalette.on_primary
+                : MaterialPalette.on_surface.with-alpha(MaterialPalette.disable_opacity);
+            width: MaterialStyleMetrics.icon_size_18;
+        }
+        Text {
+            text: root.text;
+            color: root.enabled ? MaterialPalette.on_primary
+                : MaterialPalette.on_surface.with-alpha(MaterialPalette.disable_opacity);
+            font-size: MaterialTypography.label_large.font_size;
+            font-weight: MaterialTypography.label_large.font_weight;
+            vertical-alignment: center;
+            overflow: clip;
+        }
+    }
+    states [
+        disabled when !root.enabled : {
+            elevation.background: transparent;
+        }
+        hover when root.has-hover && !root.pressed && !root.enter-pressed : {
+            elevation.level: 1;
+        }
+    ]
+}
 
-// Secondary action next to a PrimaryButton (Cancel, Test, Copy…).
-export component SecondaryButton inherits OutlineButton {}
+// App-owned compact outlined action button.
+export component SecondaryButton inherits StateLayerArea {
+    in property <image> icon;
+    in property <string> text;
+    color: MaterialPalette.on_surface;
+    border-radius: 8px;
+    min-width: max(MaterialStyleMetrics.size_32, content.min-width);
+    min-height: MaterialStyleMetrics.size_32;
+    accessible-role: button;
+    accessible-enabled: root.enabled;
+    accessible-label: root.text == "" ? root.tooltip : root.text;
+    accessible-action-default => { root.clicked(); }
+    tooltip-offset: root.height / 2 + MaterialStyleMetrics.icon_size_18 / 2 + MaterialStyleMetrics.padding_14;
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: root.border-radius;
+        border-width: 1px;
+        border-color: root.enabled ? MaterialPalette.outline_variant
+            : MaterialPalette.on_surface.with-alpha(MaterialPalette.disable_opacity);
+    }
+    content := HorizontalLayout {
+        padding-left: MaterialStyleMetrics.padding_14;
+        padding-right: MaterialStyleMetrics.padding_14;
+        padding-top: MaterialStyleMetrics.padding_6;
+        padding-bottom: MaterialStyleMetrics.padding_6;
+        spacing: MaterialStyleMetrics.spacing_8;
+        alignment: center;
+        if root.icon.width > 0 && root.icon.height > 0: Icon {
+            source: root.icon;
+            colorize: root.enabled ? MaterialPalette.on_surface : MaterialPalette.on_surface.with-alpha(MaterialPalette.disable_opacity);
+            width: MaterialStyleMetrics.icon_size_18;
+        }
+        Text {
+            text: root.text;
+            color: root.enabled ? MaterialPalette.on_surface : MaterialPalette.on_surface.with-alpha(MaterialPalette.disable_opacity);
+            font-size: MaterialTypography.label_large.font_size;
+            font-weight: MaterialTypography.label_large.font_weight;
+            vertical-alignment: center;
+            overflow: clip;
+        }
+    }
+}
 
 // Destructive / warning action (Cancel a running query, abort a stream).
 // Material's outlined-button shape in the error color, so it reads as "stop
@@ -484,8 +840,50 @@ export component DangerButton inherits StateLayerArea {
     }
 }
 
-// Plain text button (footer actions: Import, Backup, Copy, Export CSV…).
-export component TextButton inherits MaterialTextButton {}
+// Plain text action button with compact app dimensions and Material state layers.
+export component TextButton inherits StateLayerArea {
+    in property <image> icon;
+    in property <string> text;
+    in property <bool> inverse;
+    color: root.enabled ? (root.inverse ? MaterialPalette.inverse_primary : MaterialPalette.primary)
+        : MaterialPalette.on_surface;
+    border-radius: root.height / 2;
+    min-width: max(MaterialStyleMetrics.size_32, content.min-width);
+    min-height: MaterialStyleMetrics.size_32;
+    accessible-role: button;
+    accessible-enabled: root.enabled;
+    accessible-label: root.text == "" ? root.tooltip : root.text;
+    accessible-action-default => { root.clicked(); }
+    tooltip-offset: root.height / 2 + MaterialStyleMetrics.icon_size_18 / 2 + MaterialStyleMetrics.padding_14;
+    content := HorizontalLayout {
+        padding-left: MaterialStyleMetrics.padding_14;
+        padding-right: MaterialStyleMetrics.padding_14;
+        padding-top: MaterialStyleMetrics.padding_6;
+        padding-bottom: MaterialStyleMetrics.padding_6;
+        spacing: MaterialStyleMetrics.spacing_8;
+        alignment: center;
+        if root.icon.width > 0 && root.icon.height > 0: Icon {
+            source: root.icon;
+            colorize: root.enabled ? (root.inverse ? MaterialPalette.inverse_primary : MaterialPalette.primary)
+                : MaterialPalette.on_surface.with-alpha(MaterialPalette.disable_opacity);
+            width: MaterialStyleMetrics.icon_size_18;
+        }
+        Text {
+            text: root.text;
+            color: root.enabled ? (root.inverse ? MaterialPalette.inverse_primary : MaterialPalette.primary)
+                : MaterialPalette.on_surface.with-alpha(MaterialPalette.disable_opacity);
+            font-size: MaterialTypography.label_large.font_size;
+            font-weight: MaterialTypography.label_large.font_weight;
+            vertical-alignment: center;
+            overflow: clip;
+        }
+    }
+    states [
+        disabled when !root.enabled : {
+            transparent-background: true;
+        }
+    ]
+}
 
 // Export dropdown: the same Material text button as TextButton, so it aligns
 // and spaces with the other toolbar buttons, but opens a format menu.
@@ -494,7 +892,7 @@ export component ExportButton {
     in property <string> tooltip;            // optional hover label
     in property <bool> enabled: true;
     callback export(int);
-    MaterialTextButton {
+    TextButton {
         enabled: root.enabled;
         text: "Export ▾";
         tooltip: root.tooltip;
@@ -529,7 +927,7 @@ export component FormField {
     Rectangle {
         clip: true;
         border-radius: 8px;
-        tf := TextField {
+        tf := AppTextField {
             width: 100%;
             height: 100%;
             label: root.placeholder;
@@ -845,9 +1243,9 @@ export component CompletionList inherits Rectangle {
     }
 }
 
-// Search/filter input (sidebars, palette, toolbars): a Material text field
-// with a search icon. Material's TextField already clips and scrolls to the
-// caret, so long values (a Mongo JSON filter) no longer need our own viewport.
+// Search/filter input (sidebars, palette, toolbars): the app-owned outlined
+// field with a search icon. Its input viewport follows the caret, so long
+// values (a Mongo JSON filter) remain readable while editing.
 export component FilterField {
     in property <string> placeholder;
     in-out property <string> text <=> tf.text;
@@ -873,7 +1271,7 @@ export component FilterField {
     Rectangle {
         clip: true;
         border-radius: 8px;
-        tf := TextField {
+        tf := AppTextField {
             width: 100%;
             height: 100%;
             label: root.placeholder;
