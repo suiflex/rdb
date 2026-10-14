@@ -403,6 +403,7 @@ async fn finish_connect_success(
                 seed.push(model::VmTreeNode {
                     label: name.clone(),
                     kind: "database".into(),
+                    nullable: None,
                 });
             }
         }

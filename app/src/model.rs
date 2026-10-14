@@ -186,6 +186,7 @@ pub enum ResultView {
 pub struct VmTreeNode {
     pub label: String,
     pub kind: String,
+    pub nullable: Option<bool>,
 }
 
 /// One column definition for the Structure tab (Feature B).
@@ -509,6 +510,7 @@ pub fn to_tree_model(schema: &Schema) -> Vec<VmTreeNode> {
         out.push(VmTreeNode {
             label: db.name.clone(),
             kind: "database".into(),
+            nullable: None,
         });
         for c in &db.containers {
             let kind = match c.kind {
@@ -519,12 +521,10 @@ pub fn to_tree_model(schema: &Schema) -> Vec<VmTreeNode> {
             out.push(VmTreeNode {
                 label: c.name.clone(),
                 kind: kind.into(),
+                nullable: None,
             });
             for f in &c.fields {
-                // Trailing key marker so a column reads "id: int4  PK". PK wins
-                // when a column is both (PK is the stronger signal); engines
-                // without key info show neither.
-                let marker = if f.pk {
+                let key_marker = if f.pk {
                     "  PK"
                 } else if f.fk {
                     "  FK"
@@ -532,8 +532,9 @@ pub fn to_tree_model(schema: &Schema) -> Vec<VmTreeNode> {
                     ""
                 };
                 out.push(VmTreeNode {
-                    label: format!("{}: {}{}", f.name, f.type_name, marker),
+                    label: format!("{}: {}{}", f.name, f.type_name, key_marker),
                     kind: "field".into(),
+                    nullable: Some(f.nullable),
                 });
             }
         }
@@ -541,6 +542,7 @@ pub fn to_tree_model(schema: &Schema) -> Vec<VmTreeNode> {
             out.push(VmTreeNode {
                 label: f.name.clone(),
                 kind: "function".into(),
+                nullable: None,
             });
         }
     }
@@ -557,6 +559,7 @@ pub fn to_completion_nodes(schema_name: &str, schema: &Schema) -> Vec<VmTreeNode
     let mut out = vec![VmTreeNode {
         label: schema_name.to_string(),
         kind: "database".into(),
+        nullable: None,
     }];
     for db in &schema.databases {
         for c in &db.containers {
@@ -568,11 +571,13 @@ pub fn to_completion_nodes(schema_name: &str, schema: &Schema) -> Vec<VmTreeNode
             out.push(VmTreeNode {
                 label: c.name.clone(),
                 kind: kind.into(),
+                nullable: None,
             });
             for f in &c.fields {
                 out.push(VmTreeNode {
                     label: format!("{}: {}", f.name, f.type_name),
                     kind: "field".into(),
+                    nullable: Some(f.nullable),
                 });
             }
         }
@@ -865,13 +870,22 @@ mod tests {
                 containers: vec![Container {
                     name: "users".into(),
                     kind: ContainerKind::Table,
-                    fields: vec![Field {
-                        name: "id".into(),
-                        type_name: "int4".into(),
-                        nullable: false,
-                        pk: true,
-                        ..Default::default()
-                    }],
+                    fields: vec![
+                        Field {
+                            name: "id".into(),
+                            type_name: "int4".into(),
+                            nullable: false,
+                            pk: true,
+                            ..Default::default()
+                        },
+                        Field {
+                            name: "note".into(),
+                            type_name: "text".into(),
+                            nullable: true,
+                            fk: true,
+                            ..Default::default()
+                        },
+                    ],
                 }],
             }],
         };
@@ -880,9 +894,11 @@ mod tests {
         assert_eq!(nodes[0].kind, "database");
         assert_eq!(nodes[1].label, "users");
         assert_eq!(nodes[1].kind, "table");
-        // PK fields carry a trailing "PK" tag in the tree label.
         assert_eq!(nodes[2].label, "id: int4  PK");
         assert_eq!(nodes[2].kind, "field");
+        assert_eq!(nodes[2].nullable, Some(false));
+        assert_eq!(nodes[3].label, "note: text  FK");
+        assert_eq!(nodes[3].nullable, Some(true));
     }
 }
 

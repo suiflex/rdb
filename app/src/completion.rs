@@ -667,6 +667,7 @@ mod tests {
         let mk = |l: &str, k: &str| VmTreeNode {
             label: l.into(),
             kind: k.into(),
+            nullable: None,
         };
         vec![
             mk("public", "database"),
@@ -683,6 +684,7 @@ mod tests {
         let mk = |l: &str, k: &str| VmTreeNode {
             label: l.into(),
             kind: k.into(),
+            nullable: None,
         };
         vec![
             mk("shop", "database"),
@@ -742,6 +744,7 @@ mod tests {
         let mk = |l: &str, k: &str| VmTreeNode {
             label: l.into(),
             kind: k.into(),
+            nullable: None,
         };
         vec![
             mk("public", "database"),
@@ -761,6 +764,7 @@ mod tests {
         let mk = |l: &str, k: &str| VmTreeNode {
             label: l.into(),
             kind: k.into(),
+            nullable: None,
         };
         let dupes = vec![
             mk("public", "database"),
@@ -943,10 +947,12 @@ mod tests {
         n.push(VmTreeNode {
             label: "orders".into(),
             kind: "table".into(),
+            nullable: None,
         });
         n.push(VmTreeNode {
             label: "order_id".into(),
             kind: "field".into(),
+            nullable: None,
         });
         let (_, c) = sug(
             "select * from users, orders where ord",
@@ -980,6 +986,7 @@ mod tests {
         ns.push(VmTreeNode {
             label: "log_inbound".into(),
             kind: "collection".into(),
+            nullable: None,
         });
         let (n, c) = sug("db.log", &ns, "public", rdb_connstore::QueryDialect::Mongo);
         assert_eq!(n, 3);
@@ -993,6 +1000,7 @@ mod tests {
         ns.push(VmTreeNode {
             label: "log_inbound".into(),
             kind: "collection".into(),
+            nullable: None,
         });
         let (_, c) = sug(
             "db.log_inbound.fi",
@@ -1013,10 +1021,12 @@ mod tests {
         ns.push(VmTreeNode {
             label: "log_inbound".into(),
             kind: "collection".into(),
+            nullable: None,
         });
         ns.push(VmTreeNode {
             label: "source".into(),
             kind: "field".into(),
+            nullable: None,
         });
         let (_, c) = sug(
             "db.log_inbound.fi",
@@ -1036,6 +1046,7 @@ mod tests {
         ns.push(VmTreeNode {
             label: "log_inbound".into(),
             kind: "collection".into(),
+            nullable: None,
         });
         let (n, c) = sug(
             "db.log_inbound.find().s",
@@ -1054,10 +1065,12 @@ mod tests {
         ns.push(VmTreeNode {
             label: "log_inbound".into(),
             kind: "collection".into(),
+            nullable: None,
         });
         ns.push(VmTreeNode {
             label: "source".into(),
             kind: "field".into(),
+            nullable: None,
         });
         let (_, c) = sug(
             "db.log_inbound.find({ sou",
@@ -1074,6 +1087,7 @@ mod tests {
         ns.push(VmTreeNode {
             label: "log_inbound".into(),
             kind: "collection".into(),
+            nullable: None,
         });
         let (n, c) = sug(
             "db.log_inbound.find({ age: { $g",
@@ -1095,6 +1109,7 @@ mod tests {
         ns.push(VmTreeNode {
             label: "log_inbound".into(),
             kind: "collection".into(),
+            nullable: None,
         });
         let (_, c) = sug("d", &ns, "public", rdb_connstore::QueryDialect::Mongo);
         assert!(c.iter().any(|x| x.label == "db"));
@@ -1160,18 +1175,22 @@ mod tests {
             VmTreeNode {
                 label: "public".into(),
                 kind: "database".into(),
+                nullable: None,
             },
             VmTreeNode {
                 label: "licenses".into(),
                 kind: "table".into(),
+                nullable: None,
             },
             VmTreeNode {
                 label: "flag_teknis".into(),
                 kind: "field".into(),
+                nullable: None,
             },
             VmTreeNode {
                 label: "teknis_id".into(),
                 kind: "field".into(),
+                nullable: None,
             },
         ];
         let (_, c) = sug(
@@ -1192,6 +1211,7 @@ mod tests {
         let mk = |l: &str, k: &str| VmTreeNode {
             label: l.into(),
             kind: k.into(),
+            nullable: None,
         };
         let two = vec![
             mk("public", "database"),
@@ -1231,6 +1251,7 @@ mod tests {
         let mk = |l: &str, k: &str| VmTreeNode {
             label: l.into(),
             kind: k.into(),
+            nullable: None,
         };
         let n = vec![
             mk("public", "database"),
@@ -1254,6 +1275,7 @@ mod tests {
         let mk = |l: &str, k: &str| VmTreeNode {
             label: l.into(),
             kind: k.into(),
+            nullable: None,
         };
         let two = vec![
             mk("public", "database"),
@@ -1296,6 +1318,7 @@ mod tests {
         let mk = |l: &str, k: &str| VmTreeNode {
             label: l.into(),
             kind: k.into(),
+            nullable: None,
         };
         let n = vec![
             mk("analytics_core", "database"),
@@ -1332,6 +1355,7 @@ mod tests {
         let mk = |l: &str, k: &str| VmTreeNode {
             label: l.into(),
             kind: k.into(),
+            nullable: None,
         };
         let n = vec![
             mk("public", "database"),
@@ -1569,10 +1593,12 @@ mod tests {
             VmTreeNode {
                 label: "users".into(),
                 kind: "table".into(),
+                nullable: None,
             },
             VmTreeNode {
                 label: "id: int4".into(),
                 kind: "field".into(),
+                nullable: None,
             },
         ];
         let (_, c) = sug(
@@ -1590,6 +1616,7 @@ mod tests {
         let mk = |l: &str, k: &str| VmTreeNode {
             label: l.into(),
             kind: k.into(),
+            nullable: None,
         };
         let two = vec![
             mk("public", "database"),
@@ -1625,6 +1652,7 @@ mod tests {
         let mk = |l: &str, k: &str| VmTreeNode {
             label: l.into(),
             kind: k.into(),
+            nullable: None,
         };
         vec![
             mk("public", "database"),

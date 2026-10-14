@@ -18,22 +18,23 @@ fn qualified_table_ident(
     label: &str,
     eng: rdb_connstore::Engine,
 ) -> String {
-    if !db.is_empty() {
-        format!("{}.{}", quote_ident(db, eng), quote_ident(label, eng))
-    } else if !schema.is_empty()
-        && matches!(
-            eng,
-            rdb_connstore::Engine::Postgres
-                | rdb_connstore::Engine::Mssql
-                | rdb_connstore::Engine::Oracle
-        )
-    {
-        format!("{}.{}", quote_ident(schema, eng), quote_ident(label, eng))
-    } else {
+    let namespace = match eng {
+        rdb_connstore::Engine::Postgres
+        | rdb_connstore::Engine::Mssql
+        | rdb_connstore::Engine::Oracle => schema,
+        rdb_connstore::Engine::Sqlite => "",
+        _ => db,
+    };
+    if namespace.is_empty() {
         quote_ident(label, eng)
+    } else {
+        format!(
+            "{}.{}",
+            quote_ident(namespace, eng),
+            quote_ident(label, eng)
+        )
     }
 }
-
 fn copy_to_meta(w: &MainWindow, text: &str, ok_msg: &'static str) {
     let msg = if clip_set(text) {
         ok_msg
@@ -42,38 +43,188 @@ fn copy_to_meta(w: &MainWindow, text: &str, ok_msg: &'static str) {
     };
     w.set_results_meta(msg.into());
 }
-fn sync_table_structure(
-    w: &MainWindow,
+
+fn copy_select_script(engine: rdb_connstore::Engine, qualified: &str) -> Option<String> {
+    let sql = match engine {
+        rdb_connstore::Engine::Mssql => {
+            format!("SELECT TOP (100)\n    *\nFROM\n    {qualified};")
+        }
+        rdb_connstore::Engine::Oracle => {
+            format!("SELECT\n    *\nFROM\n    {qualified}\nWHERE ROWNUM <= 100;")
+        }
+        rdb_connstore::Engine::Mongo
+        | rdb_connstore::Engine::Redis
+        | rdb_connstore::Engine::Valkey => return None,
+        _ => format!("SELECT\n    *\nFROM\n    {qualified}\nLIMIT\n    100;"),
+    };
+    Some(sql)
+}
+
+fn structure_field(node: &model::VmTreeNode) -> Option<StructField> {
+    let nullable = node.nullable?;
+    let (name, rest) = node.label.split_once(':').unwrap_or((&node.label, ""));
+    let rest = rest.trim();
+    let type_name = rest.trim_end_matches("PK").trim_end_matches("FK").trim();
+    Some(StructField {
+        name: name.trim().into(),
+        type_name: type_name.into(),
+        nullable,
+    })
+}
+
+fn import_table_ref(
+    db: &str,
+    schema: &str,
+    name: &str,
+    engine: rdb_connstore::Engine,
+) -> rdb_core::write::TableRef {
+    rdb_core::write::TableRef {
+        database: (!db.is_empty()).then(|| db.to_string()),
+        schema: matches!(
+            engine,
+            rdb_connstore::Engine::Postgres
+                | rdb_connstore::Engine::Mssql
+                | rdb_connstore::Engine::Oracle
+        )
+        .then(|| schema.to_string())
+        .filter(|schema| !schema.is_empty()),
+        name: name.to_string(),
+    }
+}
+
+fn tree_parent_matches(
+    parent: Option<&str>,
+    db: &str,
+    schema: &str,
+    engine: rdb_connstore::Engine,
+) -> bool {
+    let expected = if matches!(
+        engine,
+        rdb_connstore::Engine::Mssql | rdb_connstore::Engine::Oracle
+    ) {
+        schema
+    } else {
+        db
+    };
+    if expected.is_empty() {
+        parent.is_none()
+    } else {
+        parent == Some(expected)
+    }
+}
+fn tree_database_identity(
     raw_nodes: &Arc<std::sync::Mutex<Vec<model::VmTreeNode>>>,
-    table_label: &str,
-) {
-    let mut fields = Vec::new();
-    if let Ok(nodes) = raw_nodes.lock() {
-        let mut in_table = false;
-        for n in nodes.iter() {
-            let is_container = matches!(n.kind.as_str(), "table" | "collection" | "keyspace");
-            if is_container {
-                in_table = n.label == table_label;
-            } else if n.kind == "field" && in_table {
-                let (name, rest) = n.label.split_once(':').unwrap_or((&n.label, ""));
-                let ty = rest
-                    .trim()
-                    .trim_end_matches("PK")
-                    .trim_end_matches("FK")
-                    .trim();
-                fields.push(StructField {
-                    name: name.trim().into(),
-                    type_name: ty.into(),
-                    nullable: !rest.contains("PK"),
-                });
-            } else if n.kind != "field" {
-                in_table = false;
+    database: &str,
+    engine: rdb_connstore::Engine,
+) -> String {
+    if engine == rdb_connstore::Engine::Sqlite || database.is_empty() {
+        if let Ok(nodes) = raw_nodes.lock() {
+            if let Some(root) = nodes.iter().find(|node| node.kind == "database") {
+                return root.label.clone();
             }
         }
     }
-    if !fields.is_empty() {
-        w.set_structure_columns(ModelRc::from(Rc::new(VecModel::from(fields))));
+    database.to_string()
+}
+fn effective_import_database(table_database: &str, current_database: &str) -> String {
+    if table_database.is_empty() {
+        current_database.to_string()
+    } else {
+        table_database.to_string()
     }
+}
+
+fn fields_for_container<'a>(
+    nodes: &'a [model::VmTreeNode],
+    db: &str,
+    schema: &str,
+    table: &str,
+    engine: rdb_connstore::Engine,
+) -> Vec<&'a model::VmTreeNode> {
+    let mut fields = Vec::new();
+    let mut parent = None;
+    let mut in_table = false;
+    for node in nodes {
+        if node.kind == "database" {
+            parent = Some(node.label.as_str());
+            in_table = false;
+        } else if matches!(node.kind.as_str(), "table" | "collection" | "keyspace") {
+            in_table = node.label == table && tree_parent_matches(parent, db, schema, engine);
+        } else if node.kind == "field" {
+            if in_table {
+                fields.push(node);
+            }
+        } else {
+            in_table = false;
+        }
+    }
+    fields
+}
+
+fn fields_for_tree_field<'a>(
+    nodes: &'a [model::VmTreeNode],
+    db: &str,
+    schema: &str,
+    table: &str,
+    field: &str,
+    engine: rdb_connstore::Engine,
+) -> Vec<&'a model::VmTreeNode> {
+    let active = fields_for_container(nodes, db, schema, table, engine);
+    if active
+        .iter()
+        .any(|node| completion::field_name(&node.label) == field)
+    {
+        return active;
+    }
+
+    let schema_parent = matches!(
+        engine,
+        rdb_connstore::Engine::Mssql | rdb_connstore::Engine::Oracle
+    );
+    let mut candidate = None;
+    for parent in nodes
+        .iter()
+        .filter(|node| node.kind == "database")
+        .map(|node| node.label.as_str())
+    {
+        let fields = if schema_parent {
+            fields_for_container(nodes, "", parent, table, engine)
+        } else {
+            fields_for_container(nodes, parent, "", table, engine)
+        };
+        if !fields
+            .iter()
+            .any(|node| completion::field_name(&node.label) == field)
+        {
+            continue;
+        }
+        if candidate.is_some() {
+            return active;
+        }
+        candidate = Some(fields);
+    }
+    candidate.unwrap_or(active)
+}
+
+fn sync_table_structure(
+    w: &MainWindow,
+    raw_nodes: &Arc<std::sync::Mutex<Vec<model::VmTreeNode>>>,
+    db: &str,
+    schema: &str,
+    table: &str,
+    engine: rdb_connstore::Engine,
+) {
+    let fields: Vec<StructField> = raw_nodes
+        .lock()
+        .ok()
+        .map(|nodes| {
+            fields_for_container(&nodes, db, schema, table, engine)
+                .into_iter()
+                .filter_map(structure_field)
+                .collect()
+        })
+        .unwrap_or_default();
+    w.set_structure_columns(ModelRc::from(Rc::new(VecModel::from(fields))));
 }
 
 struct ImportOutcome {
@@ -94,18 +245,30 @@ fn format_failed_indices(indices: &[usize]) -> String {
 #[derive(Clone)]
 struct PendingImport {
     db: String,
+    tree_db: String,
+    schema: String,
+    engine: rdb_connstore::Engine,
     sheet: export::ImportSheet,
     target_cols: Vec<String>,
 }
 
-fn schema_table_names(raw_nodes: &Arc<std::sync::Mutex<Vec<model::VmTreeNode>>>) -> Vec<String> {
+fn schema_table_names(
+    raw_nodes: &Arc<std::sync::Mutex<Vec<model::VmTreeNode>>>,
+    db: &str,
+    schema: &str,
+    engine: rdb_connstore::Engine,
+) -> Vec<String> {
     let mut out = Vec::new();
     if let Ok(nodes) = raw_nodes.lock() {
-        for n in nodes.iter() {
-            if matches!(n.kind.as_str(), "table" | "collection" | "keyspace")
-                && !out.contains(&n.label)
+        let mut parent = None;
+        for node in nodes.iter() {
+            if node.kind == "database" {
+                parent = Some(node.label.as_str());
+            } else if matches!(node.kind.as_str(), "table" | "collection" | "keyspace")
+                && tree_parent_matches(parent, db, schema, engine)
+                && !out.contains(&node.label)
             {
-                out.push(n.label.clone());
+                out.push(node.label.clone());
             }
         }
     }
@@ -114,26 +277,22 @@ fn schema_table_names(raw_nodes: &Arc<std::sync::Mutex<Vec<model::VmTreeNode>>>)
 
 fn table_column_names(
     raw_nodes: &Arc<std::sync::Mutex<Vec<model::VmTreeNode>>>,
-    table_label: &str,
+    db: &str,
+    schema: &str,
+    table: &str,
+    engine: rdb_connstore::Engine,
 ) -> Vec<String> {
-    let mut out = Vec::new();
-    if let Ok(nodes) = raw_nodes.lock() {
-        let mut in_table = false;
-        for n in nodes.iter() {
-            let is_container = matches!(n.kind.as_str(), "table" | "collection" | "keyspace");
-            if is_container {
-                in_table = n.label == table_label;
-            } else if n.kind == "field" && in_table {
-                let col = completion::field_name(&n.label).to_string();
-                if !col.is_empty() {
-                    out.push(col);
-                }
-            } else if n.kind != "field" {
-                in_table = false;
-            }
-        }
-    }
-    out
+    raw_nodes
+        .lock()
+        .ok()
+        .map(|nodes| {
+            fields_for_container(&nodes, db, schema, table, engine)
+                .into_iter()
+                .map(|node| completion::field_name(&node.label).to_string())
+                .filter(|name| !name.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn sync_import_cols_and_summary(
@@ -176,7 +335,13 @@ fn refresh_import_wizard_mapping(
     let target_table = w.get_import_target_table().to_string();
     let create_table = w.get_import_create_table();
     let mode = w.get_import_match_mode().to_string();
-    let tcols = table_column_names(raw_nodes, &target_table);
+    let tcols = table_column_names(
+        raw_nodes,
+        &pending.tree_db,
+        &pending.schema,
+        &target_table,
+        pending.engine,
+    );
 
     let mut options: Vec<SharedString> = vec!["Do not import".into()];
     for tc in &tcols {
@@ -202,12 +367,164 @@ fn refresh_import_wizard_mapping(
     sync_import_cols_and_summary(w, &pending.sheet, &pending.target_cols, table_col_count);
 }
 
+fn contains_exact_token(lower: &str, token: &str) -> bool {
+    lower.match_indices(token).any(|(start, _)| {
+        let end = start + token.len();
+        let boundary = |c: Option<char>| c.is_none_or(|c| !c.is_ascii_alphanumeric());
+        boundary(lower[..start].chars().next_back()) && boundary(lower[end..].chars().next())
+    })
+}
+
+fn contains_code_token(lower: &str, code: &str) -> bool {
+    lower.match_indices(code).any(|(start, _)| {
+        let end = start + code.len();
+        let boundary = |c: Option<char>| c.is_none_or(|c| !c.is_ascii_alphanumeric());
+        if !boundary(lower[..start].chars().next_back()) || !boundary(lower[end..].chars().next()) {
+            return false;
+        }
+        let prefix = lower[..start].trim_end_matches(|c: char| {
+            c.is_ascii_whitespace() || matches!(c, ':' | '=' | '(' | '[' | '#')
+        });
+        [
+            "sqlstate",
+            "error code",
+            "error number",
+            "errno",
+            "error",
+            "code",
+        ]
+        .iter()
+        .any(|marker| {
+            prefix.strip_suffix(marker).is_some_and(|before| {
+                before
+                    .chars()
+                    .next_back()
+                    .is_none_or(|c| !c.is_ascii_alphanumeric())
+            })
+        })
+    })
+}
+
 fn is_duplicate_db_error(msg: &str) -> bool {
     let lower = msg.to_ascii_lowercase();
-    lower.contains("duplicate")
-        || lower.contains("unique constraint")
-        || lower.contains("23505")
-        || lower.contains("1062")
+    ["23505", "1062", "2601", "2627"]
+        .iter()
+        .any(|code| contains_code_token(&lower, code))
+        || contains_exact_token(&lower, "ora-00001")
+        || lower.contains("duplicate key value violates unique constraint")
+        || lower.contains("unique constraint failed:")
+        || lower.contains("violation of primary key constraint")
+        || lower.contains("violation of unique key constraint")
+}
+
+fn import_sql_statements(text: &str, engine: rdb_connstore::Engine) -> Vec<String> {
+    editor::split_statements_for_engine(text, engine)
+}
+
+fn is_sqlite_memory_database(database: &str) -> bool {
+    let lower = database.trim().to_ascii_lowercase();
+    lower == ":memory:"
+        || (lower.starts_with("file:") && lower.contains("mode=memory"))
+        || lower.starts_with("file::memory:")
+}
+
+fn import_connection_config(
+    mut config: rdb_core::conn::ConnConfig,
+    engine: rdb_connstore::Engine,
+    database: &str,
+) -> Result<rdb_core::conn::ConnConfig, String> {
+    if engine == rdb_connstore::Engine::Sqlite {
+        let Some(database) = config
+            .database
+            .as_deref()
+            .filter(|database| !database.trim().is_empty())
+        else {
+            return Err(
+                "SQLite imports require a file-backed database path for isolated execution".into(),
+            );
+        };
+        if is_sqlite_memory_database(database) {
+            return Err(
+                "SQLite in-memory imports cannot be isolated from the active connection".into(),
+            );
+        }
+    }
+    if !database.is_empty() {
+        match engine {
+            rdb_connstore::Engine::Redis | rdb_connstore::Engine::Valkey => {
+                let index = database
+                    .strip_prefix("db")
+                    .and_then(|index| index.parse::<u32>().ok())
+                    .ok_or_else(|| {
+                        format!("cannot safely isolate Redis database {database:?} for import")
+                    })?;
+                config.database = Some(index.to_string());
+            }
+            rdb_connstore::Engine::Postgres
+            | rdb_connstore::Engine::MySql
+            | rdb_connstore::Engine::MariaDb
+            | rdb_connstore::Engine::Mssql
+            | rdb_connstore::Engine::Mongo
+            | rdb_connstore::Engine::Cassandra
+            | rdb_connstore::Engine::Clickhouse => {
+                config.database = Some(database.to_string());
+            }
+            _ => {}
+        }
+    }
+    Ok(config)
+}
+
+fn build_import_create_table_sql(
+    engine: rdb_connstore::Engine,
+    table: &rdb_core::write::TableRef,
+    target_cols: &[String],
+) -> Result<String, String> {
+    if matches!(
+        engine,
+        rdb_connstore::Engine::Mongo | rdb_connstore::Engine::Redis | rdb_connstore::Engine::Valkey
+    ) {
+        return Err(format!(
+            "Create new table is not supported for {}",
+            AnyDriver::label(engine)
+        ));
+    }
+    let columns: Vec<&str> = target_cols
+        .iter()
+        .map(String::as_str)
+        .filter(|column| !column.is_empty() && *column != "Do not import")
+        .collect();
+    let Some(first_column) = columns.first() else {
+        return Err("At least one imported column is required to create a table".into());
+    };
+    let database = table.database.as_deref().unwrap_or("");
+    let schema = table.schema.as_deref().unwrap_or("");
+    let qualified = qualified_table_ident(database, schema, &table.name, engine);
+    let column_type = match engine {
+        rdb_connstore::Engine::Oracle => "CLOB",
+        rdb_connstore::Engine::Mssql => "NVARCHAR(MAX)",
+        rdb_connstore::Engine::Clickhouse => "String",
+        _ => "TEXT",
+    };
+    let mut definitions: Vec<String> = columns
+        .iter()
+        .map(|column| format!("{} {column_type}", quote_ident(column, engine)))
+        .collect();
+    if engine == rdb_connstore::Engine::Cassandra {
+        definitions.push(format!(
+            "PRIMARY KEY ({})",
+            quote_ident(first_column, engine)
+        ));
+    }
+    let suffix = if engine == rdb_connstore::Engine::Clickhouse {
+        " ENGINE = MergeTree ORDER BY tuple()"
+    } else {
+        ""
+    };
+    Ok(format!(
+        "CREATE TABLE {qualified} ({}){suffix};",
+        definitions.join(", ")
+    ))
 }
 
 fn is_transactional_import_engine(engine: rdb_connstore::Engine) -> bool {
@@ -491,6 +808,14 @@ async fn finish_import_ok(
     }
 }
 
+fn should_rollback_import_error(
+    stop_on_error: bool,
+    has_transaction: bool,
+    has_explicit_tx_control: bool,
+) -> bool {
+    stop_on_error && (has_transaction || has_explicit_tx_control)
+}
+
 async fn finish_import_err(
     engine: rdb_connstore::Engine,
     driver: &AnyDriver,
@@ -498,28 +823,33 @@ async fn finish_import_err(
     tally: ImportTally,
     total: usize,
     stop_on_error: bool,
+    has_explicit_tx_control: bool,
 ) -> ImportOutcome {
     let (_, detail) = tally
         .first_err
         .unwrap_or_else(|| (1, "unknown error".into()));
+    if should_rollback_import_error(stop_on_error, tx_delims.is_some(), has_explicit_tx_control) {
+        let summary = match driver.rollback_transaction().await {
+            Ok(()) => {
+                format!("error: import aborted (rolled back {total} statement(s)) — {detail}")
+            }
+            Err(e) => {
+                let rollback_error = editor::strip_error_marker(&e.to_string()).into_owned();
+                format!("error: import aborted; ROLLBACK failed: {rollback_error} — {detail}")
+            }
+        };
+        return ImportOutcome {
+            summary,
+            has_error: true,
+            log_entries: tally.log_entries,
+        };
+    }
     if tx_delims.is_some() {
-        if stop_on_error {
-            let summary = match driver.rollback_transaction().await {
-                Ok(()) => {
-                    format!("error: import aborted (rolled back {total} statement(s)) — {detail}")
-                }
-                Err(e) => format!("error: import aborted; ROLLBACK failed: {e} — {detail}"),
-            };
-            return ImportOutcome {
-                summary,
-                has_error: true,
-                log_entries: tally.log_entries,
-            };
-        }
         if let Err(e) = driver.commit_transaction().await {
+            let commit_error = editor::strip_error_marker(&e.to_string()).into_owned();
             return ImportOutcome {
                 summary: format!(
-                    "error: imported statements could not be committed: {e} — {detail}"
+                    "error: imported statements could not be committed: {commit_error} — {detail}"
                 ),
                 has_error: true,
                 log_entries: tally.log_entries,
@@ -556,6 +886,7 @@ async fn execute_import_sql(
     let total = stmts.len();
     let stop_on_error = insert_option == "STOP ON ERROR";
     let skip_duplicates = insert_option == "SKIP DUPLICATES";
+    let has_explicit = has_explicit_tx_control(&stmts);
     let tx_delims = match begin_import_tx(engine, driver, &stmts, stop_on_error).await {
         Ok(delims) => delims,
         Err(outcome) => return outcome,
@@ -564,7 +895,16 @@ async fn execute_import_sql(
     if tally.failed_stmts.is_empty() {
         finish_import_ok(driver, tx_delims, tally, total).await
     } else {
-        finish_import_err(engine, driver, tx_delims, tally, total, stop_on_error).await
+        finish_import_err(
+            engine,
+            driver,
+            tx_delims,
+            tally,
+            total,
+            stop_on_error,
+            has_explicit,
+        )
+        .await
     }
 }
 
@@ -578,10 +918,14 @@ fn open_import_wizard_for_table(
     w: &MainWindow,
     db_arg: SharedString,
     label_arg: SharedString,
+    engine: rdb_connstore::Engine,
     raw_nodes: Arc<std::sync::Mutex<Vec<model::VmTreeNode>>>,
     pending_import: Arc<std::sync::Mutex<Option<PendingImport>>>,
 ) {
     let prompt = format!("Import into {} (CSV, JSON, SQL)", label_arg);
+    let current_database = w.get_bc_db().to_string();
+    let database = effective_import_database(&db_arg, &current_database);
+    let schema = w.get_schema_name().to_string();
     pick_file_via_dialog(w, prompt, move |w, picked| {
         let (path, contents) = match picked {
             Ok(pair) => pair,
@@ -590,7 +934,7 @@ fn open_import_wizard_for_table(
                 return;
             }
         };
-        let sheet = match export::parse_import_sheet(&path, &contents) {
+        let mut sheet = match export::parse_import_sheet(&path, &contents) {
             Ok(s) => s,
             Err(e) => {
                 let msg = format!("error: import failed — {e}");
@@ -598,8 +942,22 @@ fn open_import_wizard_for_table(
                 return;
             }
         };
+        if sheet.format_label == "SQL" {
+            sheet.sql_statements = import_sql_statements(&contents, engine);
+            if sheet.sql_statements.is_empty() {
+                let message = "error: import failed — no SQL statements found for this engine";
+                apply_import_status(w, message, true);
+                return;
+            }
+            sheet.rows = sheet
+                .sql_statements
+                .iter()
+                .map(|statement| vec![rdb_core::result::Cell::Text(statement.clone())])
+                .collect();
+        }
 
-        let mut tables = schema_table_names(&raw_nodes);
+        let tree_db = tree_database_identity(&raw_nodes, &database, engine);
+        let mut tables = schema_table_names(&raw_nodes, &tree_db, &schema, engine);
         if !label_arg.is_empty() && !tables.iter().any(|t| t == label_arg.as_str()) {
             tables.insert(0, label_arg.to_string());
         }
@@ -650,9 +1008,11 @@ fn open_import_wizard_for_table(
             })
             .collect();
         w.set_import_preview_rows(ModelRc::from(Rc::new(VecModel::from(preview_rows))));
-
         let mut pending = PendingImport {
-            db: db_arg.to_string(),
+            db: database.clone(),
+            tree_db,
+            schema: schema.clone(),
+            engine,
             sheet,
             target_cols: Vec::new(),
         };
@@ -793,11 +1153,18 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             } else {
                 db.clone()
             };
-            let schema_name = if matches!(engine, rdb_connstore::Engine::Postgres) {
+            let schema_name = if matches!(
+                engine,
+                rdb_connstore::Engine::Postgres
+                    | rdb_connstore::Engine::Mssql
+                    | rdb_connstore::Engine::Oracle
+            ) {
                 w.get_schema_name().to_string()
             } else {
                 String::new()
             };
+            let tree_db = tree_database_identity(&raw_nodes_for_open, &database_name, engine);
+            let table = import_table_ref(&database_name, &schema_name, &label, engine);
             let connection_id = current_connection_id
                 .lock()
                 .unwrap()
@@ -812,15 +1179,16 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             if let Some(index) = existing_index {
                 save_active_tab(&w);
                 restore_tab(&w, index);
-                sync_table_structure(&w, &raw_nodes_for_open, &label);
+                sync_table_structure(
+                    &w,
+                    &raw_nodes_for_open,
+                    &tree_db,
+                    &schema_name,
+                    &label,
+                    engine,
+                );
                 return;
             }
-            let table = rdb_core::write::TableRef {
-                database: (!db.is_empty()).then(|| db.clone()),
-                schema: matches!(engine, rdb_connstore::Engine::Postgres)
-                    .then(|| w.get_schema_name().to_string()),
-                name: label.clone(),
-            };
             save_active_tab(&w);
             // Fresh container: page 0, keep the user's limit, forget totals.
             {
@@ -872,7 +1240,14 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             }
             w.set_mongo_filter(SharedString::default());
             w.set_fn_mode(false);
-            sync_table_structure(&w, &raw_nodes_for_open, &label);
+            sync_table_structure(
+                &w,
+                &raw_nodes_for_open,
+                &tree_db,
+                &schema_name,
+                &label,
+                engine,
+            );
             w.set_active_table(SharedString::from(label));
             w.set_show_structure(false);
             w.set_total_rows(-1);
@@ -1528,6 +1903,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                                         model::VmTreeNode {
                                             label: c.name,
                                             kind: leaf_kind.into(),
+                                            nullable: None,
                                         },
                                     );
                                 }
@@ -1693,7 +2069,13 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             if let Some(slot) = pending.target_cols.get_mut(col_idx.max(0) as usize) {
                 *slot = target_col.to_string();
             }
-            let tcols = table_column_names(&raw_nodes, &w.get_import_target_table());
+            let tcols = table_column_names(
+                &raw_nodes,
+                &pending.tree_db,
+                &pending.schema,
+                &w.get_import_target_table(),
+                pending.engine,
+            );
             let table_col_count = if w.get_import_create_table() {
                 pending.sheet.headers.len()
             } else {
@@ -1704,10 +2086,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
     }
     {
         let weak = window.as_weak();
-        let cur_engine = cur_engine.clone();
         let rt = rt.clone();
-        let current = current.clone();
-        let driver_pool = state.driver_pool.clone();
+        let store = store.clone();
         let current_connection_id = state.current_connection_id.clone();
         let query_console = state.query_console.clone();
         let pending_import = pending_import.clone();
@@ -1718,8 +2098,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             let Some(pending) = pending_import.lock().ok().and_then(|g| g.clone()) else {
                 return;
             };
-            let eng = (*cur_engine.borrow()).unwrap_or(rdb_connstore::Engine::Postgres);
-            let schema = w.get_schema_name().to_string();
+            let engine = pending.engine;
             let create_table = w.get_import_create_table();
             let target_table = if create_table {
                 w.get_import_new_table_name().trim().to_string()
@@ -1730,71 +2109,134 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 w.set_import_error("Table name is required".into());
                 return;
             }
-            let table_ref = rdb_core::write::TableRef {
-                database: (!pending.db.is_empty()).then(|| pending.db.clone()),
-                schema: matches!(eng, rdb_connstore::Engine::Postgres)
-                    .then(|| schema.clone())
-                    .filter(|s| !s.is_empty()),
-                name: target_table.clone(),
+            let table_ref = import_table_ref(&pending.db, &pending.schema, &target_table, engine);
+            if create_table
+                && matches!(
+                    engine,
+                    rdb_connstore::Engine::Mongo
+                        | rdb_connstore::Engine::Redis
+                        | rdb_connstore::Engine::Valkey
+                )
+            {
+                let message = format!(
+                    "Create new table is not supported for {}",
+                    AnyDriver::label(engine)
+                );
+                w.set_import_error(message.clone().into());
+                apply_import_status(&w, &message, true);
+                return;
+            }
+            let sql_statements = pending.sheet.sql_statements.clone();
+            let create_ddl = if create_table && sql_statements.is_empty() {
+                match build_import_create_table_sql(engine, &table_ref, &pending.target_cols) {
+                    Ok(ddl) => Some(ddl),
+                    Err(error) => {
+                        let message = format!("error: {error}");
+                        w.set_import_error(message.clone().into());
+                        apply_import_status(&w, &message, true);
+                        return;
+                    }
+                }
+            } else {
+                None
             };
-            let ops = if pending.sheet.sql_statements.is_empty() {
+            let ops = if sql_statements.is_empty() {
                 match export::build_import_ops_from_sheet(
                     &pending.sheet,
                     &table_ref,
                     &pending.target_cols,
                 ) {
                     Ok(ops) => ops,
-                    Err(e) => {
-                        w.set_import_error(e.into());
+                    Err(error) => {
+                        w.set_import_error(error.into());
                         return;
                     }
                 }
             } else {
                 Vec::new()
             };
-            let sql_statements = pending.sheet.sql_statements.clone();
             let insert_option = w.get_import_insert_option().to_string();
-            let create_ddl = if create_table && sql_statements.is_empty() {
-                let qual = qualified_table_ident(&pending.db, &schema, &target_table, eng);
-                let cols_ddl: Vec<String> = pending
-                    .target_cols
-                    .iter()
-                    .filter(|tc| !tc.is_empty() && tc.as_str() != "Do not import")
-                    .map(|tc| format!("{} TEXT", quote_ident(tc, eng)))
-                    .collect();
-                Some(format!("CREATE TABLE {qual} ({});", cols_ddl.join(", ")))
-            } else {
-                None
-            };
             w.set_import_error(SharedString::default());
-            let conn_id = current_connection_id.lock().ok().and_then(|g| g.clone());
+            let Some(conn_id) = current_connection_id
+                .lock()
+                .ok()
+                .and_then(|guard| guard.clone())
+            else {
+                let message = "error: no saved connection is available for an isolated import";
+                w.set_import_error(message.into());
+                apply_import_status(&w, message, true);
+                return;
+            };
+            let saved_config = match store.borrow().conn_config_for(&conn_id) {
+                Ok(config) => config,
+                Err(error) => {
+                    let message = format!("error: import connection configuration failed: {error}");
+                    w.set_import_error(message.clone().into());
+                    apply_import_status(&w, &message, true);
+                    return;
+                }
+            };
+            let config = match import_connection_config(saved_config, engine, &pending.db) {
+                Ok(config) => config,
+                Err(error) => {
+                    let message = format!("error: {error}");
+                    w.set_import_error(message.clone().into());
+                    apply_import_status(&w, &message, true);
+                    return;
+                }
+            };
             let db_arg = SharedString::from(pending.db.clone());
             let label_arg = SharedString::from(target_table);
             let query_console = query_console.clone();
             let weak_done = w.as_weak();
-            let rt_inner = rt.clone();
-            let current = current.clone();
-            let driver_pool = driver_pool.clone();
             rt.spawn(async move {
-                let Some((engine, driver)) =
-                    resolve_driver(&driver_pool, &current, conn_id.as_deref()).await
-                else {
-                    return;
+                let driver = match AnyDriver::connect(engine, &config).await {
+                    Ok(driver) => driver,
+                    Err(error) => {
+                        let clean = editor::strip_error_marker(&error.to_string()).into_owned();
+                        let message = format!("error: import connection failed: {clean}");
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = weak_done.upgrade() {
+                                sync_query_console(&w, &query_console);
+                                w.set_import_error(message.clone().into());
+                                apply_import_status(&w, &message, true);
+                            }
+                        });
+                        return;
+                    }
                 };
                 if let Some(ddl) = create_ddl {
                     append_query_console(&query_console, ddl.clone());
-                    if let Ok(q) = query_parse::parse_query(engine, &ddl) {
-                        if let Err(e) = driver.query(&q).await {
-                            let clean = editor::strip_error_marker(&e.to_string()).into_owned();
+                    let query = match query_parse::parse_query(engine, &ddl) {
+                        Ok(query) => query,
+                        Err(error) => {
+                            let clean = editor::strip_error_marker(&error).into_owned();
+                            let message = format!("error: CREATE TABLE parse failed: {clean}");
+                            append_query_console(&query_console, format!("-- {message}"));
+                            drop(driver);
                             let _ = slint::invoke_from_event_loop(move || {
                                 if let Some(w) = weak_done.upgrade() {
-                                    w.set_import_error(
-                                        format!("CREATE TABLE failed: {clean}").into(),
-                                    );
+                                    sync_query_console(&w, &query_console);
+                                    w.set_import_error(message.clone().into());
+                                    apply_import_status(&w, &message, true);
                                 }
                             });
                             return;
                         }
+                    };
+                    if let Err(error) = driver.query(&query).await {
+                        let clean = editor::strip_error_marker(&error.to_string()).into_owned();
+                        let message = format!("error: CREATE TABLE failed: {clean}");
+                        append_query_console(&query_console, format!("-- {message}"));
+                        drop(driver);
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = weak_done.upgrade() {
+                                sync_query_console(&w, &query_console);
+                                w.set_import_error(message.clone().into());
+                                apply_import_status(&w, &message, true);
+                            }
+                        });
+                        return;
                     }
                 }
                 let outcome = if !sql_statements.is_empty() {
@@ -1808,8 +2250,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 let summary = outcome.summary;
                 let has_error = outcome.has_error;
                 let stop_failed = has_error && insert_option == "STOP ON ERROR";
-                let weak_after = weak_done.clone();
-                let summary_after = summary.clone();
+                drop(driver);
                 let _ = slint::invoke_from_event_loop(move || {
                     let Some(w) = weak_done.upgrade() else {
                         return;
@@ -1817,22 +2258,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     sync_query_console(&w, &query_console);
                     if stop_failed {
                         w.set_import_error(summary.clone().into());
-                        apply_import_status(&w, &summary, true);
                     } else {
                         w.set_import_modal_open(false);
                         w.invoke_open_table(db_arg, label_arg);
-                        apply_import_status(&w, &summary, has_error);
                     }
+                    apply_import_status(&w, &summary, has_error);
                 });
-                if has_error && !stop_failed {
-                    let _ = rt_inner;
-                    tokio::time::sleep(std::time::Duration::from_millis(320)).await;
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(w) = weak_after.upgrade() {
-                            apply_import_status(&w, &summary_after, true);
-                        }
-                    });
-                }
             });
         });
     }
@@ -1862,15 +2293,18 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 }
                 3 => copy_to_meta(&w, &label, "copied table name"),
                 4 => copy_to_meta(&w, &qual, "copied qualified table name"),
-                5 => {
-                    let sql = format!("SELECT\n    *\nFROM\n    {qual}\nLIMIT\n    100;");
-                    copy_to_meta(&w, &sql, "copied SELECT script");
-                }
+                5 => match copy_select_script(eng, &qual) {
+                    Some(sql) => copy_to_meta(&w, &sql, "copied SELECT script"),
+                    None => w.set_results_meta(
+                        format!("SELECT script unavailable for {}", AnyDriver::label(eng)).into(),
+                    ),
+                },
                 7 => {
                     open_import_wizard_for_table(
                         &w,
                         db,
                         label,
+                        eng,
                         raw_nodes.clone(),
                         pending_import.clone(),
                     );
@@ -1902,24 +2336,29 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             if target_col.is_empty() {
                 return;
             }
-            let mut names = Vec::new();
-            if let Ok(nodes) = raw_nodes.lock() {
-                let mut in_table = false;
-                for n in nodes.iter() {
-                    let is_container =
-                        matches!(n.kind.as_str(), "table" | "collection" | "keyspace");
-                    if is_container {
-                        in_table = n.label == table.as_str();
-                    } else if n.kind == "field" && in_table {
-                        let col = completion::field_name(&n.label).to_string();
-                        if !col.is_empty() {
-                            names.push(col);
-                        }
-                    } else if n.kind != "field" {
-                        in_table = false;
-                    }
-                }
-            }
+            let Some(engine) = *cur_engine.borrow() else {
+                return;
+            };
+            let tree_db = tree_database_identity(&raw_nodes, &w.get_bc_db(), engine);
+            let names: Vec<String> = raw_nodes
+                .lock()
+                .ok()
+                .map(|nodes| {
+                    fields_for_tree_field(
+                        &nodes,
+                        &tree_db,
+                        &w.get_schema_name(),
+                        &table,
+                        &target_col,
+                        engine,
+                    )
+                    .into_iter()
+                    .map(|node| completion::field_name(&node.label).to_string())
+                    .filter(|name| !name.is_empty())
+                    .collect()
+                })
+                .unwrap_or_default();
+            let mut names = names;
             if names.is_empty() {
                 names.push(target_col.clone());
             }
@@ -2110,5 +2549,291 @@ mod import_sql_tests {
             None
         );
         assert_eq!(sql_tx_spec(rdb_connstore::Engine::MySql, true, false), None);
+    }
+    #[test]
+    fn import_database_falls_back_to_the_active_connection_database() {
+        assert_eq!(
+            effective_import_database("", "active_database"),
+            "active_database"
+        );
+        assert_eq!(
+            effective_import_database("table_database", "active_database"),
+            "table_database"
+        );
+    }
+
+    #[test]
+    fn explicit_transaction_errors_only_rollback_in_stop_mode() {
+        assert!(should_rollback_import_error(true, false, true));
+        assert!(should_rollback_import_error(true, true, false));
+        assert!(!should_rollback_import_error(false, false, true));
+        assert!(!should_rollback_import_error(true, false, false));
+    }
+
+    #[tokio::test]
+    async fn failing_explicit_transaction_script_runs_rollback() {
+        let driver = sqlite().await;
+        sql(&driver, "CREATE TABLE items (id INTEGER)").await;
+        let outcome = execute_import_sql(
+            rdb_connstore::Engine::Sqlite,
+            &driver,
+            vec![
+                "BEGIN".into(),
+                "INSERT INTO missing_table VALUES (1)".into(),
+            ],
+            "STOP ON ERROR",
+        )
+        .await;
+        assert!(outcome.has_error);
+        assert!(outcome.summary.contains("rolled back"));
+        sql(&driver, "BEGIN").await;
+        sql(&driver, "ROLLBACK").await;
+    }
+
+    #[test]
+    fn import_sql_uses_the_selected_engine_splitter() {
+        let mysql = "INSERT INTO t VALUES ('it\\'s; still one statement'); SELECT 2;";
+        assert_eq!(
+            import_sql_statements(mysql, rdb_connstore::Engine::MySql),
+            vec![
+                "INSERT INTO t VALUES ('it\\'s; still one statement')",
+                "SELECT 2"
+            ]
+        );
+        let oracle = "SELECT 'it''s; still one statement' FROM dual; SELECT 2 FROM dual;";
+        assert_eq!(
+            import_sql_statements(oracle, rdb_connstore::Engine::Oracle),
+            vec![
+                "SELECT 'it''s; still one statement' FROM dual",
+                "SELECT 2 FROM dual"
+            ]
+        );
+    }
+
+    #[test]
+    fn generated_import_ddl_uses_engine_requirements() {
+        let oracle = import_table_ref("", "APP", "events", rdb_connstore::Engine::Oracle);
+        assert_eq!(
+            build_import_create_table_sql(
+                rdb_connstore::Engine::Oracle,
+                &oracle,
+                &["payload".into()]
+            )
+            .unwrap(),
+            "CREATE TABLE \"APP\".\"events\" (\"payload\" CLOB);"
+        );
+
+        let clickhouse =
+            import_table_ref("analytics", "", "events", rdb_connstore::Engine::Clickhouse);
+        assert_eq!(
+            build_import_create_table_sql(
+                rdb_connstore::Engine::Clickhouse,
+                &clickhouse,
+                &["payload".into()]
+            )
+            .unwrap(),
+            "CREATE TABLE \"analytics\".\"events\" (\"payload\" String) ENGINE = MergeTree ORDER BY tuple();"
+        );
+
+        let cassandra =
+            import_table_ref("analytics", "", "events", rdb_connstore::Engine::Cassandra);
+        assert_eq!(
+            build_import_create_table_sql(
+                rdb_connstore::Engine::Cassandra,
+                &cassandra,
+                &["id".into(), "payload".into()]
+            )
+            .unwrap(),
+            "CREATE TABLE \"analytics\".\"events\" (\"id\" TEXT, \"payload\" TEXT, PRIMARY KEY (\"id\"));"
+        );
+        assert!(build_import_create_table_sql(
+            rdb_connstore::Engine::Postgres,
+            &import_table_ref("", "public", "events", rdb_connstore::Engine::Postgres),
+            &["".into(), "Do not import".into()]
+        )
+        .unwrap_err()
+        .contains("At least one imported column"));
+        let mssql = import_table_ref("sales", "dbo", "events", rdb_connstore::Engine::Mssql);
+        assert_eq!(mssql.database.as_deref(), Some("sales"));
+        assert_eq!(mssql.schema.as_deref(), Some("dbo"));
+        assert_eq!(
+            build_import_create_table_sql(
+                rdb_connstore::Engine::Mssql,
+                &mssql,
+                &["payload".into()]
+            )
+            .unwrap(),
+            "CREATE TABLE \"dbo\".\"events\" (\"payload\" NVARCHAR(MAX));"
+        );
+        let postgres = import_table_ref("app", "public", "events", rdb_connstore::Engine::Postgres);
+        assert_eq!(postgres.schema.as_deref(), Some("public"));
+    }
+
+    #[test]
+    fn unsupported_import_table_creation_is_explicit() {
+        let table = import_table_ref("db", "", "items", rdb_connstore::Engine::Mongo);
+        for engine in [
+            rdb_connstore::Engine::Mongo,
+            rdb_connstore::Engine::Redis,
+            rdb_connstore::Engine::Valkey,
+        ] {
+            assert!(
+                build_import_create_table_sql(engine, &table, &["id".into()])
+                    .unwrap_err()
+                    .contains("not supported")
+            );
+        }
+    }
+
+    #[test]
+    fn copy_select_scripts_use_supported_dialect_syntax() {
+        let mssql = copy_select_script(rdb_connstore::Engine::Mssql, "[dbo].[items]").unwrap();
+        assert!(mssql.contains("SELECT TOP (100)"));
+        assert!(!mssql.contains("LIMIT"));
+        let oracle =
+            copy_select_script(rdb_connstore::Engine::Oracle, "\"APP\".\"items\"").unwrap();
+        assert!(oracle.contains("ROWNUM <= 100"));
+        assert!(!oracle.contains("LIMIT"));
+        for engine in [
+            rdb_connstore::Engine::Mongo,
+            rdb_connstore::Engine::Redis,
+            rdb_connstore::Engine::Valkey,
+        ] {
+            assert_eq!(copy_select_script(engine, "items"), None);
+        }
+    }
+
+    #[test]
+    fn duplicate_detection_requires_a_known_error_token() {
+        assert!(is_duplicate_db_error(
+            "MySQL error 1062: Duplicate entry for key"
+        ));
+        assert!(is_duplicate_db_error("SQLSTATE 23505"));
+        assert!(is_duplicate_db_error(
+            "ORA-00001: unique constraint violated"
+        ));
+        assert!(!is_duplicate_db_error("job 11062 failed"));
+        assert!(!is_duplicate_db_error("processed 1062 rows"));
+        assert!(!is_duplicate_db_error("a duplicate network record"));
+    }
+
+    #[test]
+    fn schema_field_lookup_uses_parent_and_preserves_nullability() {
+        let nodes = vec![
+            model::VmTreeNode {
+                label: "db_a".into(),
+                kind: "database".into(),
+                nullable: None,
+            },
+            model::VmTreeNode {
+                label: "orders".into(),
+                kind: "table".into(),
+                nullable: None,
+            },
+            model::VmTreeNode {
+                label: "a_id: INTEGER".into(),
+                kind: "field".into(),
+                nullable: Some(false),
+            },
+            model::VmTreeNode {
+                label: "db_b".into(),
+                kind: "database".into(),
+                nullable: None,
+            },
+            model::VmTreeNode {
+                label: "orders".into(),
+                kind: "table".into(),
+                nullable: None,
+            },
+            model::VmTreeNode {
+                label: "b_id: TEXT".into(),
+                kind: "field".into(),
+                nullable: Some(true),
+            },
+        ];
+        let raw_nodes = Arc::new(std::sync::Mutex::new(nodes.clone()));
+        assert_eq!(
+            tree_database_identity(&raw_nodes, "configured-file", rdb_connstore::Engine::Sqlite),
+            "db_a"
+        );
+        assert_eq!(
+            tree_database_identity(&raw_nodes, "", rdb_connstore::Engine::Postgres),
+            "db_a"
+        );
+        let fields =
+            fields_for_container(&nodes, "db_a", "", "orders", rdb_connstore::Engine::Sqlite);
+        assert_eq!(fields.len(), 1);
+        let structure = structure_field(fields[0]).unwrap();
+        assert_eq!(structure.name, "a_id");
+        assert_eq!(structure.type_name, "INTEGER");
+        assert!(!structure.nullable);
+
+        let fields =
+            fields_for_container(&nodes, "db_b", "", "orders", rdb_connstore::Engine::Sqlite);
+        assert_eq!(fields.len(), 1);
+        assert_eq!(structure_field(fields[0]).unwrap().name, "b_id");
+        assert!(structure_field(fields[0]).unwrap().nullable);
+    }
+    #[test]
+    fn structure_field_omits_unknown_nullability() {
+        let field = model::VmTreeNode {
+            label: "unknown: TEXT".into(),
+            kind: "field".into(),
+            nullable: None,
+        };
+        assert!(structure_field(&field).is_none());
+    }
+
+    #[test]
+    fn sqlite_isolation_rejects_memory_or_missing_database_paths() {
+        let config = |database: Option<&str>| rdb_core::conn::ConnConfig {
+            host: String::new(),
+            port: 0,
+            user: String::new(),
+            database: database.map(str::to_string),
+            password: None,
+            sslmode: rdb_core::conn::SslMode::Disable,
+            params: None,
+            ssh: None,
+        };
+        assert!(import_connection_config(
+            config(Some(":memory:")),
+            rdb_connstore::Engine::Sqlite,
+            ""
+        )
+        .is_err());
+        assert!(import_connection_config(config(None), rdb_connstore::Engine::Sqlite, "").is_err());
+        assert!(import_connection_config(
+            config(Some("file-backed.sqlite")),
+            rdb_connstore::Engine::Sqlite,
+            ""
+        )
+        .is_ok());
+    }
+    #[test]
+    fn redis_database_context_is_translated_for_the_dedicated_connection() {
+        let config = rdb_core::conn::ConnConfig {
+            host: String::new(),
+            port: 6379,
+            user: String::new(),
+            database: Some("0".into()),
+            password: None,
+            sslmode: rdb_core::conn::SslMode::Disable,
+            params: None,
+            ssh: None,
+        };
+        let config = import_connection_config(config, rdb_connstore::Engine::Redis, "db3").unwrap();
+        assert_eq!(config.database.as_deref(), Some("3"));
+        let config = rdb_core::conn::ConnConfig {
+            host: String::new(),
+            port: 6379,
+            user: String::new(),
+            database: None,
+            password: None,
+            sslmode: rdb_core::conn::SslMode::Disable,
+            params: None,
+            ssh: None,
+        };
+        assert!(import_connection_config(config, rdb_connstore::Engine::Redis, "other").is_err());
     }
 }

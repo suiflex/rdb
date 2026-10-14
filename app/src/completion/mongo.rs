@@ -282,6 +282,7 @@ mod tests {
         let mk = |l: &str, k: &str| VmTreeNode {
             label: l.into(),
             kind: k.into(),
+            nullable: None,
         };
         vec![
             mk("users", "collection"),

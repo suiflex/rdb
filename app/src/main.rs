@@ -6980,14 +6980,17 @@ mod tests {
             model::VmTreeNode {
                 label: "users".into(),
                 kind: "table".into(),
+                nullable: None,
             },
             model::VmTreeNode {
                 label: "orders".into(),
                 kind: "table".into(),
+                nullable: None,
             },
             model::VmTreeNode {
                 label: "audit_log".into(),
                 kind: "table".into(),
+                nullable: None,
             },
         ]
     }
