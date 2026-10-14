@@ -256,13 +256,11 @@ fn json_val_to_cell(v: &serde_json::Value, large_integer_prefix: &str) -> rdb_co
 const LARGE_JSON_INTEGER_PREFIX: &str = "__rdb_large_json_integer_";
 
 fn json_strings_contain(content: &str, needle: &str) -> bool {
-    let mut chars = content.char_indices();
-    while let Some((start, c)) = chars.next() {
-        if c != '"' {
-            continue;
-        }
-        let mut escaped = false;
-        for (end, c) in chars.by_ref() {
+    let mut string_start = None;
+    let mut escaped = false;
+
+    for (end, c) in content.char_indices() {
+        if let Some(start) = string_start {
             if escaped {
                 escaped = false;
             } else if c == '\\' {
@@ -273,58 +271,77 @@ fn json_strings_contain(content: &str, needle: &str) -> bool {
                 {
                     return true;
                 }
-                break;
+                string_start = None;
             }
+        } else if c == '"' {
+            string_start = Some(end);
         }
     }
     false
 }
 
+fn append_json_non_number_char(
+    c: char,
+    output: &mut String,
+    in_string: &mut bool,
+    escaped: &mut bool,
+) {
+    output.push(c);
+    if *in_string {
+        if *escaped {
+            *escaped = false;
+        } else if c == '\\' {
+            *escaped = true;
+        } else if c == '"' {
+            *in_string = false;
+        }
+    } else if c == '"' {
+        *in_string = true;
+    }
+}
+
+fn append_json_number(token: &str, prefix: &str, output: &mut String) {
+    let digits = token.strip_prefix('-').unwrap_or(token);
+    let valid_integer = !digits.is_empty()
+        && digits.bytes().all(|b| b.is_ascii_digit())
+        && (digits == "0" || !digits.starts_with('0'));
+    if valid_integer && token.parse::<i64>().is_err() && token.parse::<u64>().is_err() {
+        output.push('"');
+        output.push_str(prefix);
+        output.push_str(token);
+        output.push('"');
+    } else {
+        output.push_str(token);
+    }
+}
+
 fn preserve_large_json_integers(content: &str, prefix: &str) -> String {
     let mut output = String::with_capacity(content.len());
-    let mut chars = content.char_indices().peekable();
     let mut in_string = false;
     let mut escaped = false;
+    let mut number = String::new();
 
-    while let Some((_, c)) = chars.next() {
+    for c in content.chars() {
         if in_string {
-            output.push(c);
-            if escaped {
-                escaped = false;
-            } else if c == '\\' {
-                escaped = true;
-            } else if c == '"' {
-                in_string = false;
-            }
-        } else if c == '"' {
-            in_string = true;
-            output.push(c);
-        } else if c == '-' || c.is_ascii_digit() {
-            let mut token = String::new();
-            token.push(c);
-            while let Some(&(_, next)) = chars.peek() {
-                if next.is_ascii_digit() || matches!(next, '.' | 'e' | 'E' | '+' | '-') {
-                    token.push(next);
-                    chars.next();
-                } else {
-                    break;
-                }
-            }
-            let digits = token.strip_prefix('-').unwrap_or(&token);
-            let valid_integer = !digits.is_empty()
-                && digits.bytes().all(|b| b.is_ascii_digit())
-                && (digits == "0" || !digits.starts_with('0'));
-            if valid_integer && token.parse::<i64>().is_err() && token.parse::<u64>().is_err() {
-                output.push('"');
-                output.push_str(prefix);
-                output.push_str(&token);
-                output.push('"');
-            } else {
-                output.push_str(&token);
-            }
+            append_json_non_number_char(c, &mut output, &mut in_string, &mut escaped);
+        } else if !number.is_empty()
+            && (c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-'))
+        {
+            number.push(c);
         } else {
-            output.push(c);
+            if !number.is_empty() {
+                append_json_number(&number, prefix, &mut output);
+                number.clear();
+            }
+            if c == '-' || c.is_ascii_digit() {
+                number.push(c);
+            } else {
+                append_json_non_number_char(c, &mut output, &mut in_string, &mut escaped);
+            }
         }
+    }
+    if !number.is_empty() {
+        append_json_number(&number, prefix, &mut output);
     }
     output
 }
@@ -374,92 +391,157 @@ fn parse_json_objects(
     Ok((objs, large_integer_prefix))
 }
 
-fn parse_csv_records(content: &str) -> Result<Vec<Vec<(String, bool)>>, String> {
-    let mut rows: Vec<Vec<(String, bool)>> = Vec::new();
-    let mut cur_row: Vec<(String, bool)> = Vec::new();
-    let mut field = String::new();
-    let mut in_quotes = false;
-    let mut after_quote = false;
-    let mut was_quoted = false;
-    let mut chars = content.chars().peekable();
-    let mut record_number = 1;
+#[derive(Clone, Copy)]
+enum CsvState {
+    Unquoted,
+    Quoted,
+    AfterQuote,
+}
 
-    while let Some(c) = chars.next() {
-        if in_quotes {
-            if c == '"' {
-                if chars.peek() == Some(&'"') {
-                    chars.next();
-                    field.push('"');
-                } else {
-                    in_quotes = false;
-                    after_quote = true;
-                }
-            } else {
-                field.push(c);
-            }
-        } else if after_quote {
-            match c {
-                ',' => {
-                    cur_row.push((std::mem::take(&mut field), was_quoted));
-                    was_quoted = false;
-                    after_quote = false;
-                }
-                '\r' | '\n' => {
-                    if c == '\r' && chars.peek() == Some(&'\n') {
-                        chars.next();
-                    }
-                    cur_row.push((std::mem::take(&mut field), was_quoted));
-                    was_quoted = false;
-                    after_quote = false;
-                    rows.push(std::mem::take(&mut cur_row));
-                    record_number += 1;
-                }
-                _ => {
-                    return Err(format!(
-                        "invalid CSV character {c:?} after closing quote in record {record_number}"
-                    ));
-                }
-            }
-        } else if c == '"' {
-            if field.is_empty() {
-                in_quotes = true;
-                was_quoted = true;
-            } else {
-                return Err(format!(
-                    "unexpected quote in unquoted CSV field in record {record_number}"
-                ));
-            }
-        } else if c == ',' {
-            cur_row.push((std::mem::take(&mut field), was_quoted));
-            was_quoted = false;
-        } else if c == '\r' || c == '\n' {
-            if c == '\r' && chars.peek() == Some(&'\n') {
-                chars.next();
-            }
-            cur_row.push((std::mem::take(&mut field), was_quoted));
-            was_quoted = false;
-            if cur_row.len() > 1 || !cur_row[0].0.is_empty() || cur_row[0].1 {
-                rows.push(std::mem::take(&mut cur_row));
-            } else {
-                cur_row.clear();
-            }
-            record_number += 1;
+struct CsvParser {
+    rows: Vec<Vec<(String, bool)>>,
+    row: Vec<(String, bool)>,
+    field: String,
+    was_quoted: bool,
+    record_number: usize,
+}
+
+impl CsvParser {
+    fn new() -> Self {
+        Self {
+            rows: Vec::new(),
+            row: Vec::new(),
+            field: String::new(),
+            was_quoted: false,
+            record_number: 1,
+        }
+    }
+
+    fn finish_field(&mut self) {
+        self.row
+            .push((std::mem::take(&mut self.field), self.was_quoted));
+        self.was_quoted = false;
+    }
+
+    fn finish_record(&mut self, skip_empty: bool) {
+        self.finish_field();
+        if !skip_empty || self.row.len() > 1 || !self.row[0].0.is_empty() || self.row[0].1 {
+            self.rows.push(std::mem::take(&mut self.row));
         } else {
-            field.push(c);
+            self.row.clear();
+        }
+        self.record_number += 1;
+    }
+
+    fn consume_quoted(
+        &mut self,
+        c: char,
+        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    ) -> CsvState {
+        if c != '"' {
+            self.field.push(c);
+            return CsvState::Quoted;
+        }
+        if chars.peek() == Some(&'"') {
+            chars.next();
+            self.field.push('"');
+            CsvState::Quoted
+        } else {
+            CsvState::AfterQuote
         }
     }
-    if in_quotes {
-        return Err(format!(
-            "unclosed quoted CSV field in record {record_number}"
-        ));
-    }
-    if !field.is_empty() || was_quoted || !cur_row.is_empty() || after_quote {
-        cur_row.push((field, was_quoted));
-        if cur_row.len() > 1 || !cur_row[0].0.is_empty() || cur_row[0].1 {
-            rows.push(cur_row);
+
+    fn consume_after_quote(
+        &mut self,
+        c: char,
+        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    ) -> Result<CsvState, String> {
+        match c {
+            ',' => {
+                self.finish_field();
+                Ok(CsvState::Unquoted)
+            }
+            '\r' | '\n' => {
+                consume_csv_newline(c, chars);
+                self.finish_record(false);
+                Ok(CsvState::Unquoted)
+            }
+            _ => Err(format!(
+                "invalid CSV character {c:?} after closing quote in record {}",
+                self.record_number
+            )),
         }
     }
-    Ok(rows)
+
+    fn consume_unquoted(
+        &mut self,
+        c: char,
+        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    ) -> Result<CsvState, String> {
+        match c {
+            '"' if self.field.is_empty() => {
+                self.was_quoted = true;
+                Ok(CsvState::Quoted)
+            }
+            '"' => Err(format!(
+                "unexpected quote in unquoted CSV field in record {}",
+                self.record_number
+            )),
+            ',' => {
+                self.finish_field();
+                Ok(CsvState::Unquoted)
+            }
+            '\r' | '\n' => {
+                consume_csv_newline(c, chars);
+                self.finish_record(true);
+                Ok(CsvState::Unquoted)
+            }
+            _ => {
+                self.field.push(c);
+                Ok(CsvState::Unquoted)
+            }
+        }
+    }
+
+    fn finish(mut self, state: CsvState) -> Result<Vec<Vec<(String, bool)>>, String> {
+        if matches!(state, CsvState::Quoted) {
+            return Err(format!(
+                "unclosed quoted CSV field in record {}",
+                self.record_number
+            ));
+        }
+        let has_pending_field = !self.field.is_empty()
+            || self.was_quoted
+            || !self.row.is_empty()
+            || matches!(state, CsvState::AfterQuote);
+        if has_pending_field {
+            self.finish_field();
+            if self.row.len() > 1 || !self.row[0].0.is_empty() || self.row[0].1 {
+                self.rows.push(self.row);
+            }
+        }
+        Ok(self.rows)
+    }
+}
+
+fn consume_csv_newline(c: char, chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    if c == '\r' && chars.peek() == Some(&'\n') {
+        chars.next();
+    }
+}
+
+fn parse_csv_records(content: &str) -> Result<Vec<Vec<(String, bool)>>, String> {
+    let mut parser = CsvParser::new();
+    let mut state = CsvState::Unquoted;
+    let mut chars = content.chars().peekable();
+    while let Some(c) = chars.next() {
+        state = match state {
+            CsvState::Quoted => parser.consume_quoted(c, &mut chars),
+            CsvState::AfterQuote => parser.consume_after_quote(c, &mut chars)?,
+            CsvState::Unquoted => parser.consume_unquoted(c, &mut chars)?,
+        };
+    }
+    parser.finish(state)
 }
 
 fn csv_cell_value(raw: &str, was_quoted: bool) -> rdb_core::result::Cell {
