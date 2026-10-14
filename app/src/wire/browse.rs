@@ -18,12 +18,16 @@ fn qualified_table_ident(
     label: &str,
     eng: rdb_connstore::Engine,
 ) -> String {
+    let table = import_table_ref(db, schema, label, eng);
+    if eng == rdb_connstore::Engine::Cassandra {
+        return rdb_driver_cassandra::write_cql::table_name(&table);
+    }
     let namespace = match eng {
         rdb_connstore::Engine::Postgres
         | rdb_connstore::Engine::Mssql
-        | rdb_connstore::Engine::Oracle => schema,
+        | rdb_connstore::Engine::Oracle => table.schema.as_deref().unwrap_or(""),
         rdb_connstore::Engine::Sqlite => "",
-        _ => db,
+        _ => table.database.as_deref().unwrap_or(""),
     };
     if namespace.is_empty() {
         quote_ident(label, eng)
@@ -90,6 +94,79 @@ fn import_table_ref(
         .filter(|schema| !schema.is_empty()),
         name: name.to_string(),
     }
+}
+
+struct ImportPlan {
+    engine: rdb_connstore::Engine,
+    target_table: String,
+    create_ddl: Option<String>,
+    sql_statements: Vec<String>,
+    ops: Vec<rdb_core::write::WriteOp>,
+    insert_option: String,
+    config: rdb_core::conn::ConnConfig,
+}
+
+fn prepare_import_plan<F>(
+    pending: &PendingImport,
+    create_table: bool,
+    target_table: String,
+    insert_option: String,
+    saved_config: F,
+) -> Result<ImportPlan, (String, bool)>
+where
+    F: FnOnce() -> Result<rdb_core::conn::ConnConfig, String>,
+{
+    if target_table.is_empty() {
+        return Err(("Table name is required".into(), false));
+    }
+    let engine = pending.engine;
+    let table_ref = import_table_ref(&pending.db, &pending.schema, &target_table, engine);
+    if create_table
+        && matches!(
+            engine,
+            rdb_connstore::Engine::Mongo
+                | rdb_connstore::Engine::Redis
+                | rdb_connstore::Engine::Valkey
+        )
+    {
+        return Err((
+            format!(
+                "Create new table is not supported for {}",
+                AnyDriver::label(engine)
+            ),
+            true,
+        ));
+    }
+    let sql_statements = pending.sheet.sql_statements.clone();
+    let create_ddl = if create_table && sql_statements.is_empty() {
+        Some(
+            build_import_create_table_sql(engine, &table_ref, &pending.target_cols)
+                .map_err(|error| (format!("error: {error}"), true))?,
+        )
+    } else {
+        None
+    };
+    let ops = if sql_statements.is_empty() {
+        export::build_import_ops_from_sheet(&pending.sheet, &table_ref, &pending.target_cols)
+            .map_err(|error| (error, false))?
+    } else {
+        Vec::new()
+    };
+    let config = saved_config()
+        .map_err(|error| (error, true))
+        .and_then(|config| {
+            import_connection_config(config, engine, &pending.db)
+                .map_err(|error| (format!("error: {error}"), true))
+        })?;
+    Ok(ImportPlan {
+        engine,
+        target_table,
+        create_ddl,
+        sql_statements,
+        ops,
+        insert_option,
+        config,
+    })
 }
 
 fn tree_parent_matches(
@@ -2052,6 +2129,116 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             }
         });
     }
+    fn report_import_error(
+        weak: slint::Weak<MainWindow>,
+        query_console: Arc<std::sync::Mutex<Vec<String>>>,
+        message: String,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(w) = weak.upgrade() {
+                sync_query_console(&w, &query_console);
+                w.set_import_error(message.clone().into());
+                apply_import_status(&w, &message, true);
+            }
+        });
+    }
+
+    fn finish_import_result(
+        weak: slint::Weak<MainWindow>,
+        query_console: Arc<std::sync::Mutex<Vec<String>>>,
+        db: SharedString,
+        table: SharedString,
+        summary: String,
+        has_error: bool,
+        stop_failed: bool,
+    ) {
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(w) = weak.upgrade() else {
+                return;
+            };
+            sync_query_console(&w, &query_console);
+            if stop_failed {
+                w.set_import_error(summary.clone().into());
+            } else {
+                w.set_import_modal_open(false);
+                w.invoke_open_table(db, table);
+            }
+            apply_import_status(&w, &summary, has_error);
+        });
+    }
+
+    async fn run_import_plan(
+        plan: ImportPlan,
+        db: SharedString,
+        table: SharedString,
+        query_console: Arc<std::sync::Mutex<Vec<String>>>,
+        weak: slint::Weak<MainWindow>,
+    ) {
+        let ImportPlan {
+            engine,
+            create_ddl,
+            sql_statements,
+            ops,
+            insert_option,
+            config,
+            ..
+        } = plan;
+        let driver = match AnyDriver::connect(engine, &config).await {
+            Ok(driver) => driver,
+            Err(error) => {
+                let clean = editor::strip_error_marker(&error.to_string()).into_owned();
+                report_import_error(
+                    weak,
+                    query_console,
+                    format!("error: import connection failed: {clean}"),
+                );
+                return;
+            }
+        };
+        if let Some(ddl) = create_ddl {
+            append_query_console(&query_console, ddl.clone());
+            let query = match query_parse::parse_query(engine, &ddl) {
+                Ok(query) => query,
+                Err(error) => {
+                    let clean = editor::strip_error_marker(&error).into_owned();
+                    let message = format!("error: CREATE TABLE parse failed: {clean}");
+                    append_query_console(&query_console, format!("-- {message}"));
+                    drop(driver);
+                    report_import_error(weak, query_console, message);
+                    return;
+                }
+            };
+            if let Err(error) = driver.query(&query).await {
+                let clean = editor::strip_error_marker(&error.to_string()).into_owned();
+                let message = format!("error: CREATE TABLE failed: {clean}");
+                append_query_console(&query_console, format!("-- {message}"));
+                drop(driver);
+                report_import_error(weak, query_console, message);
+                return;
+            }
+        }
+        let outcome = if !sql_statements.is_empty() {
+            execute_import_sql(engine, &driver, sql_statements, &insert_option).await
+        } else {
+            execute_import_ops(engine, &driver, ops, &insert_option).await
+        };
+        for entry in outcome.log_entries {
+            append_query_console(&query_console, entry);
+        }
+        let has_error = outcome.has_error;
+        let stop_failed = has_error && insert_option == "STOP ON ERROR";
+        drop(driver);
+        finish_import_result(
+            weak,
+            query_console,
+            db,
+            table,
+            outcome.summary,
+            has_error,
+            stop_failed,
+        );
+    }
+
     {
         let weak = window.as_weak();
         let raw_nodes = state.raw_nodes.clone();
@@ -2098,7 +2285,6 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             let Some(pending) = pending_import.lock().ok().and_then(|g| g.clone()) else {
                 return;
             };
-            let engine = pending.engine;
             let create_table = w.get_import_create_table();
             let target_table = if create_table {
                 w.get_import_new_table_name().trim().to_string()
@@ -2109,162 +2295,43 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 w.set_import_error("Table name is required".into());
                 return;
             }
-            let table_ref = import_table_ref(&pending.db, &pending.schema, &target_table, engine);
-            if create_table
-                && matches!(
-                    engine,
-                    rdb_connstore::Engine::Mongo
-                        | rdb_connstore::Engine::Redis
-                        | rdb_connstore::Engine::Valkey
-                )
-            {
-                let message = format!(
-                    "Create new table is not supported for {}",
-                    AnyDriver::label(engine)
-                );
-                w.set_import_error(message.clone().into());
-                apply_import_status(&w, &message, true);
-                return;
-            }
-            let sql_statements = pending.sheet.sql_statements.clone();
-            let create_ddl = if create_table && sql_statements.is_empty() {
-                match build_import_create_table_sql(engine, &table_ref, &pending.target_cols) {
-                    Ok(ddl) => Some(ddl),
-                    Err(error) => {
-                        let message = format!("error: {error}");
-                        w.set_import_error(message.clone().into());
-                        apply_import_status(&w, &message, true);
-                        return;
-                    }
-                }
-            } else {
-                None
-            };
-            let ops = if sql_statements.is_empty() {
-                match export::build_import_ops_from_sheet(
-                    &pending.sheet,
-                    &table_ref,
-                    &pending.target_cols,
-                ) {
-                    Ok(ops) => ops,
-                    Err(error) => {
-                        w.set_import_error(error.into());
-                        return;
-                    }
-                }
-            } else {
-                Vec::new()
+            w.set_import_error(SharedString::default());
+            let load_saved_config = || {
+                let Some(conn_id) = current_connection_id
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.clone())
+                else {
+                    return Err(
+                        "error: no saved connection is available for an isolated import".into(),
+                    );
+                };
+                store.borrow().conn_config_for(&conn_id).map_err(|error| {
+                    format!("error: import connection configuration failed: {error}")
+                })
             };
             let insert_option = w.get_import_insert_option().to_string();
-            w.set_import_error(SharedString::default());
-            let Some(conn_id) = current_connection_id
-                .lock()
-                .ok()
-                .and_then(|guard| guard.clone())
-            else {
-                let message = "error: no saved connection is available for an isolated import";
-                w.set_import_error(message.into());
-                apply_import_status(&w, message, true);
-                return;
-            };
-            let saved_config = match store.borrow().conn_config_for(&conn_id) {
-                Ok(config) => config,
-                Err(error) => {
-                    let message = format!("error: import connection configuration failed: {error}");
+            let plan = match prepare_import_plan(
+                &pending,
+                create_table,
+                target_table,
+                insert_option,
+                load_saved_config,
+            ) {
+                Ok(plan) => plan,
+                Err((message, update_status)) => {
                     w.set_import_error(message.clone().into());
-                    apply_import_status(&w, &message, true);
+                    if update_status {
+                        apply_import_status(&w, &message, true);
+                    }
                     return;
                 }
             };
-            let config = match import_connection_config(saved_config, engine, &pending.db) {
-                Ok(config) => config,
-                Err(error) => {
-                    let message = format!("error: {error}");
-                    w.set_import_error(message.clone().into());
-                    apply_import_status(&w, &message, true);
-                    return;
-                }
-            };
-            let db_arg = SharedString::from(pending.db.clone());
-            let label_arg = SharedString::from(target_table);
+            let db = SharedString::from(pending.db.clone());
+            let table = SharedString::from(plan.target_table.clone());
             let query_console = query_console.clone();
             let weak_done = w.as_weak();
-            rt.spawn(async move {
-                let driver = match AnyDriver::connect(engine, &config).await {
-                    Ok(driver) => driver,
-                    Err(error) => {
-                        let clean = editor::strip_error_marker(&error.to_string()).into_owned();
-                        let message = format!("error: import connection failed: {clean}");
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(w) = weak_done.upgrade() {
-                                sync_query_console(&w, &query_console);
-                                w.set_import_error(message.clone().into());
-                                apply_import_status(&w, &message, true);
-                            }
-                        });
-                        return;
-                    }
-                };
-                if let Some(ddl) = create_ddl {
-                    append_query_console(&query_console, ddl.clone());
-                    let query = match query_parse::parse_query(engine, &ddl) {
-                        Ok(query) => query,
-                        Err(error) => {
-                            let clean = editor::strip_error_marker(&error).into_owned();
-                            let message = format!("error: CREATE TABLE parse failed: {clean}");
-                            append_query_console(&query_console, format!("-- {message}"));
-                            drop(driver);
-                            let _ = slint::invoke_from_event_loop(move || {
-                                if let Some(w) = weak_done.upgrade() {
-                                    sync_query_console(&w, &query_console);
-                                    w.set_import_error(message.clone().into());
-                                    apply_import_status(&w, &message, true);
-                                }
-                            });
-                            return;
-                        }
-                    };
-                    if let Err(error) = driver.query(&query).await {
-                        let clean = editor::strip_error_marker(&error.to_string()).into_owned();
-                        let message = format!("error: CREATE TABLE failed: {clean}");
-                        append_query_console(&query_console, format!("-- {message}"));
-                        drop(driver);
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(w) = weak_done.upgrade() {
-                                sync_query_console(&w, &query_console);
-                                w.set_import_error(message.clone().into());
-                                apply_import_status(&w, &message, true);
-                            }
-                        });
-                        return;
-                    }
-                }
-                let outcome = if !sql_statements.is_empty() {
-                    execute_import_sql(engine, &driver, sql_statements, &insert_option).await
-                } else {
-                    execute_import_ops(engine, &driver, ops, &insert_option).await
-                };
-                for entry in outcome.log_entries {
-                    append_query_console(&query_console, entry);
-                }
-                let summary = outcome.summary;
-                let has_error = outcome.has_error;
-                let stop_failed = has_error && insert_option == "STOP ON ERROR";
-                drop(driver);
-                let _ = slint::invoke_from_event_loop(move || {
-                    let Some(w) = weak_done.upgrade() else {
-                        return;
-                    };
-                    sync_query_console(&w, &query_console);
-                    if stop_failed {
-                        w.set_import_error(summary.clone().into());
-                    } else {
-                        w.set_import_modal_open(false);
-                        w.invoke_open_table(db_arg, label_arg);
-                    }
-                    apply_import_status(&w, &summary, has_error);
-                });
-            });
+            rt.spawn(run_import_plan(plan, db, table, query_console, weak_done));
         });
     }
     {
