@@ -355,6 +355,38 @@ fn ts_err(e: &tiberius::error::Error) -> String {
         _ => e.to_string(),
     }
 }
+fn skip_line_comment(bytes: &[u8], mut i: usize) -> usize {
+    i += 2;
+    while i < bytes.len() && bytes[i] != b'\n' {
+        i += 1;
+    }
+    i
+}
+
+fn skip_block_comment(bytes: &[u8], mut i: usize) -> usize {
+    i += 2;
+    while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+        i += 1;
+    }
+    (i + 2).min(bytes.len())
+}
+
+fn skip_quoted_text(bytes: &[u8], mut i: usize, close: u8) -> usize {
+    i += 1;
+    while i < bytes.len() {
+        if bytes[i] == close {
+            if bytes.get(i + 1) == Some(&close) {
+                i += 2;
+            } else {
+                return i + 1;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    i
+}
+
 fn unquoted_sql_words(sql: &str) -> Vec<String> {
     let bytes = sql.as_bytes();
     let mut words = Vec::new();
@@ -366,39 +398,20 @@ fn unquoted_sql_words(sql: &str) -> Vec<String> {
                 if !current.is_empty() {
                     words.push(std::mem::take(&mut current));
                 }
-                i += 2;
-                while i < bytes.len() && bytes[i] != b'\n' {
-                    i += 1;
-                }
+                i = skip_line_comment(bytes, i);
             }
             b'/' if bytes.get(i + 1) == Some(&b'*') => {
                 if !current.is_empty() {
                     words.push(std::mem::take(&mut current));
                 }
-                i += 2;
-                while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
-                    i += 1;
-                }
-                i = (i + 2).min(bytes.len());
+                i = skip_block_comment(bytes, i);
             }
             quote @ (b'\'' | b'"' | b'[') => {
                 if !current.is_empty() {
                     words.push(std::mem::take(&mut current));
                 }
                 let close = if quote == b'[' { b']' } else { quote };
-                i += 1;
-                while i < bytes.len() {
-                    if bytes[i] == close {
-                        if bytes.get(i + 1) == Some(&close) {
-                            i += 2;
-                        } else {
-                            i += 1;
-                            break;
-                        }
-                    } else {
-                        i += 1;
-                    }
-                }
+                i = skip_quoted_text(bytes, i, close);
             }
             b if b.is_ascii_alphanumeric() || b == b'_' => {
                 current.push((b as char).to_ascii_uppercase());
@@ -466,6 +479,15 @@ mod tests {
             "INSERT INTO t VALUES (1) /* SELECT is only a comment */"
         ));
         assert!(should_execute("INSERT INTO t SELECT id FROM source"));
+        assert!(should_execute(
+            "INSERT INTO t VALUES ('; SELECT', [OUTPUT], \"SELECT\")"
+        ));
+        assert!(!should_execute(
+            "INSERT INTO t OUTPUT inserted.id VALUES (1)"
+        ));
+        assert!(!should_execute(
+            "INSERT INTO t VALUES (1); /* comment */ SELECT * FROM t"
+        ));
         assert!(!should_execute(
             "INSERT INTO t VALUES (1); -- another statement follows\nSELECT * FROM t"
         ));
