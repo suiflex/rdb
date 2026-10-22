@@ -48,8 +48,10 @@ fn build_config(cfg: &ConnConfig) -> Config {
     if let Some(db) = &cfg.database {
         config.database(db);
     }
-    // Shows as program_name in sys.dm_exec_sessions and SQL Server Profiler.
     config.application_name(client_id());
+    // Keep Tiberius's handshake and command waits at their pre-0.13 behavior.
+    config.handshake_timeout(None);
+    config.command_timeout(None);
     match cfg.sslmode {
         SslMode::Disable => {
             config.encryption(EncryptionLevel::NotSupported);
@@ -463,7 +465,26 @@ fn with_line(msg: &str, line: u32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_execute, with_line};
+    use super::{build_config, should_execute, with_line};
+    use rdb_core::conn::{ConnConfig, SslMode};
+
+    #[test]
+    fn tiberius_upgrade_preserves_unbounded_handshake_and_query_waits() {
+        let cfg = ConnConfig {
+            host: "localhost".into(),
+            port: 1433,
+            user: "test".into(),
+            database: None,
+            password: None,
+            sslmode: SslMode::Prefer,
+            params: None,
+            ssh: None,
+        };
+
+        let config = build_config(&cfg);
+        assert_eq!(config.get_handshake_timeout(), None);
+        assert_eq!(config.get_command_timeout(), None);
+    }
 
     #[test]
     fn with_line_marks_a_real_batch_line_only() {
