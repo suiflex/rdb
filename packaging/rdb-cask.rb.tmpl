@@ -2,8 +2,8 @@
 # Placeholders (@VERSION@, @BASE@, @ARM_DMG_SHA@, @INTEL_DMG_SHA@) are filled in
 # via sed on each release. Edit the template, not the generated file.
 #
-# This cask installs the RDB.app GUI (from the release .dmg) into Applications.
-# The CLI-only binary is the separate `rdb` formula.
+# The signed RDB.app remains the desktop application; the bundle also carries
+# the standalone CLI and MCP server binaries used by the terminal workflows.
 cask "rdb" do
   version "@VERSION@"
 
@@ -21,6 +21,8 @@ cask "rdb" do
   homepage "https://github.com/suiflex/rdb"
 
   app "RDB.app"
+  binary "#{appdir}/RDB.app/Contents/MacOS/rdb-cli"
+  binary "#{appdir}/RDB.app/Contents/MacOS/rdb-mcp"
 
   # The .app is ad-hoc signed (no Apple Developer cert), so Gatekeeper
   # rejects it as "damaged"/"rejected by OS" once macOS re-checks the

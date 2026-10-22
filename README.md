@@ -27,6 +27,7 @@ A native, lightweight, cross-platform database manager built with Rust and Slint
 
 - **Multi-engine** — PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite, Cassandra, SQL Server, Oracle, ClickHouse in one app
 - **Native UI** — GPU-rendered via Slint (no webview, no Chromium, no Electron)
+- **CLI and MCP** — manage scoped agent access with `rdb-cli mcp`; agent clients launch the separate `rdb-mcp` stdio server
 - **Fast & light** — no GC, no runtime; aggressive release optimization (LTO, `opt-level=z`, `panic=abort`)
 - **Secure connections** — passwords stored in OS keychain (macOS Keychain, libsecret) with AES-GCM encrypted-file fallback
 - **Schema browser** — sidebar tree: databases → tables/collections/keys → columns/fields
@@ -98,6 +99,35 @@ pub enum ResultSet {
 }
 ```
 
+## MCP Server
+
+Run the interactive TTY manager:
+
+```sh
+rdb-cli mcp
+```
+
+The manager reads saved RDB connections, lets the user select one connection and database, sets read-only or write-enabled access, and registers `rdb-mcp` with the selected agent through Kurir. The MCP client starts `rdb-mcp` over stdio when it needs the server.
+
+The server exposes `rdb_list_connections`, `rdb_describe_schema`, and `rdb_execute_query`. Connection and database access default to deny. The manager writes the selected connection ID and database into the agent's MCP environment; each registration scopes one connection.
+
+SQLite connections use the saved database file; the scope name must be `main`. SQL database qualifiers outside the selected database, session/database switches, privilege changes, and procedural SQL are rejected. Database credentials remain the final permission boundary because SQL functions can have side effects.
+
+Query responses include at most 500 rows and report the number of omitted rows.
+
+Kurir supports manual registration when the TTY manager is unavailable:
+
+```sh
+kurir register \
+  --client claude-code \
+  --name rdb \
+  --command rdb-mcp \
+  --env RDB_MCP_SCOPE_CONNECTION_IDS=connection-id \
+  --env RDB_MCP_SCOPE_DATABASES=app
+```
+
+To enable writes, add `--env RDB_MCP_ALLOW_WRITES=1` only for a trusted connection. The permission applies to every connection in that server's allowlist.
+
 ## Install
 
 Prebuilt installers are expected to be attached to GitHub Releases.
@@ -124,8 +154,8 @@ Optional:
 curl -fsSL https://raw.githubusercontent.com/suiflex/rdb/develop/scripts/install.sh | RDB_VERSION=v0.1.0 INSTALL_DIR="$HOME/.local/bin" bash
 ```
 
-On macOS the script installs `RDB.app` into Applications (Launchpad) and symlinks
-the `rdb` command into `~/.local/bin`. On Linux it installs the `rdb` binary into
+On macOS the script installs `RDB.app` and links `rdb`, `rdb-cli`, and `rdb-mcp`
+into `~/.local/bin`. On Linux it installs all three commands into
 `/usr/local/bin` when writable, otherwise `~/.local/bin`.
 
 ### Homebrew (macOS / Linux)
@@ -136,12 +166,14 @@ For the macOS app (Launchpad):
 brew install --cask suiflex/tap/rdb
 ```
 
-For the CLI binary only:
+Linux package (desktop, CLI, and MCP server):
 
 ```bash
 brew install suiflex/tap/rdb
 ```
 
+The Linux formula installs `rdb`, `rdb-cli`, and `rdb-mcp`. The macOS cask
+installs `RDB.app` and links the two terminal commands.
 Upgrade later with `brew upgrade rdb`.
 
 > **macOS Gatekeeper note:** the `.app` is ad-hoc signed (no paid Apple
@@ -211,6 +243,12 @@ cargo run -p rdb
 ```
 
 The release binary lands at `target/release/rdb`.
+
+Build the CLI manager and MCP server too:
+
+```bash
+cargo build --release -p rdb-cli -p rdb-mcp
+```
 
 ## Usage
 

@@ -16,6 +16,16 @@
           "type": "json",
           "path": "npm/package.json",
           "jsonpath": "$.version"
+        },
+        {
+          "type": "toml",
+          "path": "crates/cli/Cargo.toml",
+          "jsonpath": "$.package.version"
+        },
+        {
+          "type": "toml",
+          "path": "crates/mcp/Cargo.toml",
+          "jsonpath": "$.package.version"
         }
       ]
     }

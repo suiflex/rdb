@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="suiflex/rdb"
-BINARY="rdb"
+BINARIES=(rdb rdb-cli rdb-mcp)
 VERSION="${RDB_VERSION:-latest}"
 
 log() {
@@ -112,33 +112,8 @@ case "$ASSET_NAME" in
 esac
 
 APP_PATH="$(find "$EXTRACT_DIR" -type d -name '*.app' | head -n 1)"
-# A .app bundle wins on macOS (Launchpad); otherwise install the bare binary.
+# A .app bundle wins on macOS (Launchpad); otherwise install all bare binaries.
 if [ -n "$APP_PATH" ]; then
-  BIN_PATH=""
-else
-  BIN_PATH="$(find "$EXTRACT_DIR" -type f -name "$BINARY" | head -n 1)"
-fi
-
-if [ -n "$BIN_PATH" ]; then
-  DEFAULT_INSTALL_DIR="$HOME/.local/bin"
-  if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
-    DEFAULT_INSTALL_DIR="/usr/local/bin"
-  fi
-  INSTALL_DIR="${INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
-  mkdir -p "$INSTALL_DIR"
-
-  DEST_PATH="$INSTALL_DIR/$BINARY"
-  install -m 0755 "$BIN_PATH" "$DEST_PATH"
-
-  log "Installed to $DEST_PATH"
-  case ":$PATH:" in
-    *":$INSTALL_DIR:"*) ;;
-    *)
-      printf 'warning: %s is not on your PATH yet\n' "$INSTALL_DIR" >&2
-      printf 'add this to your shell profile: export PATH="%s:$PATH"\n' "$INSTALL_DIR" >&2
-      ;;
-  esac
-elif [ "$OS_RAW" = "Darwin" ] && [ -n "$APP_PATH" ]; then
   DEFAULT_APP_DIR="$HOME/Applications"
   if [ -d "/Applications" ] && [ -w "/Applications" ]; then
     DEFAULT_APP_DIR="/Applications"
@@ -153,11 +128,14 @@ elif [ "$OS_RAW" = "Darwin" ] && [ -n "$APP_PATH" ]; then
   xattr -dr com.apple.quarantine "$DEST_PATH" 2>/dev/null || true
   log "Installed app bundle to $DEST_PATH"
 
-  # Keep the `rdb` terminal command working via a symlink into ~/.local/bin.
   CLI_DIR="$HOME/.local/bin"
   mkdir -p "$CLI_DIR"
-  ln -sf "$DEST_PATH/Contents/MacOS/$BINARY" "$CLI_DIR/$BINARY"
-  log "Linked CLI to $CLI_DIR/$BINARY"
+  for binary in "${BINARIES[@]}"; do
+    binary_path="$DEST_PATH/Contents/MacOS/$binary"
+    [ -x "$binary_path" ] || fail "app bundle does not contain $binary"
+    ln -sf "$binary_path" "$CLI_DIR/$binary"
+    log "Linked $binary to $CLI_DIR/$binary"
+  done
   case ":$PATH:" in
     *":$CLI_DIR:"*) ;;
     *)
@@ -166,5 +144,24 @@ elif [ "$OS_RAW" = "Darwin" ] && [ -n "$APP_PATH" ]; then
       ;;
   esac
 else
-  fail "downloaded archive does not contain $BINARY or a macOS .app bundle"
+  DEFAULT_INSTALL_DIR="$HOME/.local/bin"
+  if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
+    DEFAULT_INSTALL_DIR="/usr/local/bin"
+  fi
+  INSTALL_DIR="${INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
+  mkdir -p "$INSTALL_DIR"
+
+  for binary in "${BINARIES[@]}"; do
+    bin_path="$(find "$EXTRACT_DIR" -type f -name "$binary" | head -n 1)"
+    [ -n "$bin_path" ] || fail "downloaded archive does not contain $binary"
+    install -m 0755 "$bin_path" "$INSTALL_DIR/$binary"
+    log "Installed $binary to $INSTALL_DIR/$binary"
+  done
+  case ":$PATH:" in
+    *":$INSTALL_DIR:"*) ;;
+    *)
+      printf 'warning: %s is not on your PATH yet\n' "$INSTALL_DIR" >&2
+      printf 'add this to your shell profile: export PATH="%s:$PATH"\n' "$INSTALL_DIR" >&2
+      ;;
+  esac
 fi
