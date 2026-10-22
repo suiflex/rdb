@@ -1,8 +1,8 @@
 # @suiflex/rdb
 
-Native cross-platform database manager — PostgreSQL, MySQL, MariaDB, Redis,
-Valkey, MongoDB, SQLite, Cassandra, SQL Server, Oracle, ClickHouse in one binary. No
-Electron.
+Native cross-platform database manager, CLI manager, and MCP server for
+PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite, Cassandra, SQL
+Server, Oracle, and ClickHouse. No Electron.
 
 ## Install
 
@@ -10,19 +10,28 @@ Electron.
 npm i -g @suiflex/rdb
 ```
 
-The postinstall step downloads the prebuilt `rdb` binary for your platform
-(macOS, Linux, Windows — x64 & arm64) from the matching
-[GitHub Release](https://github.com/suiflex/rdb/releases). Then run:
+The postinstall step downloads the prebuilt RDB desktop, `rdb-cli`, and
+`rdb-mcp` binaries for your platform (macOS, Linux, Windows — x64 & arm64)
+from the matching [GitHub Release](https://github.com/suiflex/rdb/releases).
+Run the desktop app with:
 
 ```bash
 rdb
 ```
 
+Open the interactive MCP registration flow with:
+
+```bash
+rdb-cli mcp
+```
+
+Agent clients launch `rdb-mcp` through stdio after registration.
 ## Features
 
 - **Multi-engine** — PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite, Cassandra, SQL Server, Oracle, ClickHouse in one app
 - **Native UI** — GPU-rendered via Slint (no webview, no Chromium, no Electron)
 - **Fast & light** — no GC, no runtime; aggressive release optimization (LTO, `opt-level=z`, `panic=abort`)
+- **Agent integration** — configure a scoped MCP server for supported agent clients with `rdb-cli mcp`
 - **Secure connections** — passwords stored in OS keychain (macOS Keychain, libsecret) with AES-GCM encrypted-file fallback
 - **Schema browser** — sidebar tree: databases → tables/collections/keys → columns/fields
 - **Tabbed query editor** — multiple tabs per session, one per engine

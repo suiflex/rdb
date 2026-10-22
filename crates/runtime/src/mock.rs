@@ -5,7 +5,17 @@
 //! Compiled only under the `mock` feature; `super::mock_mode` is the always-on
 //! gate that decides whether any of this runs.
 
+use async_trait::async_trait;
+use parking_lot::Mutex;
 use rdb_connstore::{ConnStore, Engine, SavedConnection};
+use rdb_core::conn::ConnConfig;
+use rdb_core::driver::Driver;
+use rdb_core::error::{RdbError, Result};
+use rdb_core::query::Query;
+use rdb_core::result::{Cell, Column, ResultSet, Row};
+use rdb_core::schema::{Container, ContainerKind, Database, Field, Function, Schema};
+use rdb_core::write::{TableRef, WriteOp};
+use std::collections::HashMap;
 
 fn conn(
     name: &str,
@@ -149,17 +159,6 @@ pub fn mock_store(dir: std::path::PathBuf) -> ConnStore {
 // ===========================================================================
 // MockDriver: an in-process Postgres look-alike with the reference dataset.
 // ===========================================================================
-
-use std::sync::Mutex;
-
-use async_trait::async_trait;
-use rdb_core::conn::ConnConfig;
-use rdb_core::driver::Driver;
-use rdb_core::error::{RdbError, Result};
-use rdb_core::query::Query;
-use rdb_core::result::{Cell, Column, ResultSet, Row};
-use rdb_core::schema::{Container, ContainerKind, Database, Field, Function, Schema};
-use rdb_core::write::{TableRef, WriteOp};
 
 /// (name, weight) — weights sum to 986 like the reference `emiten` table.
 const SECTORS: &[(&str, i64)] = &[
@@ -308,6 +307,14 @@ fn gen_emiten() -> Vec<Row> {
         "Teknologi",
         "Ventura",
     ];
+    let mut cumulative_weight = 0;
+    let sector_boundaries: Vec<i64> = SECTORS
+        .iter()
+        .map(|(_, weight)| {
+            cumulative_weight += weight;
+            cumulative_weight
+        })
+        .collect();
     for i in 0..(986 - EMITEN_FIXED.len()) {
         let a = A[rng.below(A.len() as u64) as usize];
         let b = B[rng.below(B.len() as u64) as usize];
@@ -321,15 +328,8 @@ fn gen_emiten() -> Vec<Row> {
         )
         .to_uppercase();
         // Weighted sector pick keeps the per-sector totals plausible.
-        let mut pick = rng.below(986) as i64;
-        let mut sector = 0;
-        for (idx, (_, w)) in SECTORS.iter().enumerate() {
-            if pick < *w {
-                sector = idx;
-                break;
-            }
-            pick -= w;
-        }
+        let pick = rng.below(986) as i64;
+        let sector = sector_boundaries.partition_point(|boundary| pick >= *boundary);
         let ts = format!(
             "2025-09-27 15:{:02}:{:02}.{:03}",
             6 + rng.below(3),
@@ -361,19 +361,119 @@ fn gen_emiten() -> Vec<Row> {
 struct MockTable {
     cols: Vec<Column>,
     rows: Vec<Row>,
+    column_indices: HashMap<String, usize>,
+    id_rows: HashMap<String, usize>,
+}
+
+impl MockTable {
+    fn new(cols: Vec<Column>, rows: Vec<Row>) -> Self {
+        let column_indices = cols
+            .iter()
+            .enumerate()
+            .map(|(index, column)| (column.name.clone(), index))
+            .collect::<HashMap<_, _>>();
+        let id_index = column_indices.get("id").copied();
+        let mut id_rows = HashMap::with_capacity(rows.len());
+        if let Some(id_index) = id_index {
+            for (row_index, row) in rows.iter().enumerate() {
+                if let Some(id) = row.get(id_index) {
+                    id_rows.entry(id.render()).or_insert(row_index);
+                }
+            }
+        }
+        Self {
+            cols,
+            rows,
+            column_indices,
+            id_rows,
+        }
+    }
+    fn id(&self, row: &Row) -> Option<String> {
+        self.column_indices
+            .get("id")
+            .and_then(|index| row.get(*index))
+            .map(Cell::render)
+    }
+
+    fn find_id(&self, pk: &[(String, Cell)]) -> Option<usize> {
+        let [(column, value)] = pk else {
+            return None;
+        };
+        if column != "id" {
+            return None;
+        }
+        self.id_rows.get(&value.render()).copied()
+    }
+
+    fn rebuild_id_rows(&mut self) {
+        let Some(id_index) = self.column_indices.get("id").copied() else {
+            self.id_rows.clear();
+            return;
+        };
+        let mut id_rows = HashMap::with_capacity(self.rows.len());
+        for (row_index, row) in self.rows.iter().enumerate() {
+            if let Some(id) = row.get(id_index) {
+                id_rows.entry(id.render()).or_insert(row_index);
+            }
+        }
+        self.id_rows = id_rows;
+    }
+}
+fn resolved_columns<'a>(
+    column_indices: &'a HashMap<String, usize>,
+    values: &'a [(String, Cell)],
+) -> impl Iterator<Item = (usize, &'a Cell)> + 'a {
+    values.iter().filter_map(|(column, value)| {
+        column_indices
+            .get(column)
+            .map(|column_index| (*column_index, value))
+    })
+}
+fn apply_update(table: &mut MockTable, pk: &[(String, Cell)], changes: &[(String, Cell)]) -> bool {
+    let Some(row_index) = table.find_id(pk) else {
+        return false;
+    };
+    let old_id = table.id(&table.rows[row_index]);
+    let resolved = resolved_columns(&table.column_indices, changes);
+    let row = &mut table.rows[row_index];
+    resolved.for_each(|(index, value)| row[index] = value.clone());
+    if table.id(&table.rows[row_index]) != old_id {
+        table.rebuild_id_rows();
+    }
+    true
+}
+
+fn apply_insert(table: &mut MockTable, values: &[(String, Cell)]) {
+    let mut row = vec![Cell::Null; table.cols.len()];
+    resolved_columns(&table.column_indices, values)
+        .for_each(|(index, value)| row[index] = value.clone());
+    let row_index = table.rows.len();
+    if let Some(id) = table.id(&row) {
+        table.id_rows.entry(id).or_insert(row_index);
+    }
+    table.rows.push(row);
+}
+
+fn apply_delete(table: &mut MockTable, pk: &[(String, Cell)]) -> bool {
+    let Some(row_index) = table.find_id(pk) else {
+        return false;
+    };
+    table.rows.remove(row_index);
+    table.rebuild_id_rows();
+    true
 }
 
 fn simple_table(names: &[(&str, &str)], rows: Vec<Row>) -> MockTable {
-    MockTable {
-        cols: names
+    MockTable::new(
+        names
             .iter()
-            .map(|(n, t)| Column {
-                name: (*n).into(),
-                type_name: (*t).into(),
+            .map(|(name, type_name)| Column {
+                name: (*name).into(),
+                type_name: (*type_name).into(),
             })
             .collect(),
         rows,
-    }
+    )
 }
 
 fn uuid_fn(name: &str, args: &str, body: &str) -> Function {
@@ -395,10 +495,7 @@ impl MockDriver {
         let mut tables = std::collections::BTreeMap::new();
         tables.insert(
             "emiten".to_string(),
-            MockTable {
-                cols: emiten_columns(),
-                rows: gen_emiten(),
-            },
+            MockTable::new(emiten_columns(), gen_emiten()),
         );
         let sector_rows: Vec<Row> = SECTORS
             .iter()
@@ -540,7 +637,7 @@ impl Driver for MockDriver {
     }
 
     async fn schema(&self) -> Result<Schema> {
-        let tables = self.tables.lock().unwrap();
+        let tables = self.tables.lock();
         let containers = tables
             .iter()
             .map(|(name, t)| Container {
@@ -646,7 +743,7 @@ impl Driver for MockDriver {
                 }
                 return Err(RdbError::UnsupportedQuery);
             };
-            let tables = self.tables.lock().unwrap();
+            let tables = self.tables.lock();
             let Some(t) = tables.get(&table) else {
                 return Err(RdbError::Query(format!(
                     "relation \"{table}\" does not exist"
@@ -677,7 +774,7 @@ impl Driver for MockDriver {
     }
 
     async fn count(&self, table: &TableRef) -> Result<u64> {
-        let tables = self.tables.lock().unwrap();
+        let tables = self.tables.lock();
         tables
             .get(&table.name)
             .map(|t| t.rows.len() as u64)
@@ -685,52 +782,22 @@ impl Driver for MockDriver {
     }
 
     async fn commit(&self, ops: &[WriteOp]) -> Result<u64> {
-        let mut tables = self.tables.lock().unwrap();
+        let mut tables = self.tables.lock();
         let mut applied = 0u64;
         for op in ops {
-            let t = tables
+            let table = tables
                 .get_mut(&op.table().name)
                 .ok_or_else(|| RdbError::Query("unknown table".into()))?;
-            let find = |rows: &Vec<Row>, pk: &[(String, Cell)]| -> Option<usize> {
-                let pk_idx: Vec<(usize, &Cell)> = pk
-                    .iter()
-                    .filter_map(|(col, v)| {
-                        t.cols.iter().position(|c| &c.name == col).map(|i| (i, v))
-                    })
-                    .collect();
-                rows.iter().position(|r| {
-                    pk_idx
-                        .iter()
-                        .all(|(i, v)| r.get(*i).map(Cell::render) == Some(v.render()))
-                })
-            };
-            match op {
-                WriteOp::Update { pk, changes, .. } => {
-                    if let Some(ri) = find(&t.rows, pk) {
-                        for (col, v) in changes {
-                            if let Some(ci) = t.cols.iter().position(|c| &c.name == col) {
-                                t.rows[ri][ci] = v.clone();
-                            }
-                        }
-                        applied += 1;
-                    }
-                }
+            let did_apply = match op {
+                WriteOp::Update { pk, changes, .. } => apply_update(table, pk, changes),
                 WriteOp::Insert { values, .. } => {
-                    let mut row: Row = vec![Cell::Null; t.cols.len()];
-                    for (col, v) in values {
-                        if let Some(ci) = t.cols.iter().position(|c| &c.name == col) {
-                            row[ci] = v.clone();
-                        }
-                    }
-                    t.rows.push(row);
-                    applied += 1;
+                    apply_insert(table, values);
+                    true
                 }
-                WriteOp::Delete { pk, .. } => {
-                    if let Some(ri) = find(&t.rows, pk) {
-                        t.rows.remove(ri);
-                        applied += 1;
-                    }
-                }
+                WriteOp::Delete { pk, .. } => apply_delete(table, pk),
+            };
+            if did_apply {
+                applied += 1;
             }
         }
         Ok(applied)
@@ -738,5 +805,62 @@ impl Driver for MockDriver {
 
     async fn close(self) -> Result<()> {
         Ok(())
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn commit_keeps_id_index_consistent_across_mutations() {
+        let driver = MockDriver::build();
+        let table = TableRef::named("emiten");
+        let initial_id = {
+            let tables = driver.tables.lock();
+            tables["emiten"].rows[0][0].render()
+        };
+
+        let updated = driver
+            .commit(&[WriteOp::Update {
+                table: table.clone(),
+                pk: vec![("id".into(), Cell::Text(initial_id.clone()))],
+                changes: vec![
+                    ("id".into(), Cell::Text("reindexed-id".into())),
+                    ("name".into(), Cell::Text("Updated company".into())),
+                ],
+            }])
+            .await
+            .unwrap();
+        assert_eq!(updated, 1);
+
+        let deleted = driver
+            .commit(&[WriteOp::Delete {
+                table: table.clone(),
+                pk: vec![("id".into(), Cell::Text("reindexed-id".into()))],
+            }])
+            .await
+            .unwrap();
+        assert_eq!(deleted, 1);
+
+        let inserted = driver
+            .commit(&[WriteOp::Insert {
+                table: table.clone(),
+                values: vec![
+                    ("id".into(), Cell::Text("reindexed-id".into())),
+                    ("name".into(), Cell::Text("Inserted company".into())),
+                ],
+            }])
+            .await
+            .unwrap();
+        assert_eq!(inserted, 1);
+        let updated = driver
+            .commit(&[WriteOp::Update {
+                table,
+                pk: vec![("id".into(), Cell::Text("reindexed-id".into()))],
+                changes: vec![("name".into(), Cell::Text("Updated inserted company".into()))],
+            }])
+            .await
+            .unwrap();
+        assert_eq!(updated, 1);
     }
 }

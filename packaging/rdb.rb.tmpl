@@ -9,10 +9,9 @@
 # out above, because the delete path leaves no sed rule to substitute it and a
 # leftover placeholder in this comment would (rightly) fail the render check.
 #
-# Linux only. RDB is a GUI app, so macOS installs go through the `rdb` cask
-# (rdb-cask.rb.tmpl), which drops RDB.app into /Applications. Homebrew resolves
-# a bare `brew install rdb` to the formula, so keeping a macOS formula here
-# meant Mac users got the GUI binary dumped on $PATH instead of the app.
+# Linux-only formula. The tarball contains the desktop executable and the
+# companion `rdb-cli` and `rdb-mcp` commands; macOS installs all three from the
+# `rdb` cask, which also installs RDB.app.
 class Rdb < Formula
   desc "Native cross-platform database manager (PostgreSQL, MySQL, Redis, MongoDB)"
   homepage "https://github.com/suiflex/rdb"
@@ -39,13 +38,12 @@ class Rdb < Formula
   end # @ARM64@
 
   def install
-    bin.install "rdb"
+    bin.install "rdb", "rdb-cli", "rdb-mcp"
   end
 
-  # No `test do` block: rdb parses no arguments at all, so `rdb --version`
-  # opens a window rather than printing anything. A launch-the-GUI test would
-  # just hang on a headless machine.
   test do
     assert_predicate bin/"rdb", :executable?
+    assert_predicate bin/"rdb-cli", :executable?
+    assert_predicate bin/"rdb-mcp", :executable?
   end
 end

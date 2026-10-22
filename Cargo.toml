@@ -13,6 +13,9 @@ members = [
     "crates/driver-mssql",
     "crates/driver-clickhouse",
     "crates/tunnel",
+    "crates/runtime",
+    "crates/mcp",
+    "crates/cli",
     "app",
 ]
 # Vendored upstream source, patched in below: not ours to lint or format.

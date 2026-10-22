@@ -11,7 +11,7 @@ path = "src/main.rs"
 [features]
 # Design-parity tooling (seeded MockDriver + RDB_SHOT capture). Non-default so
 # release builds exclude ~830 lines of dev-only code.
-mock = []
+mock = ["rdb-runtime/mock"]
 
 [dependencies]
 # 1.17 is the floor, not a nicety: it is the first release with Slint's own
@@ -21,23 +21,14 @@ mock = []
 slint = { version = "1.17", default-features = false, features = ["compat-1-2", "std", "backend-winit", "renderer-femtovg", "renderer-software", "raw-window-handle-06"] }
 rdb-core = { path = "../crates/core" }
 rdb-connstore = { path = "../crates/connstore" }
-rdb-driver-postgres = { path = "../crates/driver-postgres" }
-rdb-driver-mysql = { path = "../crates/driver-mysql" }
-rdb-driver-redis = { path = "../crates/driver-redis" }
-rdb-driver-mongo = { path = "../crates/driver-mongo" }
-rdb-driver-sqlite = { path = "../crates/driver-sqlite" }
+rdb-runtime = { path = "../crates/runtime" }
 rdb-driver-cassandra = { path = "../crates/driver-cassandra" }
-rdb-driver-mssql = { path = "../crates/driver-mssql" }
-rdb-driver-oracle = { path = "../crates/driver-oracle" }
-rdb-driver-clickhouse = { path = "../crates/driver-clickhouse" }
-rdb-tunnel = { path = "../crates/tunnel" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # permissive JSON for the Mongo editor: mongosh uses bare keys / single quotes
 # (`{_id:-1}`), which strict serde_json rejects.
 json5 = "1.3"
-async-trait = "0.1"
 # clipboard; already in the tree via Slint's winit backend, so no new builds
 copypasta = "0.10"
 # update check: one blocking GitHub GET (ureq, no async/TLS-stack bloat) +

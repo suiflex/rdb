@@ -12,8 +12,8 @@ const { execFileSync } = require("child_process");
 
 const REPO = "suiflex/rdb";
 
-// platform/arch -> { target triple, archive ext, binary name }. Pure so it can
-// be self-checked without touching the network.
+// platform/arch -> target triple and archive extension. The archive contains
+// the desktop, CLI, and MCP server executables.
 function resolveTarget(platform, arch) {
   const map = {
     "darwin:arm64": ["aarch64-apple-darwin", "tar.gz", "rdb"],
@@ -28,7 +28,13 @@ function resolveTarget(platform, arch) {
     throw new Error(`unsupported platform ${platform}/${arch}`);
   }
   const [target, ext, bin] = hit;
-  return { target, ext, bin };
+  const suffix = platform === "win32" ? ".exe" : "";
+  return {
+    target,
+    ext,
+    bin,
+    binaries: [`rdb${suffix}`, `rdb-cli${suffix}`, `rdb-mcp${suffix}`],
+  };
 }
 
 function download(url, dest, redirects = 0) {
@@ -92,10 +98,15 @@ async function installMacApp(version, vendor) {
     }
     process.stdout.write(`rdb: installed ${appName} to ${appsDir}\n`);
 
-    // Vendor the inner binary so bin/rdb.js keeps resolving the `rdb` command.
-    const binPath = path.join(vendor, "rdb");
-    fs.copyFileSync(path.join(dest, "Contents", "MacOS", "rdb"), binPath);
-    fs.chmodSync(binPath, 0o755);
+    for (const binary of ["rdb", "rdb-cli", "rdb-mcp"]) {
+      const binaryPath = path.join(dest, "Contents", "MacOS", binary);
+      if (!fs.existsSync(binaryPath)) {
+        throw new Error(`RDB.app is missing ${binary}`);
+      }
+      const vendorPath = path.join(vendor, binary);
+      fs.copyFileSync(binaryPath, vendorPath);
+      fs.chmodSync(vendorPath, 0o755);
+    }
   } finally {
     try {
       execFileSync("hdiutil", ["detach", mnt], { stdio: "ignore" });
@@ -117,7 +128,7 @@ async function main() {
     return;
   }
 
-  const { target, ext, bin } = resolveTarget(process.platform, process.arch);
+  const { target, ext, binaries } = resolveTarget(process.platform, process.arch);
   const asset = `rdb-${target}.${ext}`;
   const tag = `v${version}`;
   const url = `https://github.com/${REPO}/releases/download/${tag}/${asset}`;
@@ -130,12 +141,14 @@ async function main() {
   execFileSync("tar", ["-xf", archive, "-C", vendor], { stdio: "inherit" });
   fs.unlinkSync(archive);
 
-  const binPath = path.join(vendor, bin);
-  if (!fs.existsSync(binPath)) {
-    throw new Error(`extracted archive did not contain ${bin}`);
+  for (const binary of binaries) {
+    const binaryPath = path.join(vendor, binary);
+    if (!fs.existsSync(binaryPath)) {
+      throw new Error(`extracted archive did not contain ${binary}`);
+    }
+    if (process.platform !== "win32") fs.chmodSync(binaryPath, 0o755);
   }
-  if (process.platform !== "win32") fs.chmodSync(binPath, 0o755);
-  process.stdout.write(`rdb: installed ${bin}\n`);
+  process.stdout.write(`rdb: installed ${binaries.join(", ")}\n`);
 }
 
 // `node install.js --selftest` exercises the pure mapping without a network.
@@ -147,6 +160,10 @@ if (process.argv.includes("--selftest")) {
   assert.throws(() => resolveTarget("sunos", "sparc"));
   assert.strictEqual(macDmgAsset("arm64"), "rdb-aarch64-apple-darwin.dmg");
   assert.strictEqual(macDmgAsset("x64"), "rdb-x86_64-apple-darwin.dmg");
+  assert.deepStrictEqual(
+    resolveTarget("linux", "x64").binaries,
+    ["rdb", "rdb-cli", "rdb-mcp"],
+  );
   console.log("selftest ok");
   process.exit(0);
 }

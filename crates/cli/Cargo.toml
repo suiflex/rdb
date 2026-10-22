@@ -1,0 +1,19 @@
+[package]
+name = "rdb-cli"
+version = "0.49.0"
+edition = "2021"
+license.workspace = true
+
+[[bin]]
+name = "rdb-cli"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+inquire = { version = "0.9", default-features = false, features = ["crossterm"] }
+kurir = "0.5"
+rdb-connstore = { path = "../connstore" }
+rdb-core = { path = "../core" }
+rdb-runtime = { path = "../runtime" }
+rustls = { version = "0.23", features = ["aws-lc-rs"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

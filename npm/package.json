@@ -9,10 +9,15 @@
   },
   "license": "Apache-2.0",
   "bin": {
-    "rdb": "bin/rdb.js"
+    "rdb": "bin/rdb.js",
+    "rdb-cli": "bin/rdb-cli.js",
+    "rdb-mcp": "bin/rdb-mcp.js"
   },
   "files": [
     "bin/rdb.js",
+    "bin/rdb-cli.js",
+    "bin/rdb-mcp.js",
+    "bin/run.js",
     "install.js"
   ],
   "scripts": {

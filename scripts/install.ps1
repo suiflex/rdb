@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $Repo = "suiflex/rdb"
-$Binary = "rdb.exe"
+$Binaries = @("rdb.exe", "rdb-cli.exe", "rdb-mcp.exe")
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
@@ -74,28 +74,28 @@ try {
   Invoke-WebRequest -Uri $Asset.browser_download_url -OutFile $ArchivePath -Headers $Headers
 
   Expand-Archive -Path $ArchivePath -DestinationPath $ExtractDir -Force
-  $BinPath = Get-ChildItem -Path $ExtractDir -Filter $Binary -Recurse -File |
-    Select-Object -First 1
-  if (-not $BinPath) {
-    throw "downloaded archive does not contain $Binary"
-  }
-
   New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-  $DestPath = Join-Path $InstallDir $Binary
-  Copy-Item -Path $BinPath.FullName -Destination $DestPath -Force
-  try {
-    Unblock-File -Path $DestPath
-  } catch {
-    # Older PowerShell hosts may not have attachment-zone data to clear.
+  foreach ($Binary in $Binaries) {
+    $BinPath = Get-ChildItem -Path $ExtractDir -Filter $Binary -Recurse -File |
+      Select-Object -First 1
+    if (-not $BinPath) {
+      throw "downloaded archive does not contain $Binary"
+    }
+    $DestPath = Join-Path $InstallDir $Binary
+    Copy-Item -Path $BinPath.FullName -Destination $DestPath -Force
+    try {
+      Unblock-File -Path $DestPath
+    } catch {
+      # Older PowerShell hosts may not have attachment-zone data to clear.
+    }
+    Write-Step "Installed to $DestPath"
   }
-
-  Write-Step "Installed to $DestPath"
 
   $PathEntries = ($env:PATH -split ";") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
   $OnPath = $PathEntries | Where-Object { $_.TrimEnd("\") -ieq $InstallDir.TrimEnd("\") }
   if (-not $OnPath) {
     Write-Warning "$InstallDir is not on PATH yet"
-    Write-Warning "Add it to PATH, then open a new terminal to run rdb"
+    Write-Warning "Add it to PATH, then open a new terminal to run rdb, rdb-cli, and rdb-mcp"
   }
 } finally {
   Remove-Item -Path $TmpDir -Recurse -Force -ErrorAction SilentlyContinue

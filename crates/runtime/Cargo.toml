@@ -1,0 +1,29 @@
+[package]
+name = "rdb-runtime"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+
+[features]
+mock = ["dep:parking_lot"]
+
+
+[dependencies]
+async-trait = "0.1"
+rdb-core = { path = "../core" }
+rdb-connstore = { path = "../connstore" }
+rdb-driver-postgres = { path = "../driver-postgres" }
+rdb-driver-mysql = { path = "../driver-mysql" }
+rdb-driver-redis = { path = "../driver-redis" }
+rdb-driver-mongo = { path = "../driver-mongo" }
+rdb-driver-sqlite = { path = "../driver-sqlite" }
+rdb-driver-cassandra = { path = "../driver-cassandra" }
+rdb-driver-mssql = { path = "../driver-mssql" }
+rdb-driver-oracle = { path = "../driver-oracle" }
+rdb-driver-clickhouse = { path = "../driver-clickhouse" }
+rdb-tunnel = { path = "../tunnel" }
+tokio = { version = "1", features = ["sync", "time"] }
+parking_lot = { version = "0.12", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
