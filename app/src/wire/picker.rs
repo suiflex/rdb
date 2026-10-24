@@ -1045,6 +1045,25 @@ fn wire_screen_harness(
     let Ok(screen) = std::env::var("RDB_SCREEN") else {
         return;
     };
+    let seed_agent = matches!(screen.as_str(), "agent" | "agent-settings")
+        && !store
+            .borrow()
+            .list()
+            .iter()
+            .any(|item| item.name == "screen agent");
+    if seed_agent {
+        let mut connection = rdb_connstore::SavedConnection::new(
+            "screen agent",
+            rdb_connstore::Engine::Postgres,
+            "203.0.113.10",
+            5432,
+            "screen_user",
+        );
+        connection.database = Some("sample_db".into());
+        if store.borrow_mut().add(connection).is_err() {
+            screen_fail("could not seed agent connection");
+        }
+    }
     pin_theme(window);
     schedule_connect_timer(window, store, &screen);
     schedule_multi_connection_scenario(window, store, &screen);
@@ -1054,6 +1073,26 @@ fn wire_screen_harness(
     schedule_grid_edit_scenarios(window, &screen);
     schedule_tab_flow_scenarios(window, &screen);
     schedule_sql_editor_scenarios(window, &screen, load_editor_text);
+    if matches!(screen.as_str(), "agent" | "agent-settings") {
+        let show_settings = screen == "agent-settings";
+        sequence(
+            window,
+            vec![(
+                "agent connected",
+                Rc::new(|w| w.get_connected()),
+                Rc::new(move |w| {
+                    w.set_agent_open(true);
+                    w.invoke_agent_new_conversation();
+                    if show_settings {
+                        w.set_agent_config_open(true);
+                    }
+                    if !w.get_agent_open() || w.get_agent_selected_conversation() < 0 {
+                        screen_fail("agent panel did not open a bound conversation");
+                    }
+                }),
+            )],
+        );
+    }
 }
 
 /// "connections" IS the pre-connect screen; connecting would swap it for

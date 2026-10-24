@@ -28,6 +28,7 @@ A native, lightweight, cross-platform database manager built with Rust and Slint
 - **Multi-engine** — PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite, Cassandra, SQL Server, Oracle, ClickHouse in one app
 - **Native UI** — GPU-rendered via Slint (no webview, no Chromium, no Electron)
 - **CLI and MCP** — manage scoped agent access with `rdb-cli mcp`; agent clients launch the separate `rdb-mcp` stdio server
+- **In-app Agent** — ask for SQL or let a configured model inspect schema and run read queries; writes require approval of the exact SQL and are disabled for production connections
 - **Fast & light** — no GC, no runtime; aggressive release optimization (LTO, `opt-level=z`, `panic=abort`)
 - **Secure connections** — passwords stored in OS keychain (macOS Keychain, libsecret) with AES-GCM encrypted-file fallback
 - **Schema browser** — sidebar tree: databases → tables/collections/keys → columns/fields

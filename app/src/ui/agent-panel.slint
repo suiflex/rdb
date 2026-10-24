@@ -1,0 +1,228 @@
+import { Tokens } from "tokens.slint";
+import { AgentMessage } from "structs.slint";
+import { BreadcrumbChip, ChoiceRow, FormField, IconButton, PrimaryButton,
+    SecondaryButton, SelectBox, SettingsSectionHeader } from "components.slint";
+import { ScrollView, TextEdit } from "std-widgets.slint";
+
+export component AgentPanel inherits Rectangle {
+    in property <[AgentMessage]> messages;
+    in property <[string]> conversations;
+    in property <int> selected-conversation: -1;
+    in property <string> connection-name;
+    in property <string> database-name;
+    in-out property <int> mode: 0;
+    in property <bool> busy: false;
+    in property <string> status;
+    in property <string> proposed-write;
+    in property <string> write-target;
+    in-out property <string> config-name: "Default";
+    in property <[string]> config-options;
+    in-out property <string> config-choice: "";
+    in-out property <string> config-provider: "OpenAI";
+    in-out property <string> config-endpoint: "https://api.openai.com/v1";
+    in-out property <string> config-model: "";
+    in-out property <string> config-key: "";
+    in-out property <bool> config-open: false;
+    in-out property <string> draft: "";
+    callback close;
+    callback new-conversation;
+    callback choose-conversation(int);
+    callback delete-conversation(int);
+    callback mode-changed(int);
+    callback send(string);
+    callback cancel;
+    callback approve-write;
+    callback reject-write;
+    callback save-config(string, string, string, string, string);
+    callback choose-config(string);
+    callback new-config;
+    callback delete-config;
+
+    preferred-width: 360px;
+    min-width: 300px;
+    background: Tokens.sidebar;
+    border-width: 1px;
+    border-color: Tokens.border;
+
+    VerticalLayout {
+        spacing: 0px;
+        HorizontalLayout {
+            height: 48px;
+            padding-left: Tokens.sp3;
+            padding-right: Tokens.sp3;
+            spacing: Tokens.sp2;
+            Text {
+                text: "Agent";
+                color: Tokens.text;
+                font-size: Tokens.font-md;
+                font-weight: Tokens.weight-emphasis;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            IconButton { icon: "plus"; tooltip: "New conversation"; clicked => { root.new-conversation(); } }
+            IconButton { icon: "settings"; tooltip: "Model settings"; active: root.config-open;
+                clicked => { root.config-open = !root.config-open; } }
+            IconButton { icon: "close"; tooltip: "Close Agent"; clicked => { root.close(); } }
+        }
+        Rectangle { height: 1px; background: Tokens.border; }
+
+        if root.config-open: VerticalLayout {
+            padding: Tokens.sp3;
+            spacing: Tokens.sp2;
+            SettingsSectionHeader { label: "Model configuration"; height: 24px; }
+            HorizontalLayout {
+                spacing: Tokens.sp1;
+                SelectBox {
+                    model: root.config-options;
+                    current-value <=> root.config-choice;
+                    selected(value) => { root.choose-config(value); }
+                }
+                IconButton { icon: "plus"; tooltip: "New model configuration";
+                    clicked => { root.new-config(); } }
+                IconButton { icon: "close"; tooltip: "Delete model configuration";
+                    clicked => { root.delete-config(); } }
+            }
+            FormField { text <=> root.config-name; placeholder: "Configuration name"; height: 36px; }
+            SelectBox {
+                model: ["OpenAI", "Anthropic", "Gemini", "DeepSeek", "Qwen", "MiniMax",
+                    "OpenAI Compatible", "Anthropic Compatible", "Ollama"];
+                current-value <=> root.config-provider;
+                selected(value) => {
+                    root.config-endpoint = value == "OpenAI" ? "https://api.openai.com/v1"
+                        : value == "Anthropic" ? "https://api.anthropic.com/v1"
+                        : value == "Gemini" ? "https://generativelanguage.googleapis.com/v1beta"
+                        : value == "DeepSeek" ? "https://api.deepseek.com/v1"
+                        : value == "Qwen" ? "https://dashscope.aliyuncs.com/compatible-mode/v1"
+                        : value == "MiniMax" ? "https://api.minimax.io/v1"
+                        : value == "Ollama" ? "http://localhost:11434/v1"
+                        : root.config-endpoint;
+                }
+            }
+            FormField { text <=> root.config-endpoint; placeholder: "API endpoint"; height: 36px; }
+            FormField { text <=> root.config-model; placeholder: "Model"; height: 36px; }
+            FormField { text <=> root.config-key; placeholder: "API key (leave empty to keep)";
+                input-type: InputType.password; height: 36px; }
+            PrimaryButton {
+                text: "Save model";
+                clicked => {
+                    root.save-config(root.config-name, root.config-provider,
+                        root.config-endpoint, root.config-model, root.config-key);
+                }
+            }
+            if root.status != "": Text {
+                text: root.status;
+                color: Tokens.text-dim;
+                wrap: word-wrap;
+                font-size: Tokens.font-xs;
+            }
+            Rectangle { vertical-stretch: 1; }
+        }
+        if !root.config-open: VerticalLayout {
+            spacing: Tokens.sp2;
+            HorizontalLayout {
+                padding-left: Tokens.sp3;
+                padding-right: Tokens.sp3;
+                spacing: Tokens.sp1;
+                Text { text: root.connection-name + " / " + root.database-name; color: Tokens.text-dim;
+                    font-size: Tokens.font-xs; overflow: elide; horizontal-stretch: 1; }
+            }
+            if root.conversations.length > 0: ScrollView {
+                max-height: 120px;
+                VerticalLayout {
+                    spacing: Tokens.sp1;
+                    for title[i] in root.conversations: HorizontalLayout {
+                        height: 40px;
+                        padding-left: Tokens.sp3;
+                        padding-right: Tokens.sp3;
+                        spacing: Tokens.sp1;
+                        BreadcrumbChip {
+                            text: title;
+                            show-dot: i == root.selected-conversation;
+                            clicked => { root.choose-conversation(i); }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        IconButton {
+                            icon: "close";
+                            tooltip: "Delete conversation";
+                            clicked => { root.delete-conversation(i); }
+                        }
+                    }
+                }
+            }
+            Rectangle { height: 1px; background: Tokens.border; }
+            ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    padding: Tokens.sp3;
+                    spacing: Tokens.sp2;
+                    if root.messages.length == 0: Text {
+                        text: "Ask for SQL, or use Agent to inspect data and run read queries.";
+                        color: Tokens.text-dim;
+                        wrap: word-wrap;
+                        font-size: Tokens.font-sm;
+                    }
+                    for msg in root.messages: Rectangle {
+                        height: body.preferred-height + Tokens.sp3;
+                        background: msg.role == "user" ? Tokens.accent-tint : Tokens.card;
+                        border-radius: 8px;
+                        body := Text {
+                            x: Tokens.sp2;
+                            y: Tokens.sp1;
+                            width: parent.width - 2 * Tokens.sp2;
+                            text: msg.text;
+                            color: Tokens.text;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+            if root.status != "": Text {
+                text: root.status;
+                color: Tokens.text-dim;
+                wrap: word-wrap;
+                font-size: Tokens.font-xs;
+            }
+            if root.proposed-write != "": VerticalLayout {
+                padding: Tokens.sp2;
+                spacing: Tokens.sp1;
+                Text { text: "Approve this exact SQL once?"; color: Tokens.warn; }
+                Text { text: root.write-target; color: Tokens.text-dim; wrap: word-wrap; }
+                Text { text: root.proposed-write; color: Tokens.text; font-family: Tokens.mono;
+                    wrap: word-wrap; }
+                HorizontalLayout {
+                    spacing: Tokens.sp1;
+                    PrimaryButton { text: "Allow once"; clicked => { root.approve-write(); } }
+                    SecondaryButton { text: "Deny"; clicked => { root.reject-write(); } }
+                }
+            }
+            ChoiceRow {
+                padding-left: Tokens.sp3;
+                padding-right: Tokens.sp3;
+                label: "Mode";
+                option-a: "Ask";
+                option-b: "Agent";
+                index: root.mode;
+                chosen(i) => { root.mode = i; root.mode-changed(i); }
+            }
+            TextEdit {
+                height: 88px;
+                text: root.draft;
+                edited => { root.draft = self.text; }
+                wrap: word-wrap;
+                font-size: Tokens.font-sm;
+            }
+            HorizontalLayout {
+                padding-left: Tokens.sp3;
+                padding-right: Tokens.sp3;
+                padding-bottom: Tokens.sp2;
+                Rectangle { horizontal-stretch: 1; }
+                if root.busy: SecondaryButton { text: "Stop"; clicked => { root.cancel(); } }
+                if !root.busy: PrimaryButton {
+                    text: "Send";
+                    enabled: root.draft != "" && root.proposed-write == "";
+                    clicked => { root.send(root.draft); root.draft = ""; }
+                }
+            }
+        }
+    }
+}

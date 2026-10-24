@@ -16,6 +16,7 @@ members = [
     "crates/runtime",
     "crates/mcp",
     "crates/cli",
+    "crates/agent",
     "app",
 ]
 # Vendored upstream source, patched in below: not ours to lint or format.

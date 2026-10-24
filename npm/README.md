@@ -32,6 +32,7 @@ Agent clients launch `rdb-mcp` through stdio after registration.
 - **Native UI** — GPU-rendered via Slint (no webview, no Chromium, no Electron)
 - **Fast & light** — no GC, no runtime; aggressive release optimization (LTO, `opt-level=z`, `panic=abort`)
 - **Agent integration** — configure a scoped MCP server for supported agent clients with `rdb-cli mcp`
+- **In-app Agent** — ask for SQL or let a configured model inspect schema and run read queries; writes require approval of the exact SQL and are disabled for production connections
 - **Secure connections** — passwords stored in OS keychain (macOS Keychain, libsecret) with AES-GCM encrypted-file fallback
 - **Schema browser** — sidebar tree: databases → tables/collections/keys → columns/fields
 - **Tabbed query editor** — multiple tabs per session, one per engine
