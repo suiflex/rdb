@@ -6524,6 +6524,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // order between them does not matter — `main` just has to have built the
     // state and the shared closures first.
     wire::connect::wire(&window, &state, &fns);
+    wire::agent::wire(&window, &state);
     wire::grid::wire(&window, &state);
     wire::find::wire(&window, &state, &fns);
     wire::schema::wire(&window, &state, &fns);

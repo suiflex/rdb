@@ -13,6 +13,7 @@ import {
 } from "components.slint";
 export { Shortcut }
 import { NavCluster } from "nav-cluster.slint";
+import { AgentPanel } from "agent-panel.slint";
 import { ConnPicker } from "picker.slint";
 import { WorkArea } from "workarea.slint";
 import { CommandPalette, ListModal, PaletteGroup } from "palette.slint";
@@ -37,6 +38,7 @@ import {
     IndexRow,
     DocRow,
     ResultTabItem,
+    AgentMessage,
 } from "structs.slint";
 
 export component MainWindow inherits Window {
@@ -471,6 +473,39 @@ callback create-table-commit();
     in-out property <bool> detail-visible: true;
     // Place the sidebar on the right (detail panel flips to the left).
     in-out property <bool> sidebar-right: false;
+    in-out property <bool> agent-open: false;
+    in property <[AgentMessage]> agent-messages;
+    in property <[string]> agent-conversations;
+    in property <int> agent-selected-conversation: -1;
+    in property <string> agent-connection-name;
+    in property <string> agent-database-name;
+    in-out property <int> agent-mode: 0;
+    in property <bool> agent-busy: false;
+    in property <string> agent-status;
+    in property <string> agent-proposed-write;
+    in property <string> agent-write-target;
+    in-out property <string> agent-config-name: "Default";
+    in property <[string]> agent-config-options;
+    in-out property <string> agent-config-choice: "";
+    in-out property <string> agent-config-provider: "OpenAI";
+    in-out property <string> agent-config-endpoint: "https://api.openai.com/v1";
+    in-out property <string> agent-config-model: "";
+    in-out property <string> agent-config-key: "";
+    in-out property <bool> agent-config-open: false;
+    callback agent-new-conversation;
+    callback agent-choose-conversation(int);
+    callback agent-delete-conversation(int);
+    callback agent-mode-changed(int);
+    callback agent-send(string);
+    callback agent-cancel;
+    callback agent-approve-write;
+    callback agent-reject-write;
+    callback agent-save-config(string, string, string, string, string);
+    callback agent-choose-config(string);
+    callback agent-new-config;
+    callback agent-delete-config;
+    callback agent-result(string, int, string, string, string);
+    callback agent-write-result(string, int, string, string);
     callback set-sidebar-side(bool);
     callback zoom-step(int); // ⌘+ / ⌘−: +1 / −1 zoom level (whole-UI scale)
     in-out property <bool> results-collapsed: false;
@@ -1253,6 +1288,14 @@ callback create-table-commit();
                 // settings. One row so all icons share even spacing.
                 HorizontalLayout {
                     spacing: Tokens.sp1;
+                    if root.connected: VerticalLayout {
+                        alignment: center;
+                        TextButton {
+                            text: "AI";
+                            tooltip: "Toggle Agent panel";
+                            clicked => { root.agent-open = !root.agent-open; }
+                        }
+                    }
                     // Sidebar toggle sits on the sidebar's side: left of the
                     // details toggle by default, right of it when the sidebar is
                     // on the right — so the button lines up with the panel it
@@ -2353,6 +2396,41 @@ callback create-table-commit();
                     select-schema(s) => { root.select-schema(s); }
                     filter-tree(t) => { root.filter-tree(t); }
                     add-item() => { root.new-table(); }
+                }
+                if root.agent-open: AgentPanel {
+                    messages: root.agent-messages;
+                    conversations: root.agent-conversations;
+                    selected-conversation: root.agent-selected-conversation;
+                    connection-name: root.agent-connection-name;
+                    database-name: root.agent-database-name;
+                    mode <=> root.agent-mode;
+                    busy: root.agent-busy;
+                    status: root.agent-status;
+                    proposed-write: root.agent-proposed-write;
+                    write-target: root.agent-write-target;
+                    config-name <=> root.agent-config-name;
+                    config-options: root.agent-config-options;
+                    config-choice <=> root.agent-config-choice;
+                    config-provider <=> root.agent-config-provider;
+                    config-endpoint <=> root.agent-config-endpoint;
+                    config-model <=> root.agent-config-model;
+                    config-key <=> root.agent-config-key;
+                    config-open <=> root.agent-config-open;
+                    close => { root.agent-open = false; }
+                    new-conversation => { root.agent-new-conversation(); }
+                    choose-conversation(i) => { root.agent-choose-conversation(i); }
+                    delete-conversation(i) => { root.agent-delete-conversation(i); }
+                    mode-changed(i) => { root.agent-mode-changed(i); }
+                    send(prompt) => { root.agent-send(prompt); }
+                    cancel => { root.agent-cancel(); }
+                    approve-write => { root.agent-approve-write(); }
+                    reject-write => { root.agent-reject-write(); }
+                    save-config(name, provider, endpoint, model, key) => {
+                        root.agent-save-config(name, provider, endpoint, model, key);
+                    }
+                    choose-config(value) => { root.agent-choose-config(value); }
+                    new-config => { root.agent-new-config(); }
+                    delete-config => { root.agent-delete-config(); }
                 }
             }
         }

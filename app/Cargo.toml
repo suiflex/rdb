@@ -22,6 +22,7 @@ slint = { version = "1.17", default-features = false, features = ["compat-1-2", 
 rdb-core = { path = "../crates/core" }
 rdb-connstore = { path = "../crates/connstore" }
 rdb-runtime = { path = "../crates/runtime" }
+rdb-agent = { path = "../crates/agent" }
 rdb-driver-cassandra = { path = "../crates/driver-cassandra" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }
 serde = { version = "1", features = ["derive"] }
@@ -45,6 +46,7 @@ notify-rust = "4"
 rfd = { version = "0.16", default-features = false, features = ["xdg-portal", "tokio"] }
 # History date-grouping (Today/Yesterday/date): local-timezone civil-date math.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+uuid = { version = "1", features = ["v4"] }
 # Direct only to pick the process-wide crypto provider in `main` (see there).
 # Already in the tree via mysql_async, scylla, mongodb, clickhouse and ureq;
 # naming it here keeps that dependency honest, since we now call its API.

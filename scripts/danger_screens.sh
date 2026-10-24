@@ -29,6 +29,8 @@ OUT=${DANGER_OUT:-$(mktemp -d)}
 SCREENS="
 connections
 workspace
+agent
+agent-settings
 workspace-users-bool
 workspace-users-date
 rail
