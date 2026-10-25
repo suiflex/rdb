@@ -3,8 +3,8 @@
 use std::{cell::RefCell, rc::Rc};
 
 use rdb_agent::{
-    AgentConfig, AgentOutcome, AgentScope, AgentStore, Conversation, Message, Mode, ModelRequest,
-    Provider, ToolRunner,
+    AgentConfig, AgentOutcome, AgentPreferences, AgentScope, AgentStore, Conversation, Message,
+    Mode, ModelRequest, Provider, ToolRunner,
 };
 use rdb_connstore::{Engine, EnvTag};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
@@ -154,6 +154,87 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
     let ui = Rc::new(RefCell::new(UiRun::default()));
     ui.borrow_mut().active_config_id = store.borrow().configs().first().map(|item| item.id.clone());
     paint_config(window, &store.borrow(), &ui.borrow());
+    let preferences = store.borrow().preferences().clone();
+    window.set_agent_global_instructions(preferences.global_instructions.into());
+    window.set_agent_max_turns(preferences.max_turns.to_string().into());
+    window.set_agent_max_api_retries(preferences.max_api_retries.to_string().into());
+
+    {
+        let store = store.clone();
+        let weak = window.as_weak();
+        window.on_agent_save_preferences(move |instructions, turns, retries| {
+            let Some(w) = weak.upgrade() else { return };
+            let Ok(max_turns) = turns.parse::<u16>() else {
+                w.set_agent_status("Maximum Agent turns must be a number from 5 to 500".into());
+                return;
+            };
+            let Ok(max_api_retries) = retries.parse::<u8>() else {
+                w.set_agent_status("Maximum API retries must be a number from 0 to 10".into());
+                return;
+            };
+            let preferences = AgentPreferences {
+                global_instructions: instructions.to_string(),
+                max_turns,
+                max_api_retries,
+            };
+            match store.borrow_mut().save_preferences(preferences) {
+                Ok(()) => w.set_agent_status("Assistant behavior saved".into()),
+                Err(error) => w.set_agent_status(error.into()),
+            }
+        });
+    }
+
+    {
+        let store = store.clone();
+        let ui = ui.clone();
+        let conn_store = state.store.clone();
+        let weak = window.as_weak();
+        window.on_agent_export_answer(move || {
+            let Some(w) = weak.upgrade() else { return };
+            let Some(conversation) = ui.borrow().selected_id.as_ref().and_then(|id| {
+                store
+                    .borrow()
+                    .conversations()
+                    .iter()
+                    .find(|item| &item.id == id)
+                    .cloned()
+            }) else {
+                w.set_agent_status("Select a conversation to export".into());
+                return;
+            };
+            let Some(answer) = conversation
+                .messages
+                .iter()
+                .rev()
+                .find(|message| message.role == "assistant")
+            else {
+                w.set_agent_status("This conversation has no answer to export".into());
+                return;
+            };
+            let connection = conn_store
+                .borrow()
+                .get(&conversation.connection_id)
+                .map(|saved| saved.name.clone())
+                .unwrap_or_else(|| "Unavailable connection".into());
+            let timestamp = chrono::Local::now();
+            let title = conversation.title.replace(['\n', '\r'], " ");
+            let connection = connection.replace(['\n', '\r'], " ");
+            let content = format!(
+                "# {title}\n\nConnection: {connection}\nDatabase: {}\nDate: {}\n\n{}\n",
+                conversation.database,
+                timestamp.format("%Y-%m-%d %H:%M:%S %:z"),
+                answer.content,
+            );
+            crate::save_via_dialog(
+                &w,
+                format!("rdb-assistant-{}.md", timestamp.format("%Y%m%d-%H%M%S")),
+                "Markdown".into(),
+                "md".into(),
+                content,
+                |w, status| w.set_agent_status(status.into()),
+            );
+        });
+    }
 
     {
         let store = store.clone();
@@ -361,6 +442,89 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
     {
         let store = store.clone();
         let ui = ui.clone();
+        let rt = state.rt.clone();
+        let weak = window.as_weak();
+        window.on_agent_test_config(move |provider, endpoint, model, key| {
+            let Some(w) = weak.upgrade() else { return };
+            let Some(provider) = provider_from_label(&provider) else {
+                w.set_agent_status("Unknown model provider".into());
+                return;
+            };
+            if endpoint.trim().is_empty() || model.trim().is_empty() {
+                w.set_agent_status("Endpoint and model are required for a test".into());
+                return;
+            }
+            let api_key = if key.is_empty() {
+                let id = ui.borrow().active_config_id.clone();
+                match id
+                    .as_deref()
+                    .map(|id| store.borrow().api_key(id))
+                    .transpose()
+                {
+                    Ok(value) => value.flatten().unwrap_or_default(),
+                    Err(error) => {
+                        w.set_agent_status(error.into());
+                        return;
+                    }
+                }
+            } else {
+                key.to_string()
+            };
+            let config = AgentConfig {
+                id: "test".into(),
+                name: "test".into(),
+                provider,
+                endpoint: endpoint.to_string(),
+                model: model.to_string(),
+            };
+            w.set_agent_status("Testing model…".into());
+            let background_weak = weak.clone();
+            rt.spawn(async move {
+                let started = std::time::Instant::now();
+                let messages = [Message {
+                    role: "user".into(),
+                    content: "Reply with OK.".into(),
+                }];
+                let request = ModelRequest {
+                    config: &config,
+                    api_key: &api_key,
+                    system: "This is a connection test.",
+                    messages: &messages,
+                };
+                let status = match rdb_agent::complete(&request).await {
+                    Ok(reply) if !reply.text.trim().is_empty() => format!(
+                        "Model connected in {} ms ({})",
+                        started.elapsed().as_millis(),
+                        config.model
+                    ),
+                    Ok(_) => "Model returned an empty response".into(),
+                    Err(error) => {
+                        let category = if error.starts_with("401") || error.starts_with("403") {
+                            "Authentication"
+                        } else if error.starts_with("429") {
+                            "Rate limit"
+                        } else if error.starts_with("404") {
+                            "Model or endpoint"
+                        } else if error.contains("timed out") {
+                            "Timeout"
+                        } else {
+                            "Request"
+                        };
+                        format!("{category} test failed: {error}")
+                    }
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = background_weak.upgrade() {
+                        w.set_agent_status(status.into());
+                    }
+                });
+            });
+        });
+    }
+
+    {
+        let store = store.clone();
+        let ui = ui.clone();
         let weak = window.as_weak();
         window.on_agent_mode_changed(move |index| {
             let Some(w) = weak.upgrade() else { return };
@@ -498,6 +662,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 Ok(key) => key.unwrap_or_default(),
                 Err(error) => { w.set_agent_status(error.into()); return; }
             };
+            let preferences = store.borrow().preferences().clone();
             let Some(saved) = conn_store.borrow().get(&conversation.connection_id).cloned() else {
                 w.set_agent_status("Conversation connection was deleted".into()); return;
             };
@@ -549,7 +714,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                         system: "You are RDB's database assistant. Follow the user's request and the configured mode.",
                         messages: &conversation.messages };
                     let (_, cancel) = tokio::sync::watch::channel(false);
-                    rdb_agent::run(&request, conversation.mode, &runner, &editor_context, cancel).await
+                    rdb_agent::run(&request, conversation.mode, &runner, &editor_context,
+                        &preferences, cancel).await
                 }.await;
                 let (answer, proposal, error) = match result {
                     Ok(run) => match run.outcome {

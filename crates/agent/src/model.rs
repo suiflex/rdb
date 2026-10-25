@@ -23,6 +23,24 @@ pub struct AgentConfig {
     pub model: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AgentPreferences {
+    pub global_instructions: String,
+    pub max_turns: u16,
+    pub max_api_retries: u8,
+}
+
+impl Default for AgentPreferences {
+    fn default() -> Self {
+        Self {
+            global_instructions: String::new(),
+            max_turns: 30,
+            max_api_retries: 2,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {

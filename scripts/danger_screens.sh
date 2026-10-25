@@ -31,8 +31,10 @@ connections
 workspace
 agent
 agent-settings
+agent-settings-behavior
 agent-narrow
 agent-database
+agent-model
 workspace-users-bool
 workspace-users-date
 rail
