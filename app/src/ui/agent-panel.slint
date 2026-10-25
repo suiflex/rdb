@@ -13,6 +13,9 @@ export component AgentPanel inherits Rectangle {
     in property <[string]> database-options;
     in property <[string]> model-options;
     in property <string> model-name;
+    in property <[string]> template-options;
+    in property <[string]> selected-templates;
+    in-out property <string> template-choice: "Add a template";
     in-out property <int> mode: 0;
     in property <bool> busy: false;
     in property <string> status;
@@ -22,6 +25,7 @@ export component AgentPanel inherits Rectangle {
     callback close;
     callback select-database(string);
     callback select-model(string);
+    callback toggle-template(string);
     callback new-conversation;
     callback export-answer;
     callback choose-conversation(int);
@@ -93,6 +97,25 @@ export component AgentPanel inherits Rectangle {
                     model: root.model-options;
                     current-value: root.model-name;
                     selected(name) => { root.select-model(name); }
+                }
+            }
+            if root.template-options.length > 0: VerticalLayout {
+                padding-left: Tokens.sp3;
+                padding-right: Tokens.sp3;
+                spacing: Tokens.sp1;
+                Text { text: "Prompt templates"; color: Tokens.text-dim;
+                    font-size: Tokens.font-xs; }
+                SelectBox {
+                    model: root.template-options;
+                    current-value <=> root.template-choice;
+                    selected(name) => { root.toggle-template(name); root.template-choice = "Add a template"; }
+                }
+                for name in root.selected-templates: HorizontalLayout {
+                    spacing: Tokens.sp1;
+                    Text { text: name; color: Tokens.text; font-size: Tokens.font-xs;
+                        overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+                    IconButton { icon: "close"; tooltip: "Remove prompt template";
+                        clicked => { root.toggle-template(name); } }
                 }
             }
             if root.conversations.length > 0: ScrollView {

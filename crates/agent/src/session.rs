@@ -31,6 +31,19 @@ enum AgentAction {
     Tool(ToolCall),
 }
 
+fn append_templates(system: &mut String, templates: &[String]) {
+    let mut remaining = MAX_CONTEXT_CHARS;
+    for content in templates {
+        if remaining == 0 {
+            break;
+        }
+        let bounded = content.chars().take(remaining).collect::<String>();
+        remaining -= bounded.chars().count();
+        system.push_str("\nSelected prompt template:\n");
+        system.push_str(&bounded);
+    }
+}
+
 fn parse_action(text: &str) -> Result<AgentAction, &'static str> {
     let value: Value = serde_json::from_str(text.trim()).map_err(|_| {
         "Invalid action. Return exactly one JSON object with either a final answer or a supported tool call, without Markdown fences."
@@ -57,6 +70,7 @@ async fn system_prompt(
     runner: &ToolRunner,
     editor_context: &str,
     preferences: &AgentPreferences,
+    templates: &[String],
 ) -> String {
     let scope = runner.scope();
     let mut system = format!(
@@ -76,6 +90,7 @@ async fn system_prompt(
         system.push_str("\nAdditional user instructions:\n");
         system.push_str(&preferences.global_instructions);
     }
+    append_templates(&mut system, templates);
     if mode == Mode::Ask {
         let schema_call = ToolCall {
             name: "describe_schema".into(),
@@ -117,11 +132,20 @@ pub async fn run(
     runner: &ToolRunner,
     editor_context: &str,
     preferences: &AgentPreferences,
+    templates: &[String],
     mut cancelled: watch::Receiver<bool>,
 ) -> Result<AgentRun, String> {
     let mut messages = request.messages.to_vec();
     let mut steps = Vec::new();
-    let system = system_prompt(request, mode, runner, editor_context, preferences).await;
+    let system = system_prompt(
+        request,
+        mode,
+        runner,
+        editor_context,
+        preferences,
+        templates,
+    )
+    .await;
     for _ in 0..if mode == Mode::Agent {
         usize::from(preferences.max_turns.clamp(5, 500))
     } else {
@@ -224,4 +248,17 @@ pub async fn run(
         }
     }
     Err("Agent reached its turn limit".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selected_templates_are_bounded_as_one_snapshot() {
+        let mut system = String::new();
+        append_templates(&mut system, &["A".repeat(MAX_CONTEXT_CHARS), "B".into()]);
+        assert_eq!(system.matches('A').count(), MAX_CONTEXT_CHARS);
+        assert!(!system.contains('B'));
+    }
 }

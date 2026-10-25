@@ -499,6 +499,13 @@ callback create-table-commit();
     in-out property <string> agent-max-turns: "30";
     in-out property <string> agent-max-api-retries: "2";
     in-out property <int> agent-settings-section: 0;
+    in property <[string]> agent-template-options;
+    in property <[string]> agent-selected-templates;
+    in-out property <string> agent-template-choice: "";
+    in-out property <string> agent-template-name: "";
+    in-out property <string> agent-template-content: "";
+    in property <[string]> agent-template-default-engines;
+    in-out property <string> agent-template-engine-choice: "Choose engine";
     callback agent-new-conversation;
     callback agent-export-answer;
     callback agent-choose-conversation(int);
@@ -515,6 +522,13 @@ callback create-table-commit();
     callback agent-choose-config(string);
     callback agent-new-config;
     callback agent-delete-config;
+    callback agent-toggle-template(string);
+    callback agent-choose-template(string);
+    callback agent-new-template;
+    callback agent-delete-template;
+    callback agent-save-template(string, string);
+    callback agent-add-template-engine(string);
+    callback agent-remove-template-engine(string);
     callback agent-result(string, int, string, string, string);
     callback agent-write-result(string, int, string, string);
     callback set-sidebar-side(bool);
@@ -2420,6 +2434,8 @@ callback create-table-commit();
                     database-options: root.agent-selected-conversation < 0 || root.agent-can-switch-database ? root.db-list : [];
                     model-options: root.agent-config-options;
                     model-name: root.agent-config-choice;
+                    template-options: root.agent-template-options;
+                    selected-templates: root.agent-selected-templates;
                     mode <=> root.agent-mode;
                     busy: root.agent-busy;
                     status: root.agent-status;
@@ -2428,6 +2444,7 @@ callback create-table-commit();
                     close => { root.agent-open = false; }
                     select-database(name) => { root.agent-select-database(name); }
                     select-model(name) => { root.agent-choose-config(name); }
+                    toggle-template(name) => { root.agent-toggle-template(name); }
                     new-conversation => { root.agent-new-conversation(); }
                     export-answer => { root.agent-export-answer(); }
                     choose-conversation(i) => { root.agent-choose-conversation(i); }
@@ -3937,6 +3954,12 @@ callback create-table-commit();
                     global-instructions <=> root.agent-global-instructions;
                     max-turns <=> root.agent-max-turns;
                     max-api-retries <=> root.agent-max-api-retries;
+                    template-options: root.agent-template-options;
+                    template-choice <=> root.agent-template-choice;
+                    template-name <=> root.agent-template-name;
+                    template-content <=> root.agent-template-content;
+                    template-default-engines: root.agent-template-default-engines;
+                    template-engine-choice <=> root.agent-template-engine-choice;
                     status: root.agent-status;
                     save-config(name, provider, endpoint, model, key) => {
                         root.agent-save-config(name, provider, endpoint, model, key);
@@ -3950,6 +3973,12 @@ callback create-table-commit();
                     save-preferences(instructions, turns, retries) => {
                         root.agent-save-preferences(instructions, turns, retries);
                     }
+                    choose-template(name) => { root.agent-choose-template(name); }
+                    new-template => { root.agent-new-template(); }
+                    delete-template => { root.agent-delete-template(); }
+                    save-template(name, content) => { root.agent-save-template(name, content); }
+                    add-template-engine(engine) => { root.agent-add-template-engine(engine); }
+                    remove-template-engine(engine) => { root.agent-remove-template-engine(engine); }
                 }
 
                 // --- done ---
