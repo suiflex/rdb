@@ -7,7 +7,7 @@ use rdb_agent::{
     Provider, ToolRunner,
 };
 use rdb_connstore::{Engine, EnvTag};
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use crate::{AgentMessage, AppState, MainWindow};
 
@@ -173,7 +173,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             };
             let database = if saved.engine == Engine::Sqlite {
                 "main".to_string()
-            } else if saved.engine == Engine::Mongo && !w.get_bc_db().is_empty() {
+            } else if !w.get_bc_db().is_empty() {
                 w.get_bc_db().to_string()
             } else {
                 saved.database.clone().unwrap_or_default()
@@ -187,6 +187,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 Ok(()) => {
                     ui.borrow_mut().selected_id = Some(new_id);
                     w.set_agent_connection_name(saved.name.into());
+                    w.set_agent_can_switch_database(true);
                     w.set_agent_status("".into());
                     paint(&w, &store.borrow(), &ui.borrow());
                 }
@@ -199,6 +200,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let store = store.clone();
         let ui = ui.clone();
         let conn_store = state.store.clone();
+        let current = state.current_connection_id.clone();
         let weak = window.as_weak();
         window.on_agent_choose_conversation(move |index| {
             let Some(w) = weak.upgrade() else { return };
@@ -210,6 +212,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             else {
                 return;
             };
+            w.set_agent_can_switch_database(
+                current.lock().unwrap().as_deref() == Some(conversation.connection_id.as_str()),
+            );
             ui.borrow_mut().selected_id = Some(conversation.id);
             let name = conn_store
                 .borrow()
@@ -225,6 +230,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let store = store.clone();
         let ui = ui.clone();
         let conn_store = state.store.clone();
+        let current = state.current_connection_id.clone();
         let weak = window.as_weak();
         window.on_agent_delete_conversation(move |index| {
             let Some(w) = weak.upgrade() else { return };
@@ -274,7 +280,81 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 .and_then(|id| conn_store.borrow().get(&id).map(|saved| saved.name.clone()))
                 .unwrap_or_default();
             w.set_agent_connection_name(name.into());
+            let selected_connection = run.selected_id.as_ref().and_then(|id| {
+                store
+                    .borrow()
+                    .conversations()
+                    .iter()
+                    .find(|item| &item.id == id)
+                    .map(|item| item.connection_id.clone())
+            });
+            w.set_agent_can_switch_database(
+                selected_connection.as_deref() == current.lock().unwrap().as_deref(),
+            );
             paint(&w, &store.borrow(), &run);
+        });
+    }
+
+    {
+        let store = store.clone();
+        let ui = ui.clone();
+        let current = state.current_connection_id.clone();
+        let db_override = state.db_override.clone();
+        let weak = window.as_weak();
+        window.on_agent_select_database(move |database| {
+            let Some(w) = weak.upgrade() else { return };
+            if w.get_agent_busy() || !w.get_agent_proposed_write().is_empty() {
+                w.set_agent_status(
+                    "Finish the current Agent action before changing database".into(),
+                );
+                return;
+            }
+            let Some(connection_id) = current.lock().unwrap().clone() else {
+                return;
+            };
+            if ui.borrow().selected_id.is_none() {
+                w.invoke_agent_new_conversation();
+            }
+            let Some(selected) = ui.borrow().selected_id.as_ref().and_then(|id| {
+                store
+                    .borrow()
+                    .conversations()
+                    .iter()
+                    .find(|item| &item.id == id)
+                    .cloned()
+            }) else {
+                return;
+            };
+            if selected.connection_id != connection_id {
+                w.set_agent_status(
+                    "Open this conversation's connection before changing database".into(),
+                );
+                return;
+            }
+            if selected.database == database.as_str() {
+                return;
+            }
+            if !w.get_db_list().iter().any(|name| name == database) {
+                w.set_agent_status("Database is unavailable on this connection".into());
+                return;
+            }
+            let mut conversation = Conversation::new(
+                uuid::Uuid::new_v4().to_string(),
+                connection_id,
+                database.to_string(),
+                None,
+            );
+            conversation.mode = selected.mode;
+            let new_id = conversation.id.clone();
+            if let Err(error) = store.borrow_mut().save_conversation(conversation) {
+                w.set_agent_status(error.into());
+                return;
+            }
+            ui.borrow_mut().selected_id = Some(new_id);
+            w.set_agent_status("".into());
+            paint(&w, &store.borrow(), &ui.borrow());
+            *db_override.lock().unwrap() = Some(database.to_string());
+            w.invoke_connect_clicked(w.get_selected_conn());
         });
     }
 
@@ -421,6 +501,15 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             let Some(saved) = conn_store.borrow().get(&conversation.connection_id).cloned() else {
                 w.set_agent_status("Conversation connection was deleted".into()); return;
             };
+            if saved.engine != Engine::Mongo
+                && (focused_connection.lock().unwrap().as_deref()
+                    != Some(conversation.connection_id.as_str())
+                    || (!w.get_bc_db().is_empty()
+                        && w.get_bc_db().as_str() != conversation.database.as_str()))
+            {
+                w.set_agent_status("Open this conversation's database before sending".into());
+                return;
+            }
             conversation.messages.push(Message { role: "user".into(), content: prompt.to_string() });
             if conversation.title == "New conversation" {
                 conversation.title = prompt.chars().take(45).collect();
@@ -568,6 +657,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let ui = ui.clone();
         let store = store.clone();
         let conn_store = state.store.clone();
+        let focused_connection = state.current_connection_id.clone();
         let pool = state.driver_pool.clone();
         let current = state.current.clone();
         let rt = state.rt.clone();
@@ -587,6 +677,14 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             };
             if saved.env_tag == EnvTag::Production {
                 w.set_agent_status("Agent writes are unavailable on production connections".into());
+                return;
+            }
+            if focused_connection.lock().unwrap().as_deref() != Some(pending.connection_id.as_str())
+                || (!w.get_bc_db().is_empty()
+                    && w.get_bc_db().as_str() != pending.database.as_str())
+            {
+                ui.borrow_mut().pending_write = Some(pending);
+                w.set_agent_status("Open the proposed write's database before approval".into());
                 return;
             }
             paint(&w, &store.borrow(), &ui.borrow());

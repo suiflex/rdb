@@ -1,6 +1,7 @@
 import { Tokens } from "tokens.slint";
 import { AgentMessage } from "structs.slint";
-import { BreadcrumbChip, ChoiceRow, IconButton, PrimaryButton, SecondaryButton } from "components.slint";
+import { BreadcrumbChip, ChoiceRow, IconButton, PrimaryButton, SecondaryButton, SelectBox } from "components.slint";
+import { AppIcon } from "icons.slint";
 import { ScrollView, TextEdit } from "std-widgets.slint";
 
 export component AgentPanel inherits Rectangle {
@@ -9,6 +10,7 @@ export component AgentPanel inherits Rectangle {
     in property <int> selected-conversation: -1;
     in property <string> connection-name;
     in property <string> database-name;
+    in property <[string]> database-options;
     in-out property <int> mode: 0;
     in property <bool> busy: false;
     in property <string> status;
@@ -16,7 +18,7 @@ export component AgentPanel inherits Rectangle {
     in property <string> write-target;
     in-out property <string> draft: "";
     callback close;
-    callback open-settings;
+    callback select-database(string);
     callback new-conversation;
     callback choose-conversation(int);
     callback delete-conversation(int);
@@ -39,8 +41,9 @@ export component AgentPanel inherits Rectangle {
             padding-left: Tokens.sp3;
             padding-right: Tokens.sp3;
             spacing: Tokens.sp2;
+            AppIcon { name: "robot"; size: 18px; color: Tokens.accent; }
             Text {
-                text: "Agent";
+                text: "Assistant";
                 color: Tokens.text;
                 font-size: Tokens.font-md;
                 font-weight: Tokens.weight-emphasis;
@@ -48,23 +51,32 @@ export component AgentPanel inherits Rectangle {
                 horizontal-stretch: 1;
             }
             IconButton { icon: "plus"; tooltip: "New conversation"; clicked => { root.new-conversation(); } }
-            IconButton { icon: "settings"; tooltip: "Model settings";
-                clicked => { root.open-settings(); } }
-            IconButton { icon: "close"; tooltip: "Close Agent"; clicked => { root.close(); } }
+            IconButton { icon: "close"; tooltip: "Close Assistant"; clicked => { root.close(); } }
         }
         Rectangle { height: 1px; background: Tokens.border; }
 
         VerticalLayout {
             spacing: Tokens.sp2;
-            if root.connection-name != "": HorizontalLayout {
+            if root.connection-name != "": VerticalLayout {
                 padding-left: Tokens.sp3;
                 padding-right: Tokens.sp3;
                 spacing: Tokens.sp1;
-                Text { text: root.connection-name + (root.database-name == "" ? "" : " / " + root.database-name); color: Tokens.text-dim;
-                    font-size: Tokens.font-xs; overflow: elide; horizontal-stretch: 1; }
+                Text { text: root.connection-name; color: Tokens.text-dim;
+                    font-size: Tokens.font-xs; overflow: elide; }
+                if root.database-options.length > 1: SelectBox {
+                    model: root.database-options;
+                    current-value: root.database-name;
+                    selected(name) => { root.select-database(name); }
+                }
+                if root.database-options.length <= 1 && root.database-name != "": Text {
+                    text: root.database-name;
+                    color: Tokens.text;
+                    font-size: Tokens.font-sm;
+                    overflow: elide;
+                }
             }
             if root.conversations.length > 0: ScrollView {
-                max-height: 120px;
+                height: root.conversations.length < 3 ? root.conversations.length * 40px : 120px;
                 VerticalLayout {
                     spacing: Tokens.sp1;
                     for title[i] in root.conversations: HorizontalLayout {
@@ -87,17 +99,32 @@ export component AgentPanel inherits Rectangle {
                 }
             }
             Rectangle { height: 1px; background: Tokens.border; }
-            ScrollView {
+            if root.messages.length == 0: VerticalLayout {
+                vertical-stretch: 1;
+                alignment: center;
+                padding-left: Tokens.sp4;
+                padding-right: Tokens.sp4;
+                spacing: Tokens.sp2;
+                AppIcon { name: "robot"; size: 32px; color: Tokens.text-dim; }
+                Text {
+                    text: "Explore your database";
+                    color: Tokens.text;
+                    font-size: Tokens.font-md;
+                    font-weight: Tokens.weight-emphasis;
+                }
+                Text {
+                    text: "Ask for SQL help, or let Agent inspect real data.";
+                    color: Tokens.text-dim;
+                    wrap: word-wrap;
+                    font-size: Tokens.font-sm;
+                    horizontal-alignment: center;
+                }
+            }
+            if root.messages.length > 0: ScrollView {
                 vertical-stretch: 1;
                 VerticalLayout {
                     padding: Tokens.sp3;
                     spacing: Tokens.sp2;
-                    if root.messages.length == 0: Text {
-                        text: "Ask a question about this database.";
-                        color: Tokens.text-dim;
-                        wrap: word-wrap;
-                        font-size: Tokens.font-sm;
-                    }
                     for msg in root.messages: Rectangle {
                         height: body.preferred-height + Tokens.sp3;
                         background: msg.role == "user" ? Tokens.accent-tint : Tokens.card;
@@ -136,31 +163,22 @@ export component AgentPanel inherits Rectangle {
                 padding-left: Tokens.sp3;
                 padding-right: Tokens.sp3;
                 label: "Mode";
+                description: root.mode == 0 ? "Suggest SQL and explain it" : "Inspect data with read queries";
                 option-a: "Ask";
                 option-b: "Agent";
                 index: root.mode;
                 chosen(i) => { root.mode = i; root.mode-changed(i); }
             }
             HorizontalLayout {
-                height: 32px;
                 padding-left: Tokens.sp3;
                 padding-right: Tokens.sp3;
-                Text {
-                    text: root.mode == 0 ? "Ask gives suggestions without running queries."
-                        : "Agent can inspect data and run read queries. Writes need approval.";
-                    color: Tokens.text-dim;
-                    font-size: Tokens.font-xs;
+                TextEdit {
+                    height: 88px;
+                    text: root.draft;
+                    edited => { root.draft = self.text; }
                     wrap: word-wrap;
-                    horizontal-stretch: 1;
-                    vertical-alignment: center;
+                    font-size: Tokens.font-sm;
                 }
-            }
-            TextEdit {
-                height: 88px;
-                text: root.draft;
-                edited => { root.draft = self.text; }
-                wrap: word-wrap;
-                font-size: Tokens.font-sm;
             }
             HorizontalLayout {
                 padding-left: Tokens.sp3;

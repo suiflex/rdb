@@ -32,6 +32,7 @@ workspace
 agent
 agent-settings
 agent-narrow
+agent-database
 workspace-users-bool
 workspace-users-date
 rail
