@@ -495,7 +495,12 @@ callback create-table-commit();
     in-out property <string> agent-config-endpoint: "https://api.openai.com/v1";
     in-out property <string> agent-config-model: "";
     in-out property <string> agent-config-key: "";
+    in-out property <string> agent-global-instructions: "";
+    in-out property <string> agent-max-turns: "30";
+    in-out property <string> agent-max-api-retries: "2";
+    in-out property <int> agent-settings-section: 0;
     callback agent-new-conversation;
+    callback agent-export-answer;
     callback agent-choose-conversation(int);
     callback agent-delete-conversation(int);
     callback agent-mode-changed(int);
@@ -505,6 +510,8 @@ callback create-table-commit();
     callback agent-approve-write;
     callback agent-reject-write;
     callback agent-save-config(string, string, string, string, string);
+    callback agent-test-config(string, string, string, string);
+    callback agent-save-preferences(string, string, string);
     callback agent-choose-config(string);
     callback agent-new-config;
     callback agent-delete-config;
@@ -2403,13 +2410,16 @@ callback create-table-commit();
                     add-item() => { root.new-table(); }
                 }
                 if root.agent-open: AgentPanel {
-                    horizontal-stretch: 1;
+                    width: 360px;
+                    horizontal-stretch: 0;
                     messages: root.agent-messages;
                     conversations: root.agent-conversations;
                     selected-conversation: root.agent-selected-conversation;
                     connection-name: root.agent-selected-conversation < 0 ? root.bc-conn : root.agent-connection-name;
                     database-name: root.agent-selected-conversation < 0 ? root.bc-db : root.agent-database-name;
                     database-options: root.agent-selected-conversation < 0 || root.agent-can-switch-database ? root.db-list : [];
+                    model-options: root.agent-config-options;
+                    model-name: root.agent-config-choice;
                     mode <=> root.agent-mode;
                     busy: root.agent-busy;
                     status: root.agent-status;
@@ -2417,7 +2427,9 @@ callback create-table-commit();
                     write-target: root.agent-write-target;
                     close => { root.agent-open = false; }
                     select-database(name) => { root.agent-select-database(name); }
+                    select-model(name) => { root.agent-choose-config(name); }
                     new-conversation => { root.agent-new-conversation(); }
+                    export-answer => { root.agent-export-answer(); }
                     choose-conversation(i) => { root.agent-choose-conversation(i); }
                     delete-conversation(i) => { root.agent-delete-conversation(i); }
                     mode-changed(i) => { root.agent-mode-changed(i); }
@@ -3914,6 +3926,7 @@ callback create-table-commit();
                 }
 
                 if root.settings-tab == 3: AgentSettings {
+                    section <=> root.agent-settings-section;
                     config-name <=> root.agent-config-name;
                     config-options: root.agent-config-options;
                     config-choice <=> root.agent-config-choice;
@@ -3921,13 +3934,22 @@ callback create-table-commit();
                     config-endpoint <=> root.agent-config-endpoint;
                     config-model <=> root.agent-config-model;
                     config-key <=> root.agent-config-key;
+                    global-instructions <=> root.agent-global-instructions;
+                    max-turns <=> root.agent-max-turns;
+                    max-api-retries <=> root.agent-max-api-retries;
                     status: root.agent-status;
                     save-config(name, provider, endpoint, model, key) => {
                         root.agent-save-config(name, provider, endpoint, model, key);
                     }
+                    test-config(provider, endpoint, model, key) => {
+                        root.agent-test-config(provider, endpoint, model, key);
+                    }
                     choose-config(value) => { root.agent-choose-config(value); }
                     new-config => { root.agent-new-config(); }
                     delete-config => { root.agent-delete-config(); }
+                    save-preferences(instructions, turns, retries) => {
+                        root.agent-save-preferences(instructions, turns, retries);
+                    }
                 }
 
                 // --- done ---

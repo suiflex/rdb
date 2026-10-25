@@ -1047,7 +1047,12 @@ fn wire_screen_harness(
     };
     let seed_agent = matches!(
         screen.as_str(),
-        "agent" | "agent-settings" | "agent-narrow" | "agent-database"
+        "agent"
+            | "agent-settings"
+            | "agent-settings-behavior"
+            | "agent-narrow"
+            | "agent-database"
+            | "agent-model"
     ) && !store
         .borrow()
         .list()
@@ -1077,10 +1082,17 @@ fn wire_screen_harness(
     schedule_sql_editor_scenarios(window, &screen, load_editor_text);
     if matches!(
         screen.as_str(),
-        "agent" | "agent-settings" | "agent-narrow" | "agent-database"
+        "agent"
+            | "agent-settings"
+            | "agent-settings-behavior"
+            | "agent-narrow"
+            | "agent-database"
+            | "agent-model"
     ) {
-        let show_settings = screen == "agent-settings";
+        let show_settings = screen == "agent-settings" || screen == "agent-settings-behavior";
+        let show_behavior = screen == "agent-settings-behavior";
         let switch_database = screen == "agent-database";
+        let select_model = screen == "agent-model";
         sequence(
             window,
             vec![(
@@ -1089,6 +1101,18 @@ fn wire_screen_harness(
                 Rc::new(move |w| {
                     w.set_agent_open(true);
                     w.invoke_agent_new_conversation();
+                    if select_model {
+                        w.invoke_agent_save_config(
+                            "Local model".into(),
+                            "Ollama".into(),
+                            "http://localhost:11434/v1".into(),
+                            "example".into(),
+                            "".into(),
+                        );
+                        if w.get_agent_config_choice() != "Local model" {
+                            screen_fail("agent model selector did not load the saved config");
+                        }
+                    }
                     if switch_database {
                         w.set_db_list(ModelRc::from(Rc::new(VecModel::from(vec![
                             SharedString::from("sample_db"),
@@ -1101,6 +1125,7 @@ fn wire_screen_harness(
                     }
                     if show_settings {
                         w.set_settings_tab(3);
+                        w.set_agent_settings_section(if show_behavior { 1 } else { 0 });
                         w.set_settings_open(true);
                     }
                     if !w.get_agent_open() || w.get_agent_selected_conversation() < 0 {

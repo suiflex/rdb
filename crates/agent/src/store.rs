@@ -4,13 +4,14 @@ use directories::ProjectDirs;
 use rdb_connstore::secret::{select_backend, SecretBackend};
 use serde::{Deserialize, Serialize};
 
-use crate::{AgentConfig, Conversation};
+use crate::{AgentConfig, AgentPreferences, Conversation};
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 struct StoredData {
     configs: Vec<AgentConfig>,
     conversations: Vec<Conversation>,
+    preferences: AgentPreferences,
 }
 
 pub struct AgentStore {
@@ -55,6 +56,26 @@ impl AgentStore {
     }
     pub fn conversations(&self) -> &[Conversation] {
         &self.data.conversations
+    }
+
+    pub fn preferences(&self) -> &AgentPreferences {
+        &self.data.preferences
+    }
+
+    pub fn save_preferences(&mut self, preferences: AgentPreferences) -> Result<(), String> {
+        if !(5..=500).contains(&preferences.max_turns) || preferences.max_api_retries > 10 {
+            return Err("Agent limits are out of range".into());
+        }
+        if preferences.global_instructions.chars().count() > 12_000 {
+            return Err("Global instructions exceed 12,000 characters".into());
+        }
+        let old_data = self.data.clone();
+        self.data.preferences = preferences;
+        if let Err(error) = self.flush() {
+            self.data = old_data;
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub fn api_key(&self, config_id: &str) -> Result<Option<String>, String> {
@@ -198,5 +219,30 @@ mod tests {
             store.api_key("one").unwrap().as_deref(),
             Some("secret-value")
         );
+    }
+
+    #[test]
+    fn preferences_roundtrip_and_reject_out_of_range_limits() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = AgentStore::open(dir.path().to_owned()).unwrap();
+        assert_eq!(store.preferences(), &AgentPreferences::default());
+        let preferences = AgentPreferences {
+            global_instructions: "Use UTC dates".into(),
+            max_turns: 45,
+            max_api_retries: 3,
+        };
+        store.save_preferences(preferences.clone()).unwrap();
+        assert_eq!(
+            AgentStore::open(dir.path().to_owned())
+                .unwrap()
+                .preferences(),
+            &preferences
+        );
+        let invalid = AgentPreferences {
+            max_turns: 501,
+            ..preferences.clone()
+        };
+        assert!(store.save_preferences(invalid).is_err());
+        assert_eq!(store.preferences(), &preferences);
     }
 }

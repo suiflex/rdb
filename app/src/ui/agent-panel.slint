@@ -11,6 +11,8 @@ export component AgentPanel inherits Rectangle {
     in property <string> connection-name;
     in property <string> database-name;
     in property <[string]> database-options;
+    in property <[string]> model-options;
+    in property <string> model-name;
     in-out property <int> mode: 0;
     in property <bool> busy: false;
     in property <string> status;
@@ -19,7 +21,9 @@ export component AgentPanel inherits Rectangle {
     in-out property <string> draft: "";
     callback close;
     callback select-database(string);
+    callback select-model(string);
     callback new-conversation;
+    callback export-answer;
     callback choose-conversation(int);
     callback delete-conversation(int);
     callback mode-changed(int);
@@ -51,6 +55,10 @@ export component AgentPanel inherits Rectangle {
                 horizontal-stretch: 1;
             }
             IconButton { icon: "plus"; tooltip: "New conversation"; clicked => { root.new-conversation(); } }
+            if root.messages.length > 0: SecondaryButton {
+                text: "Export";
+                clicked => { root.export-answer(); }
+            }
             IconButton { icon: "close"; tooltip: "Close Assistant"; clicked => { root.close(); } }
         }
         Rectangle { height: 1px; background: Tokens.border; }
@@ -73,6 +81,18 @@ export component AgentPanel inherits Rectangle {
                     color: Tokens.text;
                     font-size: Tokens.font-sm;
                     overflow: elide;
+                }
+            }
+            if root.model-options.length > 0: HorizontalLayout {
+                padding-left: Tokens.sp3;
+                padding-right: Tokens.sp3;
+                spacing: Tokens.sp1;
+                Text { text: "Model"; color: Tokens.text-dim; font-size: Tokens.font-xs;
+                    vertical-alignment: center; }
+                SelectBox {
+                    model: root.model-options;
+                    current-value: root.model-name;
+                    selected(name) => { root.select-model(name); }
                 }
             }
             if root.conversations.length > 0: ScrollView {
@@ -163,11 +183,19 @@ export component AgentPanel inherits Rectangle {
                 padding-left: Tokens.sp3;
                 padding-right: Tokens.sp3;
                 label: "Mode";
-                description: root.mode == 0 ? "Suggest SQL and explain it" : "Inspect data with read queries";
                 option-a: "Ask";
                 option-b: "Agent";
                 index: root.mode;
                 chosen(i) => { root.mode = i; root.mode-changed(i); }
+            }
+            Text {
+                text: root.mode == 0
+                    ? "Ask suggests SQL without running queries."
+                    : "Agent can read data; writes need approval.";
+                color: Tokens.text-dim;
+                font-size: Tokens.font-xs;
+                wrap: word-wrap;
+                horizontal-alignment: center;
             }
             HorizontalLayout {
                 padding-left: Tokens.sp3;
