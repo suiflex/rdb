@@ -1045,12 +1045,14 @@ fn wire_screen_harness(
     let Ok(screen) = std::env::var("RDB_SCREEN") else {
         return;
     };
-    let seed_agent = matches!(screen.as_str(), "agent" | "agent-settings" | "agent-narrow")
-        && !store
-            .borrow()
-            .list()
-            .iter()
-            .any(|item| item.name == "screen agent");
+    let seed_agent = matches!(
+        screen.as_str(),
+        "agent" | "agent-settings" | "agent-narrow" | "agent-database"
+    ) && !store
+        .borrow()
+        .list()
+        .iter()
+        .any(|item| item.name == "screen agent");
     if seed_agent {
         let mut connection = rdb_connstore::SavedConnection::new(
             "screen agent",
@@ -1073,8 +1075,12 @@ fn wire_screen_harness(
     schedule_grid_edit_scenarios(window, &screen);
     schedule_tab_flow_scenarios(window, &screen);
     schedule_sql_editor_scenarios(window, &screen, load_editor_text);
-    if matches!(screen.as_str(), "agent" | "agent-settings" | "agent-narrow") {
+    if matches!(
+        screen.as_str(),
+        "agent" | "agent-settings" | "agent-narrow" | "agent-database"
+    ) {
         let show_settings = screen == "agent-settings";
+        let switch_database = screen == "agent-database";
         sequence(
             window,
             vec![(
@@ -1083,6 +1089,16 @@ fn wire_screen_harness(
                 Rc::new(move |w| {
                     w.set_agent_open(true);
                     w.invoke_agent_new_conversation();
+                    if switch_database {
+                        w.set_db_list(ModelRc::from(Rc::new(VecModel::from(vec![
+                            SharedString::from("sample_db"),
+                            SharedString::from("sample_analytics"),
+                        ]))));
+                        w.invoke_agent_select_database("sample_analytics".into());
+                        if w.get_agent_database_name() != "sample_analytics" {
+                            screen_fail("agent database switch did not bind a new conversation");
+                        }
+                    }
                     if show_settings {
                         w.set_settings_tab(3);
                         w.set_settings_open(true);

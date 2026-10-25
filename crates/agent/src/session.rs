@@ -73,7 +73,9 @@ pub async fn run(
             When finished, output {\"final\":\"...\"}. Do not add Markdown fences.");
     } else {
         system.push_str(
-            "\nAsk mode provides suggestions only. Never claim to have queried the database. \
+            "\nAsk mode can generate, explain, optimize, repair, or translate queries using \
+            the supplied schema and editor context. Suggest SQL without executing it. \
+            Never claim to have queried the database or verified results. \
             Return clear SQL or an explanation when requested.",
         );
     }

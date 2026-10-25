@@ -482,6 +482,7 @@ callback create-table-commit();
     in property <int> agent-selected-conversation: -1;
     in property <string> agent-connection-name;
     in property <string> agent-database-name;
+    in property <bool> agent-can-switch-database: false;
     in-out property <int> agent-mode: 0;
     in property <bool> agent-busy: false;
     in property <string> agent-status;
@@ -498,6 +499,7 @@ callback create-table-commit();
     callback agent-choose-conversation(int);
     callback agent-delete-conversation(int);
     callback agent-mode-changed(int);
+    callback agent-select-database(string);
     callback agent-send(string);
     callback agent-cancel;
     callback agent-approve-write;
@@ -1293,7 +1295,7 @@ callback create-table-commit();
                     if root.connected: VerticalLayout {
                         alignment: center;
                         IconButton {
-                            icon: "bolt";
+                            icon: "robot";
                             tooltip: "Toggle Agent panel";
                             active: root.agent-open;
                             clicked => { root.agent-open = !root.agent-open; }
@@ -1516,7 +1518,7 @@ callback create-table-commit();
                 }
 
                 // work column: tab bar + work area (takes all remaining width)
-                if !root.agent-open || !root.agent-compact: VerticalLayout {
+                VerticalLayout {
                     horizontal-stretch: root.agent-open ? 10 : 1;
                     min-width: 340px;
                     max-width: 100000px;
@@ -2405,15 +2407,16 @@ callback create-table-commit();
                     messages: root.agent-messages;
                     conversations: root.agent-conversations;
                     selected-conversation: root.agent-selected-conversation;
-                    connection-name: root.agent-connection-name;
-                    database-name: root.agent-database-name;
+                    connection-name: root.agent-selected-conversation < 0 ? root.bc-conn : root.agent-connection-name;
+                    database-name: root.agent-selected-conversation < 0 ? root.bc-db : root.agent-database-name;
+                    database-options: root.agent-selected-conversation < 0 || root.agent-can-switch-database ? root.db-list : [];
                     mode <=> root.agent-mode;
                     busy: root.agent-busy;
                     status: root.agent-status;
                     proposed-write: root.agent-proposed-write;
                     write-target: root.agent-write-target;
                     close => { root.agent-open = false; }
-                    open-settings => { root.settings-tab = 3; root.settings-open = true; }
+                    select-database(name) => { root.agent-select-database(name); }
                     new-conversation => { root.agent-new-conversation(); }
                     choose-conversation(i) => { root.agent-choose-conversation(i); }
                     delete-conversation(i) => { root.agent-delete-conversation(i); }
@@ -3554,13 +3557,21 @@ callback create-table-commit();
                         border-radius: Tokens.radius;
                         background: root.settings-tab == i ? Tokens.accent-tint
                             : (seg-ta.has-hover ? Tokens.chrome : transparent);
-                        Text {
-                            text: tab;
-                            color: root.settings-tab == i ? Tokens.accent : Tokens.text-dim;
-                            font-size: Tokens.font-sm;
-                            font-weight: root.settings-tab == i ? Tokens.weight-emphasis : 400;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 4px;
+                            if i == 3: AppIcon {
+                                name: "robot";
+                                size: 16px;
+                                color: root.settings-tab == i ? Tokens.accent : Tokens.text-dim;
+                            }
+                            Text {
+                                text: tab;
+                                color: root.settings-tab == i ? Tokens.accent : Tokens.text-dim;
+                                font-size: Tokens.font-sm;
+                                font-weight: root.settings-tab == i ? Tokens.weight-emphasis : 400;
+                                vertical-alignment: center;
+                            }
                         }
                         seg-ta := TouchArea {
                             clicked => { root.settings-tab = i; }
