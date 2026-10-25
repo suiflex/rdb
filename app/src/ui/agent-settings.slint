@@ -1,0 +1,65 @@
+import { Tokens } from "tokens.slint";
+import { FormField, IconButton, PrimaryButton, SelectBox, SettingsSectionHeader } from "components.slint";
+
+export component AgentSettings inherits VerticalLayout {
+    in-out property <string> config-name: "Default";
+    in property <[string]> config-options;
+    in-out property <string> config-choice: "";
+    in-out property <string> config-provider: "OpenAI";
+    in-out property <string> config-endpoint: "https://api.openai.com/v1";
+    in-out property <string> config-model: "";
+    in-out property <string> config-key: "";
+    in property <string> status;
+    callback save-config(string, string, string, string, string);
+    callback choose-config(string);
+    callback new-config;
+    callback delete-config;
+
+    spacing: Tokens.sp2;
+    SettingsSectionHeader { label: "Model configuration"; }
+    HorizontalLayout {
+        spacing: Tokens.sp1;
+        SelectBox {
+            model: root.config-options;
+            current-value <=> root.config-choice;
+            selected(value) => { root.choose-config(value); }
+        }
+        IconButton { icon: "plus"; tooltip: "New model configuration";
+            clicked => { root.new-config(); } }
+        IconButton { icon: "close"; tooltip: "Delete model configuration";
+            clicked => { root.delete-config(); } }
+    }
+    FormField { text <=> root.config-name; placeholder: "Configuration name"; height: 36px; }
+    SelectBox {
+        model: ["OpenAI", "Anthropic", "Gemini", "DeepSeek", "Qwen", "MiniMax",
+            "OpenAI Compatible", "Anthropic Compatible", "Ollama"];
+        current-value <=> root.config-provider;
+        selected(value) => {
+            root.config-endpoint = value == "OpenAI" ? "https://api.openai.com/v1"
+                : value == "Anthropic" ? "https://api.anthropic.com/v1"
+                : value == "Gemini" ? "https://generativelanguage.googleapis.com/v1beta"
+                : value == "DeepSeek" ? "https://api.deepseek.com/v1"
+                : value == "Qwen" ? "https://dashscope.aliyuncs.com/compatible-mode/v1"
+                : value == "MiniMax" ? "https://api.minimax.io/v1"
+                : value == "Ollama" ? "http://localhost:11434/v1"
+                : root.config-endpoint;
+        }
+    }
+    FormField { text <=> root.config-endpoint; placeholder: "API endpoint"; height: 36px; }
+    FormField { text <=> root.config-model; placeholder: "Model"; height: 36px; }
+    FormField { text <=> root.config-key; placeholder: "API key (leave empty to keep)";
+        input-type: InputType.password; height: 36px; }
+    PrimaryButton {
+        text: "Save model";
+        clicked => {
+            root.save-config(root.config-name, root.config-provider,
+                root.config-endpoint, root.config-model, root.config-key);
+        }
+    }
+    if root.status != "": Text {
+        text: root.status;
+        color: Tokens.text-dim;
+        wrap: word-wrap;
+        font-size: Tokens.font-xs;
+    }
+}

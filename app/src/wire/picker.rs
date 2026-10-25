@@ -1045,7 +1045,7 @@ fn wire_screen_harness(
     let Ok(screen) = std::env::var("RDB_SCREEN") else {
         return;
     };
-    let seed_agent = matches!(screen.as_str(), "agent" | "agent-settings")
+    let seed_agent = matches!(screen.as_str(), "agent" | "agent-settings" | "agent-narrow")
         && !store
             .borrow()
             .list()
@@ -1073,7 +1073,7 @@ fn wire_screen_harness(
     schedule_grid_edit_scenarios(window, &screen);
     schedule_tab_flow_scenarios(window, &screen);
     schedule_sql_editor_scenarios(window, &screen, load_editor_text);
-    if matches!(screen.as_str(), "agent" | "agent-settings") {
+    if matches!(screen.as_str(), "agent" | "agent-settings" | "agent-narrow") {
         let show_settings = screen == "agent-settings";
         sequence(
             window,
@@ -1084,7 +1084,8 @@ fn wire_screen_harness(
                     w.set_agent_open(true);
                     w.invoke_agent_new_conversation();
                     if show_settings {
-                        w.set_agent_config_open(true);
+                        w.set_settings_tab(3);
+                        w.set_settings_open(true);
                     }
                     if !w.get_agent_open() || w.get_agent_selected_conversation() < 0 {
                         screen_fail("agent panel did not open a bound conversation");

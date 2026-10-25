@@ -31,6 +31,7 @@ connections
 workspace
 agent
 agent-settings
+agent-narrow
 workspace-users-bool
 workspace-users-date
 rail
@@ -105,7 +106,11 @@ for screen in $SCREENS; do
   (
     export RDB_MOCK=1
     export RDB_SCREEN="$screen"
-    export RDB_WIN=1280x800
+    if [ "$screen" = agent-narrow ]; then
+      export RDB_WIN=980x800
+    else
+      export RDB_WIN=1280x800
+    fi
     export RDB_SHOT="$OUT/$screen.bmp"
     export RDB_SHOT_DELAY_MS="$delay"
     # RDB_STORE_DIR is not optional: without it the run reads and overwrites
