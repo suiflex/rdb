@@ -1,7 +1,6 @@
 import { Tokens } from "tokens.slint";
 import { AgentMessage } from "structs.slint";
-import { BreadcrumbChip, ChoiceRow, FormField, IconButton, PrimaryButton,
-    SecondaryButton, SelectBox, SettingsSectionHeader } from "components.slint";
+import { BreadcrumbChip, ChoiceRow, IconButton, PrimaryButton, SecondaryButton } from "components.slint";
 import { ScrollView, TextEdit } from "std-widgets.slint";
 
 export component AgentPanel inherits Rectangle {
@@ -15,16 +14,9 @@ export component AgentPanel inherits Rectangle {
     in property <string> status;
     in property <string> proposed-write;
     in property <string> write-target;
-    in-out property <string> config-name: "Default";
-    in property <[string]> config-options;
-    in-out property <string> config-choice: "";
-    in-out property <string> config-provider: "OpenAI";
-    in-out property <string> config-endpoint: "https://api.openai.com/v1";
-    in-out property <string> config-model: "";
-    in-out property <string> config-key: "";
-    in-out property <bool> config-open: false;
     in-out property <string> draft: "";
     callback close;
+    callback open-settings;
     callback new-conversation;
     callback choose-conversation(int);
     callback delete-conversation(int);
@@ -33,10 +25,6 @@ export component AgentPanel inherits Rectangle {
     callback cancel;
     callback approve-write;
     callback reject-write;
-    callback save-config(string, string, string, string, string);
-    callback choose-config(string);
-    callback new-config;
-    callback delete-config;
 
     preferred-width: 360px;
     min-width: 300px;
@@ -60,70 +48,19 @@ export component AgentPanel inherits Rectangle {
                 horizontal-stretch: 1;
             }
             IconButton { icon: "plus"; tooltip: "New conversation"; clicked => { root.new-conversation(); } }
-            IconButton { icon: "settings"; tooltip: "Model settings"; active: root.config-open;
-                clicked => { root.config-open = !root.config-open; } }
+            IconButton { icon: "settings"; tooltip: "Model settings";
+                clicked => { root.open-settings(); } }
             IconButton { icon: "close"; tooltip: "Close Agent"; clicked => { root.close(); } }
         }
         Rectangle { height: 1px; background: Tokens.border; }
 
-        if root.config-open: VerticalLayout {
-            padding: Tokens.sp3;
+        VerticalLayout {
             spacing: Tokens.sp2;
-            SettingsSectionHeader { label: "Model configuration"; height: 24px; }
-            HorizontalLayout {
-                spacing: Tokens.sp1;
-                SelectBox {
-                    model: root.config-options;
-                    current-value <=> root.config-choice;
-                    selected(value) => { root.choose-config(value); }
-                }
-                IconButton { icon: "plus"; tooltip: "New model configuration";
-                    clicked => { root.new-config(); } }
-                IconButton { icon: "close"; tooltip: "Delete model configuration";
-                    clicked => { root.delete-config(); } }
-            }
-            FormField { text <=> root.config-name; placeholder: "Configuration name"; height: 36px; }
-            SelectBox {
-                model: ["OpenAI", "Anthropic", "Gemini", "DeepSeek", "Qwen", "MiniMax",
-                    "OpenAI Compatible", "Anthropic Compatible", "Ollama"];
-                current-value <=> root.config-provider;
-                selected(value) => {
-                    root.config-endpoint = value == "OpenAI" ? "https://api.openai.com/v1"
-                        : value == "Anthropic" ? "https://api.anthropic.com/v1"
-                        : value == "Gemini" ? "https://generativelanguage.googleapis.com/v1beta"
-                        : value == "DeepSeek" ? "https://api.deepseek.com/v1"
-                        : value == "Qwen" ? "https://dashscope.aliyuncs.com/compatible-mode/v1"
-                        : value == "MiniMax" ? "https://api.minimax.io/v1"
-                        : value == "Ollama" ? "http://localhost:11434/v1"
-                        : root.config-endpoint;
-                }
-            }
-            FormField { text <=> root.config-endpoint; placeholder: "API endpoint"; height: 36px; }
-            FormField { text <=> root.config-model; placeholder: "Model"; height: 36px; }
-            FormField { text <=> root.config-key; placeholder: "API key (leave empty to keep)";
-                input-type: InputType.password; height: 36px; }
-            PrimaryButton {
-                text: "Save model";
-                clicked => {
-                    root.save-config(root.config-name, root.config-provider,
-                        root.config-endpoint, root.config-model, root.config-key);
-                }
-            }
-            if root.status != "": Text {
-                text: root.status;
-                color: Tokens.text-dim;
-                wrap: word-wrap;
-                font-size: Tokens.font-xs;
-            }
-            Rectangle { vertical-stretch: 1; }
-        }
-        if !root.config-open: VerticalLayout {
-            spacing: Tokens.sp2;
-            HorizontalLayout {
+            if root.connection-name != "": HorizontalLayout {
                 padding-left: Tokens.sp3;
                 padding-right: Tokens.sp3;
                 spacing: Tokens.sp1;
-                Text { text: root.connection-name + " / " + root.database-name; color: Tokens.text-dim;
+                Text { text: root.connection-name + (root.database-name == "" ? "" : " / " + root.database-name); color: Tokens.text-dim;
                     font-size: Tokens.font-xs; overflow: elide; horizontal-stretch: 1; }
             }
             if root.conversations.length > 0: ScrollView {
@@ -156,7 +93,7 @@ export component AgentPanel inherits Rectangle {
                     padding: Tokens.sp3;
                     spacing: Tokens.sp2;
                     if root.messages.length == 0: Text {
-                        text: "Ask for SQL, or use Agent to inspect data and run read queries.";
+                        text: "Ask a question about this database.";
                         color: Tokens.text-dim;
                         wrap: word-wrap;
                         font-size: Tokens.font-sm;
@@ -203,6 +140,20 @@ export component AgentPanel inherits Rectangle {
                 option-b: "Agent";
                 index: root.mode;
                 chosen(i) => { root.mode = i; root.mode-changed(i); }
+            }
+            HorizontalLayout {
+                height: 32px;
+                padding-left: Tokens.sp3;
+                padding-right: Tokens.sp3;
+                Text {
+                    text: root.mode == 0 ? "Ask gives suggestions without running queries."
+                        : "Agent can inspect data and run read queries. Writes need approval.";
+                    color: Tokens.text-dim;
+                    font-size: Tokens.font-xs;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
             }
             TextEdit {
                 height: 88px;

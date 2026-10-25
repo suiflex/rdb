@@ -14,6 +14,7 @@ import {
 export { Shortcut }
 import { NavCluster } from "nav-cluster.slint";
 import { AgentPanel } from "agent-panel.slint";
+import { AgentSettings } from "agent-settings.slint";
 import { ConnPicker } from "picker.slint";
 import { WorkArea } from "workarea.slint";
 import { CommandPalette, ListModal, PaletteGroup } from "palette.slint";
@@ -64,7 +65,8 @@ export component MainWindow inherits Window {
     // instead, so the theme-mode override applies to Material widgets too.
     property <MaterialScheme> material-scheme: Tokens.material-scheme;
     changed material-scheme => { root.apply-material-scheme(); }
-    init => { root.apply-material-scheme(); }
+    init => { root.apply-material-scheme(); root.agent-compact = root.width < 1000px; }
+    changed width => { root.agent-compact = root.width < 1000px; }
     function apply-material-scheme() {
         MaterialPalette.schemes = { light: root.material-scheme, dark: root.material-scheme };
     }
@@ -474,6 +476,7 @@ callback create-table-commit();
     // Place the sidebar on the right (detail panel flips to the left).
     in-out property <bool> sidebar-right: false;
     in-out property <bool> agent-open: false;
+    private property <bool> agent-compact: false;
     in property <[AgentMessage]> agent-messages;
     in property <[string]> agent-conversations;
     in property <int> agent-selected-conversation: -1;
@@ -491,7 +494,6 @@ callback create-table-commit();
     in-out property <string> agent-config-endpoint: "https://api.openai.com/v1";
     in-out property <string> agent-config-model: "";
     in-out property <string> agent-config-key: "";
-    in-out property <bool> agent-config-open: false;
     callback agent-new-conversation;
     callback agent-choose-conversation(int);
     callback agent-delete-conversation(int);
@@ -1290,9 +1292,10 @@ callback create-table-commit();
                     spacing: Tokens.sp1;
                     if root.connected: VerticalLayout {
                         alignment: center;
-                        TextButton {
-                            text: "AI";
+                        IconButton {
+                            icon: "bolt";
                             tooltip: "Toggle Agent panel";
+                            active: root.agent-open;
                             clicked => { root.agent-open = !root.agent-open; }
                         }
                     }
@@ -1300,7 +1303,7 @@ callback create-table-commit();
                     // details toggle by default, right of it when the sidebar is
                     // on the right — so the button lines up with the panel it
                     // controls instead of being ambiguous.
-                    if root.connected && !root.sidebar-right: VerticalLayout {
+                    if root.connected && !root.sidebar-right && (!root.agent-open || !root.agent-compact): VerticalLayout {
                         alignment: center;
                         IconButton {
                             icon: "columns";
@@ -1311,7 +1314,7 @@ callback create-table-commit();
                         }
                     }
                     // hide/show the selected-row details panel
-                    if root.connected: VerticalLayout {
+                    if root.connected && (!root.agent-open || !root.agent-compact): VerticalLayout {
                         alignment: center;
                         IconButton {
                             // Details panel moves to the left edge when the sidebar
@@ -1324,7 +1327,7 @@ callback create-table-commit();
                         }
                     }
                     // Sidebar toggle, right-hand placement (sidebar on the right).
-                    if root.connected && root.sidebar-right: VerticalLayout {
+                    if root.connected && root.sidebar-right && (!root.agent-open || !root.agent-compact): VerticalLayout {
                         alignment: center;
                         IconButton {
                             icon: "panel-right";
@@ -1334,7 +1337,7 @@ callback create-table-commit();
                         }
                     }
                     // hide/show the results panel (grid/documents)
-                    if root.connected: VerticalLayout {
+                    if root.connected && (!root.agent-open || !root.agent-compact): VerticalLayout {
                         alignment: center;
                         IconButton {
                             icon: "rows";
@@ -1345,7 +1348,7 @@ callback create-table-commit();
                     }
                     // divider: the panel toggles above are a group; the
                     // pencil/theme/⚙ that follow are one-shot actions, not toggles.
-                    if root.connected: VerticalLayout {
+                    if root.connected && (!root.agent-open || !root.agent-compact): VerticalLayout {
                         alignment: center;
                         Rectangle {
                             width: 1px;
@@ -1354,7 +1357,7 @@ callback create-table-commit();
                         }
                     }
                     // edit the current connection (distinct from the app ⚙)
-                    if root.connected: VerticalLayout {
+                    if root.connected && (!root.agent-open || !root.agent-compact): VerticalLayout {
                         alignment: center;
                         IconButton {
                             icon: "pencil";
@@ -1391,7 +1394,7 @@ callback create-table-commit();
                         }
                     }
                     // SQL log stays available without ever hiding the table.
-                    if root.connected: VerticalLayout {
+                    if root.connected && (!root.agent-open || !root.agent-compact): VerticalLayout {
                         alignment: center;
                         IconButton {
                             icon: "terminal";
@@ -1466,7 +1469,7 @@ callback create-table-commit();
 
                 // Navigation cluster on the left (default). The right-side copy
                 // lives after the work column; only one renders at a time.
-                if !root.sidebar-right: NavCluster {
+                if !root.sidebar-right && (!root.agent-open || !root.agent-compact): NavCluster {
                     horizontal-stretch: 0;
                     focus-tick: root.focus-filter-tick;
                     tree: root.schema-tree;
@@ -1513,8 +1516,8 @@ callback create-table-commit();
                 }
 
                 // work column: tab bar + work area (takes all remaining width)
-                VerticalLayout {
-                    horizontal-stretch: 1;
+                if !root.agent-open || !root.agent-compact: VerticalLayout {
+                    horizontal-stretch: root.agent-open ? 10 : 1;
                     min-width: 340px;
                     max-width: 100000px;
                     spacing: 0px;
@@ -2351,7 +2354,7 @@ callback create-table-commit();
 
                 // Navigation cluster on the right (mirrored). Only one of the
                 // two NavCluster copies renders, keyed off `sidebar-right`.
-                if root.sidebar-right: NavCluster {
+                if root.sidebar-right && (!root.agent-open || !root.agent-compact): NavCluster {
                     mirror: true;
                     horizontal-stretch: 0;
                     focus-tick: root.focus-filter-tick;
@@ -2398,6 +2401,7 @@ callback create-table-commit();
                     add-item() => { root.new-table(); }
                 }
                 if root.agent-open: AgentPanel {
+                    horizontal-stretch: 1;
                     messages: root.agent-messages;
                     conversations: root.agent-conversations;
                     selected-conversation: root.agent-selected-conversation;
@@ -2408,15 +2412,8 @@ callback create-table-commit();
                     status: root.agent-status;
                     proposed-write: root.agent-proposed-write;
                     write-target: root.agent-write-target;
-                    config-name <=> root.agent-config-name;
-                    config-options: root.agent-config-options;
-                    config-choice <=> root.agent-config-choice;
-                    config-provider <=> root.agent-config-provider;
-                    config-endpoint <=> root.agent-config-endpoint;
-                    config-model <=> root.agent-config-model;
-                    config-key <=> root.agent-config-key;
-                    config-open <=> root.agent-config-open;
                     close => { root.agent-open = false; }
+                    open-settings => { root.settings-tab = 3; root.settings-open = true; }
                     new-conversation => { root.agent-new-conversation(); }
                     choose-conversation(i) => { root.agent-choose-conversation(i); }
                     delete-conversation(i) => { root.agent-delete-conversation(i); }
@@ -2425,12 +2422,6 @@ callback create-table-commit();
                     cancel => { root.agent-cancel(); }
                     approve-write => { root.agent-approve-write(); }
                     reject-write => { root.agent-reject-write(); }
-                    save-config(name, provider, endpoint, model, key) => {
-                        root.agent-save-config(name, provider, endpoint, model, key);
-                    }
-                    choose-config(value) => { root.agent-choose-config(value); }
-                    new-config => { root.agent-new-config(); }
-                    delete-config => { root.agent-delete-config(); }
                 }
             }
         }
@@ -3558,7 +3549,7 @@ callback create-table-commit();
                 // --- section tabs ---
                 HorizontalLayout {
                     spacing: 2px;
-                    for tab[i] in ["Appearance", "Updates", "About"]: Rectangle {
+                    for tab[i] in ["Appearance", "Updates", "About", "AI"]: Rectangle {
                         height: 28px;
                         border-radius: Tokens.radius;
                         background: root.settings-tab == i ? Tokens.accent-tint
@@ -3909,6 +3900,23 @@ callback create-table-commit();
                             }
                         }
                     }
+                }
+
+                if root.settings-tab == 3: AgentSettings {
+                    config-name <=> root.agent-config-name;
+                    config-options: root.agent-config-options;
+                    config-choice <=> root.agent-config-choice;
+                    config-provider <=> root.agent-config-provider;
+                    config-endpoint <=> root.agent-config-endpoint;
+                    config-model <=> root.agent-config-model;
+                    config-key <=> root.agent-config-key;
+                    status: root.agent-status;
+                    save-config(name, provider, endpoint, model, key) => {
+                        root.agent-save-config(name, provider, endpoint, model, key);
+                    }
+                    choose-config(value) => { root.agent-choose-config(value); }
+                    new-config => { root.agent-new-config(); }
+                    delete-config => { root.agent-delete-config(); }
                 }
 
                 // --- done ---
