@@ -4,7 +4,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use rdb_agent::{
     AgentConfig, AgentOutcome, AgentPreferences, AgentScope, AgentStore, Conversation, Message,
-    Mode, ModelRequest, Provider, ToolRunner,
+    Mode, ModelRequest, PromptTemplate, Provider, ToolRunner,
 };
 use rdb_connstore::{Engine, EnvTag};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
@@ -15,6 +15,8 @@ use crate::{AgentMessage, AppState, MainWindow};
 struct UiRun {
     selected_id: Option<String>,
     active_config_id: Option<String>,
+    active_template_id: Option<String>,
+    template_default_engines: Vec<String>,
     pending_write: Option<PendingWrite>,
     abort: Option<tokio::task::AbortHandle>,
     generation: i32,
@@ -57,11 +59,24 @@ fn paint(window: &MainWindow, store: &AgentStore, ui: &UiRun) {
             0
         });
         window.set_agent_database_name(conversation.database.clone().into());
+        let selected_templates = store
+            .templates()
+            .iter()
+            .filter(|template| conversation.selected_templates.contains(&template.id))
+            .map(|template| template.name.clone().into())
+            .collect::<Vec<SharedString>>();
+        window.set_agent_selected_templates(ModelRc::from(Rc::new(VecModel::from(
+            selected_templates,
+        ))));
     } else {
         window.set_agent_messages(ModelRc::from(Rc::new(VecModel::from(
             Vec::<AgentMessage>::new(),
         ))));
         window.set_agent_database_name("".into());
+        window.set_agent_selected_templates(ModelRc::from(Rc::new(VecModel::from(Vec::<
+            SharedString,
+        >::new(
+        )))));
     }
     let pending = ui
         .pending_write
@@ -85,6 +100,53 @@ fn paint(window: &MainWindow, store: &AgentStore, ui: &UiRun) {
             .unwrap_or_default()
             .into(),
     );
+}
+
+fn paint_templates(window: &MainWindow, store: &AgentStore, ui: &UiRun) {
+    let names = store
+        .templates()
+        .iter()
+        .map(|template| template.name.clone().into())
+        .collect::<Vec<SharedString>>();
+    window.set_agent_template_options(ModelRc::from(Rc::new(VecModel::from(names))));
+    if let Some(template) = store
+        .templates()
+        .iter()
+        .find(|template| ui.active_template_id.as_deref() == Some(template.id.as_str()))
+    {
+        window.set_agent_template_choice(template.name.clone().into());
+        window.set_agent_template_name(template.name.clone().into());
+        window.set_agent_template_content(template.content.clone().into());
+    } else {
+        window.set_agent_template_choice("".into());
+        window.set_agent_template_name("".into());
+        window.set_agent_template_content("".into());
+    }
+    paint_template_engines(window, ui);
+}
+
+fn paint_template_engines(window: &MainWindow, ui: &UiRun) {
+    window.set_agent_template_default_engines(ModelRc::from(Rc::new(VecModel::from(
+        ui.template_default_engines
+            .iter()
+            .cloned()
+            .map(Into::into)
+            .collect::<Vec<SharedString>>(),
+    ))));
+}
+
+fn default_templates(store: &AgentStore, engine: Engine) -> Vec<String> {
+    store
+        .templates()
+        .iter()
+        .filter(|template| {
+            template
+                .default_engines
+                .iter()
+                .any(|name| name == engine.display())
+        })
+        .map(|template| template.id.clone())
+        .collect()
 }
 
 fn provider_from_label(label: &str) -> Option<Provider> {
@@ -154,10 +216,183 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
     let ui = Rc::new(RefCell::new(UiRun::default()));
     ui.borrow_mut().active_config_id = store.borrow().configs().first().map(|item| item.id.clone());
     paint_config(window, &store.borrow(), &ui.borrow());
+    paint_templates(window, &store.borrow(), &ui.borrow());
     let preferences = store.borrow().preferences().clone();
     window.set_agent_global_instructions(preferences.global_instructions.into());
     window.set_agent_max_turns(preferences.max_turns.to_string().into());
     window.set_agent_max_api_retries(preferences.max_api_retries.to_string().into());
+
+    {
+        let store = store.clone();
+        let ui = ui.clone();
+        let weak = window.as_weak();
+        window.on_agent_choose_template(move |name| {
+            let Some(w) = weak.upgrade() else { return };
+            let chosen = store
+                .borrow()
+                .templates()
+                .iter()
+                .find(|template| template.name == name.as_str())
+                .cloned();
+            let mut run = ui.borrow_mut();
+            run.active_template_id = chosen.as_ref().map(|template| template.id.clone());
+            run.template_default_engines = chosen
+                .map(|template| template.default_engines)
+                .unwrap_or_default();
+            paint_templates(&w, &store.borrow(), &run);
+        });
+    }
+
+    {
+        let store = store.clone();
+        let ui = ui.clone();
+        let weak = window.as_weak();
+        window.on_agent_new_template(move || {
+            let Some(w) = weak.upgrade() else { return };
+            let mut run = ui.borrow_mut();
+            run.active_template_id = None;
+            run.template_default_engines.clear();
+            paint_templates(&w, &store.borrow(), &run);
+        });
+    }
+
+    {
+        let ui = ui.clone();
+        let weak = window.as_weak();
+        window.on_agent_add_template_engine(move |engine| {
+            let Some(w) = weak.upgrade() else { return };
+            if !rdb_connstore::ENGINES
+                .iter()
+                .any(|item| item.display == engine.as_str())
+            {
+                return;
+            }
+            let mut run = ui.borrow_mut();
+            if !run.template_default_engines.contains(&engine.to_string()) {
+                run.template_default_engines.push(engine.to_string());
+            }
+            paint_template_engines(&w, &run);
+        });
+    }
+
+    {
+        let ui = ui.clone();
+        let weak = window.as_weak();
+        window.on_agent_remove_template_engine(move |engine| {
+            let Some(w) = weak.upgrade() else { return };
+            let mut run = ui.borrow_mut();
+            run.template_default_engines
+                .retain(|selected| selected != engine.as_str());
+            paint_template_engines(&w, &run);
+        });
+    }
+
+    {
+        let store = store.clone();
+        let ui = ui.clone();
+        let weak = window.as_weak();
+        window.on_agent_save_template(move |name, content| {
+            let Some(w) = weak.upgrade() else { return };
+            let (id, default_engines) = {
+                let run = ui.borrow();
+                (
+                    run.active_template_id
+                        .clone()
+                        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                    run.template_default_engines.clone(),
+                )
+            };
+            if store
+                .borrow()
+                .templates()
+                .iter()
+                .any(|template| template.name == name.as_str() && template.id != id)
+            {
+                w.set_agent_status("Template name already exists".into());
+                return;
+            }
+            let template = PromptTemplate {
+                id: id.clone(),
+                name: name.to_string(),
+                content: content.to_string(),
+                default_engines,
+            };
+            if let Err(error) = store.borrow_mut().save_template(template) {
+                w.set_agent_status(error.into());
+                return;
+            }
+            ui.borrow_mut().active_template_id = Some(id);
+            paint_templates(&w, &store.borrow(), &ui.borrow());
+            w.set_agent_status("Prompt template saved".into());
+        });
+    }
+
+    {
+        let store = store.clone();
+        let ui = ui.clone();
+        let weak = window.as_weak();
+        window.on_agent_delete_template(move || {
+            let Some(w) = weak.upgrade() else { return };
+            let Some(id) = ui.borrow().active_template_id.clone() else {
+                return;
+            };
+            if let Err(error) = store.borrow_mut().delete_template(&id) {
+                w.set_agent_status(error.into());
+                return;
+            }
+            let mut run = ui.borrow_mut();
+            run.active_template_id = None;
+            run.template_default_engines.clear();
+            paint_templates(&w, &store.borrow(), &run);
+            paint(&w, &store.borrow(), &run);
+            w.set_agent_status("Prompt template deleted".into());
+        });
+    }
+
+    {
+        let store = store.clone();
+        let ui = ui.clone();
+        let weak = window.as_weak();
+        window.on_agent_toggle_template(move |name| {
+            let Some(w) = weak.upgrade() else { return };
+            if ui.borrow().selected_id.is_none() {
+                w.invoke_agent_new_conversation();
+            }
+            let Some(id) = ui.borrow().selected_id.clone() else {
+                return;
+            };
+            let Some(template_id) = store
+                .borrow()
+                .templates()
+                .iter()
+                .find(|template| template.name == name.as_str())
+                .map(|template| template.id.clone())
+            else {
+                return;
+            };
+            let Some(mut conversation) = store
+                .borrow()
+                .conversations()
+                .iter()
+                .find(|item| item.id == id)
+                .cloned()
+            else {
+                return;
+            };
+            if conversation.selected_templates.contains(&template_id) {
+                conversation
+                    .selected_templates
+                    .retain(|selected| selected != &template_id);
+            } else {
+                conversation.selected_templates.push(template_id);
+            }
+            if let Err(error) = store.borrow_mut().save_conversation(conversation) {
+                w.set_agent_status(error.into());
+                return;
+            }
+            paint(&w, &store.borrow(), &ui.borrow());
+        });
+    }
 
     {
         let store = store.clone();
@@ -260,8 +495,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 saved.database.clone().unwrap_or_default()
             };
             let schema = (!w.get_bc_schema().is_empty()).then(|| w.get_bc_schema().to_string());
-            let conversation =
+            let mut conversation =
                 Conversation::new(uuid::Uuid::new_v4().to_string(), id, database, schema);
+            conversation.selected_templates = default_templates(&store.borrow(), saved.engine);
             let new_id = conversation.id.clone();
             let saved_result = store.borrow_mut().save_conversation(conversation);
             match saved_result {
@@ -380,6 +616,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let store = store.clone();
         let ui = ui.clone();
         let current = state.current_connection_id.clone();
+        let conn_store = state.store.clone();
         let db_override = state.db_override.clone();
         let weak = window.as_weak();
         window.on_agent_select_database(move |database| {
@@ -426,6 +663,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 None,
             );
             conversation.mode = selected.mode;
+            if let Some(saved) = conn_store.borrow().get(&selected.connection_id) {
+                conversation.selected_templates = default_templates(&store.borrow(), saved.engine);
+            }
             let new_id = conversation.id.clone();
             if let Err(error) = store.borrow_mut().save_conversation(conversation) {
                 w.set_agent_status(error.into());
@@ -663,6 +903,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 Err(error) => { w.set_agent_status(error.into()); return; }
             };
             let preferences = store.borrow().preferences().clone();
+            let templates = store.borrow().templates().iter()
+                .filter(|template| conversation.selected_templates.contains(&template.id))
+                .map(|template| template.content.clone())
+                .collect::<Vec<_>>();
             let Some(saved) = conn_store.borrow().get(&conversation.connection_id).cloned() else {
                 w.set_agent_status("Conversation connection was deleted".into()); return;
             };
@@ -715,7 +959,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                         messages: &conversation.messages };
                     let (_, cancel) = tokio::sync::watch::channel(false);
                     rdb_agent::run(&request, conversation.mode, &runner, &editor_context,
-                        &preferences, cancel).await
+                        &preferences, &templates, cancel).await
                 }.await;
                 let (answer, proposal, error) = match result {
                     Ok(run) => match run.outcome {

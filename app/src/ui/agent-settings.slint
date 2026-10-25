@@ -1,5 +1,5 @@
 import { Tokens } from "tokens.slint";
-import { ChoiceRow, FormField, IconButton, PrimaryButton, SecondaryButton, SelectBox, SettingsSectionHeader } from "components.slint";
+import { FooterTabs, FormField, IconButton, PrimaryButton, SecondaryButton, SelectBox, SettingsSectionHeader } from "components.slint";
 import { TextEdit } from "std-widgets.slint";
 
 export component AgentSettings inherits VerticalLayout {
@@ -14,6 +14,12 @@ export component AgentSettings inherits VerticalLayout {
     in-out property <string> global-instructions: "";
     in-out property <string> max-turns: "30";
     in-out property <string> max-api-retries: "2";
+    in property <[string]> template-options;
+    in-out property <string> template-choice: "";
+    in-out property <string> template-name: "";
+    in-out property <string> template-content: "";
+    in property <[string]> template-default-engines;
+    in-out property <string> template-engine-choice: "Choose engine";
     in property <string> status;
     callback save-config(string, string, string, string, string);
     callback test-config(string, string, string, string);
@@ -21,14 +27,18 @@ export component AgentSettings inherits VerticalLayout {
     callback new-config;
     callback delete-config;
     callback save-preferences(string, string, string);
+    callback choose-template(string);
+    callback new-template;
+    callback delete-template;
+    callback save-template(string, string);
+    callback add-template-engine(string);
+    callback remove-template-engine(string);
 
     spacing: Tokens.sp2;
-    ChoiceRow {
-        label: "AI settings";
-        option-a: "Models";
-        option-b: "Behavior";
-        index: root.section;
-        chosen(i) => { root.section = i; }
+    FooterTabs {
+        items: [{ text: "Models" }, { text: "Behavior" }, { text: "Templates" }];
+        current: root.section;
+        picked(i) => { root.section = i; }
     }
     if root.section == 0: VerticalLayout {
         spacing: Tokens.sp2;
@@ -102,6 +112,51 @@ export component AgentSettings inherits VerticalLayout {
                 root.save-preferences(root.global-instructions, root.max-turns, root.max-api-retries);
             }
         }
+    }
+    if root.section == 2: VerticalLayout {
+        spacing: Tokens.sp2;
+        SettingsSectionHeader { label: "Prompt templates"; }
+        HorizontalLayout {
+            spacing: Tokens.sp1;
+            SelectBox {
+                model: root.template-options;
+                current-value <=> root.template-choice;
+                selected(value) => { root.choose-template(value); }
+            }
+            IconButton { icon: "plus"; tooltip: "New prompt template";
+                clicked => { root.new-template(); } }
+            IconButton { icon: "close"; tooltip: "Delete prompt template";
+                clicked => { root.delete-template(); } }
+        }
+        FormField { text <=> root.template-name; placeholder: "Template name"; height: 36px; }
+        TextEdit {
+            height: 96px;
+            text: root.template-content;
+            edited => { root.template-content = self.text; }
+            wrap: word-wrap;
+            font-size: Tokens.font-sm;
+        }
+        Text { text: "Apply by default for these database engines";
+            color: Tokens.text-dim; font-size: Tokens.font-xs; }
+        HorizontalLayout {
+            spacing: Tokens.sp1;
+            SelectBox {
+                model: ["PostgreSQL", "MySQL", "MariaDB", "Redis", "Valkey", "MongoDB",
+                    "SQLite", "Cassandra", "SQL Server", "Oracle", "ClickHouse"];
+                current-value <=> root.template-engine-choice;
+            }
+            SecondaryButton { text: "Add";
+                clicked => { root.add-template-engine(root.template-engine-choice); } }
+        }
+        for engine in root.template-default-engines: HorizontalLayout {
+            spacing: Tokens.sp1;
+            Text { text: engine; color: Tokens.text; font-size: Tokens.font-sm;
+                horizontal-stretch: 1; vertical-alignment: center; }
+            IconButton { icon: "close"; tooltip: "Remove default engine";
+                clicked => { root.remove-template-engine(engine); } }
+        }
+        PrimaryButton { text: "Save template";
+            clicked => { root.save-template(root.template-name, root.template-content); } }
     }
     if root.status != "": Text {
         text: root.status;

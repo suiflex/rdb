@@ -1053,6 +1053,8 @@ fn wire_screen_harness(
             | "agent-narrow"
             | "agent-database"
             | "agent-model"
+            | "agent-template"
+            | "agent-settings-templates"
     ) && !store
         .borrow()
         .list()
@@ -1088,9 +1090,16 @@ fn wire_screen_harness(
             | "agent-narrow"
             | "agent-database"
             | "agent-model"
+            | "agent-template"
+            | "agent-settings-templates"
     ) {
-        let show_settings = screen == "agent-settings" || screen == "agent-settings-behavior";
+        let show_settings = matches!(
+            screen.as_str(),
+            "agent-settings" | "agent-settings-behavior" | "agent-settings-templates"
+        );
         let show_behavior = screen == "agent-settings-behavior";
+        let show_templates = screen == "agent-settings-templates";
+        let seed_template = screen == "agent-template" || show_templates;
         let switch_database = screen == "agent-database";
         let select_model = screen == "agent-model";
         sequence(
@@ -1101,6 +1110,22 @@ fn wire_screen_harness(
                 Rc::new(move |w| {
                     w.set_agent_open(true);
                     w.invoke_agent_new_conversation();
+                    if seed_template {
+                        w.invoke_agent_new_template();
+                        w.invoke_agent_add_template_engine("PostgreSQL".into());
+                        w.invoke_agent_save_template(
+                            "SQL style".into(),
+                            "Use explicit JOIN syntax.".into(),
+                        );
+                        w.invoke_agent_new_conversation();
+                        if !w
+                            .get_agent_selected_templates()
+                            .iter()
+                            .any(|name| name == "SQL style")
+                        {
+                            screen_fail("default prompt template was not selected");
+                        }
+                    }
                     if select_model {
                         w.invoke_agent_save_config(
                             "Local model".into(),
@@ -1125,7 +1150,13 @@ fn wire_screen_harness(
                     }
                     if show_settings {
                         w.set_settings_tab(3);
-                        w.set_agent_settings_section(if show_behavior { 1 } else { 0 });
+                        w.set_agent_settings_section(if show_templates {
+                            2
+                        } else if show_behavior {
+                            1
+                        } else {
+                            0
+                        });
                         w.set_settings_open(true);
                     }
                     if !w.get_agent_open() || w.get_agent_selected_conversation() < 0 {

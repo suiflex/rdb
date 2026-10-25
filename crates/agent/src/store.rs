@@ -4,7 +4,7 @@ use directories::ProjectDirs;
 use rdb_connstore::secret::{select_backend, SecretBackend};
 use serde::{Deserialize, Serialize};
 
-use crate::{AgentConfig, AgentPreferences, Conversation};
+use crate::{AgentConfig, AgentPreferences, Conversation, PromptTemplate};
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -12,6 +12,7 @@ struct StoredData {
     configs: Vec<AgentConfig>,
     conversations: Vec<Conversation>,
     preferences: AgentPreferences,
+    templates: Vec<PromptTemplate>,
 }
 
 pub struct AgentStore {
@@ -60,6 +61,50 @@ impl AgentStore {
 
     pub fn preferences(&self) -> &AgentPreferences {
         &self.data.preferences
+    }
+
+    pub fn templates(&self) -> &[PromptTemplate] {
+        &self.data.templates
+    }
+
+    pub fn save_template(&mut self, template: PromptTemplate) -> Result<(), String> {
+        if template.name.trim().is_empty() || template.name.chars().count() > 100 {
+            return Err("Template name must be 1 to 100 characters".into());
+        }
+        if template.content.trim().is_empty() || template.content.chars().count() > 12_000 {
+            return Err("Template content must be 1 to 12,000 characters".into());
+        }
+        let old_data = self.data.clone();
+        if let Some(existing) = self
+            .data
+            .templates
+            .iter_mut()
+            .find(|item| item.id == template.id)
+        {
+            *existing = template;
+        } else {
+            self.data.templates.push(template);
+        }
+        if let Err(error) = self.flush() {
+            self.data = old_data;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    pub fn delete_template(&mut self, id: &str) -> Result<(), String> {
+        let old_data = self.data.clone();
+        self.data.templates.retain(|item| item.id != id);
+        for conversation in &mut self.data.conversations {
+            conversation
+                .selected_templates
+                .retain(|selected| selected != id);
+        }
+        if let Err(error) = self.flush() {
+            self.data = old_data;
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub fn save_preferences(&mut self, preferences: AgentPreferences) -> Result<(), String> {
@@ -244,5 +289,30 @@ mod tests {
         };
         assert!(store.save_preferences(invalid).is_err());
         assert_eq!(store.preferences(), &preferences);
+    }
+
+    #[test]
+    fn templates_roundtrip_and_deletion_clears_conversation_selection() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = AgentStore::open(dir.path().to_owned()).unwrap();
+        let template = PromptTemplate {
+            id: "template-one".into(),
+            name: "Query style".into(),
+            content: "Use explicit joins".into(),
+            default_engines: vec!["postgres".into()],
+        };
+        store.save_template(template.clone()).unwrap();
+        let mut conversation = Conversation::new(
+            "conversation-one".into(),
+            "connection-one".into(),
+            "db".into(),
+            None,
+        );
+        conversation.selected_templates.push(template.id.clone());
+        store.save_conversation(conversation).unwrap();
+        let reopened = AgentStore::open(dir.path().to_owned()).unwrap();
+        assert_eq!(reopened.templates(), &[template]);
+        store.delete_template("template-one").unwrap();
+        assert!(store.conversations()[0].selected_templates.is_empty());
     }
 }

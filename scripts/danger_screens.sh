@@ -35,6 +35,8 @@ agent-settings-behavior
 agent-narrow
 agent-database
 agent-model
+agent-template
+agent-settings-templates
 workspace-users-bool
 workspace-users-date
 rail

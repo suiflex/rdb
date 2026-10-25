@@ -31,6 +31,15 @@ pub struct AgentPreferences {
     pub max_api_retries: u8,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptTemplate {
+    pub id: String,
+    pub name: String,
+    pub content: String,
+    #[serde(default)]
+    pub default_engines: Vec<String>,
+}
+
 impl Default for AgentPreferences {
     fn default() -> Self {
         Self {
@@ -63,6 +72,8 @@ pub struct Conversation {
     pub schema: Option<String>,
     pub mode: Mode,
     pub messages: Vec<Message>,
+    #[serde(default)]
+    pub selected_templates: Vec<String>,
 }
 
 impl Conversation {
@@ -80,6 +91,27 @@ impl Conversation {
             schema,
             mode: Mode::Ask,
             messages: Vec::new(),
+            selected_templates: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn older_conversation_without_templates_remains_readable() {
+        let old = serde_json::json!({
+            "id": "one",
+            "title": "Before templates",
+            "connection_id": "connection",
+            "database": "db",
+            "schema": null,
+            "mode": "ask",
+            "messages": []
+        });
+        let restored: Conversation = serde_json::from_value(old).unwrap();
+        assert!(restored.selected_templates.is_empty());
     }
 }
