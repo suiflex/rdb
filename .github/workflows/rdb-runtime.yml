@@ -1,0 +1,37 @@
+name: rdb-runtime
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - crates/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/rdb-runtime.yml
+  pull_request:
+    paths:
+      - crates/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/rdb-runtime.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rdb-runtime
+      - run: cargo fmt -p rdb-runtime --check
+      - run: cargo clippy -p rdb-runtime --all-targets --all-features -- -D warnings
+      - run: cargo test -p rdb-runtime --lib --features mock
