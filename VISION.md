@@ -1,12 +1,16 @@
 # Vision
 
-RDB is a **native, lightweight database editor for many engines** — one small
-binary that speaks PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite,
+RDB is a **native, lightweight database editor for many engines** — one desktop
+app that speaks PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite,
 Cassandra, SQL Server, Oracle, and ClickHouse today, with room to grow.
 
 The goal is simple: give people a fast, local-first tool that opens instantly,
 stays out of the way, and handles a wide range of databases without shipping a
 browser engine to do it.
+
+The desktop app includes an Assistant: Ask drafts queries, while Agent can
+inspect a selected database. The separate CLI and MCP server serve external
+agent clients.
 
 ## Why
 
@@ -23,9 +27,9 @@ engine. RDB aims to sit where those two miss each other — broad engine support
 - **Local-first & private.** Your data and queries stay on your machine.
   Connection secrets live in the OS keychain (AES-GCM encrypted-file fallback),
   never in plaintext config.
-- **One tool, many engines.** A common `Driver` trait (`crates/core`) means the
-  UI never hardcodes an engine beyond a single dispatch enum. Adding an engine
-  is a new `driver-*` crate — the rest of the app doesn't change.
+- **One tool, many engines.** A common `Driver` trait (`crates/core`) and
+  concrete dispatch (`crates/runtime`) keep protocol code out of the UI.
+  Adding an engine updates the driver, engine catalog, and dispatch.
 - **Boring where it counts.** Predictable behavior over clever features; a
   small, auditable codebase over a large one.
 
@@ -38,8 +42,7 @@ engine. RDB aims to sit where those two miss each other — broad engine support
 Further out (aspirational, not committed yet):
 
 - A community extension surface — let people add engines and panels the
-  community builds and maintains, without forking the app. An agent panel is
-  one of the things that could live here.
+  community builds and maintains, without forking the app.
 
 ## Non-goals
 

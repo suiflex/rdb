@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <strong>Native cross-platform database manager.<br>PostgreSQL · MySQL · MariaDB · Redis · Valkey · MongoDB · SQLite · Cassandra · Scylla · SQL Server · Oracle · ClickHouse — one binary, no Electron.</strong>
+  <strong>Native cross-platform database manager.<br>PostgreSQL · MySQL · MariaDB · Redis · Valkey · MongoDB · SQLite · Cassandra · Scylla · SQL Server · Oracle · ClickHouse — one desktop app, no Electron.</strong>
 </p>
 
 <p align="center">
@@ -28,8 +28,8 @@ A native, lightweight, cross-platform database manager built with Rust and Slint
 - **Multi-engine** — PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite, Cassandra, SQL Server, Oracle, ClickHouse in one app
 - **Native UI** — GPU-rendered via Slint (no webview, no Chromium, no Electron)
 - **CLI and MCP** — manage scoped agent access with `rdb-cli mcp`; agent clients launch the separate `rdb-mcp` stdio server
-- **In-app Agent** — ask for SQL or let a configured model inspect schema and run read queries; writes require approval of the exact SQL and are disabled for production connections
-- **Fast & light** — no GC, no runtime; aggressive release optimization (LTO, `opt-level=z`, `panic=abort`)
+- **In-app Assistant** — Ask suggests queries from schema and editor context; Agent can inspect metadata and run read queries when you request results. Writes require approval of the exact SQL and are disabled for production connections
+- **Fast & light** — no GC or bundled browser runtime; aggressive release optimization (LTO, `opt-level=z`, `panic=abort`)
 - **Secure connections** — passwords stored in OS keychain (macOS Keychain, libsecret) with AES-GCM encrypted-file fallback
 - **Schema browser** — sidebar tree: databases → tables/collections/keys → columns/fields
 - **Tabbed query editor** — multiple tabs per session, one per engine
@@ -59,13 +59,16 @@ A native, lightweight, cross-platform database manager built with Rust and Slint
 
 ### Core design rule
 
-The UI (`app/`) depends only on `rdb-core`. It never imports a concrete driver crate. Adding a new engine = a new `driver-*` crate that implements the `Driver` trait; the UI is untouched.
+`rdb-core` defines the driver contract. `rdb-runtime` owns the concrete `AnyDriver` dispatch and tunnel integration. The UI uses that dispatch through `app/src/dispatch.rs`; it does not import individual driver crates. Adding an engine requires a driver implementation, an `Engine` catalog entry in `rdb-connstore`, and a dispatch variant in `rdb-runtime`.
 
 ### Async bridge
 
 Slint's event loop runs on the main thread. All I/O (connect, query, schema fetch) spawns on a `tokio` multi-thread runtime. Results return to the UI thread via `invoke_from_event_loop`.
 
 ### Driver trait
+
+The main methods are shown below; the trait also supports streaming, schema
+discovery, writes, and cancellation.
 
 ```rust
 #[async_trait]
@@ -74,7 +77,7 @@ pub trait Driver: Send + Sync {
     async fn ping(&self) -> Result<()>;
     async fn schema(&self) -> Result<Schema>;
     async fn query(&self, q: &Query) -> Result<ResultSet>;
-    async fn close(self) -> Result<()>;
+    async fn close(self) -> Result<()> where Self: Sized;
 }
 ```
 
@@ -85,7 +88,7 @@ pub enum Query {
     Sql(String),           // PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, Oracle, ClickHouse
     Cql(String),           // Cassandra/ScyllaDB
     Command(Vec<String>),  // Redis/Valkey: ["GET", "key"]
-    Mongo(MongoOp),        // find / insert / aggregate
+    Mongo(Box<MongoOp>),   // find / insert / aggregate
 }
 ```
 
@@ -99,6 +102,20 @@ pub enum ResultSet {
     Affected(u64),
 }
 ```
+
+## In-app Assistant
+
+Configure a model under **Settings → AI**. In the Assistant panel, choose the
+connection, database, and model for the conversation.
+
+- **Ask** uses schema and editor context to draft, explain, optimize, repair,
+  or translate queries. It does not execute them.
+- **Agent** can inspect database metadata and run a read query when you ask for
+  actual data or results. A proposed SQL write runs only after you approve its
+  exact text. Production connections cannot use Agent writes.
+
+The in-app Assistant is implemented in `rdb-agent`. External agent clients use
+the separate `rdb-mcp` server described below.
 
 ## MCP Server
 
@@ -139,8 +156,8 @@ Prebuilt installers are expected to be attached to GitHub Releases.
 npm i -g @suiflex/rdb
 ```
 
-The postinstall step downloads the prebuilt `rdb` binary for your platform from
-the matching GitHub Release, then `rdb` launches it. On macOS it also installs
+The postinstall step downloads the prebuilt `rdb`, `rdb-cli`, and `rdb-mcp`
+binaries from the matching GitHub Release. On macOS it also installs
 `RDB.app` into `~/Applications` so it shows up in Launchpad.
 
 ### macOS / Linux
@@ -245,6 +262,10 @@ cargo run -p rdb
 
 The release binary lands at `target/release/rdb`.
 
+The root `Makefile` provides `make be-build` and `make be-test` for the backend
+libraries, including `rdb-runtime` and `rdb-agent`. CLI and MCP have their own
+package-scoped CI workflows.
+
 Build the CLI manager and MCP server too:
 
 ```bash
@@ -298,6 +319,11 @@ Active development. Ships 11 engines (PostgreSQL, MySQL, MariaDB, Redis, Valkey,
 | `rdb` | Desktop binary (app/) |
 | `rdb-core` | `Driver` trait, `Query`, `ResultSet`, `Schema`, `RdbError` |
 | `rdb-connstore` | Saved connections — JSON on disk + OS keychain / AES-GCM file |
+| `rdb-tunnel` | SSH tunnel support for database connections |
+| `rdb-runtime` | Concrete driver dispatch, connection runtime, and mock driver |
+| `rdb-agent` | In-app Assistant models, sessions, tools, and local settings |
+| `rdb-cli` | Terminal manager for scoped MCP registration |
+| `rdb-mcp` | Stdio MCP server for external agent clients |
 | `rdb-driver-postgres` | PostgreSQL driver via `tokio-postgres` |
 | `rdb-driver-mysql` | MySQL/MariaDB driver via `mysql_async` |
 | `rdb-driver-redis` | Redis/Valkey driver via `redis` crate |

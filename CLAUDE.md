@@ -16,7 +16,7 @@ distribution files for Homebrew/Scoop).
 ## Build, Lint, Test
 
 A root `Makefile` wraps the common cargo invocations and splits FE (the
-`rdb` UI binary) from BE (the `crates/*` libraries) so each side builds and
+`rdb` UI binary) from BE (the backend libraries) so each side builds and
 tests independently. Run `make help` for the full target list.
 
 ```bash
@@ -33,23 +33,19 @@ cargo build --release -p rdb   # release binary
 
 ## CI
 
-One GitHub Actions workflow per component in `.github/workflows/` — `rdb-app`
-plus one per crate: `rdb-core`, `rdb-connstore`, `rdb-driver-postgres`,
-`rdb-driver-mysql`, `rdb-driver-redis`, `rdb-driver-mongo`,
-`rdb-driver-sqlite`, `rdb-driver-cassandra`, `rdb-driver-mssql`,
-`rdb-driver-clickhouse`.
-Each has a `paths:` filter, so editing one component only runs that
-component's CI (lean).
+GitHub Actions has package-scoped workflows for `rdb-app`, `rdb-core`,
+`rdb-connstore`, `rdb-tunnel`, each driver (including Oracle), `rdb-runtime`,
+`rdb-agent`, `rdb-cli`, and `rdb-mcp`. Each uses path filters for the package
+and its dependencies.
 
-- All ten backend crates are in the root `Makefile`'s `BE_PKGS` (used by
-  `be-build`/`be-test`/`be-check`), so the make targets and CI agree on scope.
-  Adding a crate means adding it to both.
-- Dependents also watch `crates/core/**`, so a `core` change fans out to retest
-  core + all dependents (connstore, drivers, app). Other crates stay independent.
-- Backend jobs run `cargo {fmt,clippy} -p <pkg>` and `cargo test -p <pkg> --lib`
-  (scoped with `-p`, not the workspace-wide `make` targets). `--lib` runs unit
-  tests only; the `tests/integration.rs` targets need Docker, so they stay out
-  of CI and run locally via `make test-it`.
+- The root `Makefile`'s `BE_PKGS` covers core, connstore, tunnel, all nine
+  driver crates, runtime, and agent. CLI and MCP are binaries with dedicated
+  workflows. Adding a backend library means updating `BE_PKGS` and CI.
+- Workflows watch their package and dependency paths. Runtime, agent, CLI,
+  and MCP watch `crates/**` because they depend on several workspace crates.
+- Package workflows run scoped format, Clippy, and unit tests. Driver
+  integration tests need Docker, so they run locally via `make test-it`.
+  Runtime tests enable `mock`; CLI and MCP test their binary targets.
 - The app job installs Slint system libs and runs `cargo build -p rdb`.
 - `danger.yml` is the only job that **runs** the app. It drives every
   `RDB_SCREEN` scenario (`scripts/danger_screens.sh`, ubuntu under Xvfb with
@@ -72,8 +68,9 @@ PR that bumps the version and `app/CHANGELOG.md`; merging it tags `vX.Y.Z`
 and cuts a GitHub Release. The `app` package (`rdb`) is the tracked version.
 
 `release-build.yml` does the actual packaging once that tag lands: builds
-per-target native binaries (macOS `.dmg` with an ad-hoc-codesigned `.app`,
-Windows bare `.exe`, Linux `.tar.gz`), attaches them to the GitHub Release,
+the desktop app, CLI, and MCP server for each target (macOS `.dmg` with an
+ad-hoc-codesigned `.app`, Windows `.exe` files, Linux `.tar.gz`). It attaches
+them to the GitHub Release,
 and publishes to the `suiflex/homebrew-tap` formula/cask, the
 `suiflex/scoop-bucket`, and npm (`@suiflex/rdb`, postinstall downloads the
 matching asset). `scripts/install.sh` / `scripts/install.ps1` are the direct
@@ -114,6 +111,11 @@ Keep the scope specific (`app`, `driver-postgres`, `driver-mysql`, `core`,
     `pane == 0` fork once each.
 - `crates/core/` — `Driver` trait, `Query`, `ResultSet`, `Schema`, `RdbError`
 - `crates/connstore/` — saved connections + OS keychain / AES-GCM
+- `crates/tunnel/` — SSH tunnel support
+- `crates/runtime/` — concrete `AnyDriver` dispatch and mock driver
+- `crates/agent/` — in-app Assistant sessions, models, tools, and settings
+- `crates/cli/` — terminal manager for MCP registration
+- `crates/mcp/` — stdio MCP server for external agent clients
 - `crates/driver-postgres/` — tokio-postgres
 - `crates/driver-mysql/` — mysql_async
 - `crates/driver-redis/` — redis crate
@@ -121,11 +123,14 @@ Keep the scope specific (`app`, `driver-postgres`, `driver-mysql`, `core`,
 - `crates/driver-sqlite/` — rusqlite (bundled)
 - `crates/driver-cassandra/` — scylla crate (CQL, Cassandra/ScyllaDB)
 - `crates/driver-mssql/` — tiberius (T-SQL, SQL-auth only in v1, no Windows/AD)
+- `crates/driver-oracle/` — oracledb
 - `crates/driver-clickhouse/` — HTTP `clickhouse` crate, reads via `FORMAT JSON` (not the typed `Row` path), insert-only write-back
 
 ## Key Rules
 
-- UI (`app/`) names a concrete driver crate only in `app/src/dispatch.rs` (the `AnyDriver` enum); the rest of the app depends on `rdb-core`.
+- `crates/runtime/src/lib.rs` owns the concrete `AnyDriver` enum. The UI
+  re-exports it from `app/src/dispatch.rs` and does not import individual
+  driver crates.
 - Adding new engine = new `driver-*` crate implementing `Driver` trait + a variant in `AnyDriver`.
   Query-tab behavior (completion, syntax highlighting, format) is driven by
   `Engine::language()` (`crates/connstore/src/model.rs`), which maps each
@@ -173,9 +178,10 @@ Keep the scope specific (`app`, `driver-postgres`, `driver-mysql`, `core`,
      `default_port()` all read that row, so this is the only place the strings
      live. `every_engine_has_a_row` fails if a variant has no row.
   2. `crates/connstore/src/conn_url.rs` — scheme(s) → engine in `scheme_to_engine`.
-  3. New `driver-*` crate + `app/src/dispatch.rs` — `AnyDriver` variant (box it
-     if the driver struct is large — `cargo clippy` catches this via
-     `large_enum_variant`) + `write_statements`. Then run `cargo build -p rdb`
+  3. New `driver-*` crate + `crates/runtime/src/lib.rs` — `AnyDriver`
+     variant (box it if the driver struct is large — `cargo clippy` catches
+     this via `large_enum_variant`) + `write_statements`. Then run
+     `cargo build -p rdb`
      and add an arm everywhere it complains — the compiler enumerates every
      exhaustive `Engine`/`Query` match site for you; don't hand-audit.
      **Aliased engine, existing driver** (a wire-protocol-compatible fork of
