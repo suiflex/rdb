@@ -868,6 +868,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 &conn_filter.borrow(),
                 &connected_ids.lock().unwrap(),
             ));
+            w.invoke_agent_refresh_connections();
             if other_live {
                 // Resync chrome to whatever tab stayed focused, so the
                 // topbar reflects a connection that's actually still there
@@ -1048,6 +1049,11 @@ fn wire_screen_harness(
     let seed_agent = matches!(
         screen.as_str(),
         "agent"
+            | "agent-markdown"
+            | "agent-markdown-wide"
+            | "agent-selection"
+            | "agent-send-unconfigured"
+            | "agent-send"
             | "agent-settings"
             | "agent-settings-behavior"
             | "agent-narrow"
@@ -1085,6 +1091,11 @@ fn wire_screen_harness(
     if matches!(
         screen.as_str(),
         "agent"
+            | "agent-markdown"
+            | "agent-markdown-wide"
+            | "agent-selection"
+            | "agent-send-unconfigured"
+            | "agent-send"
             | "agent-settings"
             | "agent-settings-behavior"
             | "agent-narrow"
@@ -1102,14 +1113,80 @@ fn wire_screen_harness(
         let seed_template = screen == "agent-template" || show_templates;
         let switch_database = screen == "agent-database";
         let select_model = screen == "agent-model";
+        let send_selection = screen == "agent-selection";
+        let send_unconfigured = screen == "agent-send-unconfigured";
+        let send_chat = screen == "agent-send";
+        let load_selection = load_editor_text.clone();
         sequence(
             window,
             vec![(
                 "agent connected",
                 Rc::new(|w| w.get_connected()),
                 Rc::new(move |w| {
-                    w.set_agent_open(true);
-                    w.invoke_agent_new_conversation();
+                    if send_unconfigured {
+                        w.set_agent_open(true);
+                        w.set_agent_draft("Count users".into());
+                        w.invoke_agent_send("Count users".into());
+                        if w.get_agent_conversations().row_count() != 0
+                            || w.get_agent_draft() != "Count users"
+                            || !w.get_agent_status().contains("Configure a model")
+                        {
+                            screen_fail("failed send created a conversation or cleared the draft");
+                        }
+                    } else if send_chat {
+                        w.set_agent_open(true);
+                        w.invoke_agent_save_config(
+                            "Local".into(),
+                            "Ollama".into(),
+                            "http://127.0.0.1:1/v1".into(),
+                            "mock".into(),
+                            "".into(),
+                        );
+                        w.set_agent_mode(1);
+                        w.set_agent_draft("Count users".into());
+                        w.invoke_agent_send("Count users".into());
+                        if w.get_agent_selected_conversation() < 0
+                            || w.get_agent_mode() != 1
+                            || w.get_agent_draft() != ""
+                            || w.get_agent_messages().row_count() != 1
+                        {
+                            screen_fail("accepted send did not keep Agent mode and chat state");
+                        }
+                    } else if send_selection {
+                        w.invoke_new_tab();
+                        load_selection(0, "SELECT 1");
+                        w.invoke_editor_press(0, 0, false);
+                        w.invoke_editor_drag(0, 0, 6);
+                        w.invoke_agent_send_selection(0);
+                        if !w
+                            .get_agent_selection_preview()
+                            .starts_with("Selection: SELECT")
+                        {
+                            screen_fail("editor selection did not reach the agent composer");
+                        }
+                    } else {
+                        w.set_agent_open(true);
+                        w.invoke_agent_new_conversation();
+                        if screen == "agent-markdown" || screen == "agent-markdown-wide" {
+                            if screen == "agent-markdown-wide" {
+                                w.set_agent_panel_width(560.0);
+                            }
+                            let blocks = vec![
+                                AgentBlock { kind: 1, formatted: slint::StyledText::from_markdown("Sample query").unwrap(), plain: "Sample query".into(), prefix: "".into() },
+                                AgentBlock { kind: 0, formatted: slint::StyledText::from_markdown("Use **orders** to inspect recent records. Review the schema before running a query across several related tables.").unwrap(), plain: "Use orders to inspect recent records. Review the schema before running a query across several related tables.".into(), prefix: "".into() },
+                                AgentBlock { kind: 2, formatted: slint::StyledText::from_markdown("Filter by date before running the query.").unwrap(), plain: "Filter by date before running the query.".into(), prefix: "•".into() },
+                                AgentBlock { kind: 3, formatted: slint::StyledText::from_plain_text(""), plain: "-- Recent orders from the active database\nSELECT orders.id, orders.created_at, orders.customer_id, orders.total_amount\nFROM orders\nWHERE orders.created_at >= CURRENT_DATE - INTERVAL '30 days'\n  AND orders.status IN ('paid', 'shipped', 'delivered')\nORDER BY orders.created_at DESC;".into(), prefix: "".into() },
+                                AgentBlock { kind: 4, formatted: slint::StyledText::from_markdown("Table: orders\n\nPurpose: Recent sample records with a longer description that wraps inside the panel.").unwrap(), plain: "Table: orders\n\nPurpose: Recent sample records with a longer description that wraps inside the panel.".into(), prefix: "1.".into() },
+                                AgentBlock { kind: 0, formatted: slint::StyledText::from_markdown("**Note:** Check the column types and the number of matching rows before using the query. This final paragraph must stay inside the same message card even when the SQL wraps across several lines.").unwrap(), plain: "Note: Check the column types and the number of matching rows before using the query. This final paragraph must stay inside the same message card even when the SQL wraps across several lines.".into(), prefix: "".into() },
+                            ];
+                            w.set_agent_messages(ModelRc::from(Rc::new(VecModel::from(vec![
+                                AgentMessage {
+                                    role: "assistant".into(),
+                                    blocks: ModelRc::from(Rc::new(VecModel::from(blocks))),
+                                },
+                            ]))));
+                        }
+                    }
                     if seed_template {
                         w.invoke_agent_new_template();
                         w.invoke_agent_add_template_engine("PostgreSQL".into());
@@ -1137,6 +1214,20 @@ fn wire_screen_harness(
                         if w.get_agent_config_choice() != "Local model" {
                             screen_fail("agent model selector did not load the saved config");
                         }
+                        w.invoke_agent_choose_config("Local model".into());
+                        w.invoke_agent_save_config(
+                            "Local model".into(),
+                            "Ollama".into(),
+                            "http://localhost:11434/v1".into(),
+                            "example-edited".into(),
+                            "".into(),
+                        );
+                        if w.get_agent_config_model() != "example-edited"
+                            || w.get_agent_config_options().row_count() != 1
+                            || !w.get_agent_config_editing()
+                        {
+                            screen_fail("saved model could not be edited");
+                        }
                     }
                     if switch_database {
                         w.set_db_list(ModelRc::from(Rc::new(VecModel::from(vec![
@@ -1159,12 +1250,63 @@ fn wire_screen_harness(
                         });
                         w.set_settings_open(true);
                     }
-                    if !w.get_agent_open() || w.get_agent_selected_conversation() < 0 {
-                        screen_fail("agent panel did not open a bound conversation");
+                    if !w.get_agent_open() {
+                        screen_fail("agent panel did not open");
+                    }
+                    if (send_chat || send_selection) && w.get_agent_selected_conversation() < 0 {
+                        screen_fail("sent message did not open a conversation");
+                    }
+                    if !send_chat && !send_selection && w.get_agent_selected_conversation() >= 0 {
+                        screen_fail("empty draft created a conversation");
                     }
                 }),
             )],
         );
+        if send_chat {
+            sequence(
+                window,
+                vec![(
+                    "agent request settled",
+                    Rc::new(|w| {
+                        w.get_agent_selected_conversation() >= 0
+                            && w.get_agent_messages().row_count() == 1
+                            && !w.get_agent_busy()
+                    }),
+                    Rc::new(|w| {
+                        if w.get_agent_status().contains("cancelled") {
+                            screen_fail("agent request was cancelled before the model responded");
+                        }
+                    }),
+                )],
+            );
+        }
+        if send_selection {
+            sequence(
+                window,
+                vec![(
+                    "selection panel opened",
+                    Rc::new(|w| w.get_agent_open()),
+                    Rc::new(|w| {
+                        if w.get_agent_selection_preview().is_empty() {
+                            screen_fail("editor selection disappeared before panel opened");
+                        }
+                        w.set_agent_draft("Show @us".into());
+                        w.invoke_agent_mention_query("Show @us".into());
+                        if !w
+                            .get_agent_mention_options()
+                            .iter()
+                            .any(|name| name == "users")
+                        {
+                            screen_fail("active database table was missing from agent mentions");
+                        }
+                        w.invoke_agent_mention_selected("users".into());
+                        if w.get_agent_draft() != "Show @users " {
+                            screen_fail("agent mention did not enter the selected table");
+                        }
+                    }),
+                )],
+            );
+        }
     }
 }
 
@@ -1305,7 +1447,10 @@ fn schedule_multi_connection_scenario(
         schedule_prod_confirm_scenario(window, store);
         return;
     }
-    if screen != "multi-connection" && screen != "multi-connection-sidebar" {
+    if screen != "multi-connection"
+        && screen != "multi-connection-sidebar"
+        && screen != "agent-multi-connection"
+    {
         return;
     }
     // The screen seeds its own pair rather than leaning on the mock list:
@@ -1345,6 +1490,65 @@ fn schedule_multi_connection_scenario(
             "the seeded connection pair is missing; saw {names:?}"
         ));
     };
+    if screen == "agent-multi-connection" {
+        sequence(
+            window,
+            vec![
+                (
+                    "connect to first database",
+                    Rc::new(|w: &MainWindow| !w.get_connecting()),
+                    Rc::new(move |w: &MainWindow| w.invoke_connect_clicked(pg)),
+                ),
+                (
+                    "connect to second database",
+                    Rc::new(move |w: &MainWindow| {
+                        connection_is_live(w, pg) && !w.get_tree_loading()
+                    }),
+                    Rc::new(move |w: &MainWindow| w.invoke_connect_clicked(mongo)),
+                ),
+                (
+                    "both connections appear in Assistant",
+                    Rc::new(move |w: &MainWindow| {
+                        use slint::Model as _;
+                        connection_is_live(w, pg)
+                            && connection_is_live(w, mongo)
+                            && w.get_agent_connection_options().row_count() == 2
+                    }),
+                    Rc::new(|w: &MainWindow| {
+                        w.set_agent_open(true);
+                        w.invoke_agent_select_connection("screen postgres".into());
+                    }),
+                ),
+                (
+                    "Assistant focuses the selected connection",
+                    Rc::new(move |w: &MainWindow| {
+                        w.get_selected_conn() == pg
+                            && w.get_bc_conn() == "screen postgres"
+                            && w.get_agent_connection_choice() == "screen postgres"
+                            && active_tab_engine(w) == "postgres"
+                            && !w.get_tree_loading()
+                    }),
+                    Rc::new(|w: &MainWindow| {
+                        w.invoke_agent_select_connection("screen mongo".into());
+                    }),
+                ),
+                (
+                    "Assistant switches back without losing options",
+                    Rc::new(move |w: &MainWindow| {
+                        use slint::Model as _;
+                        w.get_selected_conn() == mongo
+                            && w.get_bc_conn() == "screen mongo"
+                            && w.get_agent_connection_choice() == "screen mongo"
+                            && active_tab_engine(w) == "mongo"
+                            && w.get_agent_connection_options().row_count() == 2
+                            && !w.get_tree_loading()
+                    }),
+                    Rc::new(|_: &MainWindow| {}),
+                ),
+            ],
+        );
+        return;
+    }
     if screen == "multi-connection-sidebar" {
         schedule_sidebar_mode_scenario(window, pg, mongo);
         return;

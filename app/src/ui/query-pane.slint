@@ -69,6 +69,7 @@ export component QueryPane inherits Rectangle {
     in property <[int]> editor-fold-state;
     in property <[bool]> editor-line-hidden;
     in property <string> editor-placeholder;
+    in property <bool> editor-has-selection: false;
     in property <int> cursor-line;
     in property <int> cursor-visual-row;
     in property <int> cursor-col;
@@ -85,6 +86,7 @@ export component QueryPane inherits Rectangle {
     callback editor-press(int, int, bool);
     callback editor-drag(int, int, int);
     callback editor-select-word(int, int);
+    callback editor-send-selection;
 
     // ----- autocomplete -----
     in property <[PaletteItem]> completion-items;
@@ -614,6 +616,7 @@ export component QueryPane inherits Rectangle {
                     line-hidden: root.editor-line-hidden;
                     toggle-fold(l) => { root.toggle-fold(l); }
                     placeholder: root.editor-placeholder;
+                    has-selection: root.editor-has-selection;
                     cursor-line: root.cursor-line;
                     cursor-visual-row: root.cursor-visual-row;
                     cursor-col: root.cursor-col;
@@ -631,6 +634,7 @@ export component QueryPane inherits Rectangle {
                     press-pos(l, c, sh) => { root.editor-press(l, c, sh); }
                     drag-pos(l, r, c) => { root.editor-drag(l, r, c); }
                     select-word(l, c) => { root.editor-select-word(l, c); }
+                    send-selection => { root.editor-send-selection(); }
                 }
                 Rectangle { height: 1px; background: Tokens.border; }
                 // results header strip

@@ -219,6 +219,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
             let hidden = ModelRc::from(Rc::new(VecModel::from(hidden)));
             let fold_state = ModelRc::from(Rc::new(VecModel::from(fold_state)));
             if pane == 0 {
+                w.set_editor_has_selection(sel.is_some());
                 w.set_editor_lines(lines);
                 w.set_editor_line_hidden(hidden);
                 w.set_editor_fold_state(fold_state);
@@ -231,6 +232,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) -> (PaneFn, PaneTextFn
                 // p1-query in a later step).
                 w.set_query_text(SharedString::from(ed.text()));
             } else {
+                w.set_p1_editor_has_selection(sel.is_some());
                 w.set_p1_editor_lines(lines);
                 w.set_p1_editor_line_hidden(hidden);
                 w.set_p1_editor_fold_state(fold_state);

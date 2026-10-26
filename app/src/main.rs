@@ -1663,6 +1663,7 @@ struct StoredResult {
     // read from the tab, since a long-lived SQL tab can be re-run after the
     // user switches the active connection (each Result N chip needs its own).
     connection_id: Option<String>,
+    database: String,
     engine: String,
     connection_name: String,
     color: slint::Color,
@@ -1695,6 +1696,7 @@ mod result_tab_tests {
             latency: String::new(),
             grid: GridState::default(),
             connection_id: None,
+            database: String::new(),
             engine: String::new(),
             connection_name: String::new(),
             color: theme::accent_or_default(""),
@@ -1840,6 +1842,7 @@ struct WorkspaceTab {
     view: Option<StoredResult>,
     indexes: Vec<(String, String)>,
     loading: bool,
+    last_error: Option<(String, String, String)>,
     pinned: bool,
     // Workspace group that owns this tab: 0 is left, 1 is right.
     group: usize,
@@ -1898,6 +1901,7 @@ impl WorkspaceTab {
             view: None,
             indexes: Vec::new(),
             loading: false,
+            last_error: None,
             pinned: true,
             group: 0,
             split: false,
@@ -6116,6 +6120,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     latency: w.get_status_latency().to_string(),
                     grid: GridState::default(),
                     connection_id: view_id,
+                    database: tab
+                        .results
+                        .get(tab.active_result)
+                        .map(|r| r.database.clone())
+                        .unwrap_or_default(),
                     engine: view_engine,
                     connection_name: view_name,
                     color: view_color,

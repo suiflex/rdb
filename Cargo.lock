@@ -6670,6 +6670,7 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "open",
+ "pulldown-cmark",
  "rdb-agent",
  "rdb-connstore",
  "rdb-core",

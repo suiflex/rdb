@@ -608,6 +608,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 visible_abs_index_for_group(&w, &workspace_tabs.lock().unwrap(), 0, idx as usize);
             if let Some(index) = index {
                 restore_tab(&w, index);
+                w.invoke_agent_refresh_connections();
             }
         });
     }
