@@ -62,6 +62,7 @@ impl ToolRunner {
                 Ok(ToolResult::Data(json!(names).to_string()))
             }
             "describe_schema" => {
+                let requested = requested_tables(&call.arguments)?;
                 let schema = match self.scope.schema.as_deref() {
                     Some(name) => self.driver.schema_for(name).await,
                     None => self.driver.schema().await,
@@ -75,7 +76,13 @@ impl ToolRunner {
                     })
                     .map(|database| {
                         json!({"name": database.name,
-                        "containers": database.containers.into_iter().map(|container| {
+                        "containers": database.containers.into_iter()
+                            .filter(|container| requested.as_ref().is_none_or(|names| {
+                                names.iter().any(|name| {
+                                    mentioned_table_matches(&self.scope, name, &container.name)
+                                })
+                            }))
+                            .map(|container| {
                             json!({"name": container.name, "fields": container.fields.into_iter()
                                 .map(|field| json!({"name": field.name, "type": field.type_name,
                                     "nullable": field.nullable, "primary_key": field.pk,
@@ -206,6 +213,53 @@ impl ToolRunner {
                 })))
             }
         }
+    }
+}
+
+fn requested_tables(arguments: &Value) -> Result<Option<Vec<String>>, String> {
+    let Some(value) = arguments.get("tables") else {
+        return Ok(None);
+    };
+    let Some(names) = value.as_array() else {
+        return Err("Table references must be an array".into());
+    };
+    if names.is_empty() || names.len() > 8 {
+        return Err("Provide one to eight table references".into());
+    }
+    names
+        .iter()
+        .map(|value| {
+            let name = value.as_str().ok_or("Table references must be strings")?;
+            if name.is_empty() || name.chars().count() > 128 {
+                return Err("Invalid table reference".into());
+            }
+            Ok(name.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+fn mentioned_table_matches(scope: &AgentScope, mention: &str, table: &str) -> bool {
+    let parts = mention.split('.').collect::<Vec<_>>();
+    match parts.as_slice() {
+        [name] => name.eq_ignore_ascii_case(table),
+        [namespace, name] => {
+            name.eq_ignore_ascii_case(table)
+                && (namespace.eq_ignore_ascii_case(&scope.database)
+                    || scope
+                        .schema
+                        .as_deref()
+                        .is_some_and(|schema| namespace.eq_ignore_ascii_case(schema)))
+        }
+        [database, schema, name] => {
+            database.eq_ignore_ascii_case(&scope.database)
+                && scope
+                    .schema
+                    .as_deref()
+                    .is_some_and(|current| schema.eq_ignore_ascii_case(current))
+                && name.eq_ignore_ascii_case(table)
+        }
+        _ => false,
     }
 }
 
@@ -380,7 +434,10 @@ fn render_result(result: ResultSet) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_sql, AgentScope, ToolCall, ToolResult, ToolRunner};
+    use super::{
+        mentioned_table_matches, requested_tables, validate_sql, AgentScope, ToolCall, ToolResult,
+        ToolRunner,
+    };
     use rdb_connstore::Engine;
     use rdb_core::{
         conn::{ConnConfig, SslMode},
@@ -422,6 +479,83 @@ mod tests {
             "main"
         )
         .is_err());
+    }
+
+    #[test]
+    fn table_mentions_stay_in_the_conversation_namespace() {
+        let scope = AgentScope {
+            connection_id: "connection".into(),
+            database: "app".into(),
+            schema: Some("public".into()),
+            engine: Engine::Postgres,
+            production: false,
+        };
+        assert!(mentioned_table_matches(&scope, "orders", "orders"));
+        assert!(mentioned_table_matches(&scope, "public.orders", "orders"));
+        assert!(mentioned_table_matches(
+            &scope,
+            "app.public.orders",
+            "orders"
+        ));
+        assert!(!mentioned_table_matches(&scope, "other.orders", "orders"));
+        assert!(!mentioned_table_matches(
+            &scope,
+            "other.public.orders",
+            "orders"
+        ));
+    }
+
+    #[test]
+    fn table_filter_rejects_unbounded_or_invalid_arguments() {
+        assert!(requested_tables(&json!({})).unwrap().is_none());
+        assert!(requested_tables(&json!({"tables": []})).is_err());
+        assert!(requested_tables(&json!({"tables": ["orders", 3]})).is_err());
+        assert!(requested_tables(&json!({"tables": vec!["x"; 9]})).is_err());
+    }
+
+    #[tokio::test]
+    async fn described_schema_contains_only_requested_sqlite_table() {
+        let config = ConnConfig {
+            host: String::new(),
+            port: 0,
+            user: String::new(),
+            database: Some(":memory:".into()),
+            password: None,
+            sslmode: SslMode::Disable,
+            params: None,
+            ssh: None,
+        };
+        let driver = Arc::new(AnyDriver::connect(Engine::Sqlite, &config).await.unwrap());
+        driver
+            .query(&Query::Sql("CREATE TABLE orders (id INTEGER)".into()))
+            .await
+            .unwrap();
+        driver
+            .query(&Query::Sql("CREATE TABLE secrets (id INTEGER)".into()))
+            .await
+            .unwrap();
+        let runner = ToolRunner::new(
+            driver,
+            AgentScope {
+                connection_id: "connection".into(),
+                database: "main".into(),
+                schema: None,
+                engine: Engine::Sqlite,
+                production: false,
+            },
+        );
+        let described = runner
+            .execute(&ToolCall {
+                name: "describe_schema".into(),
+                arguments: json!({"tables": ["orders"]}),
+            })
+            .await
+            .unwrap();
+        let ToolResult::Data(schema) = described else {
+            panic!("expected schema data")
+        };
+        assert!(schema.contains("orders"));
+        assert!(!schema.contains("secrets"));
     }
 
     #[tokio::test]
