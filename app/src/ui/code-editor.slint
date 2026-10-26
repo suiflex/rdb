@@ -5,7 +5,7 @@ import { Tokens } from "tokens.slint";
 import { Span, PaletteItem } from "structs.slint";
 import { AppIcon } from "icons.slint";
 import { ScrollView } from "std-widgets.slint";
-import { CompletionList } from "components.slint";
+import { AppMenu, CompletionList } from "components.slint";
 
 export component CodeEditor inherits Rectangle {
     in property <[[Span]]> lines;
@@ -41,6 +41,10 @@ export component CodeEditor inherits Rectangle {
     // skip them to turn it back into a buffer line.
     callback drag-pos(int, int, int);
     callback select-word(int, int);
+    in property <bool> has-selection: false;
+    callback send-selection;
+    property <length> selection-menu-x;
+    property <length> selection-menu-y;
     // SQL autocomplete popup, anchored under the caret
     in property <[PaletteItem]> completion-items;
     in property <bool> completion-visible;
@@ -153,6 +157,13 @@ export component CodeEditor inherits Rectangle {
                         property <length> press-x;
                         property <length> press-y;
                         pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right
+                                && root.has-selection) {
+                                root.selection-menu-x = self.absolute-position.x - root.absolute-position.x + self.mouse-x;
+                                root.selection-menu-y = self.absolute-position.y - root.absolute-position.y + self.mouse-y;
+                                selection-menu.show();
+                                return;
+                            }
                             if (e.kind == PointerEventKind.down) {
                                 focus-scope.focus();
                                 self.press-x = self.mouse-x;
@@ -320,5 +331,19 @@ export component CodeEditor inherits Rectangle {
         choose(i) => { root.completion-choose(i); }
         x: min(root.gutter-w + Tokens.sp3 + root.cursor-col * root.charw + edit-scroll.viewport-x, root.width - self.width - Tokens.sp2);
         y: below-y + self.natural-height > root.height && above-y > 0 ? above-y : below-y;
+    }
+
+    selection-menu := PopupWindow {
+        x: min(root.selection-menu-x, root.width - self.width - 8px);
+        y: min(root.selection-menu-y, root.height - self.height - 8px);
+        width: 190px;
+        height: selection-menu-list.preferred-height;
+        selection-menu-list := AppMenu {
+            items: ["Send selection to AI"];
+            activated(_) => {
+                root.send-selection();
+                selection-menu.close();
+            }
+        }
     }
 }

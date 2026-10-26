@@ -4,11 +4,39 @@ import { BreadcrumbChip, ChoiceRow, IconButton, PrimaryButton, SecondaryButton, 
 import { AppIcon } from "icons.slint";
 import { ScrollView, TextEdit } from "std-widgets.slint";
 
+component MarkdownText inherits Rectangle {
+    in property <styled-text> formatted;
+    in property <string> plain;
+    in property <length> text-size: Tokens.font-md;
+    in property <color> text-color: Tokens.text;
+
+    // StyledText's preferred height does not include every wrapped line.
+    height: max(plain-measure.preferred-height, rich-text.preferred-height) + Tokens.sp1;
+    plain-measure := Text {
+        width: parent.width;
+        text: root.plain;
+        font-size: root.text-size;
+        wrap: word-wrap;
+        color: transparent;
+        accessible-role: none;
+    }
+    rich-text := StyledText {
+        width: parent.width;
+        height: parent.height;
+        text: root.formatted;
+        default-color: root.text-color;
+        default-font-size: root.text-size;
+        link-color: Tokens.accent;
+    }
+}
+
 export component AgentPanel inherits Rectangle {
     in property <[AgentMessage]> messages;
     in property <[string]> conversations;
     in property <int> selected-conversation: -1;
     in property <string> connection-name;
+    in property <[string]> connection-options;
+    in property <string> connection-choice;
     in property <string> database-name;
     in property <[string]> database-options;
     in property <[string]> model-options;
@@ -21,13 +49,15 @@ export component AgentPanel inherits Rectangle {
     in property <string> status;
     in property <string> proposed-write;
     in property <string> write-target;
+    in property <string> selection-preview;
+    in property <[string]> mention-options;
     in-out property <string> draft: "";
     callback close;
     callback select-database(string);
+    callback select-connection(string);
     callback select-model(string);
     callback toggle-template(string);
     callback new-conversation;
-    callback export-answer;
     callback choose-conversation(int);
     callback delete-conversation(int);
     callback mode-changed(int);
@@ -35,6 +65,14 @@ export component AgentPanel inherits Rectangle {
     callback cancel;
     callback approve-write;
     callback reject-write;
+    callback clear-selection;
+    callback mention-query(string);
+    callback mention-selected(string);
+    property <bool> scroll-to-latest;
+    property <int> shown-message-count: root.messages.length;
+    init => { root.scroll-to-latest = root.messages.length > 0; }
+    changed shown-message-count => { root.scroll-to-latest = root.messages.length > 0; }
+    changed selected-conversation => { root.scroll-to-latest = root.messages.length > 0; }
 
     preferred-width: 360px;
     min-width: 300px;
@@ -49,7 +87,11 @@ export component AgentPanel inherits Rectangle {
             padding-left: Tokens.sp3;
             padding-right: Tokens.sp3;
             spacing: Tokens.sp2;
-            AppIcon { name: "robot"; size: 18px; color: Tokens.accent; }
+            VerticalLayout {
+                width: 18px;
+                alignment: center;
+                AppIcon { name: "robot"; size: 18px; color: Tokens.accent; }
+            }
             Text {
                 text: "Assistant";
                 color: Tokens.text;
@@ -59,10 +101,6 @@ export component AgentPanel inherits Rectangle {
                 horizontal-stretch: 1;
             }
             IconButton { icon: "plus"; tooltip: "New conversation"; clicked => { root.new-conversation(); } }
-            if root.messages.length > 0: SecondaryButton {
-                text: "Export";
-                clicked => { root.export-answer(); }
-            }
             IconButton { icon: "close"; tooltip: "Close Assistant"; clicked => { root.close(); } }
         }
         Rectangle { height: 1px; background: Tokens.border; }
@@ -73,8 +111,17 @@ export component AgentPanel inherits Rectangle {
                 padding-left: Tokens.sp3;
                 padding-right: Tokens.sp3;
                 spacing: Tokens.sp1;
-                Text { text: root.connection-name; color: Tokens.text-dim;
-                    font-size: Tokens.font-xs; overflow: elide; }
+                Text { text: "Connection"; color: Tokens.text-dim; font-size: Tokens.font-xs; }
+                if root.connection-options.length > 0: SelectBox {
+                    model: root.connection-options;
+                    current-value: root.connection-choice;
+                    selected(name) => { root.select-connection(name); }
+                }
+                if root.connection-options.length == 0: Text {
+                    text: root.connection-name; color: Tokens.text;
+                    font-size: Tokens.font-sm; overflow: elide; }
+                if root.database-name != "" || root.database-options.length > 1: Text {
+                    text: "Database"; color: Tokens.text-dim; font-size: Tokens.font-xs; }
                 if root.database-options.length > 1: SelectBox {
                     model: root.database-options;
                     current-value: root.database-name;
@@ -118,7 +165,7 @@ export component AgentPanel inherits Rectangle {
                         clicked => { root.toggle-template(name); } }
                 }
             }
-            if root.conversations.length > 0: ScrollView {
+            if root.conversations.length > 1 || (root.conversations.length == 1 && root.selected-conversation < 0): ScrollView {
                 height: root.conversations.length < 3 ? root.conversations.length * 40px : 120px;
                 VerticalLayout {
                     spacing: Tokens.sp1;
@@ -163,31 +210,129 @@ export component AgentPanel inherits Rectangle {
                     horizontal-alignment: center;
                 }
             }
-            if root.messages.length > 0: ScrollView {
+            if root.messages.length > 0: messages-scroll := ScrollView {
                 vertical-stretch: 1;
-                VerticalLayout {
+                viewport-height: message-list.preferred-height;
+                Timer {
+                    interval: 16ms;
+                    running: root.scroll-to-latest;
+                    triggered => {
+                        messages-scroll.viewport-y = min(0px, messages-scroll.visible-height - messages-scroll.viewport-height);
+                        root.scroll-to-latest = false;
+                    }
+                }
+                message-list := VerticalLayout {
+                    width: parent.width;
                     padding: Tokens.sp3;
-                    spacing: Tokens.sp2;
+                    spacing: Tokens.sp3;
+                    alignment: start;
                     for msg in root.messages: Rectangle {
-                        height: body.preferred-height + Tokens.sp3;
+                        height: message-content.preferred-height + 2 * Tokens.sp3;
                         background: msg.role == "user" ? Tokens.accent-tint : Tokens.card;
                         border-radius: 8px;
-                        body := Text {
-                            x: Tokens.sp2;
-                            y: Tokens.sp1;
-                            width: parent.width - 2 * Tokens.sp2;
-                            text: msg.text;
-                            color: Tokens.text;
-                            wrap: word-wrap;
+                        message-content := VerticalLayout {
+                            x: Tokens.sp3;
+                            y: Tokens.sp3;
+                            width: parent.width - 2 * Tokens.sp3;
+                            spacing: Tokens.sp3;
+                            for block in msg.blocks: VerticalLayout {
+                                if block.kind == 0 || block.kind == 1: MarkdownText {
+                                    formatted: block.formatted;
+                                    plain: block.plain;
+                                    text-size: block.kind == 1 ? Tokens.font-md + 1px : Tokens.font-md;
+                                }
+                                if block.kind == 2: HorizontalLayout {
+                                    spacing: Tokens.sp2;
+                                    Text {
+                                        text: block.prefix;
+                                        color: Tokens.accent;
+                                        font-size: Tokens.font-md;
+                                    }
+                                    MarkdownText {
+                                        formatted: block.formatted;
+                                        plain: block.plain;
+                                        horizontal-stretch: 1;
+                                    }
+                                }
+                                if block.kind == 3: Rectangle {
+                                    height: code-text.preferred-height + 3 * Tokens.sp3;
+                                    background: Tokens.sidebar;
+                                    border-radius: 6px;
+                                    code-text := Text {
+                                        x: Tokens.sp3;
+                                        y: Tokens.sp3;
+                                        width: parent.width - 2 * Tokens.sp3;
+                                        text: block.plain;
+                                        color: Tokens.text;
+                                        font-family: Tokens.mono;
+                                        font-size: Tokens.font-sm;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                                if block.kind == 4: Rectangle {
+                                    height: row-title.preferred-height + row-text.preferred-height + 4 * Tokens.sp3 + Tokens.sp2;
+                                    background: Tokens.sidebar;
+                                    border-radius: 6px;
+                                    row-title := Text {
+                                        x: Tokens.sp3;
+                                        y: Tokens.sp3;
+                                        width: parent.width - 2 * Tokens.sp3;
+                                        text: "Row " + block.prefix;
+                                        color: Tokens.accent;
+                                        font-size: Tokens.font-xs;
+                                        font-weight: Tokens.weight-emphasis;
+                                    }
+                                    row-text := Text {
+                                        x: Tokens.sp3;
+                                        y: Tokens.sp3 + row-title.preferred-height + Tokens.sp2;
+                                        width: parent.width - 2 * Tokens.sp3;
+                                        text: block.plain;
+                                        color: Tokens.text;
+                                        font-size: Tokens.font-md;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                                if block.kind == 5: Rectangle {
+                                    height: quote-text.preferred-height + 2 * Tokens.sp2;
+                                    Rectangle { width: 2px; height: parent.height; background: Tokens.accent; }
+                                    quote-text := MarkdownText {
+                                        x: Tokens.sp2;
+                                        y: Tokens.sp2;
+                                        width: parent.width - Tokens.sp2;
+                                        formatted: block.formatted;
+                                        plain: block.plain;
+                                        text-color: Tokens.text-dim;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if root.busy: HorizontalLayout {
+                        spacing: Tokens.sp2;
+                        AppIcon { name: "robot"; size: 16px; color: Tokens.accent; }
+                        Text {
+                            text: root.status != "" ? root.status : "Thinking…";
+                            color: Tokens.text-dim;
+                            font-size: Tokens.font-sm;
+                            vertical-alignment: center;
                         }
                     }
                 }
             }
-            if root.status != "": Text {
-                text: root.status;
-                color: Tokens.text-dim;
-                wrap: word-wrap;
-                font-size: Tokens.font-xs;
+            if root.status != "" && !root.busy: Rectangle {
+                background: Tokens.warn-tint;
+                border-radius: 8px;
+                height: status-text.preferred-height + 2 * Tokens.sp1;
+                vertical-stretch: 0;
+                status-text := Text {
+                    x: Tokens.sp2;
+                    y: Tokens.sp1;
+                    width: parent.width - 2 * Tokens.sp2;
+                    text: root.status;
+                    color: Tokens.text;
+                    wrap: word-wrap;
+                    font-size: Tokens.font-sm;
+                }
             }
             if root.proposed-write != "": VerticalLayout {
                 padding: Tokens.sp2;
@@ -220,15 +365,40 @@ export component AgentPanel inherits Rectangle {
                 wrap: word-wrap;
                 horizontal-alignment: center;
             }
+            if root.selection-preview != "": HorizontalLayout {
+                padding-left: Tokens.sp3;
+                padding-right: Tokens.sp3;
+                spacing: Tokens.sp1;
+                AppIcon { name: "terminal"; size: 16px; color: Tokens.accent; }
+                Text {
+                    text: root.selection-preview;
+                    color: Tokens.text;
+                    font-size: Tokens.font-xs;
+                    overflow: elide;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                IconButton { icon: "close"; tooltip: "Remove editor selection";
+                    clicked => { root.clear-selection(); } }
+            }
             HorizontalLayout {
                 padding-left: Tokens.sp3;
                 padding-right: Tokens.sp3;
                 TextEdit {
                     height: 88px;
-                    text: root.draft;
-                    edited => { root.draft = self.text; }
+                    text <=> root.draft;
+                    edited => { root.mention-query(self.text); }
                     wrap: word-wrap;
                     font-size: Tokens.font-sm;
+                }
+            }
+            if root.mention-options.length > 0: HorizontalLayout {
+                padding-left: Tokens.sp3;
+                padding-right: Tokens.sp3;
+                SelectBox {
+                    model: root.mention-options;
+                    current-value: "Choose a table";
+                    selected(name) => { root.mention-selected(name); }
                 }
             }
             HorizontalLayout {
@@ -240,7 +410,7 @@ export component AgentPanel inherits Rectangle {
                 if !root.busy: PrimaryButton {
                     text: "Send";
                     enabled: root.draft != "" && root.proposed-write == "";
-                    clicked => { root.send(root.draft); root.draft = ""; }
+                    clicked => { root.send(root.draft); }
                 }
             }
         }

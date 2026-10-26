@@ -295,6 +295,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     view: None,
                     indexes: Vec::new(),
                     loading: false,
+                    last_error: None,
                     pinned: true,
                     group: 0,
                     split: false,

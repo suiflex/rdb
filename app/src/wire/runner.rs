@@ -326,6 +326,7 @@ fn view_row_count(v: &model::ResultView) -> u64 {
 /// long-lived tab can be re-run after the user switches connection.
 struct RunStamp {
     connection_id: Option<String>,
+    database: String,
     badge: ConnBadgeInfo,
     elapsed_ms: u64,
     queue_ms: u64,
@@ -348,6 +349,7 @@ impl RunStamp {
             latency: model::format_latency(self.elapsed_ms),
             grid: GridState::default(),
             connection_id: self.connection_id.clone(),
+            database: self.database.clone(),
             engine: self.badge.engine.clone(),
             connection_name: self.badge.name.clone(),
             color: self.badge.color,
@@ -438,6 +440,7 @@ fn apply_split_results(t: &ResultTargets, splits: &[SplitResult], stamp: &RunSta
         .collect();
     let Some((first, all)) = t.with_tab(|tab| {
         tab.loading = false;
+        tab.last_error = None;
         tab.results = stored;
         tab.active_result = 0;
         tab.view = tab.results.first().cloned();
@@ -469,6 +472,7 @@ fn apply_single_result(
     let latency = sr.latency.clone();
     let Some((is_browse, tab_results, tab_active)) = t.with_tab(|tab| {
         tab.loading = false;
+        tab.last_error = None;
         tab.view = Some(sr.clone());
         let is_browse = tab.kind == "table";
         // ⌘\ opens a new result tab; snapshot the outgoing result's live grid
@@ -513,10 +517,18 @@ fn apply_single_result(
 fn apply_query_error(
     t: &ResultTargets,
     err: &rdb_core::error::RdbError,
+    stamp: &RunStamp,
     mark: Option<ErrorMark>,
     error_mark_state: &Arc<std::sync::Mutex<Option<ErrorMark>>>,
 ) {
-    t.with_tab(|tab| tab.loading = false);
+    t.with_tab(|tab| {
+        tab.loading = false;
+        tab.last_error = Some((
+            stamp.connection_id.clone().unwrap_or_default(),
+            stamp.database.clone(),
+            editor::strip_error_marker(&err.to_string()).to_string(),
+        ));
+    });
     if !t.is_active {
         return;
     }
@@ -710,6 +722,16 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                     )
                 })
                 .unwrap_or_default();
+            let result_db = weak
+                .upgrade()
+                .map(|w| {
+                    db_for_query(
+                        &w.get_bc_db(),
+                        &painted_connection,
+                        query_connection_id.as_deref(),
+                    )
+                })
+                .unwrap_or_default();
             let query_badge = query_connection_id
                 .as_deref()
                 .map(|cid| connection_badge_info(&store.borrow(), cid))
@@ -838,6 +860,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                     };
                     let stamp = RunStamp {
                         connection_id: query_connection_id,
+                        database: result_db,
                         badge: query_badge,
                         elapsed_ms,
                         queue_ms,
@@ -854,9 +877,13 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                                 apply_single_result(&targets, v, &stamp, n_stmts, new_tab, pk_hint);
                             }
                         }
-                        (None, Some(e)) => {
-                            apply_query_error(&targets, &e, error_mark_value, &error_mark_state)
-                        }
+                        (None, Some(e)) => apply_query_error(
+                            &targets,
+                            &e,
+                            &stamp,
+                            error_mark_value,
+                            &error_mark_state,
+                        ),
                         _ => {}
                     }
                 });
@@ -965,6 +992,11 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                 &painted_connection,
                 query_connection_id.as_deref(),
             );
+            let result_db = db_for_query(
+                &w.get_bc_db(),
+                &painted_connection,
+                query_connection_id.as_deref(),
+            );
             let query_badge = query_connection_id
                 .as_deref()
                 .map(|cid| connection_badge_info(&store.borrow(), cid))
@@ -1001,6 +1033,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                 let target_id = target_id.clone();
                 let query_connection_id = query_connection_id.clone();
                 let query_badge = query_badge.clone();
+                let result_db = result_db.clone();
                 timer.start(
                     slint::TimerMode::Repeated,
                     std::time::Duration::from_millis(50),
@@ -1046,6 +1079,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                                         latency: latency.clone(),
                                         grid: GridState::default(),
                                         connection_id: query_connection_id.clone(),
+                                        database: result_db.clone(),
                                         engine: query_badge.engine.clone(),
                                         connection_name: query_badge.name.clone(),
                                         color: query_badge.color,
@@ -1058,6 +1092,7 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                                             return;
                                         };
                                         tab.loading = false;
+                                        tab.last_error = None;
                                         tab.view = Some(sr.clone());
                                         store_result(
                                             &mut tab.results,
@@ -1133,6 +1168,11 @@ pub(crate) fn build(window: &MainWindow, state: &AppState) -> (PaneSqlFn, PaneSq
                                         .find(|t| t.id == target_id)
                                     {
                                         tab.loading = false;
+                                        tab.last_error = Some((
+                                            query_connection_id.clone().unwrap_or_default(),
+                                            result_db.clone(),
+                                            editor::strip_error_marker(&e).to_string(),
+                                        ));
                                     }
                                     let active_id = if pane == 1 {
                                         &active_group1_tab_id

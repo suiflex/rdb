@@ -65,8 +65,8 @@ export component MainWindow inherits Window {
     // instead, so the theme-mode override applies to Material widgets too.
     property <MaterialScheme> material-scheme: Tokens.material-scheme;
     changed material-scheme => { root.apply-material-scheme(); }
-    init => { root.apply-material-scheme(); root.agent-compact = root.width < 1000px; }
-    changed width => { root.agent-compact = root.width < 1000px; }
+    init => { root.apply-material-scheme(); root.agent-layout-width = root.width; }
+    changed width => { root.agent-layout-width = root.width; }
     function apply-material-scheme() {
         MaterialPalette.schemes = { light: root.material-scheme, dark: root.material-scheme };
     }
@@ -447,6 +447,7 @@ callback create-table-commit();
     in property <[bool]> editor-line-hidden;
     callback toggle-fold(int);
     in property <string> editor-placeholder;
+    in property <bool> editor-has-selection: false;
     in property <int> cursor-line;
     in property <int> cursor-visual-row;
     in property <int> cursor-col;
@@ -476,24 +477,41 @@ callback create-table-commit();
     // Place the sidebar on the right (detail panel flips to the left).
     in-out property <bool> sidebar-right: false;
     in-out property <bool> agent-open: false;
-    private property <bool> agent-compact: false;
+    in-out property <length> agent-panel-width: 360px;
+    private property <length> agent-layout-width: 1240px;
+    private property <length> agent-drag-start-width: 360px;
+    private property <length> agent-drag-start-x: 0px;
+    private property <bool> agent-compact: root.agent-layout-width < max(1000px,
+        (root.sidebar-visible && !root.sidebar-rail ? root.sidebar-w : 76px)
+            + root.agent-panel-width + 466px);
+    private property <length> agent-panel-max-width: max(300px,
+        root.agent-layout-width - 466px);
     in property <[AgentMessage]> agent-messages;
     in property <[string]> agent-conversations;
     in property <int> agent-selected-conversation: -1;
     in property <string> agent-connection-name;
+    in property <[string]> agent-connection-options;
+    in property <string> agent-connection-choice;
     in property <string> agent-database-name;
     in property <bool> agent-can-switch-database: false;
     in-out property <int> agent-mode: 0;
     in property <bool> agent-busy: false;
     in property <string> agent-status;
+    in property <string> agent-test-status;
+    in property <int> agent-test-state: 0;
     in property <string> agent-proposed-write;
     in property <string> agent-write-target;
+    in property <string> agent-selection-preview;
+    in property <[string]> agent-mention-options;
+    in-out property <string> agent-draft: "";
     in-out property <string> agent-config-name: "Default";
     in property <[string]> agent-config-options;
     in-out property <string> agent-config-choice: "";
+    in property <bool> agent-config-editing: false;
     in-out property <string> agent-config-provider: "OpenAI";
     in-out property <string> agent-config-endpoint: "https://api.openai.com/v1";
     in-out property <string> agent-config-model: "";
+    in-out property <[string]> agent-model-options;
     in-out property <string> agent-config-key: "";
     in-out property <string> agent-global-instructions: "";
     in-out property <string> agent-max-turns: "30";
@@ -507,17 +525,23 @@ callback create-table-commit();
     in property <[string]> agent-template-default-engines;
     in-out property <string> agent-template-engine-choice: "Choose engine";
     callback agent-new-conversation;
-    callback agent-export-answer;
     callback agent-choose-conversation(int);
     callback agent-delete-conversation(int);
     callback agent-mode-changed(int);
     callback agent-select-database(string);
+    callback agent-select-connection(string);
+    callback agent-refresh-connections;
     callback agent-send(string);
     callback agent-cancel;
     callback agent-approve-write;
     callback agent-reject-write;
+    callback agent-clear-selection;
+    callback agent-send-selection(int);
+    callback agent-mention-query(string);
+    callback agent-mention-selected(string);
     callback agent-save-config(string, string, string, string, string);
     callback agent-test-config(string, string, string, string);
+    callback agent-discover-models(string, string, string);
     callback agent-save-preferences(string, string, string);
     callback agent-choose-config(string);
     callback agent-new-config;
@@ -636,6 +660,7 @@ callback create-table-commit();
     in property <[int]> p1-editor-fold-state;
     in property <[bool]> p1-editor-line-hidden;
     in property <string> p1-editor-placeholder;
+    in property <bool> p1-editor-has-selection: false;
     in property <int> p1-cursor-line;
     in property <int> p1-cursor-visual-row;
     in property <int> p1-cursor-col;
@@ -1319,7 +1344,10 @@ callback create-table-commit();
                             icon: "robot";
                             tooltip: "Toggle Agent panel";
                             active: root.agent-open;
-                            clicked => { root.agent-open = !root.agent-open; }
+                            clicked => {
+                                root.agent-open = !root.agent-open;
+                                if (root.agent-open) { root.agent-refresh-connections(); }
+                            }
                         }
                     }
                     // Sidebar toggle sits on the sidebar's side: left of the
@@ -1944,6 +1972,7 @@ callback create-table-commit();
                         p1-editor-fold-state: root.p1-editor-fold-state;
                         p1-editor-line-hidden: root.p1-editor-line-hidden;
                         p1-editor-placeholder: root.p1-editor-placeholder;
+                        p1-editor-has-selection: root.p1-editor-has-selection;
                         p1-cursor-line: root.p1-cursor-line;
                         p1-cursor-visual-row: root.p1-cursor-visual-row;
                         p1-cursor-col: root.p1-cursor-col;
@@ -2051,6 +2080,7 @@ callback create-table-commit();
                         p1-editor-press(l, c, sh) => { root.p1-editor-press(l, c, sh); }
                         p1-editor-drag(l, r, c) => { root.p1-editor-drag(l, r, c); }
                         p1-editor-select-word(l, c) => { root.p1-editor-select-word(l, c); }
+                        p1-editor-send-selection => { root.agent-send-selection(1); }
                         p1-completion-choose(i) => { root.p1-completion-choose(i); }
                         p1-select-result-tab(i) => { root.p1-select-result-tab(i); }
                         p1-close-result-tab(i) => { root.p1-close-result-tab(i); }
@@ -2103,6 +2133,7 @@ callback create-table-commit();
                         editor-line-hidden: root.editor-line-hidden;
                         toggle-fold(l) => { root.toggle-fold(l); }
                         editor-placeholder: root.editor-placeholder;
+                        editor-has-selection: root.editor-has-selection;
                         cursor-line: root.cursor-line;
                         cursor-visual-row: root.cursor-visual-row;
                         cursor-col: root.cursor-col;
@@ -2150,6 +2181,7 @@ callback create-table-commit();
                         editor-press(l, c, sh) => { root.editor-press(l, c, sh); }
                         editor-drag(l, r, c) => { root.editor-drag(l, r, c); }
                         editor-select-word(l, c) => { root.editor-select-word(l, c); }
+                        editor-send-selection => { root.agent-send-selection(0); }
                         find-open: root.find-open;
                         find-text <=> root.find-text;
                         find-status: root.find-status;
@@ -2423,14 +2455,38 @@ callback create-table-commit();
                     filter-tree(t) => { root.filter-tree(t); }
                     add-item() => { root.new-table(); }
                 }
+                if root.agent-open: Rectangle {
+                    width: 6px;
+                    background: agent-divider.has-hover || agent-divider.pressed ? Tokens.accent : Tokens.border-strong;
+                    agent-divider := TouchArea {
+                        mouse-cursor: col-resize;
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                                root.agent-drag-start-width = root.agent-panel-width;
+                                root.agent-drag-start-x = parent.x + self.mouse-x;
+                            }
+                        }
+                        moved => {
+                            if (self.pressed) {
+                                root.agent-panel-width = clamp(
+                                    root.agent-drag-start-width - (parent.x + self.mouse-x - root.agent-drag-start-x),
+                                    300px, root.agent-panel-max-width);
+                            }
+                        }
+                    }
+                }
                 if root.agent-open: AgentPanel {
-                    width: 360px;
+                    width: clamp(root.agent-panel-width, 300px, root.agent-panel-max-width);
                     horizontal-stretch: 0;
                     messages: root.agent-messages;
                     conversations: root.agent-conversations;
                     selected-conversation: root.agent-selected-conversation;
                     connection-name: root.agent-selected-conversation < 0 ? root.bc-conn : root.agent-connection-name;
-                    database-name: root.agent-selected-conversation < 0 ? root.bc-db : root.agent-database-name;
+                    connection-options: root.agent-connection-options;
+                    connection-choice: root.agent-connection-choice;
+                    database-name: root.agent-selected-conversation < 0
+                        ? (root.agent-database-name != "" ? root.agent-database-name : root.bc-db)
+                        : root.agent-database-name;
                     database-options: root.agent-selected-conversation < 0 || root.agent-can-switch-database ? root.db-list : [];
                     model-options: root.agent-config-options;
                     model-name: root.agent-config-choice;
@@ -2441,12 +2497,15 @@ callback create-table-commit();
                     status: root.agent-status;
                     proposed-write: root.agent-proposed-write;
                     write-target: root.agent-write-target;
+                    selection-preview: root.agent-selection-preview;
+                    mention-options: root.agent-mention-options;
+                    draft <=> root.agent-draft;
                     close => { root.agent-open = false; }
                     select-database(name) => { root.agent-select-database(name); }
+                    select-connection(name) => { root.agent-select-connection(name); }
                     select-model(name) => { root.agent-choose-config(name); }
                     toggle-template(name) => { root.agent-toggle-template(name); }
                     new-conversation => { root.agent-new-conversation(); }
-                    export-answer => { root.agent-export-answer(); }
                     choose-conversation(i) => { root.agent-choose-conversation(i); }
                     delete-conversation(i) => { root.agent-delete-conversation(i); }
                     mode-changed(i) => { root.agent-mode-changed(i); }
@@ -2454,6 +2513,9 @@ callback create-table-commit();
                     cancel => { root.agent-cancel(); }
                     approve-write => { root.agent-approve-write(); }
                     reject-write => { root.agent-reject-write(); }
+                    clear-selection => { root.agent-clear-selection(); }
+                    mention-query(draft) => { root.agent-mention-query(draft); }
+                    mention-selected(name) => { root.agent-mention-selected(name); }
                 }
             }
         }
@@ -3589,10 +3651,14 @@ callback create-table-commit();
                         HorizontalLayout {
                             alignment: center;
                             spacing: 4px;
-                            if i == 3: AppIcon {
-                                name: "robot";
-                                size: 16px;
-                                color: root.settings-tab == i ? Tokens.accent : Tokens.text-dim;
+                            if i == 3: VerticalLayout {
+                                width: 16px;
+                                alignment: center;
+                                AppIcon {
+                                    name: "robot";
+                                    size: 16px;
+                                    color: root.settings-tab == i ? Tokens.accent : Tokens.text-dim;
+                                }
                             }
                             Text {
                                 text: tab;
@@ -3947,9 +4013,11 @@ callback create-table-commit();
                     config-name <=> root.agent-config-name;
                     config-options: root.agent-config-options;
                     config-choice <=> root.agent-config-choice;
+                    config-editing: root.agent-config-editing;
                     config-provider <=> root.agent-config-provider;
                     config-endpoint <=> root.agent-config-endpoint;
                     config-model <=> root.agent-config-model;
+                    model-options <=> root.agent-model-options;
                     config-key <=> root.agent-config-key;
                     global-instructions <=> root.agent-global-instructions;
                     max-turns <=> root.agent-max-turns;
@@ -3961,11 +4029,16 @@ callback create-table-commit();
                     template-default-engines: root.agent-template-default-engines;
                     template-engine-choice <=> root.agent-template-engine-choice;
                     status: root.agent-status;
+                    test-status: root.agent-test-status;
+                    test-state: root.agent-test-state;
                     save-config(name, provider, endpoint, model, key) => {
                         root.agent-save-config(name, provider, endpoint, model, key);
                     }
                     test-config(provider, endpoint, model, key) => {
                         root.agent-test-config(provider, endpoint, model, key);
+                    }
+                    discover-models(provider, endpoint, key) => {
+                        root.agent-discover-models(provider, endpoint, key);
                     }
                     choose-config(value) => { root.agent-choose-config(value); }
                     new-config => { root.agent-new-config(); }

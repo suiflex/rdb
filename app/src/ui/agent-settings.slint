@@ -1,5 +1,6 @@
 import { Tokens } from "tokens.slint";
-import { FooterTabs, FormField, IconButton, PrimaryButton, SecondaryButton, SelectBox, SettingsSectionHeader } from "components.slint";
+import { FooterTabs, FormField, IconButton, PrimaryButton, SecondaryButton, SelectBox, SettingsSectionHeader, TextButton } from "components.slint";
+import { AppIcon } from "icons.slint";
 import { TextEdit } from "std-widgets.slint";
 
 export component AgentSettings inherits VerticalLayout {
@@ -7,9 +8,11 @@ export component AgentSettings inherits VerticalLayout {
     in-out property <string> config-name: "Default";
     in property <[string]> config-options;
     in-out property <string> config-choice: "";
+    in property <bool> config-editing: false;
     in-out property <string> config-provider: "OpenAI";
     in-out property <string> config-endpoint: "https://api.openai.com/v1";
     in-out property <string> config-model: "";
+    in-out property <[string]> model-options;
     in-out property <string> config-key: "";
     in-out property <string> global-instructions: "";
     in-out property <string> max-turns: "30";
@@ -21,8 +24,11 @@ export component AgentSettings inherits VerticalLayout {
     in property <[string]> template-default-engines;
     in-out property <string> template-engine-choice: "Choose engine";
     in property <string> status;
+    in property <string> test-status;
+    in property <int> test-state: 0;
     callback save-config(string, string, string, string, string);
     callback test-config(string, string, string, string);
+    callback discover-models(string, string, string);
     callback choose-config(string);
     callback new-config;
     callback delete-config;
@@ -42,18 +48,43 @@ export component AgentSettings inherits VerticalLayout {
     }
     if root.section == 0: VerticalLayout {
         spacing: Tokens.sp2;
-        SettingsSectionHeader { label: "Model configuration"; }
+        SettingsSectionHeader { label: "Saved models"; }
+        if root.config-options.length == 0: Text {
+            text: "No models saved yet.";
+            color: Tokens.text-dim;
+            font-size: Tokens.font-sm;
+        }
+        for name in root.config-options: Rectangle {
+            height: 36px;
+            border-radius: Tokens.radius;
+            background: name == root.config-choice ? Tokens.accent-tint : Tokens.card;
+            HorizontalLayout {
+                spacing: Tokens.sp1;
+                TextButton {
+                    text: name;
+                    horizontal-stretch: 1;
+                    clicked => { root.choose-config(name); }
+                }
+                IconButton {
+                    icon: "pencil";
+                    tooltip: "Edit " + name;
+                    clicked => { root.choose-config(name); }
+                }
+            }
+        }
         HorizontalLayout {
             spacing: Tokens.sp1;
-            SelectBox {
-                model: root.config-options;
-                current-value <=> root.config-choice;
-                selected(value) => { root.choose-config(value); }
+            SecondaryButton { text: "Add model"; clicked => { root.new-config(); } }
+            if root.config-editing: SecondaryButton {
+                text: "Delete selected";
+                clicked => { root.delete-config(); }
             }
-            IconButton { icon: "plus"; tooltip: "New model configuration";
-                clicked => { root.new-config(); } }
-            IconButton { icon: "close"; tooltip: "Delete model configuration";
-                clicked => { root.delete-config(); } }
+        }
+        SettingsSectionHeader { label: root.config-editing ? "Edit model" : "New model"; }
+        if root.config-editing: Text {
+            text: "Editing " + root.config-choice;
+            color: Tokens.text-dim;
+            font-size: Tokens.font-xs;
         }
         FormField { text <=> root.config-name; placeholder: "Configuration name"; height: 36px; }
         SelectBox {
@@ -61,6 +92,7 @@ export component AgentSettings inherits VerticalLayout {
                 "OpenAI Compatible", "Anthropic Compatible", "Ollama"];
             current-value <=> root.config-provider;
             selected(value) => {
+                root.model-options = [];
                 root.config-endpoint = value == "OpenAI" ? "https://api.openai.com/v1"
                     : value == "Anthropic" ? "https://api.anthropic.com/v1"
                     : value == "Gemini" ? "https://generativelanguage.googleapis.com/v1beta"
@@ -72,7 +104,21 @@ export component AgentSettings inherits VerticalLayout {
             }
         }
         FormField { text <=> root.config-endpoint; placeholder: "API endpoint"; height: 36px; }
-        FormField { text <=> root.config-model; placeholder: "Model"; height: 36px; }
+        HorizontalLayout {
+            spacing: Tokens.sp1;
+            FormField { text <=> root.config-model; placeholder: "Model";
+                height: 36px; horizontal-stretch: 1; }
+            SecondaryButton {
+                text: "Find models";
+                clicked => {
+                    root.discover-models(root.config-provider, root.config-endpoint, root.config-key);
+                }
+            }
+        }
+        if root.model-options.length > 0: SelectBox {
+            model: root.model-options;
+            current-value <=> root.config-model;
+        }
         FormField { text <=> root.config-key; placeholder: "API key (leave empty to keep)";
             input-type: InputType.password; height: 36px; }
         HorizontalLayout {
@@ -90,6 +136,22 @@ export component AgentSettings inherits VerticalLayout {
                     root.save-config(root.config-name, root.config-provider,
                         root.config-endpoint, root.config-model, root.config-key);
                 }
+            }
+        }
+        if root.test-status != "": Rectangle {
+            background: root.test-state == 1 ? Tokens.ok-tint
+                : root.test-state == 2 ? Tokens.error-tint : Tokens.card;
+            border-radius: Tokens.radius;
+            height: test-message.preferred-height + 2 * Tokens.sp1;
+            test-message := Text {
+                x: Tokens.sp2;
+                y: Tokens.sp1;
+                width: parent.width - 2 * Tokens.sp2;
+                text: root.test-status;
+                color: root.test-state == 1 ? Tokens.ok
+                    : root.test-state == 2 ? Tokens.error : Tokens.text-dim;
+                font-size: Tokens.font-xs;
+                wrap: word-wrap;
             }
         }
     }

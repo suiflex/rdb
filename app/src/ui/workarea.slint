@@ -89,6 +89,7 @@ export component WorkArea inherits Rectangle {
     in property <[bool]> editor-line-hidden;
     callback toggle-fold(int);
     in property <string> editor-placeholder;
+    in property <bool> editor-has-selection: false;
     in property <int> cursor-line;
     in property <int> cursor-visual-row;
     in property <int> cursor-col;
@@ -115,6 +116,7 @@ export component WorkArea inherits Rectangle {
     callback editor-press(int, int, bool);
     callback editor-drag(int, int, int);
     callback editor-select-word(int, int);
+    callback editor-send-selection;
     in property <bool> find-open;
     in-out property <string> find-text;
     in property <string> find-status;
@@ -156,6 +158,7 @@ export component WorkArea inherits Rectangle {
     in property <[int]> p1-editor-fold-state;
     in property <[bool]> p1-editor-line-hidden;
     in property <string> p1-editor-placeholder;
+    in property <bool> p1-editor-has-selection: false;
     in property <int> p1-cursor-line;
     in property <int> p1-cursor-visual-row;
     in property <int> p1-cursor-col;
@@ -264,6 +267,7 @@ export component WorkArea inherits Rectangle {
     callback p1-editor-press(int, int, bool);
     callback p1-editor-drag(int, int, int);
     callback p1-editor-select-word(int, int);
+    callback p1-editor-send-selection;
     callback p1-completion-choose(int);
     callback p1-select-result-tab(int);
     callback p1-close-result-tab(int);
@@ -481,6 +485,7 @@ export component WorkArea inherits Rectangle {
             editor-fold-state: root.editor-fold-state;
             editor-line-hidden: root.editor-line-hidden;
             editor-placeholder: root.editor-placeholder;
+            editor-has-selection: root.editor-has-selection;
             cursor-line: root.cursor-line;
             cursor-visual-row: root.cursor-visual-row;
             cursor-col: root.cursor-col;
@@ -495,6 +500,7 @@ export component WorkArea inherits Rectangle {
             editor-press(l, c, sh) => { root.editor-press(l, c, sh); }
             editor-drag(l, r, c) => { root.editor-drag(l, r, c); }
             editor-select-word(l, c) => { root.editor-select-word(l, c); }
+            editor-send-selection => { root.editor-send-selection(); }
             completion-items: root.completion-items;
             completion-visible: root.completion-visible;
             completion-selected: root.completion-selected;
@@ -641,6 +647,7 @@ export component WorkArea inherits Rectangle {
                 editor-fold-state: root.p1-editor-fold-state;
                 editor-line-hidden: root.p1-editor-line-hidden;
                 editor-placeholder: root.p1-editor-placeholder;
+                editor-has-selection: root.p1-editor-has-selection;
                 cursor-line: root.p1-cursor-line;
                 cursor-visual-row: root.p1-cursor-visual-row;
                 cursor-col: root.p1-cursor-col;
@@ -655,6 +662,7 @@ export component WorkArea inherits Rectangle {
                 editor-press(l, c, sh) => { root.p1-editor-press(l, c, sh); }
                 editor-drag(l, r, c) => { root.p1-editor-drag(l, r, c); }
                 editor-select-word(l, c) => { root.p1-editor-select-word(l, c); }
+                editor-send-selection => { root.p1-editor-send-selection(); }
                 completion-items: root.p1-completion-items;
                 completion-visible: root.p1-completion-visible;
                 completion-selected: root.p1-completion-selected;
