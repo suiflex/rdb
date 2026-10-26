@@ -53,10 +53,15 @@ Start here, before opening anything:
 
 RDB is a Cargo workspace:
 
-- `app/` — the Slint UI binary (`rdb`), the only crate that names a concrete
-  driver (in `app/src/dispatch.rs`).
+- `app/` — the Slint UI binary (`rdb`); `app/src/dispatch.rs` re-exports the
+  shared driver dispatch.
 - `crates/core/` — the `Driver` trait, `Query`, `ResultSet`, `Schema`, errors.
 - `crates/connstore/` — saved connections + OS keychain / AES-GCM.
+- `crates/tunnel/` — SSH tunnels for database connections.
+- `crates/runtime/` — concrete driver dispatch, connection runtime, and mock.
+- `crates/agent/` — in-app Assistant sessions, tools, models, and settings.
+- `crates/cli/` — terminal manager for MCP registration.
+- `crates/mcp/` — stdio MCP server for external agent clients.
 - `crates/driver-*/` — one crate per engine, each implementing `Driver`:
   `postgres`, `mysql`, `redis`, `mongo`, `sqlite`, `cassandra`, `mssql`, `oracle`,
   `clickhouse`.
@@ -91,7 +96,7 @@ in-memory data and no database at all — see
 ## Build, lint, test
 
 A root `Makefile` wraps the common Cargo invocations and splits the frontend
-(the `rdb` UI binary) from the backend (the `crates/*` libraries). Run
+(the `rdb` UI binary) from backend libraries. Run
 `make help` for the full list. The most common targets:
 
 ```bash
@@ -114,14 +119,16 @@ those are intentionally kept out of CI.
 
 ### What CI covers
 
-Every backend crate has its own workflow in `.github/workflows/`, and all eleven
-are in the `Makefile`'s `BE_PKGS`, so `make be-test` and CI agree on scope.
-Each workflow also watches `crates/core/**`, so a change to `core` fans out and
-retests its dependents.
+Package-scoped workflows in `.github/workflows/` cover the app, core,
+connstore, tunnel, drivers, runtime, agent, CLI, and MCP. The `Makefile`'s
+`BE_PKGS` contains the backend libraries. CLI and MCP have their own workflows
+because they are command-line programs. Workflows use path
+filters, including dependency paths where needed.
 
-Backend jobs run `cargo fmt -p <pkg> --check`, `cargo clippy -p <pkg>
---all-targets -- -D warnings`, and `cargo test -p <pkg> --lib`. The `--lib`
-matters: the Docker-backed integration tests are not part of that run.
+Backend jobs run package-scoped format, Clippy, and unit tests. Driver
+integration tests need Docker and are run locally with `make test-it`. Runtime
+tests enable the `mock` feature; CLI and MCP workflows test their binary
+targets.
 
 ## Running and testing the app
 
@@ -170,8 +177,8 @@ The two structural pieces are:
 
 1. A new `crates/driver-<engine>/` crate implementing the `Driver` trait from
    `rdb-core`.
-2. A variant in the `AnyDriver` enum in `app/src/dispatch.rs`, forwarding the
-   trait methods.
+2. A variant in the `AnyDriver` enum in `crates/runtime/src/lib.rs`,
+   forwarding the trait methods.
 
 Once `AnyDriver` has the variant, run `cargo build -p rdb` and fix every error
 it reports. The compiler enumerates the exhaustive `Engine` / `Query` match
