@@ -23,7 +23,7 @@ rdb-driver-oracle = { path = "../driver-oracle" }
 rdb-driver-clickhouse = { path = "../driver-clickhouse" }
 rdb-tunnel = { path = "../tunnel" }
 tokio = { version = "1", features = ["sync", "time"] }
-parking_lot = { version = "0.12", optional = true }
+parking_lot = { version = "0.13", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
