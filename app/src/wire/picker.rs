@@ -1250,10 +1250,10 @@ fn wire_screen_harness(
                         });
                         w.set_settings_open(true);
                     }
-                    if !w.get_agent_open() {
+                    if !send_selection && !w.get_agent_open() {
                         screen_fail("agent panel did not open");
                     }
-                    if (send_chat || send_selection) && w.get_agent_selected_conversation() < 0 {
+                    if send_chat && w.get_agent_selected_conversation() < 0 {
                         screen_fail("sent message did not open a conversation");
                     }
                     if !send_chat && !send_selection && w.get_agent_selected_conversation() >= 0 {
@@ -1287,6 +1287,9 @@ fn wire_screen_harness(
                     "selection panel opened",
                     Rc::new(|w| w.get_agent_open()),
                     Rc::new(|w| {
+                        if w.get_agent_selected_conversation() < 0 {
+                            screen_fail("sent message did not open a conversation");
+                        }
                         if w.get_agent_selection_preview().is_empty() {
                             screen_fail("editor selection disappeared before panel opened");
                         }
