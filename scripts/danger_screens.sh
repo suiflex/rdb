@@ -43,6 +43,7 @@ agent-model
 agent-template
 agent-settings-templates
 agent-approval
+agent-busy
 workspace-users-bool
 workspace-users-date
 rail
