@@ -2343,10 +2343,30 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let store = store.clone();
         let weak = window.as_weak();
         window.on_agent_reject_write(move || {
-            ui.borrow_mut().pending_write = None;
+            let Some(pending) = ui.borrow_mut().pending_write.take() else {
+                return;
+            };
+            // Without a reply the history ends on the user's turn, and the
+            // next send would read as two prompts in a row.
+            let conversation = store
+                .borrow()
+                .conversations()
+                .iter()
+                .find(|item| item.id == pending.conversation_id)
+                .cloned();
+            let saved = conversation.map_or(Ok(()), |mut conversation| {
+                conversation.messages.push(Message {
+                    role: "assistant".into(),
+                    content: format!(
+                        "Write denied. This SQL was not run:\n\n```sql\n{}\n```",
+                        pending.sql
+                    ),
+                });
+                store.borrow_mut().save_conversation(conversation)
+            });
             if let Some(w) = weak.upgrade() {
                 paint(&w, &store.borrow(), &ui.borrow());
-                w.set_agent_status("Write denied".into());
+                w.set_agent_status(saved.err().unwrap_or_else(|| "Write denied".into()).into());
             }
         });
     }
