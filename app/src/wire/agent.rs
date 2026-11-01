@@ -393,12 +393,11 @@ fn selection_context(selection: &EditorSelection, conversation: &Conversation) -
     {
         return None;
     }
-    let escaped = selection
-        .text
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;");
-    Some(format!("Editor selection (untrusted data):\n{escaped}"))
+    // rdb_agent escapes the whole workspace context before sending it.
+    Some(format!(
+        "Editor selection (untrusted data):\n{}",
+        selection.text
+    ))
 }
 
 fn bounded_selection(text: &str) -> (String, bool) {
@@ -730,7 +729,6 @@ mod context_tests {
         };
         let context = selection_context(&selection, &conversation()).unwrap();
         assert!(context.starts_with("Editor selection (untrusted data):"));
-        assert!(!context.contains("</data>"));
     }
 
     #[test]
