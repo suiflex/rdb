@@ -1,6 +1,6 @@
 import { Tokens } from "tokens.slint";
 import { AgentMessage } from "structs.slint";
-import { BreadcrumbChip, ChoiceRow, DangerButton, IconButton, PrimaryButton, SecondaryButton, SelectBox, TooltipArea } from "components.slint";
+import { BreadcrumbChip, DangerButton, IconButton, PrimaryButton, SecondaryButton, SelectBox, TooltipArea } from "components.slint";
 import { AppIcon } from "icons.slint";
 import { ScrollView, TextEdit } from "std-widgets.slint";
 
@@ -53,6 +53,72 @@ component MiniAction inherits Rectangle {
     area := TooltipArea {
         tip: root.tip;
         clicked => { root.clicked(); }
+    }
+}
+
+// A read-only value in the context row, sized like a SelectBox so the row
+// keeps one height whether or not there is anything to choose.
+component ContextChip inherits Rectangle {
+    in property <string> icon;
+    in property <string> text;
+    min-height: 36px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: Tokens.border;
+    HorizontalLayout {
+        padding-left: Tokens.sp2;
+        padding-right: Tokens.sp2;
+        spacing: Tokens.sp1;
+        VerticalLayout {
+            alignment: center;
+            AppIcon { name: root.icon; size: 14px; color: Tokens.text-dim; }
+        }
+        Text {
+            text: root.text;
+            color: Tokens.text;
+            font-size: Tokens.font-sm;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+    }
+}
+
+component ModeSegment inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    callback clicked;
+    preferred-width: label.preferred-width + 2 * Tokens.sp2;
+    border-radius: 6px;
+    background: root.active ? Tokens.accent-tint : area.has-hover ? Tokens.border : transparent;
+    accessible-role: tab;
+    accessible-label: root.text;
+    accessible-checked: root.active;
+    accessible-action-default => { root.clicked(); }
+    label := Text {
+        text: root.text;
+        color: root.active ? Tokens.on-tint : Tokens.text-dim;
+        font-size: Tokens.font-sm;
+        font-weight: root.active ? Tokens.weight-emphasis : 400;
+    }
+    area := TouchArea { clicked => { root.clicked(); } }
+}
+
+// Ask / Agent as a compact two-segment switch for the composer toolbar.
+component ModeToggle inherits Rectangle {
+    in property <int> mode;
+    callback chosen(int);
+    height: 36px;
+    width: ask.preferred-width + agent.preferred-width + 2 * 3px;
+    border-radius: 8px;
+    background: Tokens.card;
+    border-width: 1px;
+    border-color: Tokens.border;
+    accessible-role: tab-list;
+    HorizontalLayout {
+        padding: 3px;
+        ask := ModeSegment { text: "Ask"; active: root.mode == 0; clicked => { root.chosen(0); } }
+        agent := ModeSegment { text: "Agent"; active: root.mode == 1; clicked => { root.chosen(1); } }
     }
 }
 
@@ -139,52 +205,44 @@ export component AgentPanel inherits Rectangle {
 
         VerticalLayout {
             spacing: Tokens.sp2;
-            if root.connection-name != "": VerticalLayout {
+            // Where the conversation runs, in one row: connection, then
+            // database. Labels live in the tooltips; the values say enough.
+            if root.connection-name != "": HorizontalLayout {
                 padding-left: Tokens.sp3;
                 padding-right: Tokens.sp3;
+                padding-top: Tokens.sp2;
                 spacing: Tokens.sp1;
-                Text { text: "Connection"; color: Tokens.text-dim; font-size: Tokens.font-xs; }
                 if root.connection-options.length > 0: SelectBox {
+                    horizontal-stretch: 3;
+                    accessible-label: "Connection";
                     model: root.connection-options;
                     current-value: root.connection-choice;
                     selected(name) => { root.select-connection(name); }
                 }
-                if root.connection-options.length == 0: Text {
-                    text: root.connection-name; color: Tokens.text;
-                    font-size: Tokens.font-sm; overflow: elide; }
-                if root.database-name != "" || root.database-options.length > 1: Text {
-                    text: "Database"; color: Tokens.text-dim; font-size: Tokens.font-xs; }
+                if root.connection-options.length == 0: ContextChip {
+                    horizontal-stretch: 3;
+                    icon: "database";
+                    text: root.connection-name;
+                }
                 if root.database-options.length > 1: SelectBox {
+                    horizontal-stretch: 2;
+                    accessible-label: "Database";
                     model: root.database-options;
                     current-value: root.database-name;
                     selected(name) => { root.select-database(name); }
                 }
-                if root.database-options.length <= 1 && root.database-name != "": Text {
+                if root.database-options.length <= 1 && root.database-name != "": ContextChip {
+                    horizontal-stretch: 2;
+                    icon: "layers";
                     text: root.database-name;
-                    color: Tokens.text;
-                    font-size: Tokens.font-sm;
-                    overflow: elide;
-                }
-            }
-            if root.model-options.length > 0: HorizontalLayout {
-                padding-left: Tokens.sp3;
-                padding-right: Tokens.sp3;
-                spacing: Tokens.sp1;
-                Text { text: "Model"; color: Tokens.text-dim; font-size: Tokens.font-xs;
-                    vertical-alignment: center; }
-                SelectBox {
-                    model: root.model-options;
-                    current-value: root.model-name;
-                    selected(name) => { root.select-model(name); }
                 }
             }
             if root.template-options.length > 0: VerticalLayout {
                 padding-left: Tokens.sp3;
                 padding-right: Tokens.sp3;
                 spacing: Tokens.sp1;
-                Text { text: "Prompt templates"; color: Tokens.text-dim;
-                    font-size: Tokens.font-xs; }
                 SelectBox {
+                    accessible-label: "Prompt templates";
                     model: root.template-options;
                     current-value <=> root.template-choice;
                     selected(name) => { root.toggle-template(name); root.template-choice = "Add a template"; }
@@ -193,7 +251,7 @@ export component AgentPanel inherits Rectangle {
                     spacing: Tokens.sp1;
                     Text { text: name; color: Tokens.text; font-size: Tokens.font-xs;
                         overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
-                    IconButton { icon: "close"; tooltip: "Remove prompt template";
+                    MiniAction { icon: "close"; tip: "Remove prompt template";
                         clicked => { root.toggle-template(name); } }
                 }
             }
@@ -555,15 +613,6 @@ export component AgentPanel inherits Rectangle {
                     }
                 }
             }
-            ChoiceRow {
-                padding-left: Tokens.sp3;
-                padding-right: Tokens.sp3;
-                label: "Mode";
-                option-a: "Ask";
-                option-b: "Agent";
-                index: root.mode;
-                chosen(i) => { root.mode = i; root.mode-changed(i); }
-            }
             Text {
                 text: root.mode == 0
                     ? "Ask suggests SQL without running queries."
@@ -609,11 +658,24 @@ export component AgentPanel inherits Rectangle {
                     selected(name) => { root.mention-selected(name); }
                 }
             }
+            // Composer toolbar: how to answer, with which model, and go.
             HorizontalLayout {
                 padding-left: Tokens.sp3;
                 padding-right: Tokens.sp3;
                 padding-bottom: Tokens.sp2;
-                Rectangle { horizontal-stretch: 1; }
+                spacing: Tokens.sp1;
+                ModeToggle {
+                    mode: root.mode;
+                    chosen(i) => { root.mode = i; root.mode-changed(i); }
+                }
+                if root.model-options.length > 0: SelectBox {
+                    horizontal-stretch: 1;
+                    accessible-label: "Model";
+                    model: root.model-options;
+                    current-value: root.model-name;
+                    selected(name) => { root.select-model(name); }
+                }
+                if root.model-options.length == 0: Rectangle { horizontal-stretch: 1; }
                 if root.busy: SecondaryButton { text: "Stop"; clicked => { root.cancel(); } }
                 if !root.busy && root.can-retry && root.proposed-write == "": SecondaryButton {
                     text: "Retry";
