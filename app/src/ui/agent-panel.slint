@@ -104,6 +104,32 @@ component ModeSegment inherits Rectangle {
     area := TouchArea { clicked => { root.clicked(); } }
 }
 
+// One empty-state suggestion: a full-width outlined row.
+component StarterChip inherits Rectangle {
+    in property <string> text;
+    callback clicked;
+    height: 36px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: Tokens.border;
+    background: area.has-hover ? Tokens.card : transparent;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+    HorizontalLayout {
+        padding-left: Tokens.sp3;
+        padding-right: Tokens.sp3;
+        Text {
+            text: root.text;
+            color: Tokens.text;
+            font-size: Tokens.font-sm;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+    area := TouchArea { clicked => { root.clicked(); } }
+}
+
 // Ask / Agent as a compact two-segment switch for the composer toolbar.
 component ModeToggle inherits Rectangle {
     in property <int> mode;
@@ -298,12 +324,16 @@ export component AgentPanel inherits Rectangle {
                 padding-left: Tokens.sp4;
                 padding-right: Tokens.sp4;
                 spacing: Tokens.sp2;
-                AppIcon { name: "robot"; size: 32px; color: Tokens.text-dim; }
+                HorizontalLayout {
+                    alignment: center;
+                    AppIcon { name: "robot"; size: 32px; color: Tokens.text-dim; }
+                }
                 Text {
                     text: "Explore your database";
                     color: Tokens.text;
                     font-size: Tokens.font-md;
                     font-weight: Tokens.weight-emphasis;
+                    horizontal-alignment: center;
                 }
                 Text {
                     text: "Ask for SQL help, or let Agent inspect real data.";
@@ -311,6 +341,24 @@ export component AgentPanel inherits Rectangle {
                     wrap: word-wrap;
                     font-size: Tokens.font-sm;
                     horizontal-alignment: center;
+                }
+                // Starting points that fill the composer rather than send, so
+                // the user finishes the sentence.
+                VerticalLayout {
+                    padding-top: Tokens.sp2;
+                    spacing: Tokens.sp1;
+                    for starter in [
+                        { label: "Describe a table", text: "Describe @" },
+                        { label: "Explain the last error", text: "Explain the last query error and suggest a fix." },
+                        { label: "Write a query", text: "Write a query that " },
+                    ]: StarterChip {
+                        text: starter.label;
+                        clicked => {
+                            root.draft = starter.text;
+                            root.mention-query(starter.text);
+                            composer.focus();
+                        }
+                    }
                 }
             }
             if root.messages.length > 0: messages-scroll := ScrollView {
