@@ -593,6 +593,91 @@ mod context_tests {
     }
 
     #[test]
+    fn assistant_connection_targets_the_conversation_database() {
+        let saved = ConnConfig {
+            host: "203.0.113.10".into(),
+            port: 5432,
+            user: "sample_user".into(),
+            database: Some("sample_db".into()),
+            password: None,
+            sslmode: rdb_core::conn::SslMode::Disable,
+            params: None,
+            ssh: None,
+        };
+        let config = agent_connection_config(saved.clone(), Engine::Postgres, "analytics");
+        assert_eq!(config.database.as_deref(), Some("analytics"));
+        assert_eq!(config.host, "203.0.113.10");
+        // An empty conversation database keeps the saved one.
+        let config = agent_connection_config(saved.clone(), Engine::MySql, "");
+        assert_eq!(config.database.as_deref(), Some("sample_db"));
+        // SQLite's database is the file; "main" must not replace it.
+        let file = ConnConfig {
+            database: Some("/tmp/sample.sqlite".into()),
+            ..saved
+        };
+        let config = agent_connection_config(file, Engine::Sqlite, "main");
+        assert_eq!(config.database.as_deref(), Some("/tmp/sample.sqlite"));
+    }
+
+    /// Review reproduction: Stop used to cancel through the shared driver and
+    /// interrupted an editor query on the same SQLite connection.
+    #[test]
+    fn stop_cancels_only_the_runs_own_connection() {
+        let rt = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap(),
+        );
+        let path =
+            std::env::temp_dir().join(format!("rdb-agent-stop-{}.sqlite", std::process::id()));
+        let config = ConnConfig {
+            host: String::new(),
+            port: 0,
+            user: String::new(),
+            database: Some(path.to_string_lossy().into_owned()),
+            password: None,
+            sslmode: rdb_core::conn::SslMode::Disable,
+            params: None,
+            ssh: None,
+        };
+        let (editor, own) = rt.block_on(async {
+            (
+                Arc::new(AnyDriver::connect(Engine::Sqlite, &config).await.unwrap()),
+                Arc::new(AnyDriver::connect(Engine::Sqlite, &config).await.unwrap()),
+            )
+        });
+        let slow = rdb_core::query::Query::Sql(
+            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000000) \
+             SELECT count(*) FROM n"
+                .into(),
+        );
+        let editor_query = {
+            let editor = editor.clone();
+            rt.spawn(async move { editor.query(&slow).await })
+        };
+        // Let the editor's statement start before Stop arrives.
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        let run_task = rt.spawn(std::future::pending::<()>());
+        let mut run = UiRun {
+            running: Some(Running {
+                abort: run_task.abort_handle(),
+                connection_id: "sample-connection".into(),
+                driver: Arc::new(Mutex::new(Some(own))),
+                write: false,
+            }),
+            ..UiRun::default()
+        };
+        assert!(!Stopper { rt: rt.clone() }.stop(&mut run));
+        let finished = rt.block_on(editor_query).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            finished.is_ok(),
+            "Stop interrupted the editor's query: {finished:?}"
+        );
+    }
+
+    #[test]
     fn progress_names_the_turn_and_the_step() {
         let progress = |turn, max_turns, tool: Option<&str>| Progress {
             turn,
