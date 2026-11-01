@@ -13,6 +13,8 @@ npm i -g @suiflex/rdb
 The postinstall step downloads the prebuilt RDB desktop, `rdb-cli`, and
 `rdb-mcp` binaries for your platform (macOS, Linux, Windows — x64 & arm64)
 from the matching [GitHub Release](https://github.com/suiflex/rdb/releases).
+If npm skips install scripts (`--ignore-scripts` or an `allowScripts` policy),
+the first `rdb`, `rdb-cli`, or `rdb-mcp` run downloads them instead.
 Run the desktop app with:
 
 ```bash
