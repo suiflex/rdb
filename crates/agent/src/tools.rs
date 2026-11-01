@@ -1155,4 +1155,47 @@ mod tests {
             .parse_query(&cql("SELECT * FROM app.events"), true)
             .is_err());
     }
+    #[test]
+    fn mariadb_executable_comments_are_refused() {
+        for engine in [Engine::MySql, Engine::MariaDb] {
+            for sql in ["SELECT 1 /*!, SLEEP(5) */", "SELECT 1 /*M!, SLEEP(5) */"] {
+                assert!(validate_sql(sql, false, engine, "main").is_err(), "{sql}");
+            }
+        }
+        assert!(validate_sql("SELECT 1 /* plain note */", false, Engine::MariaDb, "main").is_ok());
+    }
+
+    #[test]
+    fn write_risk_sees_changes_nested_in_ctes() {
+        for sql in [
+            "WITH removed AS (DELETE FROM orders RETURNING *) SELECT count(*) FROM removed",
+            "WITH changed AS (UPDATE orders SET status = 'void' RETURNING *) SELECT * FROM changed",
+        ] {
+            assert!(
+                validate_sql(sql, true, Engine::Postgres, "main").is_ok(),
+                "{sql}"
+            );
+            assert_eq!(write_risk(sql), WriteRisk::Destructive, "{sql}");
+        }
+        let filtered =
+            "WITH removed AS (DELETE FROM orders WHERE id = 1 RETURNING *) SELECT * FROM removed";
+        assert_eq!(write_risk(filtered), WriteRisk::Write);
+    }
+
+    #[tokio::test]
+    async fn cte_delete_proposal_is_destructive() {
+        let runner = sqlite_runner(&["CREATE TABLE orders (id INTEGER)"]).await;
+        let sql = "WITH removed AS (DELETE FROM orders RETURNING *) SELECT count(*) FROM removed";
+        let proposal = ToolCall {
+            name: "propose_write".into(),
+            arguments: json!({ "query": sql }),
+        };
+        assert!(matches!(
+            runner.execute(&proposal).await.unwrap(),
+            ToolResult::WriteProposal {
+                risk: WriteRisk::Destructive,
+                ..
+            }
+        ));
+    }
 }
