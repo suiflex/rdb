@@ -1,5 +1,5 @@
 import { Tokens } from "tokens.slint";
-import { FooterTabs, FormField, IconButton, PrimaryButton, SecondaryButton, SelectBox, SettingsSectionHeader, TextButton } from "components.slint";
+import { FooterTabs, FormField, IconButton, PrimaryButton, SecondaryButton, SelectBox, SettingsSectionHeader, TextButton, ToggleRow } from "components.slint";
 import { AppIcon } from "icons.slint";
 import { TextEdit } from "std-widgets.slint";
 
@@ -17,6 +17,7 @@ export component AgentSettings inherits VerticalLayout {
     in-out property <string> global-instructions: "";
     in-out property <string> max-turns: "30";
     in-out property <string> max-api-retries: "2";
+    in-out property <bool> share-result-preview: false;
     in property <[string]> template-options;
     in-out property <string> template-choice: "";
     in-out property <string> template-name: "";
@@ -32,7 +33,7 @@ export component AgentSettings inherits VerticalLayout {
     callback choose-config(string);
     callback new-config;
     callback delete-config;
-    callback save-preferences(string, string, string);
+    callback save-preferences(string, string, string, bool);
     callback choose-template(string);
     callback new-template;
     callback delete-template;
@@ -168,10 +169,17 @@ export component AgentSettings inherits VerticalLayout {
         }
         FormField { text <=> root.max-turns; placeholder: "Maximum Agent turns (5–500)"; height: 36px; }
         FormField { text <=> root.max-api-retries; placeholder: "Maximum API retries (0–10)"; height: 36px; }
+        ToggleRow {
+            label: "Share result preview";
+            description: "Send up to 5 rows of the latest result to the model provider as context.";
+            checked: root.share-result-preview;
+            toggled => { root.share-result-preview = !root.share-result-preview; }
+        }
         PrimaryButton {
             text: "Save behavior";
             clicked => {
-                root.save-preferences(root.global-instructions, root.max-turns, root.max-api-retries);
+                root.save-preferences(root.global-instructions, root.max-turns, root.max-api-retries,
+                    root.share-result-preview);
             }
         }
     }
