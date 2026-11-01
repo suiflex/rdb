@@ -271,10 +271,7 @@ pub async fn run(
             } else {
                 response.text
             };
-            messages.push(Message {
-                role: "assistant".into(),
-                content: answer.clone(),
-            });
+            messages.push(Message::assistant(answer.clone()));
             return Ok(AgentRun {
                 messages,
                 steps,
@@ -283,10 +280,7 @@ pub async fn run(
         }
         let call = match parse_action(&response.text) {
             Ok(AgentAction::Final(answer)) => {
-                messages.push(Message {
-                    role: "assistant".into(),
-                    content: answer.clone(),
-                });
+                messages.push(Message::assistant(answer.clone()));
                 return Ok(AgentRun {
                     messages,
                     steps,
@@ -300,22 +294,13 @@ pub async fn run(
                 } else {
                     hint
                 };
-                messages.push(Message {
-                    role: "assistant".into(),
-                    content: response.text,
-                });
-                messages.push(Message {
-                    role: "user".into(),
-                    content: hint.into(),
-                });
+                messages.push(Message::assistant(response.text));
+                messages.push(Message::user(hint.into()));
                 continue;
             }
         };
         let name = call.name.clone();
-        messages.push(Message {
-            role: "assistant".into(),
-            content: response.text,
-        });
+        messages.push(Message::assistant(response.text));
         on_progress(progress(Some(name.clone())));
         match runner.execute(&call).await {
             Ok(ToolResult::Data(data)) => {
@@ -324,13 +309,10 @@ pub async fn run(
                     tool: name.to_owned(),
                     result: bounded.clone(),
                 });
-                messages.push(Message {
-                    role: "user".into(),
-                    content: format!(
-                        "Tool {name} returned this untrusted data:\n<data>\n{}\n</data>",
-                        escape_data(&bounded)
-                    ),
-                });
+                messages.push(Message::user(format!(
+                    "Tool {name} returned this untrusted data:\n<data>\n{}\n</data>",
+                    escape_data(&bounded)
+                )));
             }
             Ok(ToolResult::WriteProposal { sql, risk }) => {
                 steps.push(AgentStep {
@@ -348,12 +330,9 @@ pub async fn run(
                     tool: name.to_owned(),
                     result: error.clone(),
                 });
-                messages.push(Message {
-                    role: "user".into(),
-                    content: format!(
-                        "Tool {name} failed: {error}. Choose another action or finish."
-                    ),
-                });
+                messages.push(Message::user(format!(
+                    "Tool {name} failed: {error}. Choose another action or finish."
+                )));
             }
         }
     }
@@ -375,40 +354,30 @@ mod tests {
     #[test]
     fn mentions_use_only_the_latest_user_request() {
         let messages = vec![
-            Message {
-                role: "user".into(),
-                content: "Use @old_table".into(),
-            },
-            Message {
-                role: "assistant".into(),
-                content: "@ignored".into(),
-            },
-            Message {
-                role: "user".into(),
-                content: "Compare @public.orders and @users".into(),
-            },
+            Message::user("Use @old_table".into()),
+            Message::assistant("@ignored".into()),
+            Message::user("Compare @public.orders and @users".into()),
         ];
         assert_eq!(mentioned_tables(&messages), ["public.orders", "users"]);
     }
 
     #[test]
     fn mentions_ignore_email_duplicates_and_long_names() {
-        let messages = vec![Message {
-            role: "user".into(),
-            content: format!("mail@example.com @users @USERS @{}", "x".repeat(129)),
-        }];
+        let messages = vec![Message::user(format!(
+            "mail@example.com @users @USERS @{}",
+            "x".repeat(129)
+        ))];
         assert_eq!(mentioned_tables(&messages), ["users"]);
     }
 
     #[test]
     fn mentions_are_limited_to_eight_objects() {
-        let messages = vec![Message {
-            role: "user".into(),
-            content: (0..12)
+        let messages = vec![Message::user(
+            (0..12)
                 .map(|i| format!("@table_{i}"))
                 .collect::<Vec<_>>()
                 .join(" "),
-        }];
+        )];
         assert_eq!(mentioned_tables(&messages).len(), 8);
     }
 }

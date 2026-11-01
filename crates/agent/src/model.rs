@@ -67,6 +67,22 @@ pub struct Message {
     pub content: String,
 }
 
+impl Message {
+    pub fn user(content: String) -> Self {
+        Self {
+            role: "user".into(),
+            content,
+        }
+    }
+
+    pub fn assistant(content: String) -> Self {
+        Self {
+            role: "assistant".into(),
+            content,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Conversation {
     pub id: String,
