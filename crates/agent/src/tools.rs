@@ -347,9 +347,12 @@ fn validate_sql(
     if statements.len() != 1 {
         return Err("Agent permits exactly one statement".into());
     }
-    // sqlparser reads `/*! ... */` as a comment; MySQL executes what is inside.
-    if matches!(engine, Engine::MySql | Engine::MariaDb) && text.contains("/*!") {
-        return Err("Agent SQL cannot use MySQL executable comments".into());
+    // sqlparser reads `/*! ... */` (MySQL and MariaDB) and `/*M! ... */`
+    // (MariaDB only) as comments; the server executes what is inside.
+    if matches!(engine, Engine::MySql | Engine::MariaDb)
+        && (text.contains("/*!") || text.to_ascii_uppercase().contains("/*M!"))
+    {
+        return Err("Agent SQL cannot use MySQL or MariaDB executable comments".into());
     }
     if !allow_write
         && !matches!(statements.first(), Some(Statement::Query(query)) if is_read_query(query))
