@@ -8,6 +8,30 @@ use crate::{
 
 const MAX_CONTEXT_CHARS: usize = 12_000;
 const MAX_WORKSPACE_CONTEXT_CHARS: usize = 24_000;
+/// Earlier turns of a conversation sent with a new request. The latest message
+/// always goes, however long.
+// ponytail: a character budget, not tokens, and it bounds the saved history
+// only. Inside one Agent run the tool results still add up to max_turns ×
+// MAX_CONTEXT_CHARS; summarising old turns is the upgrade if models choke.
+const MAX_HISTORY_CHARS: usize = 48_000;
+
+fn recent_history(messages: &[Message]) -> Vec<Message> {
+    let mut budget = MAX_HISTORY_CHARS;
+    let mut start = messages.len();
+    while start > 0 {
+        let size = messages[start - 1].content.chars().count();
+        if size > budget && start < messages.len() {
+            break;
+        }
+        budget = budget.saturating_sub(size);
+        start -= 1;
+    }
+    // Providers expect the history to open on a user turn.
+    while start + 1 < messages.len() && messages[start].role != "user" {
+        start += 1;
+    }
+    messages[start..].to_vec()
+}
 
 #[derive(Debug, Clone)]
 pub struct AgentStep {
@@ -184,7 +208,7 @@ pub async fn run(
     templates: &[String],
     mut cancelled: watch::Receiver<bool>,
 ) -> Result<AgentRun, String> {
-    let mut messages = request.messages.to_vec();
+    let mut messages = recent_history(request.messages);
     let mut steps = Vec::new();
     let system = system_prompt(
         request,
