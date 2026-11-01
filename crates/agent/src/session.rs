@@ -1,5 +1,4 @@
 use serde_json::Value;
-use tokio::sync::watch;
 
 use crate::{
     provider::complete_with_retries, AgentPreferences, Message, Mode, ModelRequest, ToolCall,
@@ -52,6 +51,15 @@ pub struct AgentStep {
 pub enum AgentOutcome {
     Answer(String),
     WriteProposal { sql: String, risk: WriteRisk },
+}
+
+/// Where a run is, for a live status line.
+#[derive(Debug, Clone)]
+pub struct Progress {
+    pub turn: usize,
+    pub max_turns: usize,
+    /// The tool about to run, or `None` while waiting on the model.
+    pub tool: Option<String>,
 }
 
 pub struct AgentRun {
@@ -218,7 +226,7 @@ pub async fn run(
     editor_context: &str,
     preferences: &AgentPreferences,
     templates: &[String],
-    mut cancelled: watch::Receiver<bool>,
+    on_progress: &(dyn Fn(Progress) + Send + Sync),
 ) -> Result<AgentRun, String> {
     let mut messages = recent_history(request.messages);
     let mut steps = Vec::new();
@@ -231,24 +239,26 @@ pub async fn run(
         templates,
     )
     .await;
-    for _ in 0..if mode == Mode::Agent {
+    // Stopping a run aborts its task; there is no cancel signal to poll.
+    let max_turns = if mode == Mode::Agent {
         usize::from(preferences.max_turns.clamp(5, 500))
     } else {
         1
-    } {
-        if *cancelled.borrow() {
-            return Err("Agent run cancelled".into());
-        }
+    };
+    for turn in 1..=max_turns {
+        let progress = |tool: Option<String>| Progress {
+            turn,
+            max_turns,
+            tool,
+        };
+        on_progress(progress(None));
         let next = ModelRequest {
             config: request.config,
             api_key: request.api_key,
             system: &system,
             messages: &messages,
         };
-        let response = tokio::select! {
-            value = complete_with_retries(&next, preferences.max_api_retries.min(10)) => value?,
-            _ = cancelled.changed() => return Err("Agent run cancelled".into()),
-        };
+        let response = complete_with_retries(&next, preferences.max_api_retries.min(10)).await?;
         if mode == Mode::Ask {
             if response.text.trim().is_empty() {
                 return Err("Model returned an empty answer".into());
@@ -306,6 +316,7 @@ pub async fn run(
             role: "assistant".into(),
             content: response.text,
         });
+        on_progress(progress(Some(name.clone())));
         match runner.execute(&call).await {
             Ok(ToolResult::Data(data)) => {
                 let bounded = data.chars().take(MAX_CONTEXT_CHARS).collect::<String>();
