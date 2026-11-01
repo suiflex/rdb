@@ -1,6 +1,6 @@
 import { Tokens } from "tokens.slint";
 import { AgentMessage } from "structs.slint";
-import { BreadcrumbChip, ChoiceRow, IconButton, PrimaryButton, SecondaryButton, SelectBox, TooltipArea } from "components.slint";
+import { BreadcrumbChip, ChoiceRow, DangerButton, IconButton, PrimaryButton, SecondaryButton, SelectBox, TooltipArea } from "components.slint";
 import { AppIcon } from "icons.slint";
 import { ScrollView, TextEdit } from "std-widgets.slint";
 
@@ -433,22 +433,106 @@ export component AgentPanel inherits Rectangle {
                     font-size: Tokens.font-sm;
                 }
             }
-            if root.proposed-write != "": VerticalLayout {
-                padding: Tokens.sp2;
-                spacing: Tokens.sp1;
-                Text { text: "Approve this exact SQL once?"; color: Tokens.warn; }
-                if root.write-destructive: Text {
-                    text: "Destructive: this drops or rewrites data and cannot be undone.";
-                    color: Tokens.error;
-                    wrap: word-wrap;
-                }
-                Text { text: root.write-target; color: Tokens.text-dim; wrap: word-wrap; }
-                Text { text: root.proposed-write; color: Tokens.text; font-family: Tokens.mono;
-                    wrap: word-wrap; }
-                HorizontalLayout {
-                    spacing: Tokens.sp1;
-                    PrimaryButton { text: "Allow once"; clicked => { root.approve-write(); } }
-                    SecondaryButton { text: "Deny"; clicked => { root.reject-write(); } }
+            if root.proposed-write != "": HorizontalLayout {
+                padding-left: Tokens.sp3;
+                padding-right: Tokens.sp3;
+                Rectangle {
+                    background: root.write-destructive ? Tokens.error-tint : Tokens.warn-tint;
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: root.write-destructive ? Tokens.error : Tokens.warn;
+                    VerticalLayout {
+                        padding: Tokens.sp3;
+                        spacing: Tokens.sp2;
+                        HorizontalLayout {
+                            spacing: Tokens.sp2;
+                            Rectangle {
+                                width: risk-label.preferred-width + 2 * Tokens.sp2;
+                                height: 20px;
+                                border-radius: 4px;
+                                background: root.write-destructive ? Tokens.error : Tokens.warn;
+                                risk-label := Text {
+                                    text: root.write-destructive ? "DESTRUCTIVE" : "WRITE";
+                                    color: white;
+                                    font-size: Tokens.font-xs;
+                                    font-weight: Tokens.weight-emphasis;
+                                }
+                            }
+                            Text {
+                                text: "Run this SQL once?";
+                                color: Tokens.text;
+                                font-size: Tokens.font-sm;
+                                font-weight: Tokens.weight-emphasis;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                            MiniAction {
+                                icon: "copy";
+                                tip: "Copy SQL";
+                                clicked => { root.copy-text(root.proposed-write); }
+                            }
+                        }
+                        if root.write-destructive: Text {
+                            text: "It drops or rewrites data and cannot be undone.";
+                            color: Tokens.error;
+                            font-size: Tokens.font-sm;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: "Target: " + root.write-target;
+                            color: Tokens.text-dim;
+                            font-size: Tokens.font-xs;
+                            wrap: word-wrap;
+                        }
+                        // Long SQL scrolls inside a capped box so the buttons
+                        // below never leave the panel.
+                        sql-box := Rectangle {
+                            height: min(sql-measure.preferred-height + 2 * Tokens.sp2, 160px);
+                            background: Tokens.sidebar;
+                            border-radius: 6px;
+                            ScrollView {
+                                viewport-width: sql-box.width;
+                                viewport-height: sql-measure.preferred-height + 2 * Tokens.sp2;
+                                sql-measure := Text {
+                                    x: Tokens.sp2;
+                                    y: Tokens.sp2;
+                                    width: sql-box.width - 2 * Tokens.sp2 - 12px;
+                                    text: root.proposed-write;
+                                    wrap: word-wrap;
+                                    font-family: Tokens.mono;
+                                    font-size: Tokens.font-sm;
+                                    color: transparent;
+                                    accessible-role: none;
+                                }
+                                TextInput {
+                                    x: sql-measure.x;
+                                    y: sql-measure.y;
+                                    width: sql-measure.width;
+                                    height: sql-measure.preferred-height;
+                                    text: root.proposed-write;
+                                    read-only: true;
+                                    single-line: false;
+                                    wrap: word-wrap;
+                                    color: Tokens.text;
+                                    font-family: Tokens.mono;
+                                    font-size: Tokens.font-sm;
+                                }
+                            }
+                        }
+                        HorizontalLayout {
+                            alignment: end;
+                            spacing: Tokens.sp1;
+                            SecondaryButton { text: "Deny"; clicked => { root.reject-write(); } }
+                            if root.write-destructive: DangerButton {
+                                text: "Run once";
+                                clicked => { root.approve-write(); }
+                            }
+                            if !root.write-destructive: PrimaryButton {
+                                text: "Run once";
+                                clicked => { root.approve-write(); }
+                            }
+                        }
+                    }
                 }
             }
             ChoiceRow {
