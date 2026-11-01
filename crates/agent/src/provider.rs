@@ -404,4 +404,120 @@ mod tests {
         server.join().unwrap();
         assert_eq!(answer.text, "ready");
     }
+    #[test]
+    fn reply_joins_text_parts_and_flags_truncation() {
+        let anthropic = serde_json::json!({
+            "content": [
+                {"type": "thinking", "thinking": "plan"},
+                {"type": "text", "text": "SELECT "},
+                {"type": "text", "text": "1"}
+            ],
+            "stop_reason": "max_tokens"
+        });
+        let parsed = reply(Provider::Anthropic, &anthropic);
+        assert_eq!(parsed.text, "SELECT 1");
+        assert!(parsed.truncated);
+
+        let gemini = serde_json::json!({"candidates": [{
+            "content": {"parts": [{"text": "thinking", "thought": true}, {"text": "answer"}]},
+            "finishReason": "STOP"
+        }]});
+        let parsed = reply(Provider::Gemini, &gemini);
+        assert_eq!(parsed.text, "answer");
+        assert!(!parsed.truncated);
+
+        let openai = serde_json::json!({"choices": [{
+            "message": {"content": [{"type": "text", "text": "parts"}]},
+            "finish_reason": "length"
+        }]});
+        let parsed = reply(Provider::OpenAi, &openai);
+        assert_eq!(parsed.text, "parts");
+        assert!(parsed.truncated);
+    }
+
+    /// Serves `responses` in order, one per connection: (status line,
+    /// extra header line or "", body).
+    fn serve(
+        responses: Vec<(&'static str, &'static str, &'static str)>,
+    ) -> (String, std::thread::JoinHandle<usize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let mut served = 0;
+            for (status, header, body) in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 4096];
+                assert!(stream.read(&mut request).unwrap() > 0);
+                write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\n{header}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                served += 1;
+            }
+            served
+        });
+        (endpoint, server)
+    }
+
+    async fn ask(endpoint: String, retries: u8) -> Result<ModelResponse, String> {
+        let config = AgentConfig {
+            id: "test".into(),
+            name: "test".into(),
+            provider: Provider::OpenAiCompatible,
+            endpoint,
+            model: "test".into(),
+        };
+        let messages = [Message::user("hello".into())];
+        let request = ModelRequest {
+            config: &config,
+            api_key: "",
+            system: "test",
+            messages: &messages,
+        };
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            complete_with_retries(&request, retries),
+        )
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn rate_limit_waits_for_retry_after() {
+        let (endpoint, server) = serve(vec![
+            (
+                "429 Too Many Requests",
+                "Retry-After: 0\r\n",
+                r#"{"error":{"message":"slow down"}}"#,
+            ),
+            (
+                "200 OK",
+                "",
+                r#"{"choices":[{"message":{"content":"ready"}}]}"#,
+            ),
+        ]);
+        assert_eq!(ask(endpoint, 1).await.unwrap().text, "ready");
+        assert_eq!(server.join().unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn long_retry_after_fails_at_once() {
+        let (endpoint, server) = serve(vec![(
+            "429 Too Many Requests",
+            "Retry-After: 120\r\n",
+            r#"{"error":{"message":"slow down"}}"#,
+        )]);
+        let error = ask(endpoint, 3).await.err().unwrap();
+        assert!(error.starts_with("429"), "{error}");
+        assert_eq!(server.join().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn plain_string_error_is_shown() {
+        let (endpoint, server) = serve(vec![(
+            "404 Not Found",
+            "",
+            r#"{"error":"model 'missing' not found"}"#,
+        )]);
+        let error = ask(endpoint, 0).await.err().unwrap();
+        assert!(error.contains("model 'missing' not found"), "{error}");
+        server.join().unwrap();
+    }
 }
