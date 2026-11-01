@@ -328,9 +328,11 @@ struct WorkspaceContextRefs {
     right_id: Arc<Mutex<Option<String>>>,
 }
 
+/// `prompt` is `None` for a retry: the conversation's last, unanswered user
+/// message is sent again instead of adding a new one.
 fn prepare_send(
     window: &MainWindow,
-    prompt: &str,
+    prompt: Option<&str>,
     store: &AgentStore,
     ui: &UiRun,
     connections: &rdb_connstore::ConnStore,
@@ -351,11 +353,21 @@ fn prepare_send(
         .filter(|template| conversation.selected_templates.contains(&template.id))
         .map(|template| template.content.clone())
         .collect();
-    conversation
-        .messages
-        .push(Message::user(prompt.to_string()));
-    if conversation.title == "New conversation" {
-        conversation.title = prompt.chars().take(45).collect();
+    match prompt {
+        Some(prompt) => {
+            conversation
+                .messages
+                .push(Message::user(prompt.to_string()));
+            if conversation.title == "New conversation" {
+                conversation.title = prompt.chars().take(45).collect();
+            }
+        }
+        None if !is_new
+            && conversation
+                .messages
+                .last()
+                .is_some_and(|message| message.role == "user") => {}
+        None => return Err("Nothing to retry".into()),
     }
     let mut editor_context = active_workspace_context(
         window,
@@ -904,6 +916,12 @@ fn paint(window: &MainWindow, store: &AgentStore, ui: &UiRun) {
             })
             .collect::<Vec<_>>();
         window.set_agent_messages(ModelRc::from(Rc::new(VecModel::from(messages))));
+        window.set_agent_can_retry(
+            conversation
+                .messages
+                .last()
+                .is_some_and(|message| message.role == "user"),
+        );
         window.set_agent_mode(if conversation.mode == Mode::Agent {
             1
         } else {
@@ -920,6 +938,7 @@ fn paint(window: &MainWindow, store: &AgentStore, ui: &UiRun) {
             selected_templates,
         ))));
     } else {
+        window.set_agent_can_retry(false);
         window.set_agent_messages(ModelRc::from(Rc::new(VecModel::from(
             Vec::<AgentMessage>::new(),
         ))));
@@ -2164,12 +2183,18 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let current = state.current.clone();
         let rt = state.rt.clone();
         let weak = window.as_weak();
-        window.on_agent_send(move |prompt| {
+        let send = Rc::new(move |prompt: Option<SharedString>| {
             let Some(w) = weak.upgrade() else { return };
-            if w.get_agent_busy() || prompt.trim().is_empty() { return; }
+            if w.get_agent_busy()
+                || prompt
+                    .as_ref()
+                    .is_some_and(|prompt| prompt.trim().is_empty())
+            {
+                return;
+            }
             let prepared = match prepare_send(
                 &w,
-                &prompt,
+                prompt.as_deref(),
                 &store.borrow(),
                 &ui.borrow(),
                 &conn_store.borrow(),
@@ -2177,11 +2202,18 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 &workspace,
             ) {
                 Ok(value) => value,
-                Err(error) => { w.set_agent_status(error.into()); return; }
+                Err(error) => {
+                    w.set_agent_status(error.into());
+                    return;
+                }
             };
             let id = prepared.conversation.id.clone();
-            if let Err(error) = store.borrow_mut().save_conversation(prepared.conversation.clone()) {
-                w.set_agent_status(error.into()); return;
+            if let Err(error) = store
+                .borrow_mut()
+                .save_conversation(prepared.conversation.clone())
+            {
+                w.set_agent_status(error.into());
+                return;
             }
             if prepared.is_new {
                 let mut run = ui.borrow_mut();
@@ -2193,7 +2225,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             paint(&w, &store.borrow(), &ui.borrow());
             w.set_agent_busy(true);
             w.set_agent_status("Contacting the model".into());
-            w.set_agent_draft("".into());
+            if prompt.is_some() {
+                w.set_agent_draft("".into());
+            }
             ui.borrow_mut().pending_selection = None;
             w.set_agent_selection_preview("".into());
             let background_weak = weak.clone();
@@ -2258,6 +2292,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 write: false,
             });
         });
+        window.on_agent_send({
+            let send = send.clone();
+            move |prompt| send(Some(prompt))
+        });
+        window.on_agent_retry(move || send(None));
     }
 
     {

@@ -496,6 +496,8 @@ callback create-table-commit();
     in property <bool> agent-can-switch-database: false;
     in-out property <int> agent-mode: 0;
     in property <bool> agent-busy: false;
+    // The selected conversation ends on an unanswered prompt.
+    in property <bool> agent-can-retry: false;
     in property <string> agent-status;
     in property <string> agent-test-status;
     in property <int> agent-test-state: 0;
@@ -534,6 +536,7 @@ callback create-table-commit();
     callback agent-select-connection(string);
     callback agent-refresh-connections;
     callback agent-send(string);
+    callback agent-retry;
     callback agent-cancel;
     // (generation, text): where a run is, posted from its task.
     callback agent-progress(int, string);
@@ -2501,6 +2504,7 @@ callback create-table-commit();
                     selected-templates: root.agent-selected-templates;
                     mode <=> root.agent-mode;
                     busy: root.agent-busy;
+                    can-retry: root.agent-can-retry;
                     status: root.agent-status;
                     proposed-write: root.agent-proposed-write;
                     write-target: root.agent-write-target;
@@ -2518,6 +2522,7 @@ callback create-table-commit();
                     delete-conversation(i) => { root.agent-delete-conversation(i); }
                     mode-changed(i) => { root.agent-mode-changed(i); }
                     send(prompt) => { root.agent-send(prompt); }
+                    retry => { root.agent-retry(); }
                     cancel => { root.agent-cancel(); }
                     approve-write => { root.agent-approve-write(); }
                     reject-write => { root.agent-reject-write(); }

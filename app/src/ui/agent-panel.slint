@@ -46,6 +46,7 @@ export component AgentPanel inherits Rectangle {
     in-out property <string> template-choice: "Add a template";
     in-out property <int> mode: 0;
     in property <bool> busy: false;
+    in property <bool> can-retry: false;
     in property <string> status;
     in property <string> proposed-write;
     in property <string> write-target;
@@ -63,6 +64,7 @@ export component AgentPanel inherits Rectangle {
     callback delete-conversation(int);
     callback mode-changed(int);
     callback send(string);
+    callback retry;
     callback cancel;
     callback approve-write;
     callback reject-write;
@@ -437,6 +439,10 @@ export component AgentPanel inherits Rectangle {
                 padding-bottom: Tokens.sp2;
                 Rectangle { horizontal-stretch: 1; }
                 if root.busy: SecondaryButton { text: "Stop"; clicked => { root.cancel(); } }
+                if !root.busy && root.can-retry && root.proposed-write == "": SecondaryButton {
+                    text: "Retry";
+                    clicked => { root.retry(); }
+                }
                 if !root.busy: PrimaryButton {
                     text: "Send";
                     enabled: root.draft != "" && root.proposed-write == "";
