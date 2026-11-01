@@ -71,15 +71,15 @@ impl ToolRunner {
         &self,
         work: impl Future<Output = rdb_core::error::Result<T>>,
     ) -> Result<T, String> {
-        match tokio::time::timeout(READ_TIMEOUT, work).await {
-            Ok(result) => result.map_err(|error| error.to_string()),
-            Err(_) => {
-                let _ = self.driver.cancel_running().await;
-                Err(format!(
-                    "Query exceeded {}s and was cancelled",
-                    READ_TIMEOUT.as_secs()
-                ))
-            }
+        let cancel = || async {
+            let _ = self.driver.cancel_running().await;
+        };
+        match within(READ_TIMEOUT, work, cancel).await {
+            Some(result) => result.map_err(|error| error.to_string()),
+            None => Err(format!(
+                "Query exceeded {}s; cancellation was requested on the server",
+                READ_TIMEOUT.as_secs()
+            )),
         }
     }
 
@@ -408,6 +408,25 @@ fn is_side_effect_function(name: &ObjectName) -> bool {
             Some(prefix) => name.starts_with(prefix),
             None => name == *entry,
         })
+}
+
+/// Awaits `work` for at most `limit`. When the limit passes, `cancel` runs
+/// while `work` is still alive and only then is `work` dropped: the MySQL,
+/// MariaDB, MongoDB and ClickHouse drivers forget a statement's id when its
+/// future drops, so a cancel sent after the drop has nothing to cancel.
+async fn within<T, C: Future<Output = ()>>(
+    limit: Duration,
+    work: impl Future<Output = T>,
+    cancel: impl FnOnce() -> C,
+) -> Option<T> {
+    let mut work = std::pin::pin!(work);
+    match tokio::time::timeout(limit, &mut work).await {
+        Ok(output) => Some(output),
+        Err(_) => {
+            cancel().await;
+            None
+        }
+    }
 }
 
 /// Adds a row cap to a validated read that has none, so a `SELECT *` on a huge
