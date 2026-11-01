@@ -45,6 +45,35 @@ fn recent_history(messages: &[Message]) -> Vec<Message> {
 pub struct AgentStep {
     pub tool: String,
     pub result: String,
+    /// The tool and what came back, in one line for the panel.
+    pub summary: String,
+}
+
+/// `execute_query · 12 rows`, `execute_query · 100+ rows`, `describe_schema
+/// failed`. Row counts come from the JSON `render_result` produced.
+fn step_summary(tool: &str, outcome: Result<&str, &str>) -> String {
+    let Ok(data) = outcome else {
+        return format!("{tool} failed");
+    };
+    let Ok(value) = serde_json::from_str::<Value>(data) else {
+        return tool.to_string();
+    };
+    let more = if value.get("truncated").and_then(Value::as_bool) == Some(true) {
+        "+"
+    } else {
+        ""
+    };
+    match ["rows", "documents"]
+        .iter()
+        .find_map(|key| value.get(key).and_then(Value::as_array))
+    {
+        Some(rows) if rows.len() == 1 && more.is_empty() => format!("{tool} · 1 row"),
+        Some(rows) => format!("{tool} · {}{more} rows", rows.len()),
+        None => match value.get("affected").and_then(Value::as_u64) {
+            Some(count) => format!("{tool} · {count} affected"),
+            None => tool.to_string(),
+        },
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -307,6 +336,7 @@ pub async fn run(
                 let bounded = data.chars().take(MAX_CONTEXT_CHARS).collect::<String>();
                 steps.push(AgentStep {
                     tool: name.to_owned(),
+                    summary: step_summary(&name, Ok(&data)),
                     result: bounded.clone(),
                 });
                 messages.push(Message::user(format!(
@@ -318,6 +348,7 @@ pub async fn run(
                 steps.push(AgentStep {
                     tool: name.to_owned(),
                     result: "Awaiting approval".into(),
+                    summary: format!("{name} · awaiting approval"),
                 });
                 return Ok(AgentRun {
                     messages,
@@ -329,6 +360,7 @@ pub async fn run(
                 steps.push(AgentStep {
                     tool: name.to_owned(),
                     result: error.clone(),
+                    summary: step_summary(&name, Err(&error)),
                 });
                 messages.push(Message::user(format!(
                     "Tool {name} failed: {error}. Choose another action or finish."
