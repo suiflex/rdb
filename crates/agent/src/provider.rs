@@ -13,6 +13,8 @@ pub struct ModelRequest<'a> {
 
 pub struct ModelResponse {
     pub text: String,
+    /// The provider stopped at its output limit, so `text` is incomplete.
+    pub truncated: bool,
 }
 
 pub async fn discover_models(config: &AgentConfig, api_key: &str) -> Result<Vec<String>, String> {
@@ -203,8 +205,10 @@ async fn complete_once(request: &ModelRequest<'_>) -> Result<ModelResponse, Mode
     })?;
     let value: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
     if !status.is_success() {
+        // Ollama sends `{"error": "..."}` rather than an error object.
         let message = value
             .pointer("/error/message")
+            .or_else(|| value.get("error"))
             .and_then(Value::as_str)
             .unwrap_or("Model request failed");
         return Err(ModelFailure {
@@ -218,15 +222,44 @@ async fn complete_once(request: &ModelRequest<'_>) -> Result<ModelResponse, Mode
             retryable: false,
         });
     }
-    let text = match request.config.provider {
-        Provider::Anthropic | Provider::AnthropicCompatible => value.pointer("/content/0/text"),
-        Provider::Gemini => value.pointer("/candidates/0/content/parts/0/text"),
-        _ => value.pointer("/choices/0/message/content"),
-    }
-    .and_then(Value::as_str)
-    .unwrap_or_default()
-    .to_owned();
-    Ok(ModelResponse { text })
+    Ok(reply(request.config.provider, &value))
+}
+
+/// Joins every text part of a reply. Reading only the first part returned an
+/// empty answer whenever a model put a thinking block or a tool block first.
+fn reply(provider: Provider, value: &Value) -> ModelResponse {
+    let (parts, stop) = match provider {
+        Provider::Anthropic | Provider::AnthropicCompatible => {
+            (value.get("content"), value.get("stop_reason"))
+        }
+        Provider::Gemini => (
+            value.pointer("/candidates/0/content/parts"),
+            value.pointer("/candidates/0/finishReason"),
+        ),
+        _ => (
+            value.pointer("/choices/0/message/content"),
+            value.pointer("/choices/0/finish_reason"),
+        ),
+    };
+    let text = match parts {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .filter(|part| {
+                part.get("type")
+                    .and_then(Value::as_str)
+                    .is_none_or(|kind| kind == "text")
+                    && part.get("thought").and_then(Value::as_bool) != Some(true)
+            })
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .collect(),
+        _ => String::new(),
+    };
+    let truncated = matches!(
+        stop.and_then(Value::as_str),
+        Some("max_tokens" | "length" | "MAX_TOKENS")
+    );
+    ModelResponse { text, truncated }
 }
 
 fn retryable_status(status: reqwest::StatusCode) -> bool {

@@ -217,14 +217,22 @@ pub async fn run(
             if response.text.trim().is_empty() {
                 return Err("Model returned an empty answer".into());
             }
+            let answer = if response.truncated {
+                format!(
+                    "{}\n\n_(The reply stopped at the model's output limit.)_",
+                    response.text
+                )
+            } else {
+                response.text
+            };
             messages.push(Message {
                 role: "assistant".into(),
-                content: response.text.clone(),
+                content: answer.clone(),
             });
             return Ok(AgentRun {
                 messages,
                 steps,
-                outcome: AgentOutcome::Answer(response.text),
+                outcome: AgentOutcome::Answer(answer),
             });
         }
         let call = match parse_action(&response.text) {
@@ -241,6 +249,11 @@ pub async fn run(
             }
             Ok(AgentAction::Tool(call)) => call,
             Err(hint) => {
+                let hint = if response.truncated {
+                    "Your reply hit the output limit. Return a shorter JSON action."
+                } else {
+                    hint
+                };
                 messages.push(Message {
                     role: "assistant".into(),
                     content: response.text,
