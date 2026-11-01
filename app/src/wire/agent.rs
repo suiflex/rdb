@@ -588,8 +588,31 @@ mod context_tests {
         assert_eq!(blocks[0].plain, "Query");
         assert_eq!(blocks[2].prefix, "•");
         assert_eq!(blocks[3].plain, "SELECT `name` FROM users;");
+        assert_eq!(blocks[3].prefix, "sql");
         assert!(blocks[4].plain.contains("Table: users"));
         assert!(blocks[4].plain.contains("Purpose: sample records"));
+    }
+
+    #[test]
+    fn progress_names_the_turn_and_the_step() {
+        let progress = |turn, max_turns, tool: Option<&str>| Progress {
+            turn,
+            max_turns,
+            tool: tool.map(str::to_string),
+        };
+        assert_eq!(
+            progress_text(&progress(2, 30, Some("execute_query"))),
+            "Turn 2/30 · Running a query"
+        );
+        assert_eq!(
+            progress_text(&progress(1, 30, None)),
+            "Turn 1/30 · Waiting for the model"
+        );
+        // Ask mode has one turn; counting it would read as noise.
+        assert_eq!(
+            progress_text(&progress(1, 1, None)),
+            "Waiting for the model"
+        );
     }
 
     #[test]
