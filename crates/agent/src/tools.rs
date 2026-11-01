@@ -37,10 +37,18 @@ pub struct ToolCall {
     pub arguments: Value,
 }
 
+/// How much an approved write can lose. `Destructive` covers DDL that drops or
+/// rewrites objects, and DELETE/UPDATE with no WHERE clause.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteRisk {
+    Write,
+    Destructive,
+}
+
 #[derive(Debug, Clone)]
 pub enum ToolResult {
     Data(String),
-    WriteProposal(String),
+    WriteProposal { sql: String, risk: WriteRisk },
 }
 
 pub struct ToolRunner {
@@ -126,7 +134,10 @@ impl ToolRunner {
                     .and_then(Value::as_str)
                     .ok_or("Missing proposed query")?;
                 self.parse_query(&call.arguments, true)?;
-                Ok(ToolResult::WriteProposal(sql.to_owned()))
+                Ok(ToolResult::WriteProposal {
+                    sql: sql.to_owned(),
+                    risk: write_risk(sql),
+                })
             }
             _ => Err(format!("Unknown agent tool: {}", call.name)),
         }
@@ -504,6 +515,26 @@ impl Visitor for DatabaseScope<'_> {
                 | Statement::CreateTrigger(_)
                 | Statement::DropTrigger(_)
                 | Statement::CreateMacro { .. }
+                // Transaction and session control would leave the shared
+                // connection in a state the editor does not know about.
+                | Statement::StartTransaction { .. }
+                | Statement::Commit { .. }
+                | Statement::Rollback { .. }
+                | Statement::Savepoint { .. }
+                | Statement::ReleaseSavepoint { .. }
+                | Statement::Prepare { .. }
+                | Statement::Deallocate { .. }
+                | Statement::Discard { .. }
+                | Statement::Lock(_)
+                | Statement::LockTables { .. }
+                | Statement::UnlockTables
+                // Server-side file access and server administration.
+                | Statement::Copy { .. }
+                | Statement::Pragma { .. }
+                | Statement::Kill { .. }
+                | Statement::Flush { .. }
+                | Statement::Install { .. }
+                | Statement::Load { .. }
         ) {
             return self.deny(
                 "Agent SQL is outside its database scope: \
@@ -549,6 +580,30 @@ impl Visitor for DatabaseScope<'_> {
             }
         }
         ControlFlow::Continue(())
+    }
+}
+
+/// Classifies SQL that already passed [`validate_sql`]. Anything that fails to
+/// parse here is treated as destructive.
+pub(crate) fn write_risk(sql: &str) -> WriteRisk {
+    let destructive = match Parser::parse_sql(&GenericDialect {}, sql).ok().as_deref() {
+        Some([statement]) => {
+            matches!(
+                statement,
+                Statement::Drop { .. }
+                    | Statement::Truncate(_)
+                    | Statement::AlterTable(_)
+                    | Statement::AlterIndex { .. }
+                    | Statement::AlterView { .. }
+            ) || matches!(statement, Statement::Delete(delete) if delete.selection.is_none())
+                || matches!(statement, Statement::Update(update) if update.selection.is_none())
+        }
+        _ => true,
+    };
+    if destructive {
+        WriteRisk::Destructive
+    } else {
+        WriteRisk::Write
     }
 }
 
@@ -759,7 +814,7 @@ mod tests {
             arguments: json!({"query": sql}),
         };
         assert!(matches!(runner.execute(&proposal).await.unwrap(),
-            ToolResult::WriteProposal(text) if text == sql));
+            ToolResult::WriteProposal { sql: text, .. } if text == sql));
         let production = ToolRunner::new(
             driver.clone(),
             AgentScope {

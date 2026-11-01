@@ -2146,7 +2146,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 let (answer, proposal, error) = match result {
                     Ok(run) => match run.outcome {
                         AgentOutcome::Answer(answer) => (answer, String::new(), String::new()),
-                        AgentOutcome::WriteProposal(sql) => (String::new(), sql, String::new()),
+                        AgentOutcome::WriteProposal { sql, .. } => (String::new(), sql, String::new()),
                     },
                     Err(error) => (String::new(), String::new(), error),
                 };

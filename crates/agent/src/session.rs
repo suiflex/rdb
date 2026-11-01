@@ -3,7 +3,7 @@ use tokio::sync::watch;
 
 use crate::{
     provider::complete_with_retries, AgentPreferences, Message, Mode, ModelRequest, ToolCall,
-    ToolResult, ToolRunner,
+    ToolResult, ToolRunner, WriteRisk,
 };
 
 const MAX_CONTEXT_CHARS: usize = 12_000;
@@ -18,7 +18,7 @@ pub struct AgentStep {
 #[derive(Debug, Clone)]
 pub enum AgentOutcome {
     Answer(String),
-    WriteProposal(String),
+    WriteProposal { sql: String, risk: WriteRisk },
 }
 
 pub struct AgentRun {
@@ -260,7 +260,7 @@ pub async fn run(
                     ),
                 });
             }
-            Ok(ToolResult::WriteProposal(sql)) => {
+            Ok(ToolResult::WriteProposal { sql, risk }) => {
                 steps.push(AgentStep {
                     tool: name.to_owned(),
                     result: "Awaiting approval".into(),
@@ -268,7 +268,7 @@ pub async fn run(
                 return Ok(AgentRun {
                     messages,
                     steps,
-                    outcome: AgentOutcome::WriteProposal(sql),
+                    outcome: AgentOutcome::WriteProposal { sql, risk },
                 });
             }
             Err(error) => {
