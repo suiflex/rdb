@@ -2204,11 +2204,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                     let request = ModelRequest { config: &prepared.config, api_key: &prepared.key,
                         system: "You are RDB's database assistant. Follow the user's request and the configured mode.",
                         messages: &prepared.conversation.messages };
-                    let (cancel_tx, cancel) = tokio::sync::watch::channel(false);
-                    let result = rdb_agent::run(&request, prepared.conversation.mode, &runner, &prepared.editor_context,
-                        &prepared.preferences, &prepared.templates, cancel).await;
-                    drop(cancel_tx);
-                    result
+                    rdb_agent::run(&request, prepared.conversation.mode, &runner, &prepared.editor_context,
+                        &prepared.preferences, &prepared.templates, &|_| {}).await
                 }.await;
                 let (answer, proposal, destructive, error) = match result {
                     Ok(run) => match run.outcome {
