@@ -13,7 +13,7 @@ use std::{
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use rdb_agent::{
     AgentConfig, AgentOutcome, AgentPreferences, AgentScope, AgentStore, Conversation, Message,
-    Mode, ModelRequest, PromptTemplate, Provider, ToolRunner,
+    Mode, ModelRequest, PromptTemplate, Provider, ToolRunner, WriteRisk,
 };
 use rdb_connstore::{Engine, EnvTag, SavedConnection};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, StyledText, VecModel};
@@ -849,6 +849,7 @@ struct PendingWrite {
     database: String,
     schema: Option<String>,
     sql: String,
+    destructive: bool,
 }
 
 fn paint(window: &MainWindow, store: &AgentStore, ui: &UiRun) {
@@ -930,6 +931,7 @@ fn paint(window: &MainWindow, store: &AgentStore, ui: &UiRun) {
             .unwrap_or_default()
             .into(),
     );
+    window.set_agent_write_destructive(pending.is_some_and(|pending| pending.destructive));
     window.set_agent_write_target(
         pending
             .map(|pending| {
@@ -2202,16 +2204,19 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                     drop(cancel_tx);
                     result
                 }.await;
-                let (answer, proposal, error) = match result {
+                let (answer, proposal, destructive, error) = match result {
                     Ok(run) => match run.outcome {
-                        AgentOutcome::Answer(answer) => (answer, String::new(), String::new()),
-                        AgentOutcome::WriteProposal { sql, .. } => (String::new(), sql, String::new()),
+                        AgentOutcome::Answer(answer) => (answer, String::new(), false, String::new()),
+                        AgentOutcome::WriteProposal { sql, risk } => {
+                            (String::new(), sql, risk == WriteRisk::Destructive, String::new())
+                        }
                     },
-                    Err(error) => (String::new(), String::new(), error),
+                    Err(error) => (String::new(), String::new(), false, error),
                 };
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = background_weak.upgrade() {
-                        w.invoke_agent_result(id.into(), generation, answer.into(), proposal.into(), error.into());
+                        w.invoke_agent_result(id.into(), generation, answer.into(), proposal.into(),
+                            destructive, error.into());
                     }
                 });
             });
@@ -2228,56 +2233,61 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let store = store.clone();
         let ui = ui.clone();
         let weak = window.as_weak();
-        window.on_agent_result(move |id, generation, answer, proposal, error| {
-            let Some(w) = weak.upgrade() else { return };
-            if generation != ui.borrow().generation {
-                return;
-            }
-            ui.borrow_mut().running = None;
-            w.set_agent_busy(false);
-            if !error.is_empty() {
-                w.set_agent_status(error);
-                return;
-            }
-            if !proposal.is_empty() {
-                if let Some(conversation) = store
+        window.on_agent_result(
+            move |id, generation, answer, proposal, destructive, error| {
+                let Some(w) = weak.upgrade() else { return };
+                if generation != ui.borrow().generation {
+                    return;
+                }
+                ui.borrow_mut().running = None;
+                w.set_agent_busy(false);
+                if !error.is_empty() {
+                    w.set_agent_status(error);
+                    return;
+                }
+                if !proposal.is_empty() {
+                    if let Some(conversation) = store
+                        .borrow()
+                        .conversations()
+                        .iter()
+                        .find(|item| item.id == id.as_str())
+                        .cloned()
+                    {
+                        ui.borrow_mut().pending_write = Some(PendingWrite {
+                            conversation_id: conversation.id,
+                            connection_id: conversation.connection_id,
+                            database: conversation.database,
+                            schema: conversation.schema,
+                            sql: proposal.to_string(),
+                            destructive,
+                        });
+                        w.set_agent_status(
+                            "Review the exact SQL and target before approval".into(),
+                        );
+                        paint(&w, &store.borrow(), &ui.borrow());
+                    }
+                    return;
+                }
+                let selected = store
                     .borrow()
                     .conversations()
                     .iter()
                     .find(|item| item.id == id.as_str())
-                    .cloned()
-                {
-                    ui.borrow_mut().pending_write = Some(PendingWrite {
-                        conversation_id: conversation.id,
-                        connection_id: conversation.connection_id,
-                        database: conversation.database,
-                        schema: conversation.schema,
-                        sql: proposal.to_string(),
+                    .cloned();
+                if let Some(mut conversation) = selected {
+                    conversation.messages.push(Message {
+                        role: "assistant".into(),
+                        content: answer.to_string(),
                     });
-                    w.set_agent_status("Review the exact SQL and target before approval".into());
-                    paint(&w, &store.borrow(), &ui.borrow());
+                    if let Err(error) = store.borrow_mut().save_conversation(conversation) {
+                        w.set_agent_status(error.into());
+                        return;
+                    }
                 }
-                return;
-            }
-            let selected = store
-                .borrow()
-                .conversations()
-                .iter()
-                .find(|item| item.id == id.as_str())
-                .cloned();
-            if let Some(mut conversation) = selected {
-                conversation.messages.push(Message {
-                    role: "assistant".into(),
-                    content: answer.to_string(),
-                });
-                if let Err(error) = store.borrow_mut().save_conversation(conversation) {
-                    w.set_agent_status(error.into());
-                    return;
-                }
-            }
-            w.set_agent_status("".into());
-            paint(&w, &store.borrow(), &ui.borrow());
-        });
+                w.set_agent_status("".into());
+                paint(&w, &store.borrow(), &ui.borrow());
+            },
+        );
     }
 
     {
