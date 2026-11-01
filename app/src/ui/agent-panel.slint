@@ -1,6 +1,6 @@
 import { Tokens } from "tokens.slint";
 import { AgentMessage } from "structs.slint";
-import { BreadcrumbChip, ChoiceRow, IconButton, PrimaryButton, SecondaryButton, SelectBox } from "components.slint";
+import { BreadcrumbChip, ChoiceRow, IconButton, PrimaryButton, SecondaryButton, SelectBox, TooltipArea } from "components.slint";
 import { AppIcon } from "icons.slint";
 import { ScrollView, TextEdit } from "std-widgets.slint";
 
@@ -27,6 +27,32 @@ component MarkdownText inherits Rectangle {
         default-color: root.text-color;
         default-font-size: root.text-size;
         link-color: Tokens.accent;
+    }
+}
+
+// A 24px icon action for dense cards, where IconButton's 40px target crowds
+// the content it acts on.
+component MiniAction inherits Rectangle {
+    in property <string> icon;
+    in property <string> tip;
+    callback clicked;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    background: area.has-hover ? Tokens.border : transparent;
+    accessible-role: button;
+    accessible-label: root.tip;
+    accessible-action-default => { root.clicked(); }
+    AppIcon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        name: root.icon;
+        size: 14px;
+        color: area.has-hover ? Tokens.text : Tokens.text-dim;
+    }
+    area := TooltipArea {
+        tip: root.tip;
+        clicked => { root.clicked(); }
     }
 }
 
@@ -65,6 +91,8 @@ export component AgentPanel inherits Rectangle {
     callback mode-changed(int);
     callback send(string);
     callback retry;
+    callback copy-text(string);
+    callback insert-sql(string);
     callback cancel;
     callback approve-write;
     callback reject-write;
@@ -258,18 +286,62 @@ export component AgentPanel inherits Rectangle {
                                     }
                                 }
                                 if block.kind == 3: Rectangle {
-                                    height: code-text.preferred-height + 3 * Tokens.sp3;
+                                    height: code-measure.y + code-measure.preferred-height + Tokens.sp3;
                                     background: Tokens.sidebar;
                                     border-radius: 6px;
-                                    code-text := Text {
+                                    border-width: 1px;
+                                    border-color: Tokens.border;
+                                    code-head := HorizontalLayout {
                                         x: Tokens.sp3;
-                                        y: Tokens.sp3;
+                                        y: Tokens.sp1;
+                                        width: parent.width - Tokens.sp3 - Tokens.sp1;
+                                        height: 24px;
+                                        spacing: 2px;
+                                        Text {
+                                            text: block.prefix != "" ? block.prefix : "code";
+                                            color: Tokens.text-dim;
+                                            font-size: Tokens.font-xs;
+                                            vertical-alignment: center;
+                                            horizontal-stretch: 1;
+                                        }
+                                        MiniAction {
+                                            icon: "copy";
+                                            tip: "Copy";
+                                            clicked => { root.copy-text(block.plain); }
+                                        }
+                                        MiniAction {
+                                            icon: "pencil";
+                                            tip: "Insert into the editor";
+                                            clicked => { root.insert-sql(block.plain); }
+                                        }
+                                    }
+                                    // Wrapped TextInput reports no height for its
+                                    // extra lines; a hidden Text measures them.
+                                    code-measure := Text {
+                                        x: Tokens.sp3;
+                                        y: code-head.y + code-head.height + Tokens.sp1;
                                         width: parent.width - 2 * Tokens.sp3;
                                         text: block.plain;
+                                        wrap: word-wrap;
+                                        font-family: Tokens.mono;
+                                        font-size: Tokens.font-sm;
+                                        color: transparent;
+                                        accessible-role: none;
+                                    }
+                                    // Read-only TextInput rather than Text, so part
+                                    // of the code can be selected and copied.
+                                    TextInput {
+                                        x: code-measure.x;
+                                        y: code-measure.y;
+                                        width: code-measure.width;
+                                        height: code-measure.preferred-height;
+                                        text: block.plain;
+                                        read-only: true;
+                                        single-line: false;
+                                        wrap: word-wrap;
                                         color: Tokens.text;
                                         font-family: Tokens.mono;
                                         font-size: Tokens.font-sm;
-                                        wrap: word-wrap;
                                     }
                                 }
                                 if block.kind == 4: Rectangle {

@@ -10,7 +10,7 @@ use std::{
     },
 };
 
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use rdb_agent::{
     AgentConfig, AgentOutcome, AgentPreferences, AgentScope, AgentStore, Conversation, Message,
     Mode, ModelRequest, Progress, PromptTemplate, Provider, ToolRunner, WriteRisk,
@@ -18,7 +18,9 @@ use rdb_agent::{
 use rdb_connstore::{Engine, EnvTag, SavedConnection};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, StyledText, VecModel};
 
-use crate::{model, AgentBlock, AgentMessage, AppState, MainWindow, StoredResult, WorkspaceTab};
+use crate::{
+    model, AgentBlock, AgentMessage, AppFns, AppState, MainWindow, StoredResult, WorkspaceTab,
+};
 
 const PARAGRAPH: i32 = 0;
 const HEADING: i32 = 1;
@@ -43,6 +45,8 @@ struct MarkdownBlocks {
     blocks: Vec<AgentBlock>,
     block_start: Option<usize>,
     code: Option<String>,
+    /// The fence's language (`sql`, `json`), shown on the code card.
+    code_lang: String,
     lists: Vec<Option<u64>>,
     items: Vec<(usize, Option<String>)>,
     quote_depth: usize,
@@ -57,7 +61,17 @@ impl MarkdownBlocks {
     fn start(&mut self, tag: Tag<'_>, offset: usize) {
         match tag {
             Tag::Paragraph | Tag::Heading { .. } => self.block_start = Some(offset),
-            Tag::CodeBlock(_) => self.code = Some(String::new()),
+            Tag::CodeBlock(kind) => {
+                self.code = Some(String::new());
+                self.code_lang = match kind {
+                    CodeBlockKind::Fenced(info) => info
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or_default()
+                        .to_string(),
+                    CodeBlockKind::Indented => String::new(),
+                };
+            }
             Tag::List(first) => self.lists.push(first),
             Tag::Item => {
                 let depth = self.lists.len().saturating_sub(1);
@@ -98,7 +112,7 @@ impl MarkdownBlocks {
                         kind: CODE,
                         formatted: StyledText::from_plain_text(""),
                         plain: value.trim_end_matches('\n').into(),
-                        prefix: "".into(),
+                        prefix: std::mem::take(&mut self.code_lang).into(),
                     });
                 }
             }
@@ -1154,7 +1168,7 @@ fn paint_config(window: &MainWindow, store: &AgentStore, ui: &UiRun) {
     ))));
 }
 
-pub(crate) fn wire(window: &MainWindow, state: &AppState) {
+pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
     let store = match AgentStore::open_default() {
         Ok(mut store) => {
             if let Some(notice) = store.take_notice() {
@@ -2385,6 +2399,72 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                     .into(),
                 );
             }
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        window.on_agent_copy_text(move |text| {
+            if let Some(w) = weak.upgrade() {
+                w.set_agent_status(
+                    if crate::clip_set(&text) {
+                        "Copied"
+                    } else {
+                        "Copy failed"
+                    }
+                    .into(),
+                );
+            }
+        });
+    }
+
+    {
+        let store = store.clone();
+        let ui = ui.clone();
+        let tabs = state.workspace_tabs.clone();
+        let left_id = state.active_tab_id.clone();
+        let right_id = state.active_group1_tab_id.clone();
+        let panes = state.panes.clone();
+        let load_editor_text = fns.load_editor_text.clone();
+        let weak = window.as_weak();
+        window.on_agent_insert_sql(move |sql| {
+            let Some(w) = weak.upgrade() else { return };
+            let pane = usize::from(w.get_active_pane() == 1);
+            let conversation_connection = ui.borrow().selected_id.as_ref().and_then(|id| {
+                store
+                    .borrow()
+                    .conversations()
+                    .iter()
+                    .find(|item| item.id == *id)
+                    .map(|item| item.connection_id.clone())
+            });
+            let active = if pane == 1 { &right_id } else { &left_id }
+                .lock()
+                .unwrap()
+                .clone();
+            let tab_connection = active.and_then(|id| {
+                tabs.lock()
+                    .unwrap()
+                    .iter()
+                    .find(|tab| tab.id == id)
+                    .and_then(|tab| tab.connection_id.clone())
+            });
+            // Inserting into another connection's editor would run the SQL
+            // against a database it was not written for.
+            if conversation_connection.is_none() || tab_connection != conversation_connection {
+                w.set_agent_status(
+                    "Open a query tab on this conversation's connection first".into(),
+                );
+                return;
+            }
+            let existing = panes[pane].ed_state.borrow().text();
+            let text = if existing.trim().is_empty() {
+                sql.to_string()
+            } else {
+                format!("{}\n\n{sql}", existing.trim_end())
+            };
+            load_editor_text(pane, &text);
+            w.set_agent_status("Inserted into the editor".into());
         });
     }
 
