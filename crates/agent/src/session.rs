@@ -77,10 +77,21 @@ fn mentioned_tables(messages: &[Message]) -> Vec<String> {
     names
 }
 
+/// Models often wrap the action in a ```json fence or a sentence despite the
+/// prompt. Taking the outermost object keeps that from costing a turn.
+fn action_json(text: &str) -> Option<Value> {
+    let text = text.trim();
+    serde_json::from_str(text).ok().or_else(|| {
+        let start = text.find('{')?;
+        let end = text.rfind('}')?;
+        serde_json::from_str(text.get(start..=end)?).ok()
+    })
+}
+
 fn parse_action(text: &str) -> Result<AgentAction, &'static str> {
-    let value: Value = serde_json::from_str(text.trim()).map_err(|_| {
-        "Invalid action. Return exactly one JSON object with either a final answer or a supported tool call, without Markdown fences."
-    })?;
+    let value = action_json(text).ok_or(
+        "Invalid action. Return exactly one JSON object with either a final answer or a supported tool call, without Markdown fences.",
+    )?;
     if let Some(answer) = value.get("final").and_then(Value::as_str) {
         return Ok(AgentAction::Final(answer.to_owned()));
     }
