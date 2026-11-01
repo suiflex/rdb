@@ -1,4 +1,4 @@
-use std::{ops::ControlFlow, sync::Arc};
+use std::{future::Future, ops::ControlFlow, sync::Arc, time::Duration};
 
 use rdb_connstore::{Engine, QueryLanguage};
 use rdb_core::{
@@ -15,6 +15,12 @@ use sqlparser::{
     dialect::GenericDialect,
     parser::Parser,
 };
+
+/// Rows the model sees from one result. Reads fetch one more so the result can
+/// say whether it was cut.
+const MAX_ROWS: usize = 100;
+// ponytail: one fixed budget for agent reads; make it a preference if users hit it.
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 pub struct AgentScope {
@@ -51,23 +57,36 @@ impl ToolRunner {
         &self.scope
     }
 
+    /// Runs one database call under [`READ_TIMEOUT`]. On timeout the statement is
+    /// cancelled server-side too: dropping the future only closes the client end.
+    async fn bounded<T>(
+        &self,
+        work: impl Future<Output = rdb_core::error::Result<T>>,
+    ) -> Result<T, String> {
+        match tokio::time::timeout(READ_TIMEOUT, work).await {
+            Ok(result) => result.map_err(|error| error.to_string()),
+            Err(_) => {
+                let _ = self.driver.cancel_running().await;
+                Err(format!(
+                    "Query exceeded {}s and was cancelled",
+                    READ_TIMEOUT.as_secs()
+                ))
+            }
+        }
+    }
+
     pub async fn execute(&self, call: &ToolCall) -> Result<ToolResult, String> {
         match call.name.as_str() {
             "list_databases" => {
-                let names = self
-                    .driver
-                    .list_databases()
-                    .await
-                    .map_err(|error| error.to_string())?;
+                let names = self.bounded(self.driver.list_databases()).await?;
                 Ok(ToolResult::Data(json!(names).to_string()))
             }
             "describe_schema" => {
                 let requested = requested_tables(&call.arguments)?;
                 let schema = match self.scope.schema.as_deref() {
-                    Some(name) => self.driver.schema_for(name).await,
-                    None => self.driver.schema().await,
-                }
-                .map_err(|error| error.to_string())?;
+                    Some(name) => self.bounded(self.driver.schema_for(name)).await,
+                    None => self.bounded(self.driver.schema()).await,
+                }?;
                 let databases = schema
                     .databases
                     .into_iter()
@@ -94,11 +113,7 @@ impl ToolRunner {
             }
             "execute_query" => {
                 let query = self.parse_query(&call.arguments, false)?;
-                let result = self
-                    .driver
-                    .query(&query)
-                    .await
-                    .map_err(|error| error.to_string())?;
+                let result = self.bounded(self.driver.query(&query)).await?;
                 Ok(ToolResult::Data(render_result(result)))
             }
             "propose_write" => {
@@ -135,8 +150,12 @@ impl ToolRunner {
         match self.scope.engine.language() {
             QueryLanguage::Sql => {
                 let text = query_text(arguments)?;
-                validate_sql(text, allow_write, self.scope.engine, &self.scope.database)?;
-                Ok(Query::Sql(text.to_owned()))
+                let statement =
+                    validate_sql(text, allow_write, self.scope.engine, &self.scope.database)?;
+                if allow_write {
+                    return Ok(Query::Sql(text.to_owned()));
+                }
+                Ok(Query::Sql(cap_read(text, &statement, self.scope.engine)))
             }
             QueryLanguage::Cql => {
                 let text = query_text(arguments)?;
@@ -206,7 +225,7 @@ impl ToolRunner {
                 Ok(Query::Mongo(Box::new(MongoOp {
                     collection: collection.into(),
                     database: Some(self.scope.database.clone()),
-                    limit: Some(100),
+                    limit: Some(MAX_ROWS as i64 + 1),
                     skip: None,
                     sort: None,
                     kind: MongoKind::Find(filter),
@@ -280,8 +299,8 @@ fn validate_sql(
     allow_write: bool,
     engine: Engine,
     database: &str,
-) -> Result<(), String> {
-    let statements = Parser::parse_sql(&GenericDialect {}, text)
+) -> Result<Statement, String> {
+    let mut statements = Parser::parse_sql(&GenericDialect {}, text)
         .map_err(|error| format!("Cannot verify query safety: {error}"))?;
     if statements.len() != 1 {
         return Err("Agent permits exactly one statement".into());
@@ -300,7 +319,40 @@ fn validate_sql(
     if let Some(name) = scope.violation {
         return Err(format!("Agent SQL is outside its database scope: {name}"));
     }
-    Ok(())
+    Ok(statements.remove(0))
+}
+
+/// Adds a row cap to a validated read that has none, so a `SELECT *` on a huge
+/// table never loads it whole. The cap goes on its own line so a trailing `--`
+/// comment cannot swallow it, and the capped text must still parse as one
+/// statement or the original is kept.
+// ponytail: SQL Server, Oracle and Cassandra keep the cap after loading (no
+// shared LIMIT syntax); the read timeout bounds them instead.
+fn cap_read(text: &str, statement: &Statement, engine: Engine) -> String {
+    let Statement::Query(query) = statement else {
+        return text.to_owned();
+    };
+    let limits = matches!(
+        engine,
+        Engine::Postgres | Engine::MySql | Engine::MariaDb | Engine::Sqlite | Engine::Clickhouse
+    );
+    if !limits
+        || query.limit_clause.is_some()
+        || query.fetch.is_some()
+        || query.settings.is_some()
+        || query.format_clause.is_some()
+    {
+        return text.to_owned();
+    }
+    let capped = format!(
+        "{}\nLIMIT {}",
+        text.trim_end().trim_end_matches(';').trim_end(),
+        MAX_ROWS + 1
+    );
+    match Parser::parse_sql(&GenericDialect {}, &capped) {
+        Ok(parsed) if parsed.len() == 1 => capped,
+        _ => text.to_owned(),
+    }
 }
 
 struct DatabaseScope<'a> {
@@ -418,15 +470,18 @@ fn render_result(result: ResultSet) -> String {
     match result {
         ResultSet::Tabular { cols, rows } => json!({
             "columns": cols.into_iter().map(|col| col.name).collect::<Vec<_>>(),
-            "rows": rows.into_iter().take(100).map(|row| row.into_iter().map(|cell| cell.render())
-                .collect::<Vec<_>>()).collect::<Vec<_>>()
+            "truncated": rows.len() > MAX_ROWS,
+            "rows": rows.into_iter().take(MAX_ROWS).map(|row| row.into_iter()
+                .map(|cell| cell.render()).collect::<Vec<_>>()).collect::<Vec<_>>()
         })
         .to_string(),
-        ResultSet::Documents(rows) => {
-            json!(rows.into_iter().take(100).collect::<Vec<_>>()).to_string()
-        }
+        ResultSet::Documents(rows) => json!({
+            "truncated": rows.len() > MAX_ROWS,
+            "documents": rows.into_iter().take(MAX_ROWS).collect::<Vec<_>>()
+        })
+        .to_string(),
         ResultSet::KeyValue(rows) => {
-            format!("{:?}", rows.into_iter().take(100).collect::<Vec<_>>())
+            format!("{:?}", rows.into_iter().take(MAX_ROWS).collect::<Vec<_>>())
         }
         ResultSet::Affected(count) => json!({"affected": count}).to_string(),
     }
