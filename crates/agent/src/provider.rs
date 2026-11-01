@@ -51,7 +51,7 @@ pub async fn discover_models(config: &AgentConfig, api_key: &str) -> Result<Vec<
     Ok(models)
 }
 
-fn discovery_url(endpoint: &str) -> Result<reqwest::Url, String> {
+pub(crate) fn discovery_url(endpoint: &str) -> Result<reqwest::Url, String> {
     let url = reqwest::Url::parse(&format!("{}/models", endpoint.trim_end_matches('/')))
         .map_err(|_| "Enter a valid HTTP or HTTPS endpoint")?;
     if !matches!(url.scheme(), "http" | "https")

@@ -134,7 +134,19 @@ impl AgentStore {
         config: AgentConfig,
         api_key: Option<&str>,
     ) -> Result<(), String> {
+        crate::provider::discovery_url(&config.endpoint)?;
         let key_id = format!("agent:{}", config.id);
+        // A saved key belongs to the endpoint it was entered for. Keeping it
+        // after the endpoint or provider changes would send it to a new host
+        // nobody typed it in for.
+        let moved = self.data.configs.iter().any(|item| {
+            item.id == config.id
+                && (item.provider != config.provider
+                    || item.endpoint.trim_end_matches('/') != config.endpoint.trim_end_matches('/'))
+        });
+        if moved && api_key.is_none_or(str::is_empty) && self.api_key(&config.id)?.is_some() {
+            return Err("Enter the API key again for the new endpoint".into());
+        }
         let old_data = self.data.clone();
         let mut old_key = None;
         if let Some(key) = api_key.filter(|key| !key.is_empty()) {
