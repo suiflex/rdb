@@ -1069,6 +1069,7 @@ fn wire_screen_harness(
             | "agent-template"
             | "agent-settings-templates"
             | "agent-approval"
+            | "agent-busy"
     ) && !store
         .borrow()
         .list()
@@ -1112,6 +1113,7 @@ fn wire_screen_harness(
             | "agent-template"
             | "agent-settings-templates"
             | "agent-approval"
+            | "agent-busy"
     ) {
         let show_settings = matches!(
             screen.as_str(),
@@ -1195,6 +1197,28 @@ fn wire_screen_harness(
                                     steps: "describe_schema\nexecute_query · 12 rows".into(),
                                 },
                             ]))));
+                        }
+                        if screen == "agent-busy" {
+                            // A run mid-way: the busy line, its progress text
+                            // and Stop in place of Send.
+                            w.set_agent_messages(ModelRc::from(Rc::new(VecModel::from(vec![
+                                AgentMessage {
+                                    role: "user".into(),
+                                    blocks: ModelRc::from(Rc::new(VecModel::from(vec![
+                                        AgentBlock {
+                                            kind: 0,
+                                            formatted: slint::StyledText::from_plain_text(
+                                                "Count orders by status",
+                                            ),
+                                            plain: "Count orders by status".into(),
+                                            prefix: "".into(),
+                                        },
+                                    ]))),
+                                    steps: "".into(),
+                                },
+                            ]))));
+                            w.set_agent_busy(true);
+                            w.set_agent_status("Turn 2/30 · Running a query".into());
                         }
                         if screen == "agent-approval" {
                             // A destructive proposal long enough that the SQL box
