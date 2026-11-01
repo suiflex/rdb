@@ -696,8 +696,8 @@ fn render_result(result: ResultSet) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        cap_read, mentioned_table_matches, requested_tables, validate_sql, write_risk, AgentScope,
-        ToolCall, ToolResult, ToolRunner, WriteRisk,
+        cap_read, mentioned_table_matches, requested_tables, validate_sql, within, write_risk,
+        AgentScope, ToolCall, ToolResult, ToolRunner, WriteRisk,
     };
     use rdb_connstore::Engine;
     use rdb_core::{
@@ -707,7 +707,7 @@ mod tests {
     };
     use rdb_runtime::AnyDriver;
     use serde_json::json;
-    use std::sync::Arc;
+    use std::{sync::Arc, time::Duration};
 
     #[test]
     fn rejects_mutating_read_and_multiple_statements() {
@@ -1187,5 +1187,38 @@ mod tests {
                 ..
             }
         ));
+    }
+    /// Review reproduction: the timeout used to drop the query before asking
+    /// the server to cancel it, and drivers forget a statement's id on drop.
+    #[tokio::test]
+    async fn timed_out_work_is_alive_when_cancel_starts() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        struct DropFlag(Arc<AtomicBool>);
+        impl Drop for DropFlag {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let dropped = Arc::new(AtomicBool::new(false));
+        let flag = DropFlag(dropped.clone());
+        let work = async move {
+            let _flag = flag;
+            std::future::pending::<()>().await
+        };
+        let alive_at_cancel = Arc::new(AtomicBool::new(false));
+        let cancel = || {
+            let (dropped, alive_at_cancel) = (dropped.clone(), alive_at_cancel.clone());
+            async move { alive_at_cancel.store(!dropped.load(Ordering::SeqCst), Ordering::SeqCst) }
+        };
+        assert!(within(Duration::from_millis(20), work, cancel)
+            .await
+            .is_none());
+        assert!(
+            alive_at_cancel.load(Ordering::SeqCst),
+            "work dropped before cancel"
+        );
+        assert!(dropped.load(Ordering::SeqCst), "work outlived the timeout");
+        let done = within(Duration::from_secs(5), async { 7 }, || async {}).await;
+        assert_eq!(done, Some(7));
     }
 }
