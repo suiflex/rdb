@@ -692,7 +692,7 @@ mod tests {
     use rdb_connstore::Engine;
     use rdb_core::{
         conn::{ConnConfig, SslMode},
-        query::Query,
+        query::{MongoKind, Query},
         result::{Cell, ResultSet},
     };
     use rdb_runtime::AnyDriver;
@@ -1047,5 +1047,92 @@ mod tests {
         ] {
             assert_eq!(write_risk(sql), WriteRisk::Write, "{sql}");
         }
+    }
+
+    async fn runner_for(engine: Engine) -> ToolRunner {
+        let runner = sqlite_runner(&[]).await;
+        ToolRunner::new(
+            runner.driver,
+            AgentScope {
+                connection_id: "sample-connection".into(),
+                database: "app".into(),
+                schema: None,
+                engine,
+                production: false,
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn redis_reads_stay_on_the_allowlist() {
+        let runner = runner_for(Engine::Redis).await;
+        let command = |tokens: &[&str]| json!({ "command": tokens });
+        for tokens in [
+            &["GET", "session:1"][..],
+            &["hgetall", "user:1"],
+            &["SCAN", "0", "MATCH", "user:*"],
+        ] {
+            assert!(
+                runner.parse_query(&command(tokens), false).is_ok(),
+                "{tokens:?}"
+            );
+        }
+        for tokens in [
+            &["FLUSHALL"][..],
+            &["KEYS", "*"],
+            &["EVAL", "return 1", "0"],
+            &["SET", "user:1", "x"],
+            &["CONFIG", "SET", "dir", "/tmp"],
+        ] {
+            assert!(
+                runner.parse_query(&command(tokens), false).is_err(),
+                "{tokens:?}"
+            );
+        }
+        assert!(runner
+            .parse_query(&json!({"command": "GET a"}), false)
+            .is_err());
+        assert!(runner
+            .parse_query(&command(&["GET", "session:1"]), true)
+            .is_err());
+        let valkey = runner_for(Engine::Valkey).await;
+        assert!(valkey.parse_query(&command(&["DEL", "a"]), false).is_err());
+    }
+
+    #[tokio::test]
+    async fn mongo_reads_are_bounded_finds_in_the_conversation_database() {
+        let runner = runner_for(Engine::Mongo).await;
+        let Ok(Query::Mongo(op)) = runner.parse_query(
+            &json!({"collection": "orders", "filter": {"status": "paid"}}),
+            false,
+        ) else {
+            panic!("expected a Mongo find")
+        };
+        assert_eq!(op.database.as_deref(), Some("app"));
+        assert_eq!(op.limit, Some(101));
+        assert!(matches!(op.kind, MongoKind::Find(_)));
+        assert!(runner
+            .parse_query(&json!({"collection": "orders"}), true)
+            .is_err());
+        assert!(runner.parse_query(&json!({}), false).is_err());
+    }
+
+    #[tokio::test]
+    async fn cql_allows_one_select_only() {
+        let runner = runner_for(Engine::Cassandra).await;
+        let cql = |query: &str| json!({ "query": query });
+        assert!(runner
+            .parse_query(&cql("SELECT * FROM app.events LIMIT 10"), false)
+            .is_ok());
+        for query in [
+            "DELETE FROM app.events WHERE id = 1",
+            "SELECT * FROM app.events; DROP TABLE app.events",
+            "TRUNCATE app.events",
+        ] {
+            assert!(runner.parse_query(&cql(query), false).is_err(), "{query}");
+        }
+        assert!(runner
+            .parse_query(&cql("SELECT * FROM app.events"), true)
+            .is_err());
     }
 }
