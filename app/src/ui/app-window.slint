@@ -537,6 +537,9 @@ callback create-table-commit();
     callback agent-refresh-connections;
     callback agent-send(string);
     callback agent-retry;
+    callback agent-copy-text(string);
+    // Append SQL from an answer to the active editor.
+    callback agent-insert-sql(string);
     callback agent-cancel;
     // (generation, text): where a run is, posted from its task.
     callback agent-progress(int, string);
@@ -2524,6 +2527,8 @@ callback create-table-commit();
                     send(prompt) => { root.agent-send(prompt); }
                     retry => { root.agent-retry(); }
                     cancel => { root.agent-cancel(); }
+                    copy-text(text) => { root.agent-copy-text(text); }
+                    insert-sql(sql) => { root.agent-insert-sql(sql); }
                     approve-write => { root.agent-approve-write(); }
                     reject-write => { root.agent-reject-write(); }
                     clear-selection => { root.agent-clear-selection(); }
