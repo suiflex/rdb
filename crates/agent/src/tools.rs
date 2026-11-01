@@ -686,8 +686,8 @@ fn render_result(result: ResultSet) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        mentioned_table_matches, requested_tables, validate_sql, AgentScope, ToolCall, ToolResult,
-        ToolRunner,
+        cap_read, mentioned_table_matches, requested_tables, validate_sql, write_risk, AgentScope,
+        ToolCall, ToolResult, ToolRunner, WriteRisk,
     };
     use rdb_connstore::Engine;
     use rdb_core::{
@@ -862,5 +862,190 @@ mod tests {
             .unwrap();
         assert!(matches!(result, ResultSet::Tabular { rows, .. }
             if matches!(rows[0][0], Cell::Int(1))));
+    }
+
+    async fn sqlite_runner(setup: &[&str]) -> ToolRunner {
+        let config = ConnConfig {
+            host: String::new(),
+            port: 0,
+            user: String::new(),
+            database: Some(":memory:".into()),
+            password: None,
+            sslmode: SslMode::Disable,
+            params: None,
+            ssh: None,
+        };
+        let driver = Arc::new(AnyDriver::connect(Engine::Sqlite, &config).await.unwrap());
+        for sql in setup {
+            driver.query(&Query::Sql((*sql).into())).await.unwrap();
+        }
+        ToolRunner::new(
+            driver,
+            AgentScope {
+                connection_id: "sample-connection".into(),
+                database: "main".into(),
+                schema: None,
+                engine: Engine::Sqlite,
+                production: false,
+            },
+        )
+    }
+
+    #[test]
+    fn reads_reject_side_effect_functions() {
+        let read = |engine, sql| validate_sql(sql, false, engine, "main");
+        for sql in [
+            "SELECT pg_sleep(10)",
+            "SELECT pg_catalog.pg_terminate_backend(42)",
+            "SELECT nextval('orders_id_seq')",
+            "SELECT set_config('role', 'admin', false)",
+            "SELECT pg_advisory_lock(1)",
+            "SELECT dblink_exec('host=203.0.113.5', 'DROP TABLE t')",
+        ] {
+            assert!(read(Engine::Postgres, sql).is_err(), "{sql}");
+        }
+        for sql in [
+            "SELECT SLEEP(5)",
+            "SELECT LOAD_FILE('/etc/hosts')",
+            "SELECT 1 /*!, SLEEP(5) */",
+        ] {
+            assert!(read(Engine::MySql, sql).is_err(), "{sql}");
+        }
+        for sql in [
+            "SELECT * FROM url('http://203.0.113.5/x', CSV)",
+            "SELECT * FROM s3('http://203.0.113.5/bucket/key')",
+            "SELECT * FROM remote('203.0.113.5', db.t)",
+        ] {
+            assert!(read(Engine::Clickhouse, sql).is_err(), "{sql}");
+        }
+        assert!(read(
+            Engine::Mssql,
+            "SELECT * FROM OPENROWSET('SQLNCLI', 'Server=203.0.113.5;', 'SELECT 1')"
+        )
+        .is_err());
+        // Ordinary functions, and columns that share a listed name, stay readable.
+        for sql in [
+            "SELECT lower(name), count(*) FROM users GROUP BY 1",
+            "SELECT url, file FROM uploads",
+            "SELECT * FROM generate_series(1, 3)",
+        ] {
+            assert!(read(Engine::Postgres, sql).is_ok(), "{sql}");
+        }
+        // An approved write may still draw from a sequence.
+        assert!(validate_sql(
+            "INSERT INTO orders (id) VALUES (nextval('orders_id_seq'))",
+            true,
+            Engine::Postgres,
+            "main"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn reads_without_a_limit_get_a_row_cap() {
+        let cap = |engine, sql: &str| {
+            let statement = validate_sql(sql, false, engine, "main").unwrap();
+            cap_read(sql, &statement, engine)
+        };
+        assert_eq!(
+            cap(Engine::Postgres, "SELECT * FROM users;"),
+            "SELECT * FROM users\nLIMIT 101"
+        );
+        assert_eq!(
+            cap(Engine::Postgres, "SELECT * FROM users -- every row"),
+            "SELECT * FROM users -- every row\nLIMIT 101"
+        );
+        for sql in [
+            "SELECT * FROM users LIMIT 5",
+            "SELECT * FROM users FETCH FIRST 5 ROWS ONLY",
+        ] {
+            assert_eq!(cap(Engine::Postgres, sql), sql);
+        }
+        for engine in [Engine::Mssql, Engine::Oracle] {
+            assert_eq!(cap(engine, "SELECT * FROM users"), "SELECT * FROM users");
+        }
+        // A comment after the semicolon would split the capped text in two.
+        assert_eq!(cap(Engine::MySql, "SELECT 1; -- done"), "SELECT 1; -- done");
+    }
+
+    #[tokio::test]
+    async fn capped_sqlite_read_reports_truncation() {
+        let runner = sqlite_runner(&[
+            "CREATE TABLE numbers (n INTEGER)",
+            "INSERT INTO numbers WITH RECURSIVE s(n) AS \
+             (SELECT 1 UNION ALL SELECT n + 1 FROM s WHERE n < 150) SELECT n FROM s",
+        ])
+        .await;
+        let read = |query: &str| ToolCall {
+            name: "execute_query".into(),
+            arguments: json!({ "query": query }),
+        };
+        let ToolResult::Data(data) = runner
+            .execute(&read("SELECT n FROM numbers ORDER BY n"))
+            .await
+            .unwrap()
+        else {
+            panic!("expected rows")
+        };
+        let value: serde_json::Value = serde_json::from_str(&data).unwrap();
+        assert_eq!(value["rows"].as_array().unwrap().len(), 100);
+        assert_eq!(value["truncated"], true);
+        let ToolResult::Data(data) = runner
+            .execute(&read("SELECT n FROM numbers LIMIT 3"))
+            .await
+            .unwrap()
+        else {
+            panic!("expected rows")
+        };
+        let value: serde_json::Value = serde_json::from_str(&data).unwrap();
+        assert_eq!(value["rows"].as_array().unwrap().len(), 3);
+        assert_eq!(value["truncated"], false);
+    }
+
+    #[test]
+    fn approved_writes_refuse_transaction_session_and_file_control() {
+        let write = |engine, sql| validate_sql(sql, true, engine, "main");
+        for sql in [
+            "BEGIN",
+            "START TRANSACTION",
+            "COMMIT",
+            "ROLLBACK",
+            "SAVEPOINT before_change",
+            "LOCK TABLE orders IN ACCESS EXCLUSIVE MODE",
+            "COPY orders TO '/tmp/orders.csv'",
+            "PREPARE fetch_one AS SELECT 1",
+            "DISCARD ALL",
+        ] {
+            assert!(write(Engine::Postgres, sql).is_err(), "{sql}");
+        }
+        for sql in ["LOCK TABLES orders WRITE", "UNLOCK TABLES", "KILL 42"] {
+            assert!(write(Engine::MySql, sql).is_err(), "{sql}");
+        }
+        assert!(write(Engine::Sqlite, "PRAGMA journal_mode = DELETE").is_err());
+    }
+
+    #[test]
+    fn write_risk_flags_ddl_and_unfiltered_changes() {
+        for sql in [
+            "DROP TABLE orders",
+            "TRUNCATE TABLE orders",
+            "ALTER TABLE orders DROP COLUMN note",
+            "DELETE FROM orders",
+            "UPDATE orders SET status = 'void'",
+        ] {
+            assert!(
+                validate_sql(sql, true, Engine::Postgres, "main").is_ok(),
+                "{sql}"
+            );
+            assert_eq!(write_risk(sql), WriteRisk::Destructive, "{sql}");
+        }
+        for sql in [
+            "INSERT INTO orders (id) VALUES (1)",
+            "DELETE FROM orders WHERE id = 1",
+            "UPDATE orders SET status = 'void' WHERE id = 1",
+            "CREATE TABLE notes (id INT)",
+        ] {
+            assert_eq!(write_risk(sql), WriteRisk::Write, "{sql}");
+        }
     }
 }
