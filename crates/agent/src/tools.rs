@@ -1147,10 +1147,13 @@ mod tests {
     }
     #[test]
     fn mariadb_executable_comments_are_refused() {
-        for engine in [Engine::MySql, Engine::MariaDb] {
-            for sql in ["SELECT 1 /*!, SLEEP(5) */", "SELECT 1 /*M!, SLEEP(5) */"] {
-                assert!(validate_sql(sql, false, engine, "main").is_err(), "{sql}");
-            }
+        for (engine, sql) in [
+            (Engine::MySql, "SELECT 1 /*!, SLEEP(5) */"),
+            (Engine::MySql, "SELECT 1 /*M!, SLEEP(5) */"),
+            (Engine::MariaDb, "SELECT 1 /*!, SLEEP(5) */"),
+            (Engine::MariaDb, "SELECT 1 /*M!, SLEEP(5) */"),
+        ] {
+            assert!(validate_sql(sql, false, engine, "main").is_err(), "{sql}");
         }
         assert!(validate_sql("SELECT 1 /* plain note */", false, Engine::MariaDb, "main").is_ok());
     }
