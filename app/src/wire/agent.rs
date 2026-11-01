@@ -1704,6 +1704,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let weak = window.as_weak();
         window.on_agent_choose_conversation(move |index| {
             let Some(w) = weak.upgrade() else { return };
+            // The busy state and its Stop button belong to the running chat;
+            // switching away left "Thinking…" under the wrong one.
+            if w.get_agent_busy() {
+                w.set_agent_status("Stop the current run before switching conversations".into());
+                return;
+            }
             let Some(conversation) = store
                 .borrow()
                 .conversations()
