@@ -804,6 +804,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     set_p_streaming(&w, p, false);
                 }
             }
+            // The Assistant holds its own driver handle and would keep querying.
+            if let Some(id) = &disconnecting_id {
+                w.invoke_agent_connection_closed(id.into());
+            }
             w.set_selected_conn(-1);
             w.set_active_table(SharedString::default());
             w.set_status_conn(SharedString::from("no connection"));
@@ -924,6 +928,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 h.abort();
             }
             let ids: Vec<String> = connected_ids.lock().unwrap().drain().collect();
+            for id in &ids {
+                w.invoke_agent_connection_closed(id.into());
+            }
             {
                 let current = current.clone();
                 let driver_pool = driver_pool.clone();

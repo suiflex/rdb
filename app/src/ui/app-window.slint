@@ -534,6 +534,8 @@ callback create-table-commit();
     callback agent-refresh-connections;
     callback agent-send(string);
     callback agent-cancel;
+    // A connection was closed; the Assistant stops a run that uses it.
+    callback agent-connection-closed(string);
     callback agent-approve-write;
     callback agent-reject-write;
     callback agent-clear-selection;
