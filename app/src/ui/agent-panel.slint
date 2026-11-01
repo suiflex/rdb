@@ -310,12 +310,21 @@ export component AgentPanel inherits Rectangle {
                     }
                     if root.busy: HorizontalLayout {
                         spacing: Tokens.sp2;
+                        property <int> dots: 0;
+                        Timer {
+                            interval: 400ms;
+                            running: root.busy;
+                            triggered => { parent.dots = Math.mod(parent.dots + 1, 4); }
+                        }
                         AppIcon { name: "robot"; size: 16px; color: Tokens.accent; }
                         Text {
-                            text: root.status != "" ? root.status : "Thinking…";
+                            text: (root.status != "" ? root.status : "Thinking")
+                                + (parent.dots == 1 ? "." : parent.dots == 2 ? ".." : parent.dots == 3 ? "..." : "");
                             color: Tokens.text-dim;
                             font-size: Tokens.font-sm;
                             vertical-alignment: center;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
                         }
                     }
                 }
