@@ -2284,6 +2284,34 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let ui = ui.clone();
         let stopper = stopper.clone();
         let weak = window.as_weak();
+        window.on_agent_connection_closed(move |id| {
+            let mut run = ui.borrow_mut();
+            if run
+                .running
+                .as_ref()
+                .is_none_or(|running| running.connection_id != id.as_str())
+            {
+                return;
+            }
+            let write = stopper.stop(&mut run);
+            if let Some(w) = weak.upgrade() {
+                w.set_agent_busy(false);
+                w.set_agent_status(
+                    if write {
+                        "Connection closed. The write may already be committed."
+                    } else {
+                        "Connection closed. Agent run stopped."
+                    }
+                    .into(),
+                );
+            }
+        });
+    }
+
+    {
+        let ui = ui.clone();
+        let stopper = stopper.clone();
+        let weak = window.as_weak();
         window.on_agent_cancel(move || {
             let write = stopper.stop(&mut ui.borrow_mut());
             if let Some(w) = weak.upgrade() {
