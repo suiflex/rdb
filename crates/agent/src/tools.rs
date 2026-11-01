@@ -621,23 +621,40 @@ impl Visitor for DatabaseScope<'_> {
 /// parse here is treated as destructive.
 pub(crate) fn write_risk(sql: &str) -> WriteRisk {
     let destructive = match Parser::parse_sql(&GenericDialect {}, sql).ok().as_deref() {
-        Some([statement]) => {
-            matches!(
-                statement,
-                Statement::Drop { .. }
-                    | Statement::Truncate(_)
-                    | Statement::AlterTable(_)
-                    | Statement::AlterIndex { .. }
-                    | Statement::AlterView { .. }
-            ) || matches!(statement, Statement::Delete(delete) if delete.selection.is_none())
-                || matches!(statement, Statement::Update(update) if update.selection.is_none())
-        }
+        // Every statement in the tree, not only the outer one: a CTE such as
+        // `WITH d AS (DELETE FROM t RETURNING *) SELECT ...` is a query on
+        // the outside and an unfiltered delete inside.
+        Some([statement]) => statement.visit(&mut DestructiveScan).is_break(),
         _ => true,
     };
     if destructive {
         WriteRisk::Destructive
     } else {
         WriteRisk::Write
+    }
+}
+
+/// Breaks on the first statement that drops or rewrites data.
+struct DestructiveScan;
+
+impl Visitor for DestructiveScan {
+    type Break = ();
+
+    fn pre_visit_statement(&mut self, statement: &Statement) -> ControlFlow<Self::Break> {
+        let destructive = matches!(
+            statement,
+            Statement::Drop { .. }
+                | Statement::Truncate(_)
+                | Statement::AlterTable(_)
+                | Statement::AlterIndex { .. }
+                | Statement::AlterView { .. }
+        ) || matches!(statement, Statement::Delete(delete) if delete.selection.is_none())
+            || matches!(statement, Statement::Update(update) if update.selection.is_none());
+        if destructive {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
     }
 }
 
