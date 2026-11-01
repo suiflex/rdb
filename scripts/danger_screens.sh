@@ -42,6 +42,7 @@ agent-database
 agent-model
 agent-template
 agent-settings-templates
+agent-approval
 workspace-users-bool
 workspace-users-date
 rail

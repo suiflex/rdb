@@ -1068,6 +1068,7 @@ fn wire_screen_harness(
             | "agent-model"
             | "agent-template"
             | "agent-settings-templates"
+            | "agent-approval"
     ) && !store
         .borrow()
         .list()
@@ -1110,6 +1111,7 @@ fn wire_screen_harness(
             | "agent-model"
             | "agent-template"
             | "agent-settings-templates"
+            | "agent-approval"
     ) {
         let show_settings = matches!(
             screen.as_str(),
@@ -1193,6 +1195,17 @@ fn wire_screen_harness(
                                     steps: "describe_schema\nexecute_query · 12 rows".into(),
                                 },
                             ]))));
+                        }
+                        if screen == "agent-approval" {
+                            // A destructive proposal long enough that the SQL box
+                            // has to scroll: the buttons must stay on screen.
+                            let sql = (1..=12)
+                                .map(|n| format!("DELETE FROM sample_orders_{n};"))
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            w.set_agent_proposed_write(sql.into());
+                            w.set_agent_write_target("screen agent / sample_db".into());
+                            w.set_agent_write_destructive(true);
                         }
                     }
                     if seed_template {
