@@ -952,6 +952,10 @@ struct Stopper {
     rt: Arc<tokio::runtime::Runtime>,
 }
 
+/// How long Stop waits for the server to take a cancel before ending the run
+/// anyway.
+const CANCEL_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
 impl Stopper {
     /// Ends the active run, if any, and returns whether it was an approved
     /// write. Any result it still delivers is dropped as stale.
@@ -960,12 +964,17 @@ impl Stopper {
         let Some(running) = run.running.take() else {
             return false;
         };
-        running.abort.abort();
-        if let Some(driver) = running.driver.lock().unwrap().take() {
-            self.rt.spawn(async move {
-                let _ = driver.cancel_running().await;
-            });
-        }
+        let driver = running.driver.lock().unwrap().take();
+        let abort = running.abort;
+        // Cancel first, abort after: the MySQL, MariaDB, MongoDB and ClickHouse
+        // drivers forget a statement's id once its future drops, and aborting
+        // the task drops it.
+        self.rt.spawn(async move {
+            if let Some(driver) = driver {
+                let _ = tokio::time::timeout(CANCEL_GRACE, driver.cancel_running()).await;
+            }
+            abort.abort();
+        });
         running.write
     }
 }
