@@ -1068,7 +1068,12 @@ fn paint_config(window: &MainWindow, store: &AgentStore, ui: &UiRun) {
 
 pub(crate) fn wire(window: &MainWindow, state: &AppState) {
     let store = match AgentStore::open_default() {
-        Ok(store) => Rc::new(RefCell::new(store)),
+        Ok(mut store) => {
+            if let Some(notice) = store.take_notice() {
+                window.set_agent_status(notice.into());
+            }
+            Rc::new(RefCell::new(store))
+        }
         Err(error) => {
             window.set_agent_status(format!("Agent storage: {error}").into());
             return;
