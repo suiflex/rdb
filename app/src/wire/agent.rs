@@ -1595,6 +1595,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 global_instructions: instructions.to_string(),
                 max_turns,
                 max_api_retries,
+                share_result_preview: store.borrow().preferences().share_result_preview,
             };
             match store.borrow_mut().save_preferences(preferences) {
                 Ok(()) => w.set_agent_status("Assistant behavior saved".into()),
