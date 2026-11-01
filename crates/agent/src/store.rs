@@ -273,6 +273,14 @@ impl AgentStore {
         let bytes = serde_json::to_vec_pretty(&self.data).map_err(|error| error.to_string())?;
         let temp = self.path.with_extension("json.tmp");
         fs::write(&temp, bytes).map_err(|error| error.to_string())?;
+        // Conversations hold query text and results; keep them owner-only,
+        // like the connection store's secret file.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&temp, fs::Permissions::from_mode(0o600))
+                .map_err(|error| error.to_string())?;
+        }
         fs::rename(temp, &self.path).map_err(|error| error.to_string())
     }
 }
