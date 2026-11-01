@@ -351,10 +351,9 @@ fn prepare_send(
         .filter(|template| conversation.selected_templates.contains(&template.id))
         .map(|template| template.content.clone())
         .collect();
-    conversation.messages.push(Message {
-        role: "user".into(),
-        content: prompt.to_string(),
-    });
+    conversation
+        .messages
+        .push(Message::user(prompt.to_string()));
     if conversation.title == "New conversation" {
         conversation.title = prompt.chars().take(45).collect();
     }
@@ -1992,10 +1991,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             let background_weak = weak.clone();
             rt.spawn(async move {
                 let started = std::time::Instant::now();
-                let messages = [Message {
-                    role: "user".into(),
-                    content: "Reply with OK.".into(),
-                }];
+                let messages = [Message::user("Reply with OK.".into())];
                 let request = ModelRequest {
                     config: &config,
                     api_key: &api_key,
@@ -2305,10 +2301,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                     .find(|item| item.id == id.as_str())
                     .cloned();
                 if let Some(mut conversation) = selected {
-                    conversation.messages.push(Message {
-                        role: "assistant".into(),
-                        content: answer.to_string(),
-                    });
+                    conversation
+                        .messages
+                        .push(Message::assistant(answer.to_string()));
                     if let Err(error) = store.borrow_mut().save_conversation(conversation) {
                         w.set_agent_status(error.into());
                         return;
@@ -2397,13 +2392,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 .find(|item| item.id == pending.conversation_id)
                 .cloned();
             let saved = conversation.map_or(Ok(()), |mut conversation| {
-                conversation.messages.push(Message {
-                    role: "assistant".into(),
-                    content: format!(
-                        "Write denied. This SQL was not run:\n\n```sql\n{}\n```",
-                        pending.sql
-                    ),
-                });
+                conversation.messages.push(Message::assistant(format!(
+                    "Write denied. This SQL was not run:\n\n```sql\n{}\n```",
+                    pending.sql
+                )));
                 store.borrow_mut().save_conversation(conversation)
             });
             if let Some(w) = weak.upgrade() {
@@ -2523,10 +2515,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                     .find(|item| item.id == conversation_id.as_str())
                     .cloned();
                 if let Some(mut conversation) = selected {
-                    conversation.messages.push(Message {
-                        role: "assistant".into(),
-                        content: format!("Write completed: {answer}"),
-                    });
+                    conversation
+                        .messages
+                        .push(Message::assistant(format!("Write completed: {answer}")));
                     if let Err(error) = store.borrow_mut().save_conversation(conversation) {
                         w.set_agent_status(error.into());
                         return;

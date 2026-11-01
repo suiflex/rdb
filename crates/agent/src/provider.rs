@@ -389,10 +389,7 @@ mod tests {
             endpoint,
             model: "test".into(),
         };
-        let messages = [Message {
-            role: "user".into(),
-            content: "hello".into(),
-        }];
+        let messages = [Message::user("hello".into())];
         let request = ModelRequest {
             config: &config,
             api_key: "",
