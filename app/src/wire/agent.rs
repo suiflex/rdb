@@ -13,7 +13,7 @@ use std::{
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use rdb_agent::{
     AgentConfig, AgentOutcome, AgentPreferences, AgentScope, AgentStore, Conversation, Message,
-    Mode, ModelRequest, PromptTemplate, Provider, ToolRunner, WriteRisk,
+    Mode, ModelRequest, Progress, PromptTemplate, Provider, ToolRunner, WriteRisk,
 };
 use rdb_connstore::{Engine, EnvTag, SavedConnection};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, StyledText, VecModel};
@@ -840,6 +840,23 @@ impl Stopper {
             });
         }
         running.write
+    }
+}
+
+/// The busy line for a run's progress. The panel animates the trailing dots.
+fn progress_text(progress: &Progress) -> String {
+    let step = match progress.tool.as_deref() {
+        None => "Waiting for the model",
+        Some("list_databases") => "Listing databases",
+        Some("describe_schema") => "Reading the schema",
+        Some("execute_query") => "Running a query",
+        Some("propose_write") => "Preparing a write for approval",
+        Some(_) => "Running a tool",
+    };
+    if progress.max_turns > 1 {
+        format!("Turn {}/{} · {step}", progress.turn, progress.max_turns)
+    } else {
+        step.to_string()
     }
 }
 
@@ -2178,7 +2195,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             }
             paint(&w, &store.borrow(), &ui.borrow());
             w.set_agent_busy(true);
-            w.set_agent_status("Contacting model…".into());
+            w.set_agent_status("Contacting the model".into());
             w.set_agent_draft("".into());
             ui.borrow_mut().pending_selection = None;
             w.set_agent_selection_preview("".into());
@@ -2193,6 +2210,16 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             let connection_id = prepared.conversation.connection_id.clone();
             let in_flight = Arc::new(AtomicBool::new(false));
             let task_in_flight = in_flight.clone();
+            let progress_weak = weak.clone();
+            let on_progress = move |progress: Progress| {
+                let text = progress_text(&progress);
+                let weak = progress_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak.upgrade() {
+                        w.invoke_agent_progress(generation, text.into());
+                    }
+                });
+            };
             let abort = rt.spawn(async move {
                 let result = async {
                     let (_, driver) = crate::resolve_driver(&pool, &current, Some(&prepared.conversation.connection_id))
@@ -2205,7 +2232,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                         system: "You are RDB's database assistant. Follow the user's request and the configured mode.",
                         messages: &prepared.conversation.messages };
                     rdb_agent::run(&request, prepared.conversation.mode, &runner, &prepared.editor_context,
-                        &prepared.preferences, &prepared.templates, &|_| {}).await
+                        &prepared.preferences, &prepared.templates, &on_progress).await
                 }.await;
                 let (answer, proposal, destructive, error) = match result {
                     Ok(run) => match run.outcome {
@@ -2323,6 +2350,18 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
 
     {
         let ui = ui.clone();
+        let weak = window.as_weak();
+        window.on_agent_progress(move |generation, text| {
+            if let Some(w) = weak.upgrade() {
+                if generation == ui.borrow().generation && w.get_agent_busy() {
+                    w.set_agent_status(text);
+                }
+            }
+        });
+    }
+
+    {
+        let ui = ui.clone();
         let stopper = stopper.clone();
         let weak = window.as_weak();
         window.on_agent_cancel(move || {
@@ -2410,6 +2449,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             }
             paint(&w, &store.borrow(), &ui.borrow());
             w.set_agent_busy(true);
+            w.set_agent_status("Running the approved write".into());
             let background_weak = weak.clone();
             let pool = pool.clone();
             let current = current.clone();

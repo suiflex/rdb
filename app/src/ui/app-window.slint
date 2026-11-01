@@ -535,6 +535,8 @@ callback create-table-commit();
     callback agent-refresh-connections;
     callback agent-send(string);
     callback agent-cancel;
+    // (generation, text): where a run is, posted from its task.
+    callback agent-progress(int, string);
     // A connection was closed; the Assistant stops a run that uses it.
     callback agent-connection-closed(string);
     callback agent-approve-write;
