@@ -364,4 +364,101 @@ mod tests {
         store.delete_template("template-one").unwrap();
         assert!(store.conversations()[0].selected_templates.is_empty());
     }
+    fn sample_config(endpoint: &str) -> AgentConfig {
+        AgentConfig {
+            id: "one".into(),
+            name: "Sample".into(),
+            provider: Provider::OpenAi,
+            endpoint: endpoint.into(),
+            model: "example".into(),
+        }
+    }
+
+    #[test]
+    fn corrupt_store_is_set_aside_and_opens_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("agent.json"), b"{ not json").unwrap();
+        let mut store = AgentStore::open(dir.path().to_owned()).unwrap();
+        assert!(store.conversations().is_empty());
+        let notice = store.take_notice().unwrap();
+        assert!(notice.contains("agent.json.corrupt-"), "{notice}");
+        assert!(store.take_notice().is_none());
+        let aside = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .find(|entry| entry.file_name().to_string_lossy().contains(".corrupt-"))
+            .unwrap();
+        assert_eq!(fs::read(aside.path()).unwrap(), b"{ not json");
+    }
+
+    #[test]
+    fn moving_a_config_needs_its_key_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = AgentStore::open(dir.path().to_owned()).unwrap();
+        store
+            .save_config(
+                sample_config("https://example.invalid/v1"),
+                Some("secret-value"),
+            )
+            .unwrap();
+        // Same endpoint, empty key field: the stored key stays.
+        store
+            .save_config(sample_config("https://example.invalid/v1/"), Some(""))
+            .unwrap();
+        assert!(store
+            .save_config(sample_config("https://other.invalid/v1"), Some(""))
+            .is_err());
+        assert_eq!(store.configs()[0].endpoint, "https://example.invalid/v1/");
+        store
+            .save_config(
+                sample_config("https://other.invalid/v1"),
+                Some("new-secret"),
+            )
+            .unwrap();
+        assert_eq!(store.api_key("one").unwrap().as_deref(), Some("new-secret"));
+    }
+
+    #[test]
+    fn endpoints_with_credentials_or_queries_are_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = AgentStore::open(dir.path().to_owned()).unwrap();
+        for endpoint in [
+            "ftp://example.invalid/v1",
+            "https://user:pass@example.invalid/v1",
+            "https://example.invalid/v1?key=abc",
+            "not a url",
+        ] {
+            assert!(
+                store.save_config(sample_config(endpoint), None).is_err(),
+                "{endpoint}"
+            );
+        }
+        assert!(store.configs().is_empty());
+    }
+
+    #[test]
+    fn older_preferences_load_without_sharing_results() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("agent.json"),
+            br#"{"preferences":{"global_instructions":"","max_turns":30,"max_api_retries":2}}"#,
+        )
+        .unwrap();
+        let store = AgentStore::open(dir.path().to_owned()).unwrap();
+        assert!(!store.preferences().share_result_preview);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn store_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = AgentStore::open(dir.path().to_owned()).unwrap();
+        store.save_preferences(AgentPreferences::default()).unwrap();
+        let mode = fs::metadata(dir.path().join("agent.json"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
 }
