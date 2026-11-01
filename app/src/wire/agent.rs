@@ -890,6 +890,7 @@ fn paint(window: &MainWindow, store: &AgentStore, ui: &UiRun) {
             .filter(|message| message.role == "user" || message.role == "assistant")
             .map(|message| AgentMessage {
                 role: message.role.clone().into(),
+                steps: message.steps.join("\n").into(),
                 blocks: if message.role == "assistant" {
                     ModelRc::from(Rc::new(VecModel::from(assistant_blocks(&message.content))))
                 } else {
@@ -2230,19 +2231,23 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                     rdb_agent::run(&request, prepared.conversation.mode, &runner, &prepared.editor_context,
                         &prepared.preferences, &prepared.templates, &on_progress).await
                 }.await;
-                let (answer, proposal, destructive, error) = match result {
-                    Ok(run) => match run.outcome {
-                        AgentOutcome::Answer(answer) => (answer, String::new(), false, String::new()),
-                        AgentOutcome::WriteProposal { sql, risk } => {
-                            (String::new(), sql, risk == WriteRisk::Destructive, String::new())
+                let (answer, steps, proposal, destructive, error) = match result {
+                    Ok(run) => {
+                        let steps = run.steps.iter().map(|step| step.summary.as_str())
+                            .collect::<Vec<_>>().join("\n");
+                        match run.outcome {
+                            AgentOutcome::Answer(answer) => (answer, steps, String::new(), false, String::new()),
+                            AgentOutcome::WriteProposal { sql, risk } => {
+                                (String::new(), steps, sql, risk == WriteRisk::Destructive, String::new())
+                            }
                         }
-                    },
-                    Err(error) => (String::new(), String::new(), false, error),
+                    }
+                    Err(error) => (String::new(), String::new(), String::new(), false, error),
                 };
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = background_weak.upgrade() {
-                        w.invoke_agent_result(id.into(), generation, answer.into(), proposal.into(),
-                            destructive, error.into());
+                        w.invoke_agent_result(id.into(), generation, answer.into(), steps.into(),
+                            proposal.into(), destructive, error.into());
                     }
                 });
             });
@@ -2260,7 +2265,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let ui = ui.clone();
         let weak = window.as_weak();
         window.on_agent_result(
-            move |id, generation, answer, proposal, destructive, error| {
+            move |id, generation, answer, steps, proposal, destructive, error| {
                 let Some(w) = weak.upgrade() else { return };
                 if generation != ui.borrow().generation {
                     return;
@@ -2301,9 +2306,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                     .find(|item| item.id == id.as_str())
                     .cloned();
                 if let Some(mut conversation) = selected {
-                    conversation
-                        .messages
-                        .push(Message::assistant(answer.to_string()));
+                    conversation.messages.push(Message {
+                        steps: steps.lines().map(str::to_string).collect(),
+                        ..Message::assistant(answer.to_string())
+                    });
                     if let Err(error) = store.borrow_mut().save_conversation(conversation) {
                         w.set_agent_status(error.into());
                         return;

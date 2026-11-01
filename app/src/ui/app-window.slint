@@ -559,7 +559,8 @@ callback create-table-commit();
     callback agent-save-template(string, string);
     callback agent-add-template-engine(string);
     callback agent-remove-template-engine(string);
-    callback agent-result(string, int, string, string, bool, string);
+    // (conversation id, generation, answer, tool steps, proposed write, destructive, error)
+    callback agent-result(string, int, string, string, string, bool, string);
     callback agent-write-result(string, int, string, string);
     callback set-sidebar-side(bool);
     callback zoom-step(int); // ⌘+ / ⌘−: +1 / −1 zoom level (whole-UI scale)

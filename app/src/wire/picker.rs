@@ -1190,6 +1190,7 @@ fn wire_screen_harness(
                                 AgentMessage {
                                     role: "assistant".into(),
                                     blocks: ModelRc::from(Rc::new(VecModel::from(blocks))),
+                                    steps: "describe_schema\nexecute_query · 12 rows".into(),
                                 },
                             ]))));
                         }
