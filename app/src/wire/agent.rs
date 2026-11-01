@@ -4,10 +4,7 @@ use std::{
     cell::RefCell,
     collections::HashSet,
     rc::Rc,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
 };
 
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
@@ -16,10 +13,12 @@ use rdb_agent::{
     Mode, ModelRequest, Progress, PromptTemplate, Provider, ToolRunner, WriteRisk,
 };
 use rdb_connstore::{Engine, EnvTag, SavedConnection};
+use rdb_core::conn::ConnConfig;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, StyledText, VecModel};
 
 use crate::{
-    model, AgentBlock, AgentMessage, AppFns, AppState, MainWindow, StoredResult, WorkspaceTab,
+    dispatch::AnyDriver, model, AgentBlock, AgentMessage, AppFns, AppState, MainWindow,
+    StoredResult, WorkspaceTab,
 };
 
 const PARAGRAPH: i32 = 0;
@@ -852,20 +851,20 @@ struct UiRun {
 struct Running {
     abort: tokio::task::AbortHandle,
     connection_id: String,
-    /// Set by `ToolRunner` while a database call is in flight.
-    in_flight: Arc<AtomicBool>,
+    driver: OwnDriver,
     write: bool,
 }
 
+/// A run's own driver, shared with Stop. Empty until the run has connected,
+/// and emptied by the run when it ends so the connection closes there.
+type OwnDriver = Arc<Mutex<Option<Arc<AnyDriver>>>>;
+
 /// What Stop needs to end a run. Aborting the task only closes the client end
-/// of a statement, so one the agent had in flight is also cancelled on the
-/// server — and only then, so an editor query on the same connection is left
-/// alone.
+/// of a statement, so the run's own connection is also asked to cancel on the
+/// server. Being its own, that cannot reach an editor query.
 #[derive(Clone)]
 struct Stopper {
     rt: Arc<tokio::runtime::Runtime>,
-    pool: crate::DriverPool,
-    current: crate::DriverSlot,
 }
 
 impl Stopper {
@@ -877,18 +876,52 @@ impl Stopper {
             return false;
         };
         running.abort.abort();
-        if running.in_flight.load(Ordering::SeqCst) {
-            let (pool, current) = (self.pool.clone(), self.current.clone());
+        if let Some(driver) = running.driver.lock().unwrap().take() {
             self.rt.spawn(async move {
-                if let Some((_, driver)) =
-                    crate::resolve_driver(&pool, &current, Some(&running.connection_id)).await
-                {
-                    let _ = driver.cancel_running().await;
-                }
+                let _ = driver.cancel_running().await;
             });
         }
         running.write
     }
+}
+
+/// The saved connection's settings, pointed at the conversation's database.
+/// SQLite is left alone: its `database` is the file, and a conversation's
+/// "main" names the schema inside it.
+fn agent_connection_config(mut config: ConnConfig, engine: Engine, database: &str) -> ConnConfig {
+    if engine != Engine::Sqlite && !database.is_empty() {
+        config.database = Some(database.to_string());
+    }
+    config
+}
+
+/// Opens the run's own connection. `cancel_running` cancels whatever a
+/// connection is running, so on the shared driver a Stop or a read timeout
+/// also hit an editor query running, or queued, on the same connection.
+// ponytail: one new connection (and SSH tunnel) per run; keep one per
+// conversation if the handshake shows up in run latency.
+async fn connect_own(
+    pool: &crate::DriverPool,
+    current: &crate::DriverSlot,
+    connection_id: &str,
+    engine: Engine,
+    config: &ConnConfig,
+    slot: &OwnDriver,
+) -> Result<Arc<AnyDriver>, String> {
+    // The conversation's connection must still be open in the app.
+    crate::resolve_driver(pool, current, Some(connection_id))
+        .await
+        .ok_or("Connect the conversation's database first")?;
+    let driver = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        AnyDriver::connect(engine, config),
+    )
+    .await
+    .map_err(|_| "The Assistant's connection timed out".to_string())?
+    .map_err(|error| error.to_string())?;
+    let driver = Arc::new(driver);
+    *slot.lock().unwrap() = Some(driver.clone());
+    Ok(driver)
 }
 
 /// The busy line for a run's progress. The panel animates the trailing dots.
@@ -1219,8 +1252,6 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
     let ui = Rc::new(RefCell::new(UiRun::default()));
     let stopper = Stopper {
         rt: state.rt.clone(),
-        pool: state.driver_pool.clone(),
-        current: state.current.clone(),
     };
     ui.borrow_mut().active_config_id = store.borrow().configs().first().map(|item| item.id.clone());
     paint_config(window, &store.borrow(), &ui.borrow());
@@ -2268,6 +2299,20 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     return;
                 }
             };
+            let config = match conn_store
+                .borrow()
+                .conn_config_for(&prepared.conversation.connection_id)
+            {
+                Ok(config) => agent_connection_config(
+                    config,
+                    prepared.saved.engine,
+                    &prepared.conversation.database,
+                ),
+                Err(error) => {
+                    show_error(&w, error.to_string().into());
+                    return;
+                }
+            };
             let id = prepared.conversation.id.clone();
             if let Err(error) = store
                 .borrow_mut()
@@ -2300,8 +2345,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 run.generation
             };
             let connection_id = prepared.conversation.connection_id.clone();
-            let in_flight = Arc::new(AtomicBool::new(false));
-            let task_in_flight = in_flight.clone();
+            let own = OwnDriver::default();
+            let task_own = own.clone();
             let progress_weak = weak.clone();
             let on_progress = move |progress: Progress| {
                 let text = progress_text(&progress);
@@ -2314,18 +2359,20 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             };
             let abort = rt.spawn(async move {
                 let result = async {
-                    let (_, driver) = crate::resolve_driver(&pool, &current, Some(&prepared.conversation.connection_id))
-                        .await.ok_or("Connect the conversation's database first")?;
+                    let driver = connect_own(&pool, &current, &prepared.conversation.connection_id,
+                        prepared.saved.engine, &config, &task_own).await?;
                     let scope = AgentScope { connection_id: prepared.conversation.connection_id.clone(),
                         database: prepared.conversation.database.clone(), schema: prepared.conversation.schema.clone(),
                         engine: prepared.saved.engine, production: prepared.saved.env_tag == EnvTag::Production };
-                    let runner = ToolRunner::new(driver, scope).with_in_flight(task_in_flight);
+                    let runner = ToolRunner::new(driver, scope);
                     let request = ModelRequest { config: &prepared.config, api_key: &prepared.key,
                         system: "You are RDB's database assistant. Follow the user's request and the configured mode.",
                         messages: &prepared.conversation.messages };
                     rdb_agent::run(&request, prepared.conversation.mode, &runner, &prepared.editor_context,
                         &prepared.preferences, &prepared.templates, &on_progress).await
                 }.await;
+                // Close the run's connection here, on the runtime.
+                task_own.lock().unwrap().take();
                 let (answer, steps, proposal, destructive, error) = match result {
                     Ok(run) => {
                         let steps = run.steps.iter().map(|step| step.summary.as_str())
@@ -2349,7 +2396,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             ui.borrow_mut().running = Some(Running {
                 abort: abort.abort_handle(),
                 connection_id,
-                in_flight,
+                driver: own,
                 write: false,
             });
         });
@@ -2616,6 +2663,14 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 );
                 return;
             }
+            let config = match conn_store.borrow().conn_config_for(&pending.connection_id) {
+                Ok(config) => agent_connection_config(config, saved.engine, &pending.database),
+                Err(error) => {
+                    ui.borrow_mut().pending_write = Some(pending);
+                    show_error(&w, error.to_string().into());
+                    return;
+                }
+            };
             paint(&w, &store.borrow(), &ui.borrow());
             w.set_agent_busy(true);
             show_info(&w, "Running the approved write".into());
@@ -2628,14 +2683,19 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 run.generation
             };
             let connection_id = pending.connection_id.clone();
-            let in_flight = Arc::new(AtomicBool::new(false));
-            let task_in_flight = in_flight.clone();
+            let own = OwnDriver::default();
+            let task_own = own.clone();
             let abort = rt.spawn(async move {
                 let result = async {
-                    let (_, driver) =
-                        crate::resolve_driver(&pool, &current, Some(&pending.connection_id))
-                            .await
-                            .ok_or("Connection is no longer open")?;
+                    let driver = connect_own(
+                        &pool,
+                        &current,
+                        &pending.connection_id,
+                        saved.engine,
+                        &config,
+                        &task_own,
+                    )
+                    .await?;
                     let scope = AgentScope {
                         connection_id: pending.connection_id.clone(),
                         database: pending.database.clone(),
@@ -2644,11 +2704,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                         production: saved.env_tag == EnvTag::Production,
                     };
                     ToolRunner::new(driver, scope)
-                        .with_in_flight(task_in_flight)
                         .execute_approved_write(&pending.sql)
                         .await
                 }
                 .await;
+                task_own.lock().unwrap().take();
                 let (answer, error) = match result {
                     Ok(answer) => (answer, String::new()),
                     Err(error) => (String::new(), error),
@@ -2667,7 +2727,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             ui.borrow_mut().running = Some(Running {
                 abort: abort.abort_handle(),
                 connection_id,
-                in_flight,
+                driver: own,
                 write: true,
             });
         });
