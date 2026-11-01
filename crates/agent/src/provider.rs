@@ -115,7 +115,9 @@ pub(crate) async fn complete_with_retries(
         match complete_once(request).await {
             Ok(response) => return Ok(response),
             Err(error) if error.retryable && attempt < max_retries => {
-                let delay = Duration::from_millis(500 * (1_u64 << attempt.min(5)));
+                let delay = error
+                    .wait
+                    .unwrap_or_else(|| Duration::from_millis(500 * (1_u64 << attempt.min(5))));
                 tokio::time::sleep(delay).await;
                 attempt += 1;
             }
@@ -127,7 +129,13 @@ pub(crate) async fn complete_with_retries(
 struct ModelFailure {
     message: String,
     retryable: bool,
+    /// The server's `Retry-After`, when it sent one.
+    wait: Option<Duration>,
 }
+
+/// Longest `Retry-After` honoured; a longer one fails fast instead of leaving
+/// the panel on "Thinking…" for minutes.
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
 
 async fn complete_once(request: &ModelRequest<'_>) -> Result<ModelResponse, ModelFailure> {
     let client = reqwest::Client::builder()
@@ -136,6 +144,7 @@ async fn complete_once(request: &ModelRequest<'_>) -> Result<ModelResponse, Mode
         .map_err(|error| ModelFailure {
             message: error.to_string(),
             retryable: false,
+            wait: None,
         })?;
     let (url, body) = match request.config.provider {
         Provider::OpenAi
@@ -197,11 +206,19 @@ async fn complete_once(request: &ModelRequest<'_>) -> Result<ModelResponse, Mode
     let response = http.send().await.map_err(|error| ModelFailure {
         retryable: error.is_timeout() || error.is_connect(),
         message: error.to_string(),
+        wait: None,
     })?;
     let status = response.status();
+    let wait = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(Duration::from_secs);
     let body = response.text().await.map_err(|error| ModelFailure {
         message: error.to_string(),
         retryable: false,
+        wait: None,
     })?;
     let value: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
     if !status.is_success() {
@@ -213,13 +230,15 @@ async fn complete_once(request: &ModelRequest<'_>) -> Result<ModelResponse, Mode
             .unwrap_or("Model request failed");
         return Err(ModelFailure {
             message: format!("{status}: {message}"),
-            retryable: retryable_status(status),
+            retryable: retryable_status(status) && wait.is_none_or(|wait| wait <= MAX_RETRY_AFTER),
+            wait,
         });
     }
     if value.is_null() {
         return Err(ModelFailure {
             message: "Model returned an invalid response".into(),
             retryable: false,
+            wait: None,
         });
     }
     Ok(reply(request.config.provider, &value))
