@@ -19,6 +19,7 @@ pub struct AgentStore {
     path: PathBuf,
     data: StoredData,
     secrets: Box<dyn SecretBackend>,
+    notice: Option<String>,
 }
 
 impl AgentStore {
@@ -38,9 +39,30 @@ impl AgentStore {
 
     pub fn open(dir: PathBuf) -> Result<Self, String> {
         let path = dir.join("agent.json");
+        let mut notice = None;
         let data = if path.exists() {
-            serde_json::from_slice(&fs::read(&path).map_err(|error| error.to_string())?)
-                .map_err(|error| error.to_string())?
+            let bytes = fs::read(&path).map_err(|error| error.to_string())?;
+            match serde_json::from_slice(&bytes) {
+                Ok(data) => data,
+                // A file that no longer parses used to disable the whole
+                // panel. Set it aside, untouched, and start empty.
+                Err(error) => {
+                    let aside = path.with_extension(format!(
+                        "json.corrupt-{}",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |elapsed| elapsed.as_secs())
+                    ));
+                    fs::rename(&path, &aside).map_err(|rename| {
+                        format!("{error}; could not set the file aside: {rename}")
+                    })?;
+                    notice = Some(format!(
+                        "Assistant data could not be read ({error}) and was moved to {}",
+                        aside.display()
+                    ));
+                    StoredData::default()
+                }
+            }
         } else {
             StoredData::default()
         };
@@ -49,7 +71,13 @@ impl AgentStore {
             path,
             data,
             secrets,
+            notice,
         })
+    }
+
+    /// A one-time message about recovery done while opening the store.
+    pub fn take_notice(&mut self) -> Option<String> {
+        self.notice.take()
     }
 
     pub fn configs(&self) -> &[AgentConfig] {
