@@ -65,6 +65,10 @@ pub enum Mode {
 pub struct Message {
     pub role: String,
     pub content: String,
+    /// One line per tool the answer used, for the panel. Never sent to the
+    /// model: providers get `role` and `content` only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steps: Vec<String>,
 }
 
 impl Message {
@@ -72,6 +76,7 @@ impl Message {
         Self {
             role: "user".into(),
             content,
+            steps: Vec::new(),
         }
     }
 
@@ -79,6 +84,7 @@ impl Message {
         Self {
             role: "assistant".into(),
             content,
+            steps: Vec::new(),
         }
     }
 }
