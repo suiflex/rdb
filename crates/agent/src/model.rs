@@ -29,6 +29,9 @@ pub struct AgentPreferences {
     pub global_instructions: String,
     pub max_turns: u16,
     pub max_api_retries: u8,
+    /// Send a few rows of the latest result grid as context. Off by default:
+    /// the rows leave the machine for the model provider.
+    pub share_result_preview: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,6 +49,7 @@ impl Default for AgentPreferences {
             global_instructions: String::new(),
             max_turns: 30,
             max_api_retries: 2,
+            share_result_preview: false,
         }
     }
 }

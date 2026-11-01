@@ -323,6 +323,7 @@ mod tests {
             global_instructions: "Use UTC dates".into(),
             max_turns: 45,
             max_api_retries: 3,
+            share_result_preview: true,
         };
         store.save_preferences(preferences.clone()).unwrap();
         assert_eq!(
