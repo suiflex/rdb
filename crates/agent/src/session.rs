@@ -413,7 +413,7 @@ mod tests {
         assert_eq!(mentioned_tables(&messages).len(), 8);
     }
     use std::{
-        io::{Read, Write},
+        io::{BufRead, BufReader, Read, Write},
         net::{TcpListener, TcpStream},
         sync::{Arc, Mutex},
     };
@@ -424,32 +424,21 @@ mod tests {
 
     use crate::{AgentConfig, AgentScope, Provider};
 
-    fn read_body(stream: &mut TcpStream) -> String {
-        let mut data = Vec::new();
-        let mut buffer = [0_u8; 8192];
-        loop {
-            let read = stream.read(&mut buffer).unwrap();
-            data.extend_from_slice(&buffer[..read]);
-            if let Some(end) = data.windows(4).position(|window| window == b"\r\n\r\n") {
-                let head = String::from_utf8_lossy(&data[..end]).to_ascii_lowercase();
-                let length = head
-                    .lines()
-                    .find_map(|line| line.strip_prefix("content-length:"))
-                    .and_then(|value| value.trim().parse::<usize>().ok())
-                    .unwrap_or(0);
-                while data.len() < end + 4 + length {
-                    let read = stream.read(&mut buffer).unwrap();
-                    if read == 0 {
-                        break;
-                    }
-                    data.extend_from_slice(&buffer[..read]);
-                }
-                return String::from_utf8_lossy(&data[end + 4..]).into_owned();
+    /// Reads one HTTP request and returns its body: headers up to the blank
+    /// line, then exactly `Content-Length` bytes.
+    fn read_body(stream: &TcpStream) -> String {
+        let mut reader = BufReader::new(stream);
+        let mut length = 0;
+        let mut line = String::new();
+        while reader.read_line(&mut line).unwrap() > 0 && line != "\r\n" {
+            if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                length = value.trim().parse().unwrap();
             }
-            if read == 0 {
-                return String::new();
-            }
+            line.clear();
         }
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).unwrap();
+        String::from_utf8(body).unwrap()
     }
 
     /// An OpenAI-compatible endpoint that answers each request with the next
@@ -462,7 +451,7 @@ mod tests {
                 .into_iter()
                 .map(|content| {
                     let (mut stream, _) = listener.accept().unwrap();
-                    let body = read_body(&mut stream);
+                    let body = read_body(&stream);
                     let reply = serde_json::json!({"choices": [{"message": {"content": content}}]})
                         .to_string();
                     write!(
