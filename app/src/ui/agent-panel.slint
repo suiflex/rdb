@@ -306,6 +306,21 @@ export component AgentPanel inherits Rectangle {
                                     }
                                 }
                             }
+                            if msg.steps != "": HorizontalLayout {
+                                spacing: Tokens.sp1;
+                                VerticalLayout {
+                                    alignment: start;
+                                    AppIcon { name: "terminal"; size: 12px; color: Tokens.text-dim; }
+                                }
+                                Text {
+                                    text: msg.steps;
+                                    color: Tokens.text-dim;
+                                    font-family: Tokens.mono;
+                                    font-size: Tokens.font-xs;
+                                    wrap: word-wrap;
+                                    horizontal-stretch: 1;
+                                }
+                            }
                         }
                     }
                     if root.busy: HorizontalLayout {
