@@ -174,6 +174,19 @@ export component AgentPanel inherits Rectangle {
 
     preferred-width: 360px;
     min-width: 300px;
+
+    // Measures the draft at the composer's text width, so the composer can
+    // grow with it; TextEdit reports no height for wrapped content.
+    composer-measure := Text {
+        x: 0;
+        y: 0;
+        width: max(0px, composer.width - 24px);
+        text: root.draft + "\n";
+        wrap: word-wrap;
+        font-size: Tokens.font-sm;
+        visible: false;
+        accessible-role: none;
+    }
     background: Tokens.sidebar;
     border-width: 1px;
     border-color: Tokens.border;
@@ -613,15 +626,6 @@ export component AgentPanel inherits Rectangle {
                     }
                 }
             }
-            Text {
-                text: root.mode == 0
-                    ? "Ask suggests SQL without running queries."
-                    : "Agent can read data; writes need approval.";
-                color: Tokens.text-dim;
-                font-size: Tokens.font-xs;
-                wrap: word-wrap;
-                horizontal-alignment: center;
-            }
             if root.selection-preview != "": HorizontalLayout {
                 padding-left: Tokens.sp3;
                 padding-right: Tokens.sp3;
@@ -641,10 +645,24 @@ export component AgentPanel inherits Rectangle {
             HorizontalLayout {
                 padding-left: Tokens.sp3;
                 padding-right: Tokens.sp3;
-                TextEdit {
-                    height: 88px;
+                composer := TextEdit {
+                    // Grows with the draft, from two lines to about seven.
+                    height: clamp(composer-measure.preferred-height + 28px, 64px, 160px);
                     text <=> root.draft;
+                    placeholder-text: root.mode == 0
+                        ? "Ask for SQL help. Type @ to mention a table."
+                        : "Ask the agent to look at your data. Writes need your approval.";
                     edited => { root.mention-query(self.text); }
+                    // Enter sends, Shift+Enter adds a line.
+                    key-pressed(event) => {
+                        if event.text == Key.Return && !event.modifiers.shift {
+                            if root.draft != "" && root.proposed-write == "" && !root.busy {
+                                root.send(root.draft);
+                            }
+                            return accept;
+                        }
+                        return reject;
+                    }
                     wrap: word-wrap;
                     font-size: Tokens.font-sm;
                 }
