@@ -10,4 +10,4 @@ pub use model::{
 pub use provider::{complete, discover_models, ModelRequest};
 pub use session::{run, AgentOutcome, AgentRun, AgentStep};
 pub use store::AgentStore;
-pub use tools::{AgentScope, ToolCall, ToolResult, ToolRunner};
+pub use tools::{AgentScope, ToolCall, ToolResult, ToolRunner, WriteRisk};
