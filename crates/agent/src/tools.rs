@@ -9,8 +9,8 @@ use rdb_runtime::AnyDriver;
 use serde_json::{json, Value};
 use sqlparser::{
     ast::{
-        ObjectName, ObjectNamePart, ObjectType, Query as SqlQuery, SetExpr, Statement, Visit,
-        Visitor,
+        Expr, ObjectName, ObjectNamePart, ObjectType, Query as SqlQuery, SetExpr, Statement,
+        TableFactor, Visit, Visitor,
     },
     dialect::GenericDialect,
     parser::Parser,
@@ -305,6 +305,10 @@ fn validate_sql(
     if statements.len() != 1 {
         return Err("Agent permits exactly one statement".into());
     }
+    // sqlparser reads `/*! ... */` as a comment; MySQL executes what is inside.
+    if matches!(engine, Engine::MySql | Engine::MariaDb) && text.contains("/*!") {
+        return Err("Agent SQL cannot use MySQL executable comments".into());
+    }
     if !allow_write
         && !matches!(statements.first(), Some(Statement::Query(query)) if is_read_query(query))
     {
@@ -313,13 +317,81 @@ fn validate_sql(
     let mut scope = DatabaseScope {
         engine,
         database,
+        read_only: !allow_write,
         violation: None,
     };
     let _ = statements.visit(&mut scope);
-    if let Some(name) = scope.violation {
-        return Err(format!("Agent SQL is outside its database scope: {name}"));
+    if let Some(reason) = scope.violation {
+        return Err(reason);
     }
     Ok(statements.remove(0))
+}
+
+/// Functions that change state, sleep, or reach outside the database even
+/// inside a `SELECT`. Matched on the unqualified, lowercased name; entries
+/// ending in `*` match as a prefix.
+// ponytail: a denylist only knows what it lists. The real boundary is a
+// read-only database user; this catches the well-known ones.
+const SIDE_EFFECT_FUNCTIONS: &[&str] = &[
+    // Postgres
+    "pg_sleep*",
+    "pg_terminate_backend",
+    "pg_cancel_backend",
+    "pg_reload_conf",
+    "pg_rotate_logfile",
+    "set_config",
+    "nextval",
+    "setval",
+    "pg_advisory_*",
+    "pg_try_advisory_*",
+    "lo_*",
+    "pg_read_file",
+    "pg_read_binary_file",
+    "pg_ls_dir",
+    "pg_stat_file",
+    "dblink*",
+    // MySQL / MariaDB
+    "sleep",
+    "benchmark",
+    "get_lock",
+    "release_lock",
+    "release_all_locks",
+    "load_file",
+    // ClickHouse table functions
+    "url",
+    "s3*",
+    "file",
+    "remote",
+    "remotesecure",
+    "cluster",
+    "mysql",
+    "postgresql",
+    "mongodb",
+    "redis",
+    "sqlite",
+    "hdfs",
+    "jdbc",
+    "odbc",
+    "executable",
+    "input",
+    // SQL Server
+    "openrowset",
+    "opendatasource",
+    "openquery",
+    "xp_cmdshell",
+];
+
+fn is_side_effect_function(name: &ObjectName) -> bool {
+    let Some(ObjectNamePart::Identifier(last)) = name.0.last() else {
+        return true;
+    };
+    let name = last.value.to_ascii_lowercase();
+    SIDE_EFFECT_FUNCTIONS
+        .iter()
+        .any(|entry| match entry.strip_suffix('*') {
+            Some(prefix) => name.starts_with(prefix),
+            None => name == *entry,
+        })
 }
 
 /// Adds a row cap to a validated read that has none, so a `SELECT *` on a huge
@@ -358,11 +430,45 @@ fn cap_read(text: &str, statement: &Statement, engine: Engine) -> String {
 struct DatabaseScope<'a> {
     engine: Engine,
     database: &'a str,
+    read_only: bool,
     violation: Option<String>,
+}
+
+impl DatabaseScope<'_> {
+    fn deny(&mut self, reason: String) -> ControlFlow<()> {
+        self.violation = Some(reason);
+        ControlFlow::Break(())
+    }
+
+    fn check_function(&mut self, name: &ObjectName) -> ControlFlow<()> {
+        if self.read_only && is_side_effect_function(name) {
+            return self.deny(format!("Agent reads cannot call {name}"));
+        }
+        ControlFlow::Continue(())
+    }
 }
 
 impl Visitor for DatabaseScope<'_> {
     type Break = ();
+
+    fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<Self::Break> {
+        match expr {
+            Expr::Function(function) => self.check_function(&function.name),
+            _ => ControlFlow::Continue(()),
+        }
+    }
+
+    fn pre_visit_table_factor(&mut self, factor: &TableFactor) -> ControlFlow<Self::Break> {
+        match factor {
+            TableFactor::Table {
+                name,
+                args: Some(_),
+                ..
+            }
+            | TableFactor::Function { name, .. } => self.check_function(name),
+            _ => ControlFlow::Continue(()),
+        }
+    }
 
     fn pre_visit_statement(&mut self, statement: &Statement) -> ControlFlow<Self::Break> {
         if matches!(
@@ -399,8 +505,11 @@ impl Visitor for DatabaseScope<'_> {
                 | Statement::DropTrigger(_)
                 | Statement::CreateMacro { .. }
         ) {
-            self.violation = Some("session, database, privilege, or procedural SQL".into());
-            return ControlFlow::Break(());
+            return self.deny(
+                "Agent SQL is outside its database scope: \
+                 session, database, privilege, or procedural SQL"
+                    .into(),
+            );
         }
         if let Statement::Drop { names, .. } = statement {
             for name in names {
@@ -420,8 +529,9 @@ impl Visitor for DatabaseScope<'_> {
             })
             .collect::<Option<Vec<_>>>()
         else {
-            self.violation = Some(relation.to_string());
-            return ControlFlow::Break(());
+            return self.deny(format!(
+                "Agent SQL is outside its database scope: {relation}"
+            ));
         };
         let index = match self.engine {
             Engine::MySql | Engine::MariaDb | Engine::Clickhouse | Engine::Sqlite
@@ -434,8 +544,8 @@ impl Visitor for DatabaseScope<'_> {
         };
         if let Some(index) = index {
             if parts[index] != self.database {
-                self.violation = Some(parts[index].to_owned());
-                return ControlFlow::Break(());
+                let name = parts[index].to_owned();
+                return self.deny(format!("Agent SQL is outside its database scope: {name}"));
             }
         }
         ControlFlow::Continue(())
