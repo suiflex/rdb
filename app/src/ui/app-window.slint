@@ -516,6 +516,7 @@ callback create-table-commit();
     in-out property <string> agent-global-instructions: "";
     in-out property <string> agent-max-turns: "30";
     in-out property <string> agent-max-api-retries: "2";
+    in-out property <bool> agent-share-result-preview: false;
     in-out property <int> agent-settings-section: 0;
     in property <[string]> agent-template-options;
     in property <[string]> agent-selected-templates;
@@ -542,7 +543,7 @@ callback create-table-commit();
     callback agent-save-config(string, string, string, string, string);
     callback agent-test-config(string, string, string, string);
     callback agent-discover-models(string, string, string);
-    callback agent-save-preferences(string, string, string);
+    callback agent-save-preferences(string, string, string, bool);
     callback agent-choose-config(string);
     callback agent-new-config;
     callback agent-delete-config;
@@ -4022,6 +4023,7 @@ callback create-table-commit();
                     global-instructions <=> root.agent-global-instructions;
                     max-turns <=> root.agent-max-turns;
                     max-api-retries <=> root.agent-max-api-retries;
+                    share-result-preview <=> root.agent-share-result-preview;
                     template-options: root.agent-template-options;
                     template-choice <=> root.agent-template-choice;
                     template-name <=> root.agent-template-name;
@@ -4043,8 +4045,8 @@ callback create-table-commit();
                     choose-config(value) => { root.agent-choose-config(value); }
                     new-config => { root.agent-new-config(); }
                     delete-config => { root.agent-delete-config(); }
-                    save-preferences(instructions, turns, retries) => {
-                        root.agent-save-preferences(instructions, turns, retries);
+                    save-preferences(instructions, turns, retries, share) => {
+                        root.agent-save-preferences(instructions, turns, retries, share);
                     }
                     choose-template(name) => { root.agent-choose-template(name); }
                     new-template => { root.agent-new-template(); }

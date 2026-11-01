@@ -361,6 +361,7 @@ fn prepare_send(
         &workspace.tabs,
         &workspace.left_id,
         &workspace.right_id,
+        preferences.share_result_preview,
     );
     if let Some(data) = selection_data {
         editor_context.push_str("\n\n");
@@ -498,6 +499,7 @@ fn active_workspace_context(
     tabs: &Arc<Mutex<Vec<WorkspaceTab>>>,
     left_id: &Arc<Mutex<Option<String>>>,
     right_id: &Arc<Mutex<Option<String>>>,
+    share_results: bool,
 ) -> String {
     let pane = window.get_active_pane();
     let active_id = if pane == 1 { right_id } else { left_id }
@@ -527,8 +529,10 @@ fn active_workspace_context(
             .map(|error| error_context(error, conversation))
             .filter(|preview| !preview.is_empty())
             .or_else(|| {
+                // Result rows leave the machine; only when the user opted in.
                 tab.results
                     .get(tab.active_result)
+                    .filter(|_| share_results)
                     .map(|result| result_context(result, conversation))
             })
             .unwrap_or_default();
@@ -1087,6 +1091,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
     window.set_agent_global_instructions(preferences.global_instructions.into());
     window.set_agent_max_turns(preferences.max_turns.to_string().into());
     window.set_agent_max_api_retries(preferences.max_api_retries.to_string().into());
+    window.set_agent_share_result_preview(preferences.share_result_preview);
 
     {
         let store = store.clone();
@@ -1581,7 +1586,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
     {
         let store = store.clone();
         let weak = window.as_weak();
-        window.on_agent_save_preferences(move |instructions, turns, retries| {
+        window.on_agent_save_preferences(move |instructions, turns, retries, share_results| {
             let Some(w) = weak.upgrade() else { return };
             let Ok(max_turns) = turns.parse::<u16>() else {
                 w.set_agent_status("Maximum Agent turns must be a number from 5 to 500".into());
@@ -1595,7 +1600,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 global_instructions: instructions.to_string(),
                 max_turns,
                 max_api_retries,
-                share_result_preview: store.borrow().preferences().share_result_preview,
+                share_result_preview: share_results,
             };
             match store.borrow_mut().save_preferences(preferences) {
                 Ok(()) => w.set_agent_status("Assistant behavior saved".into()),
