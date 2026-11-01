@@ -49,6 +49,7 @@ export component AgentPanel inherits Rectangle {
     in property <string> status;
     in property <string> proposed-write;
     in property <string> write-target;
+    in property <bool> write-destructive;
     in property <string> selection-preview;
     in property <[string]> mention-options;
     in-out property <string> draft: "";
@@ -338,6 +339,11 @@ export component AgentPanel inherits Rectangle {
                 padding: Tokens.sp2;
                 spacing: Tokens.sp1;
                 Text { text: "Approve this exact SQL once?"; color: Tokens.warn; }
+                if root.write-destructive: Text {
+                    text: "Destructive: this drops or rewrites data and cannot be undone.";
+                    color: Tokens.error;
+                    wrap: word-wrap;
+                }
                 Text { text: root.write-target; color: Tokens.text-dim; wrap: word-wrap; }
                 Text { text: root.proposed-write; color: Tokens.text; font-family: Tokens.mono;
                     wrap: word-wrap; }
