@@ -1,12 +1,4 @@
-use std::{
-    future::Future,
-    ops::ControlFlow,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{future::Future, ops::ControlFlow, sync::Arc, time::Duration};
 
 use rdb_connstore::{Engine, QueryLanguage};
 use rdb_core::{
@@ -62,32 +54,11 @@ pub enum ToolResult {
 pub struct ToolRunner {
     driver: Arc<AnyDriver>,
     scope: AgentScope,
-    in_flight: Arc<AtomicBool>,
 }
 
 impl ToolRunner {
     pub fn new(driver: Arc<AnyDriver>, scope: AgentScope) -> Self {
-        Self {
-            driver,
-            scope,
-            in_flight: Arc::default(),
-        }
-    }
-
-    /// Shares a flag that is true while a database call is in flight. It stays
-    /// true if the task is aborted mid-call, which is how a caller that stops a
-    /// run knows the server still has a statement to cancel — and that it
-    /// should not cancel one the editor started on the same connection.
-    pub fn with_in_flight(mut self, flag: Arc<AtomicBool>) -> Self {
-        self.in_flight = flag;
-        self
-    }
-
-    async fn tracked<T>(&self, work: impl Future<Output = T>) -> T {
-        self.in_flight.store(true, Ordering::SeqCst);
-        let output = work.await;
-        self.in_flight.store(false, Ordering::SeqCst);
-        output
+        Self { driver, scope }
     }
 
     pub fn scope(&self) -> &AgentScope {
@@ -100,11 +71,10 @@ impl ToolRunner {
         &self,
         work: impl Future<Output = rdb_core::error::Result<T>>,
     ) -> Result<T, String> {
-        match tokio::time::timeout(READ_TIMEOUT, self.tracked(work)).await {
+        match tokio::time::timeout(READ_TIMEOUT, work).await {
             Ok(result) => result.map_err(|error| error.to_string()),
             Err(_) => {
                 let _ = self.driver.cancel_running().await;
-                self.in_flight.store(false, Ordering::SeqCst);
                 Err(format!(
                     "Query exceeded {}s and was cancelled",
                     READ_TIMEOUT.as_secs()
@@ -182,7 +152,8 @@ impl ToolRunner {
         // No time limit: the user approved this exact statement, and a long
         // migration should not be cut off. Stop cancels it instead.
         let result = self
-            .tracked(self.driver.query(&query))
+            .driver
+            .query(&query)
             .await
             .map_err(|error| error.to_string())?;
         Ok(render_result(result))
