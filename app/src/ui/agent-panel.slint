@@ -74,6 +74,7 @@ export component AgentPanel inherits Rectangle {
     in property <bool> busy: false;
     in property <bool> can-retry: false;
     in property <string> status;
+    in property <bool> status-error;
     in property <string> proposed-write;
     in property <string> write-target;
     in property <bool> write-destructive;
@@ -418,20 +419,39 @@ export component AgentPanel inherits Rectangle {
                     }
                 }
             }
-            if root.status != "" && !root.busy: Rectangle {
-                background: Tokens.warn-tint;
-                border-radius: 8px;
-                height: status-text.preferred-height + 2 * Tokens.sp1;
-                vertical-stretch: 0;
-                status-text := Text {
-                    x: Tokens.sp2;
-                    y: Tokens.sp1;
-                    width: parent.width - 2 * Tokens.sp2;
-                    text: root.status;
-                    color: Tokens.text;
-                    wrap: word-wrap;
-                    font-size: Tokens.font-sm;
+            if root.status != "" && !root.busy && root.status-error: HorizontalLayout {
+                padding-left: Tokens.sp3;
+                padding-right: Tokens.sp3;
+                Rectangle {
+                    background: Tokens.error-tint;
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: Tokens.error.with-alpha(0.4);
+                    height: status-text.preferred-height + 2 * Tokens.sp2;
+                    Rectangle {
+                        x: 0;
+                        width: 3px;
+                        height: parent.height;
+                        border-radius: 1.5px;
+                        background: Tokens.error;
+                    }
+                    status-text := Text {
+                        x: Tokens.sp3;
+                        y: Tokens.sp2;
+                        width: parent.width - Tokens.sp3 - Tokens.sp2;
+                        text: root.status;
+                        color: Tokens.text;
+                        wrap: word-wrap;
+                        font-size: Tokens.font-sm;
+                    }
                 }
+            }
+            if root.status != "" && !root.busy && !root.status-error: Text {
+                text: root.status;
+                color: Tokens.text-dim;
+                wrap: word-wrap;
+                font-size: Tokens.font-xs;
+                horizontal-alignment: center;
             }
             if root.proposed-write != "": HorizontalLayout {
                 padding-left: Tokens.sp3;

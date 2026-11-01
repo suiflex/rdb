@@ -885,6 +885,18 @@ fn progress_text(progress: &Progress) -> String {
     }
 }
 
+/// A failure or a refusal the user has to act on: shown in the warning box.
+fn show_error(window: &MainWindow, text: SharedString) {
+    window.set_agent_status_error(true);
+    window.set_agent_status(text);
+}
+
+/// Progress, confirmations and other notes: shown as quiet text.
+fn show_info(window: &MainWindow, text: SharedString) {
+    window.set_agent_status_error(false);
+    window.set_agent_status(text);
+}
+
 struct PendingWrite {
     conversation_id: String,
     connection_id: String,
@@ -1172,12 +1184,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
     let store = match AgentStore::open_default() {
         Ok(mut store) => {
             if let Some(notice) = store.take_notice() {
-                window.set_agent_status(notice.into());
+                show_error(window, notice.into());
             }
             Rc::new(RefCell::new(store))
         }
         Err(error) => {
-            window.set_agent_status(format!("Agent storage: {error}").into());
+            show_error(window, format!("Agent storage: {error}").into());
             return;
         }
     };
@@ -1243,14 +1255,15 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         window.on_agent_select_connection(move |label| {
             let Some(w) = weak.upgrade() else { return };
             if w.get_agent_busy() || !w.get_agent_proposed_write().is_empty() {
-                w.set_agent_status(
+                show_error(
+                    &w,
                     "Finish the current Agent action before changing connection".into(),
                 );
                 return;
             }
             let choices = live_connection_choices(&connections.borrow(), &live.lock().unwrap());
             let Some((id, _)) = choices.iter().find(|(_, choice)| choice == label.as_str()) else {
-                w.set_agent_status("Connection is no longer active".into());
+                show_error(&w, "Connection is no longer active".into());
                 w.invoke_agent_refresh_connections();
                 return;
             };
@@ -1296,7 +1309,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             }
             w.set_agent_connection_name(saved.name.into());
             w.set_agent_can_switch_database(true);
-            w.set_agent_status("".into());
+            show_info(&w, "".into());
             if !already_focused || !database_matches {
                 w.invoke_connect_clicked(index as i32);
                 let target_tab = tabs
@@ -1396,7 +1409,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             let Some(w) = weak.upgrade() else { return };
             let pane = pane.clamp(0, 1) as usize;
             let Some(selected) = panes[pane].ed_state.borrow().selected_text() else {
-                w.set_agent_status("Select SQL text first".into());
+                show_error(&w, "Select SQL text first".into());
                 return;
             };
             let tab_id = if pane == 1 { &right_id } else { &left_id }
@@ -1411,15 +1424,15 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 .find(|tab| tab.id == tab_id && tab.kind == "sql")
                 .and_then(|tab| tab.connection_id.clone())
             else {
-                w.set_agent_status("Select text in a connected SQL tab".into());
+                show_error(&w, "Select text in a connected SQL tab".into());
                 return;
             };
             if current.lock().unwrap().as_deref() != Some(connection_id.as_str()) {
-                w.set_agent_status("Reconnect this editor's database before sending".into());
+                show_error(&w, "Reconnect this editor's database before sending".into());
                 return;
             }
             let Some(saved) = conn_store.borrow().get(&connection_id).cloned() else {
-                w.set_agent_status("Saved connection is unavailable".into());
+                show_error(&w, "Saved connection is unavailable".into());
                 return;
             };
             let database = if saved.engine == Engine::Sqlite {
@@ -1457,7 +1470,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 conversation.selected_templates = default_templates(&store.borrow(), saved.engine);
                 let id = conversation.id.clone();
                 if let Err(error) = store.borrow_mut().save_conversation(conversation) {
-                    w.set_agent_status(error.into());
+                    show_error(&w, error.into());
                     return;
                 }
                 id
@@ -1486,7 +1499,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             );
             w.set_agent_connection_name(saved.name.into());
             w.set_agent_can_switch_database(true);
-            w.set_agent_status("".into());
+            show_info(&w, "".into());
             paint(&w, &store.borrow(), &ui.borrow());
             let open_weak = weak.clone();
             slint::Timer::single_shot(std::time::Duration::ZERO, move || {
@@ -1594,7 +1607,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 .iter()
                 .any(|template| template.name == name.as_str() && template.id != id)
             {
-                w.set_agent_status("Template name already exists".into());
+                show_error(&w, "Template name already exists".into());
                 return;
             }
             let template = PromptTemplate {
@@ -1604,12 +1617,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 default_engines,
             };
             if let Err(error) = store.borrow_mut().save_template(template) {
-                w.set_agent_status(error.into());
+                show_error(&w, error.into());
                 return;
             }
             ui.borrow_mut().active_template_id = Some(id);
             paint_templates(&w, &store.borrow(), &ui.borrow());
-            w.set_agent_status("Prompt template saved".into());
+            show_info(&w, "Prompt template saved".into());
         });
     }
 
@@ -1623,7 +1636,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 return;
             };
             if let Err(error) = store.borrow_mut().delete_template(&id) {
-                w.set_agent_status(error.into());
+                show_error(&w, error.into());
                 return;
             }
             let mut run = ui.borrow_mut();
@@ -1631,7 +1644,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             run.template_default_engines.clear();
             paint_templates(&w, &store.borrow(), &run);
             paint(&w, &store.borrow(), &run);
-            w.set_agent_status("Prompt template deleted".into());
+            show_info(&w, "Prompt template deleted".into());
         });
     }
 
@@ -1679,7 +1692,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 conversation.selected_templates.push(template_id);
             }
             if let Err(error) = store.borrow_mut().save_conversation(conversation) {
-                w.set_agent_status(error.into());
+                show_error(&w, error.into());
                 return;
             }
             paint(&w, &store.borrow(), &ui.borrow());
@@ -1692,11 +1705,17 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         window.on_agent_save_preferences(move |instructions, turns, retries, share_results| {
             let Some(w) = weak.upgrade() else { return };
             let Ok(max_turns) = turns.parse::<u16>() else {
-                w.set_agent_status("Maximum Agent turns must be a number from 5 to 500".into());
+                show_error(
+                    &w,
+                    "Maximum Agent turns must be a number from 5 to 500".into(),
+                );
                 return;
             };
             let Ok(max_api_retries) = retries.parse::<u8>() else {
-                w.set_agent_status("Maximum API retries must be a number from 0 to 10".into());
+                show_error(
+                    &w,
+                    "Maximum API retries must be a number from 0 to 10".into(),
+                );
                 return;
             };
             let preferences = AgentPreferences {
@@ -1706,8 +1725,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 share_result_preview: share_results,
             };
             match store.borrow_mut().save_preferences(preferences) {
-                Ok(()) => w.set_agent_status("Assistant behavior saved".into()),
-                Err(error) => w.set_agent_status(error.into()),
+                Ok(()) => show_info(&w, "Assistant behavior saved".into()),
+                Err(error) => show_error(&w, error.into()),
             }
         });
     }
@@ -1722,11 +1741,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         window.on_agent_new_conversation(move || {
             let Some(w) = weak.upgrade() else { return };
             let Some(id) = current.lock().unwrap().clone() else {
-                w.set_agent_status("Connect to a database first".into());
+                show_error(&w, "Connect to a database first".into());
                 return;
             };
             let Some(saved) = conn_store.borrow().get(&id).cloned() else {
-                w.set_agent_status("Saved connection is unavailable".into());
+                show_error(&w, "Saved connection is unavailable".into());
                 return;
             };
             let mut run = ui.borrow_mut();
@@ -1741,7 +1760,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             w.set_agent_connection_name(saved.name.into());
             w.set_agent_can_switch_database(true);
             w.set_agent_busy(false);
-            w.set_agent_status("".into());
+            show_info(&w, "".into());
             paint(&w, &store.borrow(), &ui.borrow());
         });
     }
@@ -1757,7 +1776,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             // The busy state and its Stop button belong to the running chat;
             // switching away left "Thinking…" under the wrong one.
             if w.get_agent_busy() {
-                w.set_agent_status("Stop the current run before switching conversations".into());
+                show_error(
+                    &w,
+                    "Stop the current run before switching conversations".into(),
+                );
                 return;
             }
             let Some(conversation) = store
@@ -1805,7 +1827,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 return;
             };
             if let Err(error) = store.borrow_mut().delete_conversation(&conversation.id) {
-                w.set_agent_status(error.into());
+                show_error(&w, error.into());
                 return;
             }
             let mut run = ui.borrow_mut();
@@ -1866,7 +1888,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         window.on_agent_select_database(move |database| {
             let Some(w) = weak.upgrade() else { return };
             if w.get_agent_busy() || !w.get_agent_proposed_write().is_empty() {
-                w.set_agent_status(
+                show_error(
+                    &w,
                     "Finish the current Agent action before changing database".into(),
                 );
                 return;
@@ -1886,7 +1909,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 .as_ref()
                 .is_some_and(|chat| chat.connection_id != connection_id)
             {
-                w.set_agent_status(
+                show_error(
+                    &w,
                     "Open this conversation's connection before changing database".into(),
                 );
                 return;
@@ -1898,7 +1922,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 return;
             }
             if !w.get_db_list().iter().any(|name| name == database) {
-                w.set_agent_status("Database is unavailable on this connection".into());
+                show_error(&w, "Database is unavailable on this connection".into());
                 return;
             }
             ui.borrow_mut().selected_id = None;
@@ -1906,7 +1930,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 ui.borrow_mut().draft_templates =
                     Some(default_templates(&store.borrow(), saved.engine));
             }
-            w.set_agent_status("".into());
+            show_info(&w, "".into());
             w.set_agent_draft("".into());
             paint(&w, &store.borrow(), &ui.borrow());
             w.set_agent_database_name(database.clone());
@@ -1923,11 +1947,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         window.on_agent_discover_models(move |provider, endpoint, key| {
             let Some(w) = weak.upgrade() else { return };
             let Some(provider_kind) = provider_from_label(&provider) else {
-                w.set_agent_status("Unknown model provider".into());
+                show_error(&w, "Unknown model provider".into());
                 return;
             };
             if endpoint.trim().is_empty() {
-                w.set_agent_status("Enter an API endpoint first".into());
+                show_error(&w, "Enter an API endpoint first".into());
                 return;
             }
             let api_key = match preview_api_key(
@@ -1939,7 +1963,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             ) {
                 Ok(key) => key,
                 Err(error) => {
-                    w.set_agent_status(error.into());
+                    show_error(&w, error.into());
                     return;
                 }
             };
@@ -1950,7 +1974,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 endpoint: endpoint.to_string(),
                 model: String::new(),
             };
-            w.set_agent_status("Finding models…".into());
+            show_info(&w, "Finding models…".into());
             let background_weak = weak.clone();
             rt.spawn(async move {
                 let result = rdb_agent::discover_models(&config, &api_key).await;
@@ -1972,9 +1996,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                                     .map(Into::into)
                                     .collect::<Vec<SharedString>>(),
                             ))));
-                            w.set_agent_status(format!("Found {count} models").into());
+                            show_info(&w, format!("Found {count} models").into());
                         }
-                        Err(error) => w.set_agent_status(error.into()),
+                        Err(error) => show_error(&w, error.into()),
                     }
                 });
             });
@@ -2021,7 +2045,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             };
             w.set_agent_test_status("Testing model…".into());
             w.set_agent_test_state(0);
-            w.set_agent_status("".into());
+            show_info(&w, "".into());
             let background_weak = weak.clone();
             rt.spawn(async move {
                 let started = std::time::Instant::now();
@@ -2087,7 +2111,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             };
             conversation.mode = if index == 1 { Mode::Agent } else { Mode::Ask };
             if let Err(error) = store.borrow_mut().save_conversation(conversation) {
-                w.set_agent_status(error.into());
+                show_error(&w, error.into());
             }
         });
     }
@@ -2099,11 +2123,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         window.on_agent_save_config(move |name, provider, endpoint, model, key| {
             let Some(w) = weak.upgrade() else { return };
             let Some(provider) = provider_from_label(&provider) else {
-                w.set_agent_status("Unknown model provider".into());
+                show_error(&w, "Unknown model provider".into());
                 return;
             };
             if name.trim().is_empty() || endpoint.trim().is_empty() || model.trim().is_empty() {
-                w.set_agent_status("Name, endpoint, and model are required".into());
+                show_error(&w, "Name, endpoint, and model are required".into());
                 return;
             }
             let active_id = ui.borrow().active_config_id.clone();
@@ -2113,7 +2137,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 .iter()
                 .any(|item| item.name == name.as_str() && Some(&item.id) != active_id.as_ref())
             {
-                w.set_agent_status("Model configuration name already exists".into());
+                show_error(&w, "Model configuration name already exists".into());
                 return;
             }
             let id = active_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
@@ -2129,9 +2153,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 Ok(()) => {
                     ui.borrow_mut().active_config_id = Some(id);
                     paint_config(&w, &store.borrow(), &ui.borrow());
-                    w.set_agent_status("Model saved".into());
+                    show_info(&w, "Model saved".into());
                 }
-                Err(error) => w.set_agent_status(error.into()),
+                Err(error) => show_error(&w, error.into()),
             }
         });
     }
@@ -2173,13 +2197,13 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 return;
             };
             if let Err(error) = store.borrow_mut().delete_config(&id) {
-                w.set_agent_status(error.into());
+                show_error(&w, error.into());
                 return;
             }
             ui.borrow_mut().active_config_id =
                 store.borrow().configs().first().map(|item| item.id.clone());
             paint_config(&w, &store.borrow(), &ui.borrow());
-            w.set_agent_status("Model configuration deleted".into());
+            show_info(&w, "Model configuration deleted".into());
         });
     }
 
@@ -2217,7 +2241,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             ) {
                 Ok(value) => value,
                 Err(error) => {
-                    w.set_agent_status(error.into());
+                    show_error(&w, error.into());
                     return;
                 }
             };
@@ -2226,7 +2250,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 .borrow_mut()
                 .save_conversation(prepared.conversation.clone())
             {
-                w.set_agent_status(error.into());
+                show_error(&w, error.into());
                 return;
             }
             if prepared.is_new {
@@ -2238,7 +2262,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             }
             paint(&w, &store.borrow(), &ui.borrow());
             w.set_agent_busy(true);
-            w.set_agent_status("Contacting the model".into());
+            show_info(&w, "Contacting the model".into());
             if prompt.is_some() {
                 w.set_agent_draft("".into());
             }
@@ -2326,7 +2350,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 ui.borrow_mut().running = None;
                 w.set_agent_busy(false);
                 if !error.is_empty() {
-                    w.set_agent_status(error);
+                    show_error(&w, error);
                     return;
                 }
                 if !proposal.is_empty() {
@@ -2345,9 +2369,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                             sql: proposal.to_string(),
                             destructive,
                         });
-                        w.set_agent_status(
-                            "Review the exact SQL and target before approval".into(),
-                        );
+                        show_info(&w, "Review the exact SQL and target before approval".into());
                         paint(&w, &store.borrow(), &ui.borrow());
                     }
                     return;
@@ -2364,11 +2386,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                         ..Message::assistant(answer.to_string())
                     });
                     if let Err(error) = store.borrow_mut().save_conversation(conversation) {
-                        w.set_agent_status(error.into());
+                        show_error(&w, error.into());
                         return;
                     }
                 }
-                w.set_agent_status("".into());
+                show_info(&w, "".into());
                 paint(&w, &store.borrow(), &ui.borrow());
             },
         );
@@ -2390,14 +2412,14 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             let write = stopper.stop(&mut run);
             if let Some(w) = weak.upgrade() {
                 w.set_agent_busy(false);
-                w.set_agent_status(
-                    if write {
-                        "Connection closed. The write may already be committed."
-                    } else {
-                        "Connection closed. Agent run stopped."
-                    }
-                    .into(),
-                );
+                if write {
+                    show_error(
+                        &w,
+                        "Connection closed. The write may already be committed.".into(),
+                    );
+                } else {
+                    show_info(&w, "Connection closed. Agent run stopped.".into());
+                }
             }
         });
     }
@@ -2406,14 +2428,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         let weak = window.as_weak();
         window.on_agent_copy_text(move |text| {
             if let Some(w) = weak.upgrade() {
-                w.set_agent_status(
-                    if crate::clip_set(&text) {
-                        "Copied"
-                    } else {
-                        "Copy failed"
-                    }
-                    .into(),
-                );
+                if crate::clip_set(&text) {
+                    show_info(&w, "Copied".into());
+                } else {
+                    show_error(&w, "Copy failed".into());
+                }
             }
         });
     }
@@ -2452,7 +2471,8 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             // Inserting into another connection's editor would run the SQL
             // against a database it was not written for.
             if conversation_connection.is_none() || tab_connection != conversation_connection {
-                w.set_agent_status(
+                show_error(
+                    &w,
                     "Open a query tab on this conversation's connection first".into(),
                 );
                 return;
@@ -2464,7 +2484,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 format!("{}\n\n{sql}", existing.trim_end())
             };
             load_editor_text(pane, &text);
-            w.set_agent_status("Inserted into the editor".into());
+            show_info(&w, "Inserted into the editor".into());
         });
     }
 
@@ -2474,7 +2494,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
         window.on_agent_progress(move |generation, text| {
             if let Some(w) = weak.upgrade() {
                 if generation == ui.borrow().generation && w.get_agent_busy() {
-                    w.set_agent_status(text);
+                    show_info(&w, text);
                 }
             }
         });
@@ -2488,14 +2508,14 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             let write = stopper.stop(&mut ui.borrow_mut());
             if let Some(w) = weak.upgrade() {
                 w.set_agent_busy(false);
-                w.set_agent_status(
-                    if write {
-                        "Stop requested. The write may already be committed."
-                    } else {
-                        "Agent run stopped"
-                    }
-                    .into(),
-                );
+                if write {
+                    show_error(
+                        &w,
+                        "Stop requested. The write may already be committed.".into(),
+                    );
+                } else {
+                    show_info(&w, "Agent run stopped".into());
+                }
             }
         });
     }
@@ -2525,7 +2545,10 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
             });
             if let Some(w) = weak.upgrade() {
                 paint(&w, &store.borrow(), &ui.borrow());
-                w.set_agent_status(saved.err().unwrap_or_else(|| "Write denied".into()).into());
+                match saved {
+                    Ok(()) => show_info(&w, "Write denied".into()),
+                    Err(error) => show_error(&w, error.into()),
+                }
             }
         });
     }
@@ -2549,11 +2572,14 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                 return;
             }
             let Some(saved) = conn_store.borrow().get(&pending.connection_id).cloned() else {
-                w.set_agent_status("Connection was deleted".into());
+                show_error(&w, "Connection was deleted".into());
                 return;
             };
             if saved.env_tag == EnvTag::Production {
-                w.set_agent_status("Agent writes are unavailable on production connections".into());
+                show_error(
+                    &w,
+                    "Agent writes are unavailable on production connections".into(),
+                );
                 return;
             }
             if focused_connection.lock().unwrap().as_deref() != Some(pending.connection_id.as_str())
@@ -2561,12 +2587,15 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                     && w.get_bc_db().as_str() != pending.database.as_str())
             {
                 ui.borrow_mut().pending_write = Some(pending);
-                w.set_agent_status("Open the proposed write's database before approval".into());
+                show_error(
+                    &w,
+                    "Open the proposed write's database before approval".into(),
+                );
                 return;
             }
             paint(&w, &store.borrow(), &ui.borrow());
             w.set_agent_busy(true);
-            w.set_agent_status("Running the approved write".into());
+            show_info(&w, "Running the approved write".into());
             let background_weak = weak.clone();
             let pool = pool.clone();
             let current = current.clone();
@@ -2644,17 +2673,17 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState, fns: &AppFns) {
                         .messages
                         .push(Message::assistant(format!("Write completed: {answer}")));
                     if let Err(error) = store.borrow_mut().save_conversation(conversation) {
-                        w.set_agent_status(error.into());
+                        show_error(&w, error.into());
                         return;
                     }
                 }
                 paint(&w, &store.borrow(), &ui.borrow());
             }
-            w.set_agent_status(if error.is_empty() {
-                format!("Write completed: {answer}").into()
+            if error.is_empty() {
+                show_info(&w, format!("Write completed: {answer}").into());
             } else {
-                error
-            });
+                show_error(&w, error);
+            }
         });
     }
 

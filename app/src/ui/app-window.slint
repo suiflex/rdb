@@ -499,6 +499,8 @@ callback create-table-commit();
     // The selected conversation ends on an unanswered prompt.
     in property <bool> agent-can-retry: false;
     in property <string> agent-status;
+    // `agent-status` is a failure the user must act on, not a note.
+    in property <bool> agent-status-error;
     in property <string> agent-test-status;
     in property <int> agent-test-state: 0;
     in property <string> agent-proposed-write;
@@ -2509,6 +2511,7 @@ callback create-table-commit();
                     busy: root.agent-busy;
                     can-retry: root.agent-can-retry;
                     status: root.agent-status;
+                    status-error: root.agent-status-error;
                     proposed-write: root.agent-proposed-write;
                     write-target: root.agent-write-target;
                     write-destructive: root.agent-write-destructive;
@@ -4048,6 +4051,7 @@ callback create-table-commit();
                     template-default-engines: root.agent-template-default-engines;
                     template-engine-choice <=> root.agent-template-engine-choice;
                     status: root.agent-status;
+                    status-error: root.agent-status-error;
                     test-status: root.agent-test-status;
                     test-state: root.agent-test-state;
                     save-config(name, provider, endpoint, model, key) => {

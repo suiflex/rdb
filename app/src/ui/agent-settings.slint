@@ -25,6 +25,7 @@ export component AgentSettings inherits VerticalLayout {
     in property <[string]> template-default-engines;
     in-out property <string> template-engine-choice: "Choose engine";
     in property <string> status;
+    in property <bool> status-error;
     in property <string> test-status;
     in property <int> test-state: 0;
     callback save-config(string, string, string, string, string);
@@ -230,7 +231,7 @@ export component AgentSettings inherits VerticalLayout {
     }
     if root.status != "": Text {
         text: root.status;
-        color: Tokens.text-dim;
+        color: root.status-error ? Tokens.error : Tokens.text-dim;
         wrap: word-wrap;
         font-size: Tokens.font-xs;
     }
