@@ -4,7 +4,10 @@ use std::{
     cell::RefCell,
     collections::HashSet,
     rc::Rc,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
@@ -792,9 +795,52 @@ struct UiRun {
     active_template_id: Option<String>,
     template_default_engines: Vec<String>,
     pending_write: Option<PendingWrite>,
-    abort: Option<tokio::task::AbortHandle>,
+    running: Option<Running>,
     generation: i32,
     pending_selection: Option<EditorSelection>,
+}
+
+/// The task behind the busy state.
+struct Running {
+    abort: tokio::task::AbortHandle,
+    connection_id: String,
+    /// Set by `ToolRunner` while a database call is in flight.
+    in_flight: Arc<AtomicBool>,
+    write: bool,
+}
+
+/// What Stop needs to end a run. Aborting the task only closes the client end
+/// of a statement, so one the agent had in flight is also cancelled on the
+/// server — and only then, so an editor query on the same connection is left
+/// alone.
+#[derive(Clone)]
+struct Stopper {
+    rt: Arc<tokio::runtime::Runtime>,
+    pool: crate::DriverPool,
+    current: crate::DriverSlot,
+}
+
+impl Stopper {
+    /// Ends the active run, if any, and returns whether it was an approved
+    /// write. Any result it still delivers is dropped as stale.
+    fn stop(&self, run: &mut UiRun) -> bool {
+        run.generation = run.generation.wrapping_add(1);
+        let Some(running) = run.running.take() else {
+            return false;
+        };
+        running.abort.abort();
+        if running.in_flight.load(Ordering::SeqCst) {
+            let (pool, current) = (self.pool.clone(), self.current.clone());
+            self.rt.spawn(async move {
+                if let Some((_, driver)) =
+                    crate::resolve_driver(&pool, &current, Some(&running.connection_id)).await
+                {
+                    let _ = driver.cancel_running().await;
+                }
+            });
+        }
+        running.write
+    }
 }
 
 struct PendingWrite {
@@ -1084,6 +1130,11 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         }
     };
     let ui = Rc::new(RefCell::new(UiRun::default()));
+    let stopper = Stopper {
+        rt: state.rt.clone(),
+        pool: state.driver_pool.clone(),
+        current: state.current.clone(),
+    };
     ui.borrow_mut().active_config_id = store.borrow().configs().first().map(|item| item.id.clone());
     paint_config(window, &store.borrow(), &ui.borrow());
     paint_templates(window, &store.borrow(), &ui.borrow());
@@ -1614,6 +1665,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let ui = ui.clone();
         let conn_store = state.store.clone();
         let current = state.current_connection_id.clone();
+        let stopper = stopper.clone();
         let weak = window.as_weak();
         window.on_agent_new_conversation(move || {
             let Some(w) = weak.upgrade() else { return };
@@ -1626,10 +1678,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 return;
             };
             let mut run = ui.borrow_mut();
-            run.generation = run.generation.wrapping_add(1);
-            if let Some(abort) = run.abort.take() {
-                abort.abort();
-            }
+            stopper.stop(&mut run);
             run.selected_id = None;
             run.draft_templates = Some(default_templates(&store.borrow(), saved.engine));
             run.pending_selection = None;
@@ -1685,6 +1734,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
         let ui = ui.clone();
         let conn_store = state.store.clone();
         let current = state.current_connection_id.clone();
+        let stopper = stopper.clone();
         let weak = window.as_weak();
         window.on_agent_delete_conversation(move |index| {
             let Some(w) = weak.upgrade() else { return };
@@ -1702,10 +1752,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             }
             let mut run = ui.borrow_mut();
             if run.selected_id.as_deref() == Some(conversation.id.as_str()) {
-                run.generation = run.generation.wrapping_add(1);
-                if let Some(abort) = run.abort.take() {
-                    abort.abort();
-                }
+                stopper.stop(&mut run);
                 run.selected_id = store
                     .borrow()
                     .conversations()
@@ -2135,6 +2182,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 run.generation = run.generation.wrapping_add(1);
                 run.generation
             };
+            let connection_id = prepared.conversation.connection_id.clone();
+            let in_flight = Arc::new(AtomicBool::new(false));
+            let task_in_flight = in_flight.clone();
             let abort = rt.spawn(async move {
                 let result = async {
                     let (_, driver) = crate::resolve_driver(&pool, &current, Some(&prepared.conversation.connection_id))
@@ -2142,7 +2192,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                     let scope = AgentScope { connection_id: prepared.conversation.connection_id.clone(),
                         database: prepared.conversation.database.clone(), schema: prepared.conversation.schema.clone(),
                         engine: prepared.saved.engine, production: prepared.saved.env_tag == EnvTag::Production };
-                    let runner = ToolRunner::new(driver, scope);
+                    let runner = ToolRunner::new(driver, scope).with_in_flight(task_in_flight);
                     let request = ModelRequest { config: &prepared.config, api_key: &prepared.key,
                         system: "You are RDB's database assistant. Follow the user's request and the configured mode.",
                         messages: &prepared.conversation.messages };
@@ -2165,7 +2215,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                     }
                 });
             });
-            ui.borrow_mut().abort = Some(abort.abort_handle());
+            ui.borrow_mut().running = Some(Running {
+                abort: abort.abort_handle(),
+                connection_id,
+                in_flight,
+                write: false,
+            });
         });
     }
 
@@ -2178,7 +2233,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             if generation != ui.borrow().generation {
                 return;
             }
-            ui.borrow_mut().abort = None;
+            ui.borrow_mut().running = None;
             w.set_agent_busy(false);
             if !error.is_empty() {
                 w.set_agent_status(error);
@@ -2227,16 +2282,20 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
 
     {
         let ui = ui.clone();
+        let stopper = stopper.clone();
         let weak = window.as_weak();
         window.on_agent_cancel(move || {
-            let mut run = ui.borrow_mut();
-            run.generation = run.generation.wrapping_add(1);
-            if let Some(abort) = run.abort.take() {
-                abort.abort();
-            }
+            let write = stopper.stop(&mut ui.borrow_mut());
             if let Some(w) = weak.upgrade() {
                 w.set_agent_busy(false);
-                w.set_agent_status("Agent run stopped".into());
+                w.set_agent_status(
+                    if write {
+                        "Stop requested. The write may already be committed."
+                    } else {
+                        "Agent run stopped"
+                    }
+                    .into(),
+                );
             }
         });
     }
@@ -2298,6 +2357,9 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                 run.generation = run.generation.wrapping_add(1);
                 run.generation
             };
+            let connection_id = pending.connection_id.clone();
+            let in_flight = Arc::new(AtomicBool::new(false));
+            let task_in_flight = in_flight.clone();
             let abort = rt.spawn(async move {
                 let result = async {
                     let (_, driver) =
@@ -2312,6 +2374,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                         production: saved.env_tag == EnvTag::Production,
                     };
                     ToolRunner::new(driver, scope)
+                        .with_in_flight(task_in_flight)
                         .execute_approved_write(&pending.sql)
                         .await
                 }
@@ -2331,7 +2394,12 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
                     }
                 });
             });
-            ui.borrow_mut().abort = Some(abort.abort_handle());
+            ui.borrow_mut().running = Some(Running {
+                abort: abort.abort_handle(),
+                connection_id,
+                in_flight,
+                write: true,
+            });
         });
     }
 
@@ -2344,7 +2412,7 @@ pub(crate) fn wire(window: &MainWindow, state: &AppState) {
             if generation != ui.borrow().generation {
                 return;
             }
-            ui.borrow_mut().abort = None;
+            ui.borrow_mut().running = None;
             w.set_agent_busy(false);
             if error.is_empty() {
                 let selected = store
