@@ -8,8 +8,18 @@ const command = path.basename(process.argv[1], ".js");
 const binary = process.platform === "win32" ? `${command}.exe` : command;
 const binaryPath = path.join(__dirname, "..", "vendor", binary);
 
+// npm can skip postinstall (--ignore-scripts, allowScripts policy), and a
+// reinstall skips it again. Download on first run instead. Installer output
+// goes to stderr: stdout belongs to `rdb-mcp`'s stdio protocol.
 if (!fs.existsSync(binaryPath)) {
-  console.error(`${command}: binary not found. Reinstall with \`npm i -g @suiflex/rdb\`.`);
+  const installer = path.join(__dirname, "..", "install.js");
+  spawnSync(process.execPath, [installer], { stdio: ["ignore", 2, 2] });
+}
+
+if (!fs.existsSync(binaryPath)) {
+  console.error(
+    `${command}: binary not found. Run \`node "${path.join(__dirname, "..", "install.js")}"\` to download it.`,
+  );
   process.exit(1);
 }
 
