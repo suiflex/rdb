@@ -13,7 +13,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 tokio = { version = "1", features = ["sync", "time", "process"] }
-sqlparser = { version = "0.62", features = ["visitor"] }
+sqlparser = { version = "0.63", features = ["visitor"] }
 futures-util = "0.3"
 
 [dev-dependencies]
