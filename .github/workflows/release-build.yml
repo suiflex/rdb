@@ -198,14 +198,17 @@ jobs:
               --body "Automated release-data refresh for ${{ github.ref_name }}.")"
             pr_number="${pr_url##*/}"
           fi
-          # Auto-merge is off on this repo, so wait for the required checks
-          # here, then rebase: merge commits and squash are both disabled
-          # (rebase is the only merge method the repo allows).
-          # ponytail: fixed delay, since `gh pr checks` errors while a fresh PR
-          # has no checks yet. Poll for them instead if 30s ever falls short.
-          sleep 30
-          gh pr checks "$pr_number" --required --watch --fail-fast --interval 15
-          gh pr merge "$pr_number" --rebase --delete-branch
+          # Auto-merge is off on this repo, so keep retrying until the ruleset
+          # lets the merge through. Rebase, because merge commits and squash
+          # are both disabled. `gh pr checks --required` cannot gate this:
+          # guardener / forgeguard is posted by a workflow_run ~6 min after
+          # the PR opens, and until then it is simply absent, not pending.
+          # ponytail: 20 min ceiling (~3x the observed guardener delay).
+          for i in $(seq 1 40); do
+            gh pr merge "$pr_number" --rebase --delete-branch && exit 0
+            echo "merge blocked (attempt $i/40), retrying in 30s…"; sleep 30
+          done
+          echo "::error::website release data PR #$pr_number still blocked after 20 min"; exit 1
 
   publish-homebrew:
     if: github.event_name == 'push'
