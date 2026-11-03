@@ -174,8 +174,8 @@ jobs:
         env:
           # develop is a protected ruleset that forbids direct pushes for every
           # actor (PR required, no bypass), so route the change through a PR and
-          # merge it. Website files need 0 approvals and no required checks, so
-          # the merge lands immediately. RELEASE_PLEASE_TOKEN has repo + PR write.
+          # merge it. Website files need 0 approvals, but the guardener and cla
+          # checks are required. RELEASE_PLEASE_TOKEN has repo + PR write.
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
         run: |
           if git diff --quiet -- website/src/data/release.json; then
@@ -198,16 +198,14 @@ jobs:
               --body "Automated release-data refresh for ${{ github.ref_name }}.")"
             pr_number="${pr_url##*/}"
           fi
-          # Merge once GitHub has computed mergeability (no auto-merge on this
-          # repo). Plain merge commit, not --squash: this repo's ruleset has
-          # squash merges disabled entirely (allow_squash_merge: false).
-          for i in 1 2 3 4 5 6; do
-            if gh pr merge "$pr_number" --merge --delete-branch; then
-              exit 0
-            fi
-            echo "merge not ready yet, retrying…"; sleep 5
-          done
-          echo "::error::failed to merge website release data PR"; exit 1
+          # Auto-merge is off on this repo, so wait for the required checks
+          # here, then rebase: merge commits and squash are both disabled
+          # (rebase is the only merge method the repo allows).
+          # ponytail: fixed delay, since `gh pr checks` errors while a fresh PR
+          # has no checks yet. Poll for them instead if 30s ever falls short.
+          sleep 30
+          gh pr checks "$pr_number" --required --watch --fail-fast --interval 15
+          gh pr merge "$pr_number" --rebase --delete-branch
 
   publish-homebrew:
     if: github.event_name == 'push'
