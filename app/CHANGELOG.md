@@ -1,0 +1,58 @@
+# Changelog
+
+## [0.50.0](https://github.com/suiflex/rdb/compare/v0.49.0...v0.50.0) (2026-11-03)
+
+
+### App Features
+
+* **agent:** add result preview preference ([a19133e](https://github.com/suiflex/rdb/commit/a19133ec18ed5191be535fbca9f4d6433a7961af))
+* **agent:** discover provider models ([0e27fa0](https://github.com/suiflex/rdb/commit/0e27fa062d3d99afa539c8f083e98ef4e3a20ca3))
+* **agent:** keep tool steps on the final message ([99ced41](https://github.com/suiflex/rdb/commit/99ced419d9601ea11fce94ae62e5732adadf1709))
+* **agent:** report database calls in flight ([e514516](https://github.com/suiflex/rdb/commit/e5145164fc7f9213388ba347418d080b165e4021))
+* **agent:** scope schema to table mentions ([3005506](https://github.com/suiflex/rdb/commit/3005506b4693088d11be8c694b8d88cf7d020034))
+* **app:** add assistant prompt templates ([aa2a544](https://github.com/suiflex/rdb/commit/aa2a5448a0c207ca872af6a83d399bbb464f2c55))
+* **app:** add copy and insert actions to code blocks ([3bea900](https://github.com/suiflex/rdb/commit/3bea900ce089a6c5a8414d3dfa2cb1f31e045b75))
+* **app:** add in-app Agent panel ([635d67f](https://github.com/suiflex/rdb/commit/635d67f6a95784f8b086cb45e13e2e3c568bcecc))
+* **app:** add prompt starters to the empty state ([08f5b86](https://github.com/suiflex/rdb/commit/08f5b864b3b8d6771dca183ca2b4a5bfd5d3a64f))
+* **app:** compact the assistant header ([26f36e1](https://github.com/suiflex/rdb/commit/26f36e1febf6bc95ab755b4c73def56e9fb9b12e))
+* **app:** expand assistant controls and reliability ([f95dfa1](https://github.com/suiflex/rdb/commit/f95dfa1395a29b71e6042ac42b1792ac20a2ac91))
+* **app:** redesign the write approval card ([9af0f42](https://github.com/suiflex/rdb/commit/9af0f42e6c4a6e9a5f51e70e96fdf3cea520a033))
+* **app:** retry a failed run ([0a06146](https://github.com/suiflex/rdb/commit/0a0614613da049c88e6bd9b87aee52e290d0e018))
+* **app:** send on Enter in the assistant composer ([17ce52c](https://github.com/suiflex/rdb/commit/17ce52c459ca18bd20c48e4a4498cbd14fd20930))
+* **app:** show live agent progress ([9f4f451](https://github.com/suiflex/rdb/commit/9f4f451762d57242e38cb50addb8260b1e7e8a13))
+* **app:** show tool steps under answers ([b37fda3](https://github.com/suiflex/rdb/commit/b37fda3c8b13818d791cb792a8875d84aba2ca15))
+* **mcp:** add scoped server and agent setup ([0124db5](https://github.com/suiflex/rdb/commit/0124db57623ebbbc7fbf97af4ab8d2f7b4f15a1f))
+
+
+### Bug Fixes
+
+* **agent:** accept fenced JSON actions ([4f047c3](https://github.com/suiflex/rdb/commit/4f047c3f06efa2d574ca5132ac720f7d6a1d6963))
+* **agent:** bound conversation history sent to the model ([c218d90](https://github.com/suiflex/rdb/commit/c218d90d4e6859be57c59e6f88a414c912c3db4d))
+* **agent:** cancel a timed-out read before dropping it ([24c1f0b](https://github.com/suiflex/rdb/commit/24c1f0b55075e37c46c8581b47e5d381c67f168b))
+* **agent:** cap agent reads and time out slow queries ([0d5db40](https://github.com/suiflex/rdb/commit/0d5db4009342a13862c4de0cb57b994f27050dfe))
+* **agent:** classify write risk and block transaction control ([9343359](https://github.com/suiflex/rdb/commit/934335977135e3c760366383ee1d03c49702c5fd))
+* **agent:** escape all untrusted context in one place ([9cd275e](https://github.com/suiflex/rdb/commit/9cd275ee46a5041edb88380bebb18f4d2eb4268f))
+* **agent:** flag destructive writes nested in CTEs ([a252582](https://github.com/suiflex/rdb/commit/a252582d34923fbcc98790cf10a9de6ac5085774))
+* **agent:** honor Retry-After on rate limits ([1f9768d](https://github.com/suiflex/rdb/commit/1f9768d906c3e7b6d52854580c3323de8074509b))
+* **agent:** read every text part of a model reply ([017ebce](https://github.com/suiflex/rdb/commit/017ebcef9e566d016a871bc49386b3527007cb69))
+* **agent:** recover from a corrupt agent store ([a5f2c28](https://github.com/suiflex/rdb/commit/a5f2c284259e55fc6189146b8ab13333a6556deb))
+* **agent:** reject MariaDB executable comments ([fbb03a0](https://github.com/suiflex/rdb/commit/fbb03a09572a14507eaa2bb63486a603b2c9647d))
+* **agent:** reject side-effect functions in agent reads ([0711959](https://github.com/suiflex/rdb/commit/0711959f29dda5615ab1d9cf22bfa5a946c701a8))
+* **agent:** require the API key again for a new endpoint ([8186798](https://github.com/suiflex/rdb/commit/8186798654795af9f59f907bc4f83a2489531f37))
+* **agent:** restrict agent store file permissions ([27b82b3](https://github.com/suiflex/rdb/commit/27b82b335f7a1b323a621bdf91be6b34bcf02b43))
+* **app:** align Agent panel with shared UI ([b013a66](https://github.com/suiflex/rdb/commit/b013a6680763932fb2b37d40cb2ac55ecfdc9647))
+* **app:** block conversation switching during a run ([6c0e47e](https://github.com/suiflex/rdb/commit/6c0e47eebddf6a26e2769658302d6aa8c0a6f6f4))
+* **app:** cancel a stopped run's statement before aborting it ([aad7431](https://github.com/suiflex/rdb/commit/aad7431d0ef4a37d4c9a900779ddb3419e478ac5))
+* **app:** cancel the running statement on Stop ([7d14b1e](https://github.com/suiflex/rdb/commit/7d14b1e90899eef05278080248a0ac8e8770f8f0))
+* **app:** carry write risk into pending approvals ([70ba20e](https://github.com/suiflex/rdb/commit/70ba20ec06cdff37c93b63b9621070ed54275f80))
+* **app:** record denied writes in the conversation ([2e5a971](https://github.com/suiflex/rdb/commit/2e5a971f1a4bc1699db7302e1187f5302877aec2))
+* **app:** refine assistant chat and layout ([78d2202](https://github.com/suiflex/rdb/commit/78d2202b4d5e9ccf23e2fe52cee61b940bbf458e))
+* **app:** refine assistant panel and database binding ([e44c9b0](https://github.com/suiflex/rdb/commit/e44c9b0c6a1090415e9e481efc4ed571935f2053))
+* **app:** run the Assistant on its own connection ([cf9f162](https://github.com/suiflex/rdb/commit/cf9f162c3d2cc8f057c0152d678d1c83c784ab5f))
+* **app:** separate error and info status styling ([ec9236e](https://github.com/suiflex/rdb/commit/ec9236eeeba9a7376dcb948c323109a69b665d85))
+* **app:** share result preview only when enabled ([2eb562b](https://github.com/suiflex/rdb/commit/2eb562baf802e897092b46229660def6cad28dc4))
+* **app:** stop the agent run when its connection disconnects ([925b4a3](https://github.com/suiflex/rdb/commit/925b4a306c47da7650d6fb0ddee1cfc8cef7f53b))
+* **ci:** bump libz-sys and pulldown-cmark for audit advisories ([2fdddd8](https://github.com/suiflex/rdb/commit/2fdddd8dcd78c1f66aa057bf5c8e9688062381d3))
+* **ci:** update audited cryptography crates ([0717b8e](https://github.com/suiflex/rdb/commit/0717b8e2acd1e2132c2e3a42cfde68783a0da3ac))
+* **mssql:** update to patched rustls ([b0986ae](https://github.com/suiflex/rdb/commit/b0986aea1ea69a7a9cee3b8733793701016688cf))
+* **npm:** download binaries on first run when postinstall is skipped ([07e8c9d](https://github.com/suiflex/rdb/commit/07e8c9d74e03e275801703cb1a29c37b9d3da626)), closes [#349](https://github.com/suiflex/rdb/issues/349)
