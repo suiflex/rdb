@@ -92,6 +92,7 @@ jobs:
           app="RDB.app"
           plist="$app/Contents/Info.plist"
           iconset="$RUNNER_TEMP/RDB.iconset"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$iconset"
           cp "target/${{ matrix.target }}/release/rdb" "$app/Contents/MacOS/rdb"
           cp "target/${{ matrix.target }}/release/rdb-cli" "$app/Contents/MacOS/rdb-cli"
           cp "target/${{ matrix.target }}/release/rdb-mcp" "$app/Contents/MacOS/rdb-mcp"
