@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 inquire = { version = "0.9", default-features = false, features = ["crossterm"] }
-kurir = "0.6"
+kurir = "0.7"
 rdb-connstore = { path = "../connstore" }
 rdb-core = { path = "../core" }
 rdb-runtime = { path = "../runtime" }
