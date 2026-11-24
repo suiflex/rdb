@@ -4280,9 +4280,9 @@ dependencies = [
 
 [[package]]
 name = "kurir"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9320dd1710e392af43ef9891ffae8b3fe82b4731c4f0a26d75df30747372d0ef"
+checksum = "4030f10a2c299cbdbdcdb3e2ecc9d805610415320417c6f1748f993b31e33f9a"
 dependencies = [
  "clap",
  "reqwest 0.12.28",
